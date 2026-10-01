@@ -9,6 +9,7 @@ via ``DATABASE_PROVIDER`` / ``FILE_STORAGE_PROVIDER`` and must set
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,108 @@ def _default_app_env() -> str:
     return (os.getenv("APP_ENV") or "development").strip().lower() or "development"
 
 
+# Fast Chat can Retrieve twice (initial gate hit + rare RAG fallback) and
+# invoke AgentCore twice inside one claimed notebook execution. Strands
+# ``limits={"turns": 2}`` bounds structured-output recovery *inside* one
+# invoke; Deep Review uses ``turns=3``. ``ModelRetryStrategy`` is a separate
+# inner Converse retry cap and does not add a third client-timeout window.
+FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN = 2
+FAST_CHAT_MAX_RETRIEVALS_PER_TURN = 2
+# Auth/notebook/history/catalog loads, citation resolution, boto connect
+# (min(10s, read timeout) per successful invoke), persist_coach_turn, and
+# complete_coach_request. These are not a second model timeout.
+COACH_TURN_STATE_AND_PERSIST_BUDGET_SECONDS = 10
+# Extra headroom above the server-side maximum so a retry cannot reclaim
+# the DSQL/SQLite lease while the original worker is still finishing.
+# Tradeoff: a genuinely crashed request blocks the notebook for this lease
+# (default 270s), not 180s. That is cheaper than discarding a completed
+# generation via CoachRequestLeaseLostError.
+COACH_IDEMPOTENCY_LEASE_MARGIN_SECONDS = 20
+# Historical hard-coded lease. Kept as a named constant so tests can prove
+# the derived value is not this stale number when timeouts grow.
+LEGACY_COACH_IDEMPOTENCY_LEASE_SECONDS = 180
+
+
+def provider_attempt_budget_seconds(
+    timeout_seconds: float, max_retries: int
+) -> float:
+    """Return one provider invoke budget: ``timeout * (max_retries + 1)``.
+
+    boto ``max_attempts`` is ``max_retries + 1``. With the default
+    ``AGENTCORE_MAX_RETRIES=0`` this equals one read-timeout window.
+    """
+    attempts = max(0, int(max_retries)) + 1
+    return max(0.0, float(timeout_seconds)) * attempts
+
+
+def timeout_bounded_coach_work_seconds(
+    *,
+    provider_timeout_seconds: float,
+    provider_max_retries: int = 0,
+    retrieve_timeout_seconds: float,
+    max_provider_invocations: int = FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN,
+    max_retrievals: int = FAST_CHAT_MAX_RETRIEVALS_PER_TURN,
+) -> int:
+    """Return timeout-bounded Fast Chat work with no persist margin.
+
+    Defaults: two Retrieves + two AgentCore invokes. Does not include
+    DSQL/SQLite loads or ``persist_coach_turn``.
+    """
+    model = max(1, int(max_provider_invocations)) * provider_attempt_budget_seconds(
+        provider_timeout_seconds, provider_max_retries
+    )
+    retrieval = max(0, int(max_retrievals)) * max(0.0, float(retrieve_timeout_seconds))
+    return int(math.ceil(model + retrieval))
+
+
+def bounded_coach_execution_seconds(
+    *,
+    provider_timeout_seconds: float,
+    provider_max_retries: int = 0,
+    retrieve_timeout_seconds: float,
+    max_provider_invocations: int = FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN,
+    max_retrievals: int = FAST_CHAT_MAX_RETRIEVALS_PER_TURN,
+    state_and_persist_budget_seconds: int = COACH_TURN_STATE_AND_PERSIST_BUDGET_SECONDS,
+) -> int:
+    """Return the server-side maximum for one claimed Fast Chat turn.
+
+    This is the timeout-bounded path plus a small persist/state budget.
+    The idempotency lease must stay strictly above this value.
+    """
+    timeout_bounded = timeout_bounded_coach_work_seconds(
+        provider_timeout_seconds=provider_timeout_seconds,
+        provider_max_retries=provider_max_retries,
+        retrieve_timeout_seconds=retrieve_timeout_seconds,
+        max_provider_invocations=max_provider_invocations,
+        max_retrievals=max_retrievals,
+    )
+    return timeout_bounded + max(0, int(state_and_persist_budget_seconds))
+
+
+def derived_coach_idempotency_lease_seconds(
+    *,
+    provider_timeout_seconds: float,
+    provider_max_retries: int = 0,
+    retrieve_timeout_seconds: float,
+    margin_seconds: int = COACH_IDEMPOTENCY_LEASE_MARGIN_SECONDS,
+    state_and_persist_budget_seconds: int = COACH_TURN_STATE_AND_PERSIST_BUDGET_SECONDS,
+) -> int:
+    """Return the durable coach-request lease derived from configured timeouts.
+
+    There is no independent ``COACH_IDEMPOTENCY_LEASE_SECONDS`` knob: raising
+    ``AGENTCORE_TIMEOUT_SECONDS`` or ``AGENTCORE_MAX_RETRIES`` lengthens this
+    lease automatically so the two cannot drift apart. Raising retries also
+    lengthens how long a crashed request blocks the notebook.
+    """
+    bounded = bounded_coach_execution_seconds(
+        provider_timeout_seconds=provider_timeout_seconds,
+        provider_max_retries=provider_max_retries,
+        retrieve_timeout_seconds=retrieve_timeout_seconds,
+        state_and_persist_budget_seconds=state_and_persist_budget_seconds,
+    )
+    return max(1, bounded + max(0, int(margin_seconds)))
+
+
 @dataclass
 class Settings:
     project_root: Path = PROJECT_ROOT
@@ -117,6 +220,10 @@ class Settings:
     # When true, Journey lets students pick any Thinking Path stage. Takes
     # precedence over auto_advance_stages (selection wins if both are true).
     student_stage_selection: bool = _boolean("STUDENT_STAGE_SELECTION", False)
+    # Progressive How Might We scaffold in Problem Identification. Default
+    # on; FastAPI still gates visibility from stage + active Coaching
+    # assessments. Do not treat this as a client-writable switch.
+    hmw_scaffold_enabled: bool = _boolean("HMW_SCAFFOLD_ENABLED", True)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-luna")
     openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "110"))
@@ -132,7 +239,21 @@ class Settings:
     agentcore_timeout_seconds: float = float(
         os.getenv("AGENTCORE_TIMEOUT_SECONDS", "110")
     )
+    deep_review_agentcore_timeout_seconds: float = float(
+        os.getenv("DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS", "200")
+    )
     agentcore_max_retries: int = int(os.getenv("AGENTCORE_MAX_RETRIES", "0"))
+    # FastAPI-owned compute affinity only. Default false keeps a fresh
+    # ``stateless-<uuid>`` runtimeSessionId per InvokeAgentRuntime. When true,
+    # FastAPI reuses an opaque id per owner+notebook+role so AgentCore can
+    # keep a warm microVM. DSQL remains the transcript. Not derived from
+    # notebook data or from AGENTCORE_QUALIFIER.
+    agentcore_session_affinity_enabled: bool = _boolean(
+        "AGENTCORE_SESSION_AFFINITY_ENABLED", False
+    )
+    agentcore_session_generation: str = (
+        os.getenv("AGENTCORE_SESSION_GENERATION", "1").strip() or "1"
+    )
     # Runtime process env (also required on the published AgentCore runtime).
     # Empty in local mock/dev; production AgentCore fail-closes when unset.
     agentcore_model_provider: str = os.getenv("AGENTCORE_MODEL_PROVIDER", "").strip().lower()
@@ -160,6 +281,12 @@ class Settings:
     deep_review_interval_turns: int = _bounded_int(
         "DEEP_REVIEW_INTERVAL_TURNS", 3, 1, 20
     )
+    deep_review_max_concurrent: int = _bounded_int(
+        "DEEP_REVIEW_MAX_CONCURRENT", 8, 1, 32
+    )
+    deep_review_job_timeout_seconds: int = _bounded_int(
+        "DEEP_REVIEW_JOB_TIMEOUT_SECONDS", 240, 30, 600
+    )
     guardrail_id: str = os.getenv("GUARDRAIL_ID", "").strip()
     guardrail_version: str = os.getenv("GUARDRAIL_VERSION", "").strip()
     knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()
@@ -168,6 +295,20 @@ class Settings:
     knowledge_base_strict_metadata_filter: bool = _boolean(
         "KNOWLEDGE_BASE_STRICT_METADATA_FILTER", False
     )
+    knowledge_base_metadata_filter_mode: str = os.getenv(
+        "KNOWLEDGE_BASE_METADATA_FILTER_MODE", ""
+    ).strip()
+    # Filtered Retrieve should finish well under this budget. 10s is twice the
+    # previous 5s fail-closed cap and far below the 120s UI timeout. Unfiltered
+    # MANAGED search previously ran 110s; required-mode filtering must not
+    # restore that retry. Bounded 2–30 so operators can tune without a rebuild.
+    knowledge_base_retrieve_timeout_seconds: int = _bounded_int(
+        "KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS", 10, 2, 30
+    )
+    knowledge_base_retrieve_executor_workers: int = _bounded_int(
+        "KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS", 4, 1, 16
+    )
+    co_design_rag_debug: bool = _boolean("CO_DESIGN_RAG_DEBUG", False)
     model_context_limit_tokens: int = int(
         os.getenv("MODEL_CONTEXT_LIMIT_TOKENS", "272000")
     )
@@ -180,6 +321,60 @@ class Settings:
     )
     history_recent_verbatim_messages: int = int(
         os.getenv("HISTORY_RECENT_VERBATIM_MESSAGES", "12")
+    )
+    fast_chat_max_input_tokens: int = _bounded_int(
+        "FAST_CHAT_MAX_INPUT_TOKENS", 16_000, 4_000, 64_000
+    )
+    fast_chat_soft_input_tokens: int = _bounded_int(
+        "FAST_CHAT_SOFT_INPUT_TOKENS", 12_000, 2_000, 64_000
+    )
+    fast_chat_recent_verbatim_messages: int = _bounded_int(
+        "FAST_CHAT_RECENT_VERBATIM_MESSAGES", 6, 4, 12
+    )
+    fast_chat_recent_history_max_tokens: int = _bounded_int(
+        "FAST_CHAT_RECENT_HISTORY_MAX_TOKENS", 3_000, 500, 20_000
+    )
+    fast_chat_history_message_max_tokens: int = _bounded_int(
+        "FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS", 1_500, 200, 8_000
+    )
+    # Runtime-owned Bedrock prefix cache. Default false keeps tests
+    # deterministic. Production may enable after prefix-size verification.
+    fast_chat_prompt_cache_enabled: bool = _boolean(
+        "FAST_CHAT_PROMPT_CACHE_ENABLED", False
+    )
+    fast_chat_retrieval_max_chunks: int = _bounded_int(
+        "FAST_CHAT_RETRIEVAL_MAX_CHUNKS", 4, 1, 8
+    )
+    fast_chat_retrieval_max_chars: int = _bounded_int(
+        "FAST_CHAT_RETRIEVAL_MAX_CHARS", 8_000, 1_000, 24_000
+    )
+    fast_chat_project_context_chars: int = _bounded_int(
+        "FAST_CHAT_PROJECT_CONTEXT_CHARS", 2_000, 200, 8_000
+    )
+    student_source_chunk_cache_max_bytes: int = _bounded_int(
+        "STUDENT_SOURCE_CHUNK_CACHE_MAX_BYTES", 33_554_432, 0, 268_435_456
+    )
+    deep_review_max_input_tokens: int = int(
+        os.getenv("DEEP_REVIEW_MAX_INPUT_TOKENS", os.getenv("MODEL_MAX_INPUT_TOKENS", "210000"))
+    )
+    deep_review_recent_verbatim_messages: int = int(
+        os.getenv(
+            "DEEP_REVIEW_RECENT_VERBATIM_MESSAGES",
+            os.getenv("HISTORY_RECENT_VERBATIM_MESSAGES", "12"),
+        )
+    )
+    # Compact checkpoint_delta only when the frozen transcript itself is
+    # large enough that compacting is worth considering. Default 20,000
+    # estimated tokens sits well below Sonnet's 210k max input so ordinary
+    # classroom reviews keep full_history. Absolute and relative savings
+    # gates in deep_review_context.py decide whether a particular checkpoint
+    # is actually cheaper enough to use. Do not reuse the Fast Chat 12k/16k
+    # window; that policy is latency-oriented and must not apply here.
+    deep_review_checkpoint_token_threshold: int = _bounded_int(
+        "DEEP_REVIEW_CHECKPOINT_TOKEN_THRESHOLD", 20_000, 2_000, 80_000
+    )
+    deep_review_force_full_final: bool = _boolean(
+        "DEEP_REVIEW_FORCE_FULL_FINAL", True
     )
     agentcore_eval_harness_arn: str = os.getenv(
         "AGENTCORE_EVAL_HARNESS_ARN", ""
@@ -203,6 +398,12 @@ class Settings:
     )
     ui_base_url: str = os.getenv("CO_DESIGN_UI_URL", "http://127.0.0.1:8501")
     use_local_api: bool = _boolean("USE_LOCAL_API", True)
+    # Guest ownership is an explicit opt-in. Keep production disabled until
+    # the guest persistence migration and later release phases are approved.
+    guest_access_enabled: bool = _boolean("GUEST_ACCESS_ENABLED", False)
+    guest_session_cookie_name: str = os.getenv(
+        "GUEST_SESSION_COOKIE_NAME", "co_design_guest"
+    ).strip() or "co_design_guest"
     # Cognito owns the browser session via HttpOnly refresh + ID-token cookies.
     # Cookie Max-Age for refresh defaults to 30d; Cognito app-client refresh
     # token validity is authoritative (~30d when configured that way).
@@ -295,6 +496,30 @@ class Settings:
         return bool(self.auto_advance_stages) and not bool(self.student_stage_selection)
 
     @property
+    def coach_idempotency_lease_seconds(self) -> int:
+        """Return the durable coach-request lease derived from AgentCore timeouts.
+
+        Sized for the production Fast Chat path even when ``MODEL_PROVIDER=mock``
+        so local tests cannot hide a production under-lease. Uses
+        ``AGENTCORE_TIMEOUT_SECONDS``, ``AGENTCORE_MAX_RETRIES``, and
+        ``KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS``.
+        """
+        return derived_coach_idempotency_lease_seconds(
+            provider_timeout_seconds=self.agentcore_timeout_seconds,
+            provider_max_retries=self.agentcore_max_retries,
+            retrieve_timeout_seconds=self.knowledge_base_retrieve_timeout_seconds,
+        )
+
+    @property
+    def coach_turn_bounded_execution_seconds(self) -> int:
+        """Return the server-side maximum for one claimed Fast Chat turn."""
+        return bounded_coach_execution_seconds(
+            provider_timeout_seconds=self.agentcore_timeout_seconds,
+            provider_max_retries=self.agentcore_max_retries,
+            retrieve_timeout_seconds=self.knowledge_base_retrieve_timeout_seconds,
+        )
+
+    @property
     def normalized_knowledge_base_type(self) -> str:
         """Return ``vector`` or ``managed`` for the Retrieve search configuration.
 
@@ -308,6 +533,22 @@ class Settings:
         if raw == "managed":
             return "managed"
         return raw
+
+    @property
+    def normalized_knowledge_base_metadata_filter_mode(self) -> str:
+        """Return ``required``, ``degraded_unfiltered``, or ``disabled``.
+
+        ``KNOWLEDGE_BASE_METADATA_FILTER_MODE`` is the source of truth.
+        ``KNOWLEDGE_BASE_STRICT_METADATA_FILTER=true`` still maps to
+        ``required``. False no longer skips the MANAGED filter; operators who
+        have not ingested sidecars must set ``degraded_unfiltered`` explicitly.
+        """
+        raw = str(self.knowledge_base_metadata_filter_mode or "").strip().casefold()
+        if raw in {"required", "degraded_unfiltered", "disabled"}:
+            return raw
+        if self.knowledge_base_strict_metadata_filter:
+            return "required"
+        return "required"
 
     @property
     def uses_local_database(self) -> bool:
@@ -411,41 +652,68 @@ def _validate_provider_model_pair(
 
 
 def _validate_agentcore_role_models() -> None:
-    """Require explicit per-role production models. No silent Haiku↔Sonnet swap."""
-    roles = (
-        ("router", settings.router_model_provider, settings.router_model_id),
-        ("qa", settings.qa_model_provider, settings.qa_model_id),
-        ("coaching", settings.coaching_model_provider, settings.coaching_model_id),
-        (
-            "review_incremental",
-            settings.review_incremental_model_provider,
-            settings.review_incremental_model_id,
-        ),
+    """Require active production models. Legacy router/incremental are optional."""
+    required = (
+        ("coaching", settings.coaching_model_provider, settings.coaching_model_id,
+         "COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
         (
             "review_deep",
             settings.review_deep_model_provider,
             settings.review_deep_model_id,
+            "REVIEW_DEEP_MODEL_PROVIDER",
+            "REVIEW_DEEP_MODEL_ID",
         ),
     )
-    env_names = {
-        "router": ("ROUTER_MODEL_PROVIDER", "ROUTER_MODEL_ID"),
-        "qa": ("QA_MODEL_PROVIDER", "QA_MODEL_ID"),
-        "coaching": ("COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
-        "review_incremental": (
-            "REVIEW_INCREMENTAL_MODEL_PROVIDER",
-            "REVIEW_INCREMENTAL_MODEL_ID",
-        ),
-        "review_deep": ("REVIEW_DEEP_MODEL_PROVIDER", "REVIEW_DEEP_MODEL_ID"),
-    }
-    for role, provider, model_id in roles:
-        provider_env, model_env = env_names[role]
+    for _role, provider, model_id, provider_env, model_env in required:
         _validate_provider_model_pair(
             provider, model_id, provider_env=provider_env, model_env=model_env
         )
-    if not 0.0 <= float(settings.router_min_confidence) <= 1.0:
+    optional = (
+        ("router", settings.router_model_provider, settings.router_model_id,
+         "ROUTER_MODEL_PROVIDER", "ROUTER_MODEL_ID"),
+        ("qa", settings.qa_model_provider, settings.qa_model_id,
+         "QA_MODEL_PROVIDER", "QA_MODEL_ID"),
+        (
+            "review_incremental",
+            settings.review_incremental_model_provider,
+            settings.review_incremental_model_id,
+            "REVIEW_INCREMENTAL_MODEL_PROVIDER",
+            "REVIEW_INCREMENTAL_MODEL_ID",
+        ),
+    )
+    for _role, provider, model_id, provider_env, model_env in optional:
+        if str(provider or "").strip() or str(model_id or "").strip():
+            _validate_provider_model_pair(
+                provider, model_id, provider_env=provider_env, model_env=model_env
+            )
+    if str(settings.router_model_provider or "").strip() and not (
+        0.0 <= float(settings.router_min_confidence) <= 1.0
+    ):
         raise ValueError("ROUTER_MIN_CONFIDENCE must be between 0 and 1")
     if not 1 <= int(settings.deep_review_interval_turns) <= 20:
         raise ValueError("DEEP_REVIEW_INTERVAL_TURNS must be between 1 and 20")
+    if int(settings.fast_chat_soft_input_tokens) > int(settings.fast_chat_max_input_tokens):
+        raise ValueError(
+            "FAST_CHAT_SOFT_INPUT_TOKENS must be <= FAST_CHAT_MAX_INPUT_TOKENS"
+        )
+
+
+def validate_knowledge_base_bucket_binding() -> None:
+    """Fail closed when a Knowledge Base is configured without a course bucket.
+
+    Local/mock development with an empty ``KNOWLEDGE_BASE_ID`` is unchanged.
+    Production ``APP_ENV=production`` calls this from
+    :func:`validate_production_configuration` so "KB on, course sync off"
+    cannot skip bucket confirmation.
+
+    Raises:
+        ValueError: When ``KNOWLEDGE_BASE_ID`` is set and
+            ``COURSE_MATERIALS_BUCKET`` is empty.
+    """
+    if not str(settings.knowledge_base_id or "").strip():
+        return
+    if not str(settings.course_materials_bucket or "").strip():
+        raise ValueError("COURSE_MATERIALS_BUCKET is not configured")
 
 
 def validate_production_configuration() -> None:
@@ -484,6 +752,10 @@ def validate_production_configuration() -> None:
             raise ValueError("AGENTCORE_RUNTIME_ARN is not configured")
         if not 1 <= settings.agentcore_timeout_seconds <= 120:
             raise ValueError("AGENTCORE_TIMEOUT_SECONDS must be between 1 and 120")
+        if not 30 <= settings.deep_review_agentcore_timeout_seconds <= 600:
+            raise ValueError(
+                "DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS must be between 30 and 600"
+            )
         if not 0 <= settings.agentcore_max_retries <= 2:
             raise ValueError("AGENTCORE_MAX_RETRIES must be between 0 and 2")
         if not settings.agentcore_model_region.strip():
@@ -528,6 +800,8 @@ def validate_production_configuration() -> None:
             "managed",
         }:
             raise ValueError("KNOWLEDGE_BASE_TYPE must be VECTOR or MANAGED")
+
+    validate_knowledge_base_bucket_binding()
 
     if settings.database_provider == "sqlite":
         raise ValueError("DATABASE_PROVIDER=sqlite is not allowed in production")

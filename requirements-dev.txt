@@ -1,2 +1,5 @@
+# Development and CI surface: runtime pins plus test/lint tooling. The
+# production image installs requirements.txt only.
 -r requirements.txt
+pytest==9.0.3
 ruff==0.11.13

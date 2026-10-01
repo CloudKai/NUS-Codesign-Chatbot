@@ -1,8 +1,8 @@
-"""Between-column drag resize for the notebook workspace.
+"""Desktop sizing for the Gemini-style three-region workspace.
 
-Injects a small browser script that draws drag handles between the Thinking Path,
-Chat, and Sources columns. Collapse state and ratios live in ``st.session_state``
-and are restored on each render. Prefer importing from ``ui.layout``.
+Navigation, center, and Thinking Path share one ratio triple persisted in
+browser local storage. Both vertical dividers are draggable on desktop.
+Collapse state lives in ``st.session_state``.
 """
 
 from __future__ import annotations
@@ -12,92 +12,137 @@ import json
 import streamlit as st
 import streamlit.components.v1 as components
 
-DEFAULT_WORKSPACE_WIDTHS: tuple[float, float, float] = (1.05, 2.35, 1.05)
-_MIN_RATIO = 0.18
+from ui.html_embed import wrap_component_html
+
+# Navigation | center | Thinking Path (relative flex ratios).
+DEFAULT_WORKSPACE_WIDTHS: tuple[float, float, float] = (0.85, 2.5, 1.0)
+_MIN_RATIO = 0.2
 _COLLAPSED_RATIO = 0.08
-_RAIL_WIDTH_PX = 42
-_STORAGE_KEY = "cd_workspace_column_widths"
+_RAIL_WIDTH_PX = 72
+_NAV_COLLAPSED_PX = 72
+_NAV_MIN_PX = 200
+_NAV_MAX_PX = 420
+_PAIR_MIN_PX = 220
+_STORAGE_KEY = "cd_workspace_column_widths_v4"
 
 
 def _normalize_widths(widths: list[float]) -> list[float]:
-    """Clamp and renormalize three positive column ratios."""
+    """Clamp and renormalize the three workspace column ratios."""
     values = [max(float(width), _MIN_RATIO) for width in widths[:3]]
     while len(values) < 3:
         values.append(_MIN_RATIO)
     total = sum(values) or 1.0
-    return [round(value / total * 4.45, 4) for value in values]
+    return [round(value / total * 4.35, 4) for value in values]
 
 
 def get_workspace_widths() -> list[float]:
-    """Return desktop workspace column ratios for ``st.columns``."""
+    """Return nav / center / Thinking Path ratios for ``st.columns``."""
     raw = st.session_state.get("workspace_column_widths")
     if isinstance(raw, (list, tuple)) and len(raw) == 3:
         try:
             return _normalize_widths([float(item) for item in raw])
         except (TypeError, ValueError):
             pass
+    # Migrate the prior center/studio-only pair by inserting the default nav.
+    if isinstance(raw, (list, tuple)) and len(raw) == 2:
+        try:
+            center, studio = (float(raw[0]), float(raw[1]))
+            return _normalize_widths(
+                [DEFAULT_WORKSPACE_WIDTHS[0], center, studio]
+            )
+        except (TypeError, ValueError):
+            pass
     return list(DEFAULT_WORKSPACE_WIDTHS)
 
 
+def nav_collapsed() -> bool:
+    """Return whether the left chat navigation is icon-only."""
+    return bool(st.session_state.get("workspace_nav_collapsed", False))
+
+
+def set_nav_collapsed(collapsed: bool) -> None:
+    """Persist left-navigation collapse for the current session."""
+    st.session_state["workspace_nav_collapsed"] = bool(collapsed)
+
+
 def side_panel_collapsed(side: str) -> bool:
-    """Return whether Thinking Path (``studio``) or Sources is collapsed."""
-    key = f"workspace_{side}_collapsed"
-    return bool(st.session_state.get(key, False))
+    """Return whether the named side panel is collapsed."""
+    return bool(st.session_state.get(f"workspace_{side}_collapsed", False))
 
 
 def set_side_panel_collapsed(side: str, collapsed: bool) -> None:
-    """Persist Thinking Path / Sources collapse state for the session."""
+    """Persist side-panel collapse state for the current session."""
     st.session_state[f"workspace_{side}_collapsed"] = bool(collapsed)
 
 
 def effective_column_widths() -> list[float]:
-    """Return column ratios after applying side-panel collapse."""
-    studio, chat, sources = get_workspace_widths()
+    """Return placeholder ratios for navigation, center, and Thinking Path."""
+    nav, center, studio = get_workspace_widths()
+    if nav_collapsed():
+        freed = max(nav - _COLLAPSED_RATIO, 0.0)
+        nav = _COLLAPSED_RATIO
+        center += freed
     if side_panel_collapsed("studio"):
         freed = max(studio - _COLLAPSED_RATIO, 0.0)
         studio = _COLLAPSED_RATIO
-        chat += freed
-    if side_panel_collapsed("sources"):
-        freed = max(sources - _COLLAPSED_RATIO, 0.0)
-        sources = _COLLAPSED_RATIO
-        chat += freed
-    return [round(studio, 4), round(chat, 4), round(sources, 4)]
+        center += freed
+    return [round(nav, 4), round(center, 4), round(studio, 4)]
 
 
 def sync_workspace_column_resize() -> None:
-    """Apply column widths and between-column drag handles.
-
-    Collapsed side columns stay fixed rails. Drag handles remain between any
-    two adjacent open panels so resize still works while a side is collapsed.
-    """
+    """Apply column flex ratios and install both desktop resize handles."""
     stored = get_workspace_widths()
     studio_collapsed = side_panel_collapsed("studio")
-    sources_collapsed = side_panel_collapsed("sources")
+    nav_is_collapsed = nav_collapsed()
+    app_run = int(st.session_state.get("_app_runs") or 0)
     components.html(
-        f"""
+        wrap_component_html(
+            f"""
 <script>
 (() => {{
+  const APP_RUN = {app_run};
   const STORED = {json.dumps(stored)};
   const MIN_RATIO = {_MIN_RATIO};
   const RAIL_PX = {_RAIL_WIDTH_PX};
+  const NAV_COLLAPSED_PX = {_NAV_COLLAPSED_PX};
+  const NAV_MIN_PX = {_NAV_MIN_PX};
+  const NAV_MAX_PX = {_NAV_MAX_PX};
+  const PAIR_MIN_PX = {_PAIR_MIN_PX};
   const STORAGE_KEY = {_STORAGE_KEY!r};
   const STUDIO_COLLAPSED = {str(studio_collapsed).lower()};
-  const SOURCES_COLLAPSED = {str(sources_collapsed).lower()};
+  const NAV_COLLAPSED = {str(nav_is_collapsed).lower()};
+  const MOBILE_QUERY = "(max-width: 1050px)";
   const doc = window.parent.document;
   const win = window.parent;
+  const previousRetryTimer = win.__cdWorkspaceLayoutRetryTimer;
+  if (previousRetryTimer) win.clearInterval(previousRetryTimer);
+  win.__cdWorkspaceLayoutRetryTimer = null;
+  const layoutGeneration =
+    String(APP_RUN) + ":" + ((Number(win.__cdWorkspaceLayoutGeneration) || 0) + 1);
+  win.__cdWorkspaceLayoutGeneration = layoutGeneration;
 
   function writeStored(ratios) {{
     try {{
       win.localStorage.setItem(STORAGE_KEY, JSON.stringify(ratios));
     }} catch (error) {{
-      /* ignore quota / private mode */
+      /* Ignore quota and private-mode failures. */
     }}
   }}
 
   function readStored() {{
     try {{
       const raw = win.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return STORED.slice();
+      if (!raw) {{
+        /* Migrate v3 center/studio pairs once. */
+        const legacy = win.localStorage.getItem("cd_workspace_column_widths_v3");
+        if (legacy) {{
+          const parsed = JSON.parse(legacy);
+          if (Array.isArray(parsed) && parsed.length === 2) {{
+            return [STORED[0], Number(parsed[0]), Number(parsed[1])];
+          }}
+        }}
+        return STORED.slice();
+      }}
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed) || parsed.length !== 3) return STORED.slice();
       return parsed.map((value) => Number(value));
@@ -106,27 +151,17 @@ def sync_workspace_column_resize() -> None:
     }}
   }}
 
-  function isCollapsedRole(role) {{
-    return (
-      (role === "studio" && STUDIO_COLLAPSED) ||
-      (role === "sources" && SOURCES_COLLAPSED)
-    );
-  }}
-
   function classify(column) {{
+    if (column.querySelector(".st-key-nav_panel")) return "nav";
+    if (
+      column.querySelector(".st-key-chat_panel") ||
+      column.querySelector(".st-key-search_panel") ||
+      column.querySelector(".st-key-sources_panel")
+    ) return "center";
     if (
       column.querySelector(".st-key-studio_rail") ||
       column.querySelector(".st-key-studio_panel")
-    ) {{
-      return "studio";
-    }}
-    if (column.querySelector(".st-key-chat_panel")) return "chat";
-    if (
-      column.querySelector(".st-key-sources_rail") ||
-      column.querySelector(".st-key-sources_panel")
-    ) {{
-      return "sources";
-    }}
+    ) return "studio";
     return null;
   }}
 
@@ -140,11 +175,7 @@ def sync_workspace_column_resize() -> None:
       );
       if (columns.length < 3) continue;
       const roles = columns.map(classify);
-      if (
-        roles.includes("studio") &&
-        roles.includes("chat") &&
-        roles.includes("sources")
-      ) {{
+      if (roles.includes("nav") && roles.includes("center") && roles.includes("studio")) {{
         return {{ row, columns, roles }};
       }}
     }}
@@ -153,27 +184,22 @@ def sync_workspace_column_resize() -> None:
 
   function clearSizing(column) {{
     [
-      "flex",
-      "flex-grow",
-      "flex-shrink",
-      "flex-basis",
-      "width",
-      "min-width",
-      "max-width",
+      "flex", "flex-grow", "flex-shrink", "flex-basis", "width",
+      "min-width", "max-width", "display"
     ].forEach((prop) => column.style.removeProperty(prop));
-    column.classList.remove("cd-col-rail");
+    column.classList.remove("cd-col-rail", "cd-col-nav");
   }}
 
-  function setRail(column) {{
-    column.classList.add("cd-col-rail");
-    column.style.setProperty("flex", "0 0 " + RAIL_PX + "px", "important");
-    column.style.setProperty("width", RAIL_PX + "px", "important");
-    column.style.setProperty("min-width", RAIL_PX + "px", "important");
-    column.style.setProperty("max-width", RAIL_PX + "px", "important");
+  function setFixed(column, px, className) {{
+    column.classList.add(className);
+    column.style.setProperty("flex", "0 0 " + px + "px", "important");
+    column.style.setProperty("width", px + "px", "important");
+    column.style.setProperty("min-width", px + "px", "important");
+    column.style.setProperty("max-width", px + "px", "important");
   }}
 
   function setFlex(column, grow) {{
-    column.classList.remove("cd-col-rail");
+    column.classList.remove("cd-col-rail", "cd-col-nav");
     column.style.setProperty("flex-grow", String(grow), "important");
     column.style.setProperty("flex-shrink", "1", "important");
     column.style.setProperty("flex-basis", "0px", "important");
@@ -182,81 +208,269 @@ def sync_workspace_column_resize() -> None:
     column.style.setProperty("max-width", "none", "important");
   }}
 
-  function applyLayout(columns, roles, ratios) {{
+  function setMobile(column, role) {{
+    column.classList.remove("cd-col-rail", "cd-col-nav");
+    if (role === "nav" || role === "studio") {{
+      column.style.setProperty("flex", "0 0 auto", "important");
+      column.style.setProperty("width", "min(20.5rem, 88vw)", "important");
+      column.style.setProperty("min-width", "0", "important");
+      column.style.setProperty("max-width", "88vw", "important");
+      return;
+    }}
+    column.style.setProperty("flex", "1 1 100%", "important");
+    column.style.setProperty("width", "100%", "important");
+    column.style.setProperty("min-width", "0", "important");
+    column.style.setProperty("max-width", "100%", "important");
+  }}
+
+  function applyLayout(
+    columns,
+    roles,
+    ratios,
+    navCollapsed = NAV_COLLAPSED,
+    studioCollapsed = STUDIO_COLLAPSED
+  ) {{
     const byRole = {{}};
     roles.forEach((role, index) => {{
-      byRole[role] = {{ column: columns[index], ratio: ratios[index], index }};
+      if (role) byRole[role] = columns[index];
     }});
+    Object.values(byRole).forEach(clearSizing);
 
-    Object.values(byRole).forEach((item) => clearSizing(item.column));
-
-    let studioGrow = byRole.studio.ratio;
-    let chatGrow = byRole.chat.ratio;
-    let sourcesGrow = byRole.sources.ratio;
-
-    if (STUDIO_COLLAPSED) {{
-      setRail(byRole.studio.column);
-      studioGrow = 0;
+    if (navCollapsed) {{
+      setFixed(byRole.nav, NAV_COLLAPSED_PX, "cd-col-nav");
     }}
-    if (SOURCES_COLLAPSED) {{
-      setRail(byRole.sources.column);
-      sourcesGrow = 0;
+    if (studioCollapsed) {{
+      setFixed(byRole.studio, RAIL_PX, "cd-col-rail");
     }}
 
-    const openTotal = studioGrow + chatGrow + sourcesGrow || 1;
-    if (!STUDIO_COLLAPSED) {{
-      setFlex(byRole.studio.column, studioGrow / openTotal);
+    if (navCollapsed && studioCollapsed) {{
+      setFlex(byRole.center, 1);
+      return;
     }}
-    setFlex(byRole.chat.column, chatGrow / openTotal);
-    if (!SOURCES_COLLAPSED) {{
-      setFlex(byRole.sources.column, sourcesGrow / openTotal);
+    if (navCollapsed) {{
+      const total = ratios[1] + ratios[2] || 1;
+      setFlex(byRole.center, ratios[1] / total);
+      setFlex(byRole.studio, ratios[2] / total);
+      return;
+    }}
+    if (studioCollapsed) {{
+      const total = ratios[0] + ratios[1] || 1;
+      setFlex(byRole.nav, ratios[0] / total);
+      setFlex(byRole.center, ratios[1] / total);
+      return;
+    }}
+
+    const total = ratios[0] + ratios[1] + ratios[2] || 1;
+    setFlex(byRole.nav, ratios[0] / total);
+    setFlex(byRole.center, ratios[1] / total);
+    setFlex(byRole.studio, ratios[2] / total);
+  }}
+
+  const OPTIMISTIC_SHELL_CLASSES = [
+    "cd-shell-optimistic-resize",
+    "cd-shell-nav-collapsed",
+    "cd-shell-nav-expanded",
+    "cd-shell-studio-collapsed",
+    "cd-shell-studio-expanded",
+    "cd-mobile-nav-optimistic",
+    "cd-mobile-studio-optimistic",
+    "cd-mobile-drawer-closing",
+  ];
+
+  function clearOptimisticStateWhenAuthoritative() {{
+    const body = doc.body;
+    if (!body) return;
+
+    /* Only the helper script emitted by a new Streamlit render calls
+       install(true). Resize/observer callbacks use install(false), so they
+       cannot cancel an in-flight optimistic transition. Clearing as soon as
+       the authoritative helper mounts also covers empty or error renders that
+       do not contain a discoverable workspace row. */
+    body.classList.remove(...OPTIMISTIC_SHELL_CLASSES);
+  }}
+
+  function hitsKey(target, token) {{
+    if (!(target instanceof win.Element)) return false;
+    return Boolean(target.closest('[class*="st-key-' + token + '"]'));
+  }}
+
+  function hitsAnyKey(target, tokens) {{
+    return tokens.some((token) => hitsKey(target, token));
+  }}
+
+  function setOptimisticDrawer(side) {{
+    doc.body.classList.remove(
+      "cd-mobile-nav-optimistic",
+      "cd-mobile-studio-optimistic",
+      "cd-mobile-drawer-closing"
+    );
+    if (side) doc.body.classList.add("cd-mobile-" + side + "-optimistic");
+  }}
+
+  function closeOptimisticDrawers() {{
+    doc.body.classList.remove(
+      "cd-mobile-nav-optimistic",
+      "cd-mobile-studio-optimistic"
+    );
+    doc.body.classList.add("cd-mobile-drawer-closing");
+  }}
+
+  function setOptimisticResize(target) {{
+    doc.body.classList.remove(
+      "cd-shell-optimistic-resize",
+      "cd-shell-nav-collapsed",
+      "cd-shell-nav-expanded",
+      "cd-shell-studio-collapsed",
+      "cd-shell-studio-expanded"
+    );
+    if (target) {{
+      doc.body.classList.add(
+        "cd-shell-optimistic-resize",
+        "cd-shell-" + target
+      );
     }}
   }}
 
-  function install() {{
+  function columnIsCollapsed(found, role) {{
+    const index = found.roles.indexOf(role);
+    const column = index >= 0 ? found.columns[index] : null;
+    if (!column) return false;
+    if (role === "nav") {{
+      return column.classList.contains("cd-col-nav") ||
+        Boolean(column.querySelector(".st-key-nav_collapsed_actions"));
+    }}
+    if (role === "studio") {{
+      return column.classList.contains("cd-col-rail") ||
+        Boolean(column.querySelector(".st-key-studio_rail"));
+    }}
+    return false;
+  }}
+
+  function handleOptimisticShellAction(event) {{
+    const target = event.target;
+    if (!(target instanceof win.Element) || !target.closest("button")) return;
+
+    if (win.matchMedia(MOBILE_QUERY).matches) {{
+      if (hitsKey(target, "mobile_nav_menu")) {{
+        setOptimisticDrawer("nav");
+        return;
+      }}
+      if (hitsKey(target, "mobile_analyse")) {{
+        setOptimisticDrawer("studio");
+        return;
+      }}
+      if (hitsAnyKey(target, [
+        "mobile-nav-close",
+        "mobile_studio_close",
+        "mobile_drawer_backdrop",
+        "nav-new-chat",
+        "nav-search-chats",
+        "nav-library",
+        "nav-open-",
+      ])) {{
+        closeOptimisticDrawers();
+      }}
+      return;
+    }}
+
+    const found = findWorkspaceColumns();
+    if (!found) return;
+    const ratios = readStored();
+    const navCollapsed = columnIsCollapsed(found, "nav");
+    const studioCollapsed = columnIsCollapsed(found, "studio");
+    if (hitsKey(target, "nav-collapse")) {{
+      setOptimisticResize("nav-collapsed");
+      applyLayout(found.columns, found.roles, ratios, true, studioCollapsed);
+    }} else if (hitsKey(target, "nav-expand")) {{
+      setOptimisticResize("nav-expanded");
+      applyLayout(found.columns, found.roles, ratios, false, studioCollapsed);
+    }} else if (hitsKey(target, "collapse-studio")) {{
+      setOptimisticResize("studio-collapsed");
+      applyLayout(found.columns, found.roles, ratios, navCollapsed, true);
+    }} else if (hitsKey(target, "expand-studio")) {{
+      setOptimisticResize("studio-expanded");
+      applyLayout(found.columns, found.roles, ratios, navCollapsed, false);
+    }}
+  }}
+
+  function bindHandle(handle, onDown) {{
+    handle.addEventListener("mousedown", (event) => {{
+      if (event.button !== 0) return;
+      onDown(event);
+      event.preventDefault();
+      event.stopPropagation();
+    }});
+  }}
+
+  function install(authoritative = false) {{
+    if (authoritative) clearOptimisticStateWhenAuthoritative();
     const found = findWorkspaceColumns();
     if (!found) return false;
     const {{ row, columns, roles }} = found;
-
     row.querySelectorAll(".cd-col-resize-handle").forEach((node) => node.remove());
-    if (getComputedStyle(row).position === "static") {{
-      row.style.position = "relative";
+    if (getComputedStyle(row).position === "static") row.style.position = "relative";
+
+    if (win.matchMedia(MOBILE_QUERY).matches) {{
+      columns.forEach(clearSizing);
+      columns.forEach((column, index) => setMobile(column, roles[index]));
+      return true;
     }}
 
     const ratios = readStored();
     applyLayout(columns, roles, ratios);
     writeStored(ratios);
-    win.dispatchEvent(new Event("resize"));
 
-    const openCount =
-      (STUDIO_COLLAPSED ? 0 : 1) + 1 + (SOURCES_COLLAPSED ? 0 : 1);
-    if (openCount < 2) return true;
+    const nav = columns[roles.indexOf("nav")];
+    const center = columns[roles.indexOf("center")];
+    const studio = columns[roles.indexOf("studio")];
+    if (getComputedStyle(nav).position === "static") nav.style.position = "relative";
+    if (getComputedStyle(center).position === "static") center.style.position = "relative";
 
     let active = null;
 
     const onMove = (event) => {{
       if (!active) return;
       const delta = event.clientX - active.startX;
-      const left = active.leftIndex;
-      const right = active.rightIndex;
-      if (active.openWidth <= 0) return;
-
-      let leftPx = active.startLeftPx + delta;
-      let rightPx = active.startRightPx - delta;
-      const minPx = Math.max(active.openWidth * MIN_RATIO, 120);
-      if (leftPx < minPx) {{
-        rightPx -= minPx - leftPx;
-        leftPx = minPx;
+      let next = active.ratios.slice();
+      if (active.kind === "nav") {{
+        let navPx = active.startNav + delta;
+        let centerPx = active.startCenter - delta;
+        const studioPx = active.startStudio;
+        navPx = Math.max(NAV_MIN_PX, Math.min(NAV_MAX_PX, navPx));
+        centerPx = active.startNav + active.startCenter - navPx;
+        if (centerPx < PAIR_MIN_PX) {{
+          centerPx = PAIR_MIN_PX;
+          navPx = active.startNav + active.startCenter - centerPx;
+          navPx = Math.max(NAV_MIN_PX, Math.min(NAV_MAX_PX, navPx));
+          centerPx = active.startNav + active.startCenter - navPx;
+        }}
+        const total = navPx + centerPx + studioPx || 1;
+        const scale = active.ratios[0] + active.ratios[1] + active.ratios[2];
+        next = [
+          navPx / total * scale,
+          centerPx / total * scale,
+          studioPx / total * scale,
+        ];
+      }} else {{
+        const navPx = active.startNav;
+        let centerPx = active.startCenter + delta;
+        let studioPx = active.startStudio - delta;
+        if (centerPx < PAIR_MIN_PX) {{
+          studioPx -= PAIR_MIN_PX - centerPx;
+          centerPx = PAIR_MIN_PX;
+        }}
+        if (studioPx < PAIR_MIN_PX) {{
+          centerPx -= PAIR_MIN_PX - studioPx;
+          studioPx = PAIR_MIN_PX;
+        }}
+        const total = navPx + centerPx + studioPx || 1;
+        const scale = active.ratios[0] + active.ratios[1] + active.ratios[2];
+        next = [
+          navPx / total * scale,
+          centerPx / total * scale,
+          studioPx / total * scale,
+        ];
       }}
-      if (rightPx < minPx) {{
-        leftPx -= minPx - rightPx;
-        rightPx = minPx;
-      }}
-
-      const pairTotal = active.ratios[left] + active.ratios[right];
-      const next = active.ratios.slice();
-      next[left] = (leftPx / (leftPx + rightPx)) * pairTotal;
-      next[right] = (rightPx / (leftPx + rightPx)) * pairTotal;
       active.current = next;
       applyLayout(columns, roles, next);
       event.preventDefault();
@@ -267,10 +481,6 @@ def sync_workspace_column_resize() -> None:
       const finalWidths = (active.current || active.ratios).map((value) =>
         Number(value.toFixed(4))
       );
-      // Keep collapsed panel's remembered width for when it expands again.
-      roles.forEach((role, index) => {{
-        if (isCollapsedRole(role)) finalWidths[index] = ratios[index];
-      }});
       active = null;
       doc.removeEventListener("mousemove", onMove);
       doc.removeEventListener("mouseup", onUp);
@@ -278,69 +488,92 @@ def sync_workspace_column_resize() -> None:
       writeStored(finalWidths);
     }};
 
-    columns.slice(0, -1).forEach((column, index) => {{
-      const leftRole = roles[index];
-      const rightRole = roles[index + 1];
-      if (isCollapsedRole(leftRole) || isCollapsedRole(rightRole)) return;
+    function beginDrag(kind, event) {{
+      active = {{
+        kind,
+        startX: event.clientX,
+        startNav: nav.getBoundingClientRect().width,
+        startCenter: center.getBoundingClientRect().width,
+        startStudio: studio.getBoundingClientRect().width,
+        ratios: ratios.slice(),
+        current: ratios.slice(),
+      }};
+      doc.body.classList.add("cd-col-resizing");
+      doc.addEventListener("mousemove", onMove);
+      doc.addEventListener("mouseup", onUp);
+    }}
 
-      // Attach the Sources divider to the Sources column (higher stacking
-      // context) so its tooltip is not covered by the Sources panel.
-      const attachToRight = rightRole === "sources";
-      const host = attachToRight ? columns[index + 1] : column;
-      const handle = doc.createElement("div");
-      handle.className = attachToRight
-        ? "cd-col-resize-handle cd-col-resize-handle-start"
-        : "cd-col-resize-handle";
-      handle.setAttribute("role", "separator");
-      handle.setAttribute("aria-orientation", "vertical");
-      handle.setAttribute("aria-label", "Drag to resize");
-      handle.setAttribute("data-tooltip", "Drag to resize");
-      if (getComputedStyle(host).position === "static") {{
-        host.style.position = "relative";
-      }}
-      host.appendChild(handle);
+    if (!NAV_COLLAPSED) {{
+      const navHandle = doc.createElement("div");
+      navHandle.className = "cd-col-resize-handle";
+      navHandle.setAttribute("role", "separator");
+      navHandle.setAttribute("aria-orientation", "vertical");
+      navHandle.setAttribute("aria-label", "Resize navigation");
+      navHandle.setAttribute("data-tooltip", "Drag to resize");
+      nav.appendChild(navHandle);
+      bindHandle(navHandle, (event) => beginDrag("nav", event));
+    }}
 
-      handle.addEventListener("mousedown", (event) => {{
-        if (event.button !== 0) return;
-        const rowWidth = row.getBoundingClientRect().width;
-        const railCount =
-          (STUDIO_COLLAPSED ? 1 : 0) + (SOURCES_COLLAPSED ? 1 : 0);
-        const openWidth = Math.max(rowWidth - railCount * RAIL_PX, 1);
-        const leftRect = columns[index].getBoundingClientRect().width;
-        const rightRect = columns[index + 1].getBoundingClientRect().width;
-        active = {{
-          leftIndex: index,
-          rightIndex: index + 1,
-          startX: event.clientX,
-          openWidth,
-          startLeftPx: leftRect,
-          startRightPx: rightRect,
-          ratios: ratios.slice(),
-          current: ratios.slice(),
-        }};
-        doc.body.classList.add("cd-col-resizing");
-        doc.addEventListener("mousemove", onMove);
-        doc.addEventListener("mouseup", onUp);
-        event.preventDefault();
-        event.stopPropagation();
-      }});
-    }});
+    if (!STUDIO_COLLAPSED) {{
+      const studioHandle = doc.createElement("div");
+      studioHandle.className = "cd-col-resize-handle";
+      studioHandle.setAttribute("role", "separator");
+      studioHandle.setAttribute("aria-orientation", "vertical");
+      studioHandle.setAttribute("aria-label", "Resize Thinking Path");
+      studioHandle.setAttribute("data-tooltip", "Drag to resize");
+      center.appendChild(studioHandle);
+      bindHandle(studioHandle, (event) => beginDrag("studio", event));
+    }}
 
     return true;
   }}
 
-  function boot() {{
-    if (install()) return;
-    let attempts = 0;
-    const timer = win.setInterval(() => {{
-      attempts += 1;
-      if (install() || attempts > 50) win.clearInterval(timer);
-    }}, 80);
+  win.__cdWorkspaceLayoutInstall = install;
+  win.__cdOptimisticShellAction = handleOptimisticShellAction;
+  if (!win.__cdOptimisticShellActionBound) {{
+    /* Use click capture instead of pointerdown. Adding the backdrop during
+       pointerdown changes hit testing before Streamlit receives activation,
+       which can swallow the original drawer button click. Click capture still
+       updates the shell in the same frame while preserving native dispatch. */
+    doc.addEventListener("click", (event) => {{
+      const handler = win.__cdOptimisticShellAction;
+      if (typeof handler === "function") handler(event);
+    }}, true);
+    win.__cdOptimisticShellActionBound = true;
+  }}
+  if (!win.__cdWorkspaceLayoutResizeBound) {{
+    win.addEventListener("resize", () => {{
+      win.requestAnimationFrame(() => {{
+        const reinstall = win.__cdWorkspaceLayoutInstall;
+        if (typeof reinstall === "function") reinstall(false);
+      }});
+    }});
+    win.__cdWorkspaceLayoutResizeBound = true;
   }}
 
-  boot();
+  if (!install(true)) {{
+    let attempts = 0;
+    const timer = win.setInterval(() => {{
+      if (win.__cdWorkspaceLayoutGeneration !== layoutGeneration) {{
+        win.clearInterval(timer);
+        if (win.__cdWorkspaceLayoutRetryTimer === timer) {{
+          win.__cdWorkspaceLayoutRetryTimer = null;
+        }}
+        return;
+      }}
+      attempts += 1;
+      if (install(false) || attempts > 50) {{
+        win.clearInterval(timer);
+        if (win.__cdWorkspaceLayoutRetryTimer === timer) {{
+          win.__cdWorkspaceLayoutRetryTimer = null;
+        }}
+      }}
+    }}, 80);
+    win.__cdWorkspaceLayoutRetryTimer = timer;
+  }}
 }})();
 </script>
-        """,
+            """
+        ),
         height=0,
     )

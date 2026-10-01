@@ -6,19 +6,36 @@ from typing import Any
 
 import pytest
 
+from backend.agentcore_provider import AgentCoreCoachProvider
+from backend.application import CoachApplicationService
+from backend.domain import CoachRequest
+from backend.learning_service import LearningProgressService
 from backend.persistence.dsql_connection import run_dsql_transaction
 from backend.persistence.dsql_student_store import DsqlStudentStore
 from backend.persistence.factory import reset_file_storage_cache
 from backend.persistence.memory_files import MemoryFileStorage
 from backend.persistence.object_keys import (
+    build_source_chunks_object_key,
     notebook_prefix,
     sanitize_filename,
     source_prefix,
 )
+from backend.repositories import (
+    SQLiteNotebookRepository,
+    SQLitePhaseTransitionRepository,
+)
 from backend.settings import settings
-from backend.source_library import add_file_sources
+from backend.source_library import add_file_sources, add_text_source
+from backend.sources.chunk_artifacts import parse_chunk_artifact
+from backend.sources.chunk_cache import (
+    ChunkCacheKey,
+    reset_student_source_chunk_cache,
+    student_source_chunk_cache,
+)
 from backend.student_store import StudentStore
+from backend.workflow import CoachWorkflow
 from backend.workspace_service import WorkspaceService
+from fake_agentcore_runtime import FakeAgentCoreRuntime
 
 
 def _install_memory_storage(monkeypatch, memory: MemoryFileStorage) -> None:
@@ -399,3 +416,278 @@ def test_locked_course_source_still_blocked_when_metadata_exists(tmp_path, monke
     with pytest.raises(ValueError, match="Course materials"):
         store.delete_source(notebook_id, source_id)
     assert store.get_source(notebook_id, source_id) is not None
+
+
+_RUNTIME_ARN = (
+    "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test-harness"
+)
+
+
+def _coach_service(store: StudentStore) -> CoachApplicationService:
+    """Build a mock AgentCore coaching service for post-delete turns."""
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    return CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(
+            AgentCoreCoachProvider(
+                _RUNTIME_ARN,
+                region="us-west-2",
+                qualifier="DEFAULT",
+                timeout_seconds=110.0,
+                max_retries=0,
+                client=FakeAgentCoreRuntime(
+                    payload={
+                        "mode": "coaching",
+                        "response_text": "What assumption is carrying this preference?",
+                        "recommendation": "stay",
+                        "recommendation_rationale": "More evidence is still needed.",
+                        "citations": [],
+                        "hmw_scaffold_ready": False,
+                        "needs_source_retrieval": False,
+                        "out_of_scope": False,
+                    }
+                ),
+            ),
+            transitions,
+        ),
+        LearningProgressService(store, notebooks, transitions),
+    )
+
+
+def test_source_delete_removes_chunk_artifact_and_blocks_coach(tmp_path, monkeypatch):
+    reset_student_source_chunk_cache()
+    memory = MemoryFileStorage()
+    _install_memory_storage(monkeypatch, memory)
+    store = StudentStore(tmp_path / "chunk-del.sqlite3", identifier="owner-a")
+    notebook_id = store.create_thread(model_id="mock", support_mode="guided")
+    source = add_text_source(
+        store,
+        notebook_id,
+        "notes.txt",
+        "Accessibility notes for older pedestrians.",
+    )
+    source_id = source["id"]
+    chunks_key = build_source_chunks_object_key(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+    expected_prefix = source_prefix(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+    assert memory.exists(chunks_key)
+    digest = str((source.get("metadata") or {}).get("extracted_text_sha256") or "")
+    parsed = parse_chunk_artifact(
+        memory.get_bytes(chunks_key),
+        expected_source_id=source_id,
+        expected_digest=digest,
+    )
+    assert parsed is not None
+    cache = student_source_chunk_cache()
+    cache.put(ChunkCacheKey.current(chunks_key, digest), parsed)
+    assert cache.get(ChunkCacheKey.current(chunks_key, digest)) is not None
+    store.delete_source(notebook_id, source_id)
+    assert store.get_source(notebook_id, source_id) is None
+    assert not memory.exists(chunks_key)
+    extracted_key = source.get("extracted_text_key")
+    if extracted_key:
+        assert not memory.exists(extracted_key)
+    assert cache.get(ChunkCacheKey.current(chunks_key, digest)) is None
+    assert expected_prefix.endswith("/")
+    service = _coach_service(store)
+    with pytest.raises(ValueError, match="unknown"):
+        service.submit(
+            CoachRequest(
+                thread_id=notebook_id,
+                student_message="What does the lecture say about accessibility?",
+                current_stage="problem_identification",
+                response_detail="short",
+                source_ids=[source_id],
+                idempotency_key="after-delete",
+            )
+        )
+    turn = service.submit(
+        CoachRequest(
+            thread_id=notebook_id,
+            student_message="What does the lecture say about accessibility?",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="after-delete-empty",
+        )
+    )
+    assert turn.response_text
+    reset_student_source_chunk_cache()
+
+
+def test_source_delete_invalidates_chunk_cache_when_storage_cleanup_fails(
+    tmp_path, monkeypatch
+):
+    """Metadata delete plus cache drop still happen when prefix cleanup raises."""
+
+    class _FlakyPrefixStorage(MemoryFileStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.prefix_calls: list[str] = []
+            self._failures_left = 1
+
+        def delete_prefix(self, prefix: str) -> int:
+            self.prefix_calls.append(prefix)
+            if self._failures_left > 0:
+                self._failures_left -= 1
+                raise PermissionError(f"transient AccessDenied: {prefix}")
+            return super().delete_prefix(prefix)
+
+    reset_student_source_chunk_cache()
+    memory = _FlakyPrefixStorage()
+    _install_memory_storage(monkeypatch, memory)
+    store = StudentStore(tmp_path / "cache-survive.sqlite3", identifier="owner-a")
+    notebook_id = store.create_thread(model_id="mock", support_mode="guided")
+    source = add_text_source(
+        store,
+        notebook_id,
+        "notes.txt",
+        "Accessibility notes for older pedestrians.",
+    )
+    source_id = source["id"]
+    chunks_key = build_source_chunks_object_key(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+    expected_prefix = source_prefix(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+    digest = str((source.get("metadata") or {}).get("extracted_text_sha256") or "")
+    parsed = parse_chunk_artifact(
+        memory.get_bytes(chunks_key),
+        expected_source_id=source_id,
+        expected_digest=digest,
+    )
+    assert parsed is not None
+    cache = student_source_chunk_cache()
+    cache.put(ChunkCacheKey.current(chunks_key, digest), parsed)
+    assert cache.get(ChunkCacheKey.current(chunks_key, digest)) is not None
+
+    with pytest.raises(PermissionError, match="transient AccessDenied"):
+        store.delete_source(notebook_id, source_id)
+
+    assert store.get_source(notebook_id, source_id) is None
+    assert memory.exists(chunks_key)
+    assert memory.prefix_calls == [expected_prefix]
+    assert cache.get(ChunkCacheKey.current(chunks_key, digest)) is None
+
+    service = _coach_service(store)
+    with pytest.raises(ValueError, match="unknown"):
+        service.submit(
+            CoachRequest(
+                thread_id=notebook_id,
+                student_message="What does the lecture say about accessibility?",
+                current_stage="problem_identification",
+                response_detail="short",
+                source_ids=[source_id],
+                idempotency_key="after-failed-cleanup",
+            )
+        )
+
+    store.delete_source(notebook_id, source_id)
+    assert not memory.exists(chunks_key)
+    assert memory.prefix_calls == [expected_prefix, expected_prefix]
+    reset_student_source_chunk_cache()
+
+
+def test_chunk_cache_invalidation_failure_does_not_mask_storage_error(
+    tmp_path, monkeypatch
+):
+    """A raising cache drop must not replace the original storage exception."""
+
+    class _FlakyPrefixStorage(MemoryFileStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.prefix_calls: list[str] = []
+
+        def delete_prefix(self, prefix: str) -> int:
+            self.prefix_calls.append(prefix)
+            raise PermissionError(f"transient AccessDenied: {prefix}")
+
+    reset_student_source_chunk_cache()
+    memory = _FlakyPrefixStorage()
+    _install_memory_storage(monkeypatch, memory)
+    cache = student_source_chunk_cache()
+
+    def _boom(_prefix: str) -> int:
+        raise RuntimeError("cache boom")
+
+    monkeypatch.setattr(cache, "invalidate_prefix", _boom)
+    store = StudentStore(tmp_path / "cache-mask.sqlite3", identifier="owner-a")
+    notebook_id = store.create_thread(model_id="mock", support_mode="guided")
+    source = add_text_source(
+        store,
+        notebook_id,
+        "notes.txt",
+        "Accessibility notes for older pedestrians.",
+    )
+    source_id = source["id"]
+    expected_prefix = source_prefix(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+
+    with pytest.raises(PermissionError, match="transient AccessDenied"):
+        store.delete_source(notebook_id, source_id)
+
+    assert store.get_source(notebook_id, source_id) is None
+    assert memory.prefix_calls == [expected_prefix]
+    reset_student_source_chunk_cache()
+
+
+def test_notebook_delete_removes_chunk_artifacts_and_sources(tmp_path, monkeypatch):
+    reset_student_source_chunk_cache()
+    memory = MemoryFileStorage()
+    _install_memory_storage(monkeypatch, memory)
+    store = StudentStore(tmp_path / "nb-chunk-del.sqlite3", identifier="owner-a")
+    notebook_id = store.create_thread(model_id="mock", support_mode="guided")
+    created = [
+        add_text_source(store, notebook_id, "a.txt", "First accessibility note."),
+        add_text_source(store, notebook_id, "b.txt", "Second accessibility note."),
+    ]
+    chunk_keys = [
+        build_source_chunks_object_key(
+            user_id=store.owner_id,
+            notebook_id=notebook_id,
+            source_id=item["id"],
+        )
+        for item in created
+    ]
+    expected_prefix = notebook_prefix(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+    )
+    assert all(memory.exists(key) for key in chunk_keys)
+    store.delete_thread(notebook_id)
+    assert store.get_thread(notebook_id) is None
+    assert store.list_sources(notebook_id) == []
+    for item in created:
+        assert store.get_source(notebook_id, item["id"]) is None
+    for key in chunk_keys:
+        assert not memory.exists(key)
+        assert key.startswith(expected_prefix)
+    service = _coach_service(store)
+    with pytest.raises(ValueError, match="Notebook not found"):
+        service.submit(
+            CoachRequest(
+                thread_id=notebook_id,
+                student_message="What does the lecture say about accessibility?",
+                current_stage="problem_identification",
+                response_detail="short",
+                source_ids=[created[0]["id"]],
+                idempotency_key="after-nb-delete",
+            )
+        )
+    reset_student_source_chunk_cache()

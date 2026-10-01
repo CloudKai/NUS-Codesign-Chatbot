@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import base64
 import json
 import logging
 import sys
@@ -16,14 +17,21 @@ import pytest
 
 from agentcore_runtime.models import (
     CoachTurnOutput,
+    DeepReviewTurnOutput,
+    FastChatTurnOutput,
     QATurnOutput,
     ReviewTurnOutput,
     RouterOutput,
+)
+from agentcore_runtime.model import (
+    HAIKU_4_5_MODEL_ID,
+    RuntimeModelConfig,
 )
 from agentcore_runtime.structured_coach import (
     STRUCTURED_OUTPUT_REPAIR_PROMPT,
     CoachTurnExtractionError,
     coach_turn_from_agent_result,
+    fast_chat_turn_from_agent_result,
     coaching_invoke_prompts,
     inspect_agent_result,
     invoke_failure_category,
@@ -31,6 +39,7 @@ from agentcore_runtime.structured_coach import (
     log_coach_turn_outcome,
     qa_turn_from_agent_result,
     review_turn_from_agent_result,
+    runtime_model_provenance_fields,
 )
 
 _STREET = "A quiet residential street"
@@ -287,7 +296,7 @@ def test_short_street_message_survives_prompt_planning() -> None:
         {
             "phase": "coaching",
             "topic": "problem_identification",
-            "trusted_instructions": "Guidance mode: Strict.",
+            "trusted_instructions": "Guidance mode: Free.",
             "messages": [
                 {"role": "assistant", "content": [{"text": "Where does this actually happen?"}]},
                 {"role": "user", "content": [{"text": _STREET}]},
@@ -305,7 +314,7 @@ def test_short_street_message_survives_prompt_planning() -> None:
     assert user_prompt == _STREET
     assert _STREET not in system_prompt
     assert "STAGE: PROBLEM IDENTIFICATION" in system_prompt
-    assert "Guidance mode: Strict." in system_prompt
+    assert "Guidance mode: Free." in system_prompt
     assert user_prompt.strip()
 
 
@@ -326,6 +335,111 @@ def test_conversation_for_invoke_keeps_history_out_of_current_prompt() -> None:
     assert current == _STREET
 
 
+def test_image_source_bytes_are_decoded_without_reordering_text_or_history() -> None:
+    """Runtime normalization decodes images while retaining Converse order."""
+    from agentcore_runtime.structured_coach import conversation_for_invoke
+
+    raw_image = b"\x89PNG\r\nstudent-upload"
+    encoded = base64.b64encode(raw_image).decode("ascii")
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"text": "Earlier upload"},
+                    {"image": {"format": "png", "source": {"bytes": encoded}}},
+                ],
+            },
+            {"role": "assistant", "content": [{"text": "I remember it."}]},
+            {
+                "role": "user",
+                "content": [
+                    {"text": "Current upload"},
+                    {"image": {"format": "png", "source": {"bytes": encoded}}},
+                    {"text": "Keep this order."},
+                ],
+            },
+        ]
+    }
+
+    prior, current = conversation_for_invoke(payload)
+
+    assert [block.get("text", "") for block in prior[0]["content"]] == [
+        "Earlier upload",
+        "",
+    ]
+    assert prior[0]["content"][1]["image"]["source"]["bytes"] == raw_image
+    assert prior[1]["content"][0]["text"] == "I remember it."
+    assert [
+        block.get("text", "") if isinstance(block, dict) else block for block in current
+    ] == ["Current upload", "", "Keep this order."]
+    assert current[1]["image"]["source"]["bytes"] == raw_image
+    assert payload["messages"][2]["content"][1]["image"]["source"]["bytes"] == encoded
+
+
+@pytest.mark.parametrize(
+    "byte_shape",
+    ["", "not base64", b"already decoded", [], None, 42],
+)
+def test_invalid_image_source_bytes_fail_closed(byte_shape: Any) -> None:
+    """Empty, malformed, and non-string image bytes use the safe error path."""
+    from agentcore_runtime.structured_coach import conversation_for_invoke
+
+    with pytest.raises(CoachTurnExtractionError) as raised:
+        conversation_for_invoke(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"text": "Please inspect this."},
+                            {
+                                "image": {
+                                    "format": "png",
+                                    "source": {"bytes": byte_shape},
+                                }
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+    assert raised.value.category == "structured_output_failure"
+
+
+def test_invalid_image_source_bytes_return_existing_runtime_error_envelope() -> None:
+    """Malformed images do not reach Strands and return the normal envelope."""
+    import agentcore_runtime.main as runtime_main
+
+    result = asyncio.run(
+        runtime_main.fast_chat_invoke(
+            _user_payload(
+                "fast_chat",
+                output_contract="fast_chat_turn",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"text": "Please inspect this."},
+                            {
+                                "image": {
+                                    "format": "png",
+                                    "source": {"bytes": "not base64"},
+                                }
+                            },
+                        ],
+                    }
+                ],
+            )
+        )
+    )
+    assert result == {
+        "ok": False,
+        "error": True,
+        "category": "structured_output_failure",
+    }
+
+
 def test_unknown_phase_falls_closed_to_coaching_not_qa() -> None:
     from agentcore_runtime.specialists.routing import invoke_kind, payload_phase
     from agentcore_runtime.structured_coach import specialist_system_prompt
@@ -333,6 +447,8 @@ def test_unknown_phase_falls_closed_to_coaching_not_qa() -> None:
     assert payload_phase({"phase": "coach"}) == "coaching"
     assert payload_phase({"phase": "scoring"}) == "review"
     assert invoke_kind({"output_contract": "router_turn"}) == "router"
+    assert invoke_kind({"phase": "fast_chat"}) == "fast_chat"
+    assert invoke_kind({"output_contract": "fast_chat_turn"}) == "fast_chat"
     assert invoke_kind({"phase": "stage_judge"}) == "specialist"
     assert invoke_kind({"phase": "qa"}) == "specialist"
     system = specialist_system_prompt({"phase": "unknown", "topic": "problem_identification"})
@@ -344,10 +460,14 @@ def test_unknown_phase_falls_closed_to_coaching_not_qa() -> None:
     review = specialist_system_prompt({"phase": "review", "review_mode": "deep"})
     assert "Deep Review specialist" in review
     assert "not a grade" in review.lower()
+    assert "stage_reviews" in review
+    assert "supporting_message_refs" in review
+    assert "ENTIRE frozen active conversation" in review
     incremental = specialist_system_prompt(
         {"phase": "review", "review_mode": "incremental"}
     )
     assert "Incremental Review specialist" in incremental
+    assert "stage_reviews" not in incremental
 
 
 def test_inspect_and_log_omit_student_text(caplog: pytest.LogCaptureFixture) -> None:
@@ -416,8 +536,30 @@ def _sample_structured_output(output_model: type[Any]) -> Any:
         return QATurnOutput.model_validate(
             {"response_text": "Week 2 covers the JTBD framework.", "citations": []}
         )
+    if output_model is DeepReviewTurnOutput:
+        return DeepReviewTurnOutput.model_validate(
+            {
+                **_review_turn(),
+                "review_depth": "deep",
+                "current_stage": "problem_identification",
+                "recommendation": "stay",
+                "rationale_summary": "Stay for more evidence.",
+                "readiness_evidence": [],
+                "missing_requirements": [],
+                "stage_reviews": [],
+            }
+        )
     if output_model is ReviewTurnOutput:
         return ReviewTurnOutput.model_validate(_review_turn())
+    if output_model is FastChatTurnOutput:
+        return FastChatTurnOutput.model_validate(
+            {
+                "mode": "coaching",
+                "response_text": "What trade-off still needs evidence?",
+                "recommendation": "stay",
+                "citations": [],
+            }
+        )
     return CoachTurnOutput.model_validate(_coach_turn())
 
 
@@ -478,6 +620,10 @@ def test_structured_role_invoke_passes_custom_repair_prompt() -> None:
     prompt_node = keywords.get("structured_output_prompt")
     assert isinstance(prompt_node, ast.Name)
     assert prompt_node.id == "STRUCTURED_OUTPUT_REPAIR_PROMPT"
+    limits_node = keywords.get("limits")
+    assert isinstance(limits_node, ast.Call)
+    assert isinstance(limits_node.func, ast.Name)
+    assert limits_node.func.id == "structured_output_limits_for_role"
     model_node = keywords["structured_output_model"]
     assert isinstance(model_node, ast.Name)
     assert model_node.id == "output_model"
@@ -492,7 +638,7 @@ def test_router_and_specialists_share_structured_role_invoke() -> None:
     for node in ast.walk(tree):
         if not isinstance(node, ast.AsyncFunctionDef):
             continue
-        if node.name not in {"router_invoke", "specialist_invoke"}:
+        if node.name not in {"router_invoke", "specialist_invoke", "fast_chat_invoke"}:
             continue
         for child in ast.walk(node):
             if (
@@ -501,7 +647,7 @@ def test_router_and_specialists_share_structured_role_invoke() -> None:
                 and child.func.id == "_structured_role_invoke"
             ):
                 callers.add(node.name)
-    assert callers == {"router_invoke", "specialist_invoke"}
+    assert callers == {"router_invoke", "specialist_invoke", "fast_chat_invoke"}
 
 
 def test_all_structured_roles_use_shared_output_contracts() -> None:
@@ -509,12 +655,15 @@ def test_all_structured_roles_use_shared_output_contracts() -> None:
     from agentcore_runtime.main import _output_model_for, _role_for_payload
     from agentcore_runtime.model import (
         MODEL_ROLE_COACHING,
+        MODEL_ROLE_FAST_CHAT,
         MODEL_ROLE_QA,
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
         MODEL_ROLE_ROUTER,
     )
+    from agentcore_runtime.models import FastChatTurnOutput
 
+    assert _role_for_payload({"phase": "fast_chat"}) == MODEL_ROLE_FAST_CHAT
     assert _role_for_payload({"phase": "qa"}) == MODEL_ROLE_QA
     assert _role_for_payload({"phase": "coaching"}) == MODEL_ROLE_COACHING
     assert (
@@ -526,8 +675,11 @@ def test_all_structured_roles_use_shared_output_contracts() -> None:
         == MODEL_ROLE_REVIEW_DEEP
     )
     assert _output_model_for("qa", "qa_turn") is QATurnOutput
+    assert _output_model_for("fast_chat", "fast_chat_turn") is FastChatTurnOutput
     assert _output_model_for("coaching", "coach_turn") is CoachTurnOutput
     assert _output_model_for("review", "review_turn") is ReviewTurnOutput
+    assert _output_model_for("review", "review_turn", "deep") is DeepReviewTurnOutput
+    assert _output_model_for("review", "review_turn", "incremental") is ReviewTurnOutput
     assert MODEL_ROLE_ROUTER == "router"
 
 
@@ -544,10 +696,35 @@ def test_structured_output_contracts_still_validate() -> None:
     )
     coach = CoachTurnOutput.model_validate(_coach_turn())
     review = ReviewTurnOutput.model_validate(_review_turn())
+    fast = FastChatTurnOutput.model_validate(
+        {
+            "mode": "coaching",
+            "response_text": "What specifically prevents noon booking?",
+            "recommendation": "stay",
+        }
+    )
     assert router.specialist == "coaching"
     assert qa.response_text.startswith("Week 1")
     assert coach.assessment.recommendation == "stay"
     assert "users" in review.synthesis
+    assert fast.recommendation == "stay"
+    assert "assessment" not in FastChatTurnOutput.model_fields
+
+
+def test_fast_chat_turn_from_agent_result_accepts_slim_schema() -> None:
+    parsed = fast_chat_turn_from_agent_result(
+        _result(
+            structured_output=FastChatTurnOutput.model_validate(
+                {
+                    "mode": "qa",
+                    "response_text": "Week 1 covers Innovation-driven economy [S1].",
+                    "citations": [{"label": "S1"}],
+                }
+            )
+        )
+    )
+    assert parsed.mode == "qa"
+    assert parsed.recommendation is None
 
 
 def test_review_guardrail_intervened_is_still_safety_blocked() -> None:
@@ -579,15 +756,23 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
     from agentcore_runtime.model import (
         HAIKU_4_5_MODEL_ID,
         MODEL_ROLE_COACHING,
+        MODEL_ROLE_FAST_CHAT,
         MODEL_ROLE_QA,
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
         MODEL_ROLE_ROUTER,
+        PINNED_RUNTIME_PACKAGES,
         SONNET_4_6_MODEL_ID,
         RuntimeModelConfig,
     )
 
     calls: list[dict[str, Any]] = []
+
+    class FakeModelRetryStrategy:
+        """Record constructor kwargs without importing Strands."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
 
     class FakeAgent:
         """Record invoke_async kwargs without importing Strands."""
@@ -612,6 +797,7 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
 
     fake_strands = types.ModuleType("strands")
     fake_strands.Agent = FakeAgent  # type: ignore[attr-defined]
+    fake_strands.ModelRetryStrategy = FakeModelRetryStrategy  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "strands", fake_strands)
     monkeypatch.setattr(runtime_main, "_ensure_role_configs", lambda: None)
 
@@ -664,6 +850,30 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
                 output_contract="review_turn",
             )
         ),
+        runtime_main.fast_chat_invoke(
+            _user_payload(
+                "fast_chat",
+                output_contract="fast_chat_turn",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"text": "Describe this upload."},
+                            {
+                                "image": {
+                                    "format": "png",
+                                    "source": {
+                                        "bytes": base64.b64encode(
+                                            b"runtime-image"
+                                        ).decode("ascii")
+                                    },
+                                }
+                            },
+                        ],
+                    }
+                ],
+            )
+        ),
     )
     results = [asyncio.run(item) for item in invocations]
     assert roles_seen == [
@@ -672,21 +882,95 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
         MODEL_ROLE_COACHING,
         MODEL_ROLE_REVIEW_INCREMENTAL,
         MODEL_ROLE_REVIEW_DEEP,
+        MODEL_ROLE_FAST_CHAT,
     ]
-    assert len(calls) == 5
+    assert len(calls) == 6
     expected_models = (
         RouterOutput,
         QATurnOutput,
         CoachTurnOutput,
         ReviewTurnOutput,
-        ReviewTurnOutput,
+        DeepReviewTurnOutput,
+        FastChatTurnOutput,
     )
     for call, expected_model, result in zip(calls, expected_models, results, strict=True):
         assert "structured_output_prompt" not in call["init_kwargs"]
         assert call["init_kwargs"]["tools"] == []
+        assert "retry_strategy" in call["init_kwargs"]
         assert call["kwargs"]["structured_output_model"] is expected_model
         assert call["kwargs"]["structured_output_prompt"] == (
             "Please use the output tool now."
         )
         assert result.get("error") is not True
+    assert calls[0]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[1]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[2]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[3]["kwargs"]["limits"] == {"turns": 3}
+    assert calls[4]["kwargs"]["limits"] == {"turns": 3}
+    assert calls[5]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[5]["prompt"][1]["image"]["source"]["bytes"] == b"runtime-image"
+    assert calls[0]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
+    assert calls[2]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
+    assert calls[4]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 3
+    assert calls[5]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
+    fast_chat_result = results[5]
+    assert fast_chat_result["runtime_model_role"] == MODEL_ROLE_FAST_CHAT
+    assert fast_chat_result["runtime_model_provider"] == "bedrock"
+    assert fast_chat_result["runtime_model_id"] == HAIKU_4_5_MODEL_ID
+    assert fast_chat_result["runtime_model_region"] == "us-west-2"
+    assert (
+        fast_chat_result["runtime_strands_agents"]
+        == PINNED_RUNTIME_PACKAGES["strands-agents"]
+    )
+    assert "guardrail_id" not in fast_chat_result
+    assert "o8aipba8m129" not in json.dumps(fast_chat_result)
+    deep_result = results[4]
+    assert deep_result["runtime_model_role"] == MODEL_ROLE_REVIEW_DEEP
+    assert deep_result["runtime_model_id"] == SONNET_4_6_MODEL_ID
+    assert deep_result["runtime_model_provider"] == "bedrock"
 
+
+def test_limit_turns_stop_reason_is_structured_output_failure() -> None:
+    """A turns cap must fail closed, not parse leftover assistant text as JSON."""
+    with pytest.raises(CoachTurnExtractionError) as raised:
+        fast_chat_turn_from_agent_result(
+            _result(
+                stop_reason="limit_turns",
+                structured_output=None,
+                message=_text_message(
+                    '{"mode":"coaching","response_text":"Ignore me.","recommendation":"stay"}'
+                ),
+            )
+        )
+    assert raised.value.category == "structured_output_failure"
+
+
+def test_event_loop_cycle_count_is_not_invented() -> None:
+    from agentcore_runtime.structured_coach import event_loop_cycle_count_from_agent_result
+
+    assert event_loop_cycle_count_from_agent_result(_result()) is None
+    counted = _result(
+        metrics=SimpleNamespace(
+            cycle_count=2,
+            latest_agent_invocation=SimpleNamespace(cycles=[{}, {}]),
+        )
+    )
+    assert event_loop_cycle_count_from_agent_result(counted) == 2
+
+
+def test_runtime_model_provenance_fields_omit_secrets_and_missing_config() -> None:
+    assert runtime_model_provenance_fields(None) == {}
+    config = RuntimeModelConfig(
+        provider="bedrock",
+        model_id=HAIKU_4_5_MODEL_ID,
+        region="us-west-2",
+        guardrail_id="gr-secret",
+        guardrail_version="3",
+        role="fast_chat",
+    )
+    fields = runtime_model_provenance_fields(config)
+    assert fields["runtime_model_role"] == "fast_chat"
+    assert fields["runtime_model_id"] == HAIKU_4_5_MODEL_ID
+    assert "gr-secret" not in json.dumps(fields)
+    assert "guardrail" not in json.dumps(fields)
+    assert _STREET not in json.dumps(fields)

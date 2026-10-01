@@ -11,12 +11,15 @@ from pathlib import Path
 
 import streamlit as st
 
+from ui.html_embed import wrap_component_html
+
 _ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 _STYLES_DIR = _ASSETS_DIR / "styles"
 # Fixed cascade order. Do not reorder without comparing the assembled CSS.
 _STYLE_PARTIALS: tuple[str, ...] = (
     "00-foundations.css",
     "10-workspace.css",
+    "15-nav.css",
     "20-studio.css",
     "30-chat.css",
     "40-sources.css",
@@ -70,64 +73,177 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def inject_mobile_viewport_lock() -> None:
+    """Keep phone browsers from zooming or shifting the app shell on focus.
+
+    iOS Safari zooms pages when a focused control is under 16px, and it also
+    scrolls the layout viewport to bring the composer into view. That scroll
+    often sticks after the keyboard closes: a gap appears under the composer
+    and the mobile top-bar icons sit under the status bar (unclickable).
+
+    Combined with the mobile 16px input floor in ``90-responsive.css``, this
+    locks ``maximum-scale=1`` and repeatedly pins ``scroll`` / visualViewport
+    offsets back to the origin while editing.
+    """
+    import streamlit.components.v1 as components
+
+    components.html(
+        wrap_component_html(
+            """
+<script>
+(() => {
+  const doc = window.parent.document;
+  const win = window.parent;
+  const desired =
+    "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover";
+  let meta = doc.querySelector('meta[name="viewport"]');
+  if (!meta) {
+    meta = doc.createElement("meta");
+    meta.setAttribute("name", "viewport");
+    (doc.head || doc.documentElement).appendChild(meta);
+  }
+  if (meta.getAttribute("content") !== desired) {
+    meta.setAttribute("content", desired);
+  }
+
+  const isNarrow = () => {
+    try {
+      return win.matchMedia("(max-width: 1050px)").matches;
+    } catch (_) {
+      return win.innerWidth <= 1050;
+    }
+  };
+
+  const pinDocumentScroll = () => {
+    if (!isNarrow()) {
+      return;
+    }
+    try {
+      if (win.scrollX || win.scrollY) {
+        win.scrollTo(0, 0);
+      }
+      if (doc.documentElement && doc.documentElement.scrollTop) {
+        doc.documentElement.scrollTop = 0;
+      }
+      if (doc.body && doc.body.scrollTop) {
+        doc.body.scrollTop = 0;
+      }
+      const main = doc.querySelector(
+        '[data-testid="stAppViewContainer"] > .main, section.main'
+      );
+      if (main && main.scrollTop) {
+        main.scrollTop = 0;
+      }
+    } catch (_) {}
+  };
+
+  const schedulePin = () => {
+    pinDocumentScroll();
+    try {
+      win.requestAnimationFrame(pinDocumentScroll);
+    } catch (_) {}
+    win.setTimeout(pinDocumentScroll, 50);
+    win.setTimeout(pinDocumentScroll, 250);
+  };
+
+  if (!win.__cdViewportPinInstalled) {
+    win.__cdViewportPinInstalled = true;
+    win.addEventListener("scroll", pinDocumentScroll, { passive: true });
+    doc.addEventListener(
+      "focusin",
+      (event) => {
+        const target = event.target;
+        if (!target || typeof target.matches !== "function") {
+          return;
+        }
+        if (
+          !target.matches(
+            "input, textarea, [contenteditable='true'], [contenteditable='']"
+          )
+        ) {
+          return;
+        }
+        schedulePin();
+      },
+      true
+    );
+    doc.addEventListener("focusout", schedulePin, true);
+    if (win.visualViewport) {
+      win.visualViewport.addEventListener("resize", schedulePin);
+      win.visualViewport.addEventListener("scroll", schedulePin);
+    }
+  }
+  pinDocumentScroll();
+})();
+</script>
+            """
+        ),
+        height=0,
+        width=0,
+    )
+
+
 def inject_template_css() -> None:
     """Inject the active template stylesheet into the Streamlit page."""
     st.markdown(_build_template_ui_css(), unsafe_allow_html=True)
+    inject_mobile_viewport_lock()
 
 
 def render_theme_css() -> None:
     light_tokens = """
         color-scheme:light;
-        --cd-bg:#F3F5F7;--cd-surface:#FFFFFF;--cd-surface-muted:#F7F9FA;
-        --cd-text:#15202B;--cd-muted:#5B6B7C;--cd-border:#D5DCE3;
-        --cd-panel:#EEF1F4;--cd-subtle:#E8ECF0;--cd-accent-soft:#E6F5F3;
-        --cd-accent:#0F766E;--cd-accent-hover:#0D9488;--cd-success:#15803D;
-        --cd-scrollbar:#C4CBD4;
+        --cd-bg:#F7F9FC;--cd-surface:#FFFFFF;--cd-surface-muted:#F1F4F8;
+        --cd-nav:#EEF2F6;--cd-text:#1F2933;--cd-muted:#66727F;
+        --cd-border:#DDE3E9;--cd-panel:#F7F9FB;--cd-subtle:#E9EEF3;
+        --cd-accent-soft:#DFF6F2;--cd-accent:#179E90;
+        --cd-accent-hover:#11877B;--cd-success:#15803D;
+        --cd-scrollbar:#C8D0D8;
         --cd-checkbox-bg:#FFFFFF;--cd-checkbox-border:#D5DCE3;
-        --cd-shadow:0 8px 24px rgba(21,32,43,.08);
+        --cd-shadow:0 10px 30px rgba(31,41,51,.09);
         --cd-placeholder-opacity:.48;
     """
     dark_tokens = """
         color-scheme:dark;
-        --cd-bg:#0F1419;--cd-surface:#171C22;--cd-surface-muted:#1C232B;
-        --cd-text:#F2F5F7;--cd-muted:#9AA8B5;--cd-border:#2A343E;
-        --cd-panel:#171C22;--cd-subtle:#1C232B;--cd-accent-soft:#14352F;
-        --cd-accent:#2DD4BF;--cd-accent-hover:#5EEAD4;--cd-success:#4ADE80;
-        --cd-scrollbar:#4A5560;
-        --cd-checkbox-bg:#1C232B;--cd-checkbox-border:#2A343E;
-        --cd-shadow:0 18px 50px rgba(0,0,0,.34);
+        --cd-bg:#0F1011;--cd-surface:#101112;--cd-surface-muted:#1D1F20;
+        --cd-nav:#1D1F20;--cd-text:#E8EAED;--cd-muted:#9AA0A6;
+        --cd-border:#2D3033;--cd-panel:#151718;--cd-subtle:#252729;
+        --cd-accent-soft:#123A35;--cd-accent:#39CDBA;
+        --cd-accent-hover:#63DECF;--cd-success:#4ADE80;
+        --cd-scrollbar:#4B4F54;
+        --cd-checkbox-bg:#202223;--cd-checkbox-border:#3A3D40;
+        --cd-shadow:0 18px 50px rgba(0,0,0,.38);
         --cd-placeholder-opacity:.48;
     """
     mode = st.session_state.get("appearance", "System")
     tokens = dark_tokens if mode == "Dark" else light_tokens
-    portal_background = "#171C22" if mode == "Dark" else "#FFFFFF"
-    portal_text = "#F2F5F7" if mode == "Dark" else "#15202B"
-    portal_muted = "#9AA8B5" if mode == "Dark" else "#5B6B7C"
+    portal_background = "#1D1F20" if mode == "Dark" else "#FFFFFF"
+    portal_text = "#E8EAED" if mode == "Dark" else "#1F2933"
+    portal_muted = "#9AA0A6" if mode == "Dark" else "#66727F"
     system_portal_dark = (
         """
         @media (prefers-color-scheme:dark) {
             [data-testid="stPopoverBody"],
             [data-testid="stPopoverBody"] > div {
-                background:#171C22 !important;
+                background:#1D1F20 !important;
             }
             [data-testid="stPopoverBody"] p,
             [data-testid="stPopoverBody"] h3,
             [data-testid="stPopoverBody"] label {
-                color:#F2F5F7 !important;
-                -webkit-text-fill-color:#F2F5F7 !important;
+                color:#E8EAED !important;
+                -webkit-text-fill-color:#E8EAED !important;
             }
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"],
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"] [data-testid="stIconMaterial"],
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"] svg {
                 opacity:1 !important;
-                color:#9AA8B5 !important;
-                -webkit-text-fill-color:#9AA8B5 !important;
+                color:#9AA0A6 !important;
+                -webkit-text-fill-color:#9AA0A6 !important;
                 fill:currentColor !important;
             }
             [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"],
             [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] p {
-                color:#9AA8B5 !important;
-                -webkit-text-fill-color:#9AA8B5 !important;
+                color:#9AA0A6 !important;
+                -webkit-text-fill-color:#9AA0A6 !important;
             }
         }
         """
@@ -139,11 +255,30 @@ def render_theme_css() -> None:
         if mode == "System"
         else ""
     )
+    light_inline_code = """
+            [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p code {
+                color:#475467 !important;
+                -webkit-text-fill-color:#475467 !important;
+                background:#E8EDF2 !important;
+                border:1px solid #D5DDE5 !important;
+                border-radius:.35rem !important;
+                padding:.08rem .3rem !important;
+            }
+    """
+    system_light_inline_code = (
+        f"@media (prefers-color-scheme:light) {{ {light_inline_code} }}"
+        if mode == "System"
+        else ""
+    )
+    active_light_inline_code = (
+        light_inline_code if mode == "Light" else system_light_inline_code
+    )
     st.markdown(
         f"""
         <style>
             :root {{{tokens}}}
             {system_dark}
+            {active_light_inline_code}
             [data-testid="stAppViewContainer"],
             [data-testid="stAppViewContainer"] > .main {{
                 color:var(--cd-text);
@@ -266,31 +401,47 @@ def render_theme_css() -> None:
                 color:inherit !important;
                 -webkit-text-fill-color:currentColor !important;
             }}
+            .st-key-profile_coaching_style [data-testid="stRadioOption"],
+            .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] {{
+                border-right:0 !important;
+                min-height:0 !important;
+                color:var(--cd-text) !important;
+                background:var(--cd-surface) !important;
+            }}
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected],
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-checked="true"],
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-pressed="true"],
+            .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked),
+            .st-key-profile_coaching_style [role="radiogroup"] > label[data-selected],
+            .st-key-profile_coaching_style [role="radiogroup"] > label:has(input:checked),
             .st-key-profile_coaching_style [role="radiogroup"]
             > [role="radio"][aria-checked="true"],
             .st-key-profile_coaching_style [role="radiogroup"]
-            > [role="radio"][aria-pressed="true"],
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[aria-checked="true"],
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[aria-pressed="true"],
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[kind="primary"] {{
-                color:#fff !important;
-                background:var(--cd-accent) !important;
+            > [role="radio"][aria-pressed="true"] {{
+                color:var(--cd-accent) !important;
+                background:var(--cd-accent-soft) !important;
                 border-color:var(--cd-accent) !important;
                 font-weight:700 !important;
             }}
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected] p,
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-checked="true"] p,
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-pressed="true"] p,
+            .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked) p,
+            .st-key-profile_coaching_style [role="radiogroup"] > label[data-selected] p,
+            .st-key-profile_coaching_style [role="radiogroup"] > label:has(input:checked) p,
             .st-key-profile_coaching_style [role="radiogroup"]
             > [role="radio"][aria-checked="true"] p,
             .st-key-profile_coaching_style [role="radiogroup"]
-            > [role="radio"][aria-pressed="true"] p,
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[aria-checked="true"] p,
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[kind="primary"] p {{
-                color:#fff !important;
-                -webkit-text-fill-color:#fff !important;
+            > [role="radio"][aria-pressed="true"] p {{
+                color:var(--cd-accent) !important;
+                -webkit-text-fill-color:var(--cd-accent) !important;
+            }}
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
+            [data-testid="stCaptionContainer"] p,
+            .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
+            [data-testid="stCaptionContainer"] p {{
+                color:var(--cd-text) !important;
+                -webkit-text-fill-color:var(--cd-text) !important;
             }}
             [data-baseweb="select"] *,
             [data-baseweb="input"] input,

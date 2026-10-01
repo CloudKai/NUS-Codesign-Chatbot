@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import re
+import threading
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -20,13 +22,16 @@ from fastapi.responses import (
 )
 from pydantic import BaseModel, Field
 
-from backend.auth_oidc import CognitoOIDCClient
+from backend.auth_oidc import CognitoOIDCClient, CognitoOIDCError
 from backend.auth_profiles import PROTECTED_ROLES
 from backend.auth_routes import register_auth_routes
 from backend.domain import (
     CoachRequest,
     CoachTurn,
+    DeepReviewJob,
+    DeepReviewRequest,
     MessageCreateRequest,
+    MessagePage,
     NotebookCreateRequest,
     NotebookUpdateRequest,
     PendingPhaseTransition,
@@ -35,7 +40,10 @@ from backend.domain import (
     SourceUpdateRequest,
 )
 from backend.owner_context import OwnerResolver, OwnerServices
+from backend.persistence.guest_sessions import GUEST_SESSION_TTL
+from backend.coaching.progress import PROGRESS_LABELS
 from backend.operational_metrics import (
+    configure_operational_loggers,
     record_coach_rate_limit,
     record_coach_turn,
     record_http_request,
@@ -49,7 +57,14 @@ from backend.providers import (
 )
 from backend.rate_limit import RateLimitExceeded
 from backend.settings import settings, validate_production_configuration
-from backend.source_library import CourseMaterialSyncCoordinator
+from backend.learning.hmw import hmw_scaffold_projection
+from backend.student_journey import DEFAULT_STAGE, normalize_journey
+from backend.source_library import (
+    CourseMaterialSyncCoordinator,
+    list_visible_sources,
+    read_source_bytes,
+)
+from backend.turn_perf import begin_coach_turn_perf, record_field
 from backend.student_store import (
     CoachIdempotencyConflictError,
     CoachRequestInProgressError,
@@ -57,12 +72,17 @@ from backend.student_store import (
     ConversationRevisionConflictError,
     StudentStore,
 )
-from backend.workspace_service import WorkspaceService
+from backend.workspace_service import WorkspaceService, public_notebook_metadata
 from backend.professor_analytics.models import (
     ConversationTranscriptResponse,
     CriticalThinkingResponse,
     EngagementResponse,
+    NotebookWorkspaceResponse,
     OverviewResponse,
+    ProfessorJourneyProjection,
+    ProfessorMessagePage,
+    ProfessorReviewProjection,
+    ProfessorSourcesResponse,
     StudentDetailResponse,
     StudentsResponse,
 )
@@ -79,7 +99,11 @@ from backend.professor_analytics.research import (
     ResearchReviewRequest,
     ResearchSummaryResponse,
 )
-from backend.research.models import ResearchAdjudication, ResearchReview
+from backend.research.models import (
+    ResearchAccessEventCreate,
+    ResearchAdjudication,
+    ResearchReview,
+)
 
 logger = logging.getLogger("backend.api")
 
@@ -129,6 +153,19 @@ class MessageReviseRequest(BaseModel):
     reasoning_effort: str | None = None
     response_detail: str | None = Field(default=None, pattern="^(short|long)$")
     response_language: str | None = Field(default=None, min_length=1, max_length=50)
+
+
+class GuestClaimConfirmRequest(BaseModel):
+    """Explicit confirmation and retry key for guest workspace claim."""
+
+    confirmed: bool = False
+    operation_id: str = Field(min_length=16, max_length=80)
+
+
+class GuestClaimCancelRequest(BaseModel):
+    """Identify the caller's pending guest-claim operation to release."""
+
+    operation_id: str = Field(min_length=16, max_length=80)
 
 
 def _expire_streamlit_auth_cookie(response: RedirectResponse, cookie_name: str) -> None:
@@ -197,6 +234,7 @@ def create_app(
         validate_storage_configuration,
     )
 
+    configure_operational_loggers()
     validate_storage_configuration()
     validate_production_configuration()
     if store is not None:
@@ -313,9 +351,11 @@ def create_app(
         request: Request, _error: ProfessorAnalyticsUnavailable
     ) -> JSONResponse:
         """Return a privacy-safe temporary failure without driver or SQL detail."""
+        cause = _error.__cause__ or _error
         logger.warning(
-            "Professor analytics snapshot unavailable request_id=%s",
+            "Professor analytics snapshot unavailable request_id=%s error_type=%s",
             getattr(request.state, "request_id", "unknown"),
+            type(cause).__name__,
         )
         return JSONResponse(
             status_code=503,
@@ -324,7 +364,9 @@ def create_app(
 
     def _value_error(error: ValueError) -> HTTPException:
         detail = str(error)
-        status = 404 if "not found" in detail.lower() else 400
+        status = int(getattr(error, "status_code", 0) or 0)
+        if status not in {400, 404, 409}:
+            status = 404 if "not found" in detail.lower() else 400
         return HTTPException(status_code=status, detail=detail)
 
     def _with_idempotency_header(
@@ -393,10 +435,26 @@ def create_app(
         """
         try:
             return len(
-                owner.workspace.list_sources(thread_id, selected_only=True)
+                list_visible_sources(
+                    owner.store,
+                    thread_id,
+                    selected_only=True,
+                    include_extracted_text=False,
+                )
             )
         except Exception:
             return 0
+
+    def _recommendation_metric_value(turn: CoachTurn) -> str:
+        """Return a privacy-safe recommendation label for operational metrics.
+
+        Q&A turns persist ``recommendation=None``. Metrics must not assume a
+        stay/advance enum.
+        """
+        decision = turn.assessment.recommendation
+        if decision is None:
+            return "none"
+        return str(decision.value)
 
     def _emit_coach_metric(
         *,
@@ -417,7 +475,7 @@ def create_app(
             outcome=outcome,
             selected_source_count=selected_source_count,
             citation_count=len(turn.assessment.citations),
-            recommendation=turn.assessment.recommendation.value,
+            recommendation=_recommendation_metric_value(turn),
             transition_outcome=(
                 "auto_advanced"
                 if turn.auto_advanced_to
@@ -436,21 +494,367 @@ def create_app(
         mode = "production" if env == "production" else "local"
         return {"status": "ok", "mode": mode}
 
+    @app.post("/api/v1/auth/guest/renew")
+    def renew_guest_session(request: Request, response: Response) -> dict[str, bool]:
+        """Renew a valid guest cookie through a same-origin browser request.
+
+        Streamlit's server-side API client cannot update the browser cookie, so
+        the browser calls this route directly. The bearer value is never
+        returned in the response body.
+        """
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+
+        origin = str(request.headers.get("origin") or "").strip()
+        expected = urlparse(settings.public_api_base_url)
+        supplied = urlparse(origin)
+        request_host = str(request.headers.get("host") or "").strip()
+        if (
+            not origin
+            or supplied.scheme not in {"http", "https"}
+            or supplied.netloc.lower() != expected.netloc.lower()
+            or supplied.netloc.lower() != request_host.lower()
+            or supplied.scheme != expected.scheme
+        ):
+            raise HTTPException(status_code=403, detail="Same-origin request required")
+
+        secret = str(
+            request.cookies.get(settings.guest_session_cookie_name) or ""
+        ).strip()
+        if not secret or active_store.validate_guest_session(secret) is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        if not active_store.renew_guest_session(secret):
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        response.set_cookie(
+            key=settings.guest_session_cookie_name,
+            value=secret,
+            max_age=int(GUEST_SESSION_TTL.total_seconds()),
+            path="/",
+            secure=settings.auth_cookie_secure
+            or str(request.url.hostname or "").lower()
+            not in {"localhost", "127.0.0.1", "::1"},
+            httponly=True,
+            samesite="lax",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {"renewed": True}
+
+    def _require_guest_browser_origin(request: Request) -> None:
+        """Validate the public Origin from browsers and the configured API Host for server calls."""
+        origin = str(request.headers.get("origin") or "").strip()
+        expected = urlparse(settings.public_api_base_url)
+        supplied = urlparse(origin)
+        request_host = str(request.headers.get("host") or "").strip()
+        internal_api = urlparse(settings.api_base_url)
+        request_scheme = str(request.url.scheme or "").lower()
+        trusted_host = request_host.lower() == supplied.netloc.lower() or (
+            request_host.lower() == internal_api.netloc.lower()
+            and request_scheme == internal_api.scheme.lower()
+        )
+        if (
+            not origin
+            or supplied.scheme not in {"http", "https"}
+            or supplied.username
+            or supplied.password
+            or supplied.path not in {"", "/"}
+            or supplied.query
+            or supplied.fragment
+            or supplied.netloc.lower() != expected.netloc.lower()
+            or not trusted_host
+            or supplied.scheme != expected.scheme
+        ):
+            raise HTTPException(status_code=403, detail="Same-origin request required")
+
+    def _reject_cognito_precedence(request: Request) -> None:
+        """Prevent an explicit guest start from downgrading a Cognito session."""
+        id_token = str(
+            request.cookies.get(settings.cognito_id_token_cookie_name) or ""
+        ).strip()
+        refresh_token = str(
+            request.cookies.get(settings.cognito_refresh_cookie_name) or ""
+        ).strip()
+        if id_token:
+            try:
+                oidc.verify_id_token(id_token)
+            except CognitoOIDCError as error:
+                raise HTTPException(
+                    status_code=401, detail="Not authenticated"
+                ) from error
+            raise HTTPException(status_code=409, detail="Cognito session already active")
+        if refresh_token:
+            try:
+                oidc.refresh(refresh_token)
+            except CognitoOIDCError as error:
+                raise HTTPException(
+                    status_code=401, detail="Not authenticated"
+                ) from error
+            raise HTTPException(status_code=409, detail="Cognito session already active")
+
+    @app.post("/api/v1/auth/guest/start")
+    def start_guest_session(request: Request, response: Response) -> dict[str, Any]:
+        """Explicitly create a guest owner or reuse the presented valid session."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        _require_guest_browser_origin(request)
+        _reject_cognito_precedence(request)
+        existing_secret = str(
+            request.cookies.get(settings.guest_session_cookie_name) or ""
+        ).strip()
+        owner_user_id = (
+            active_store.validate_guest_session(existing_secret)
+            if existing_secret
+            else None
+        )
+        if owner_user_id is None:
+            owner_user_id, existing_secret = active_store.create_guest_session()
+        user = active_store.get_user_by_id(owner_user_id)
+        if user is None:
+            raise HTTPException(status_code=503, detail="Guest session unavailable")
+        response.set_cookie(
+            key=settings.guest_session_cookie_name,
+            value=existing_secret,
+            max_age=int(GUEST_SESSION_TTL.total_seconds()),
+            path="/",
+            secure=settings.auth_cookie_secure
+            or str(request.url.hostname or "").lower()
+            not in {"localhost", "127.0.0.1", "::1"},
+            httponly=True,
+            samesite="lax",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {"started": True, "guest_id": str(user.get("identifier") or "")}
+
+    @app.post("/api/v1/auth/guest/probe")
+    def probe_guest_session(request: Request) -> JSONResponse:
+        """Verify the browser's guest cookie without creating or renewing it."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        origin = str(request.headers.get("origin") or "").strip()
+        expected_origin = urlparse(settings.public_api_base_url)
+        api_origin = urlparse(settings.api_base_url)
+        request_host = str(request.headers.get("host") or "").strip()
+        supplied_origin = urlparse(origin)
+        if (
+            not origin
+            or supplied_origin.scheme != expected_origin.scheme
+            or supplied_origin.netloc.lower() != expected_origin.netloc.lower()
+            or request_host.lower() != api_origin.netloc.lower()
+        ):
+            raise HTTPException(status_code=403, detail="Same-origin request required")
+        _reject_cognito_precedence(request)
+        secret = str(request.cookies.get(settings.guest_session_cookie_name) or "").strip()
+        owner_user_id = active_store.validate_guest_session(secret) if secret else None
+        if owner_user_id is None:
+            return JSONResponse({"authenticated": False}, headers={"Cache-Control": "no-store"})
+        user = active_store.get_user_by_id(owner_user_id)
+        if user is None:
+            return JSONResponse({"authenticated": False}, headers={"Cache-Control": "no-store"})
+        return JSONResponse(
+            {"authenticated": True, "guest_id": str(user.get("identifier") or "")},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/v1/auth/guest/claim/preview")
+    def preview_guest_claim(request: Request) -> dict[str, Any]:
+        """Preview guest data for a verified Cognito account, without mutation."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        _require_guest_browser_origin(request)
+        owner = current_owner(request)
+        profile = owner.store.get_user_by_id(owner.user_id)
+        if not profile or not str(profile.get("identifier") or "").startswith("cognito:"):
+            raise HTTPException(status_code=401, detail="Cognito account required")
+        secret = str(request.cookies.get(settings.guest_session_cookie_name) or "").strip()
+        preview = active_store.create_guest_claim_preview(
+            secret=secret, target_user_id=owner.user_id
+        )
+        if preview is None:
+            raise HTTPException(status_code=401, detail="Guest session unavailable")
+        if preview.get("already_claimed"):
+            from backend.guest_claims import cleanup_guest_objects
+            from backend.persistence.factory import get_file_storage
+            cleanup = active_store.guest_claim_cleanup_info(
+                secret=secret, target_user_id=owner.user_id,
+                operation_id=str(preview.get("operation_id") or ""),
+            )
+            if cleanup:
+                cleanup_guest_objects(
+                    storage=get_file_storage(), guest_user_id=cleanup[0],
+                    notebook_ids=cleanup[1],
+                )
+        return {
+            "account": {
+                "display_name": str(profile.get("display_name") or "Student")[:80],
+                "email": str(profile.get("email") or "")[:254],
+            },
+            **preview,
+        }
+
+    @app.post("/api/v1/auth/guest/claim/confirm")
+    def confirm_guest_claim(
+        payload: GuestClaimConfirmRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        """Copy and atomically claim a guest workspace after explicit consent."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        _require_guest_browser_origin(request)
+        owner = current_owner(request)
+        profile = owner.store.get_user_by_id(owner.user_id)
+        if not profile or not str(profile.get("identifier") or "").startswith("cognito:"):
+            raise HTTPException(status_code=401, detail="Cognito account required")
+        if not payload.confirmed:
+            raise HTTPException(status_code=400, detail="Explicit confirmation required")
+        try:
+            from uuid import UUID
+            operation_id = str(UUID(payload.operation_id.strip()))
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=422, detail="Invalid claim operation") from None
+        secret = str(request.cookies.get(settings.guest_session_cookie_name) or "").strip()
+        if not secret:
+            raise HTTPException(status_code=401, detail="Guest session unavailable")
+        from backend.guest_claims import complete_guest_claim
+        from backend.persistence.factory import get_file_storage
+        try:
+            result = complete_guest_claim(
+                store=active_store, storage=get_file_storage(), secret=secret,
+                target_user_id=owner.user_id, operation_id=operation_id,
+            )
+        except ValueError as error:
+            if "Guest workspace changed" in str(error):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Guest workspace changed. Refresh the preview before confirming.",
+                ) from None
+            logger.warning(
+                "Guest claim failed before ownership commit (%s)", type(error).__name__
+            )
+            raise HTTPException(
+                status_code=409, detail="Guest claim failed; retry the confirmation"
+            ) from None
+        except Exception as error:
+            logger.warning(
+                "Guest claim failed before ownership commit (%s)", type(error).__name__
+            )
+            raise HTTPException(
+                status_code=409, detail="Guest claim failed; retry the confirmation"
+            ) from None
+        if result is None:
+            raise HTTPException(status_code=409, detail="Guest claim unavailable")
+        return {"claimed": True, **result}
+
+    @app.post("/api/v1/auth/guest/claim/cancel")
+    def cancel_guest_claim(
+        payload: GuestClaimCancelRequest,
+        request: Request,
+    ) -> dict[str, bool]:
+        """Release a pending claim fence for this Cognito owner and guest cookie."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        _require_guest_browser_origin(request)
+        owner = current_owner(request)
+        profile = owner.store.get_user_by_id(owner.user_id)
+        if not profile or not str(profile.get("identifier") or "").startswith("cognito:"):
+            raise HTTPException(status_code=401, detail="Cognito account required")
+        try:
+            from uuid import UUID
+            operation_id = str(UUID(payload.operation_id.strip()))
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=422, detail="Invalid claim operation") from None
+        secret = str(request.cookies.get(settings.guest_session_cookie_name) or "").strip()
+        if not secret:
+            raise HTTPException(status_code=401, detail="Guest session unavailable")
+        released = active_store.release_guest_claim(
+            secret=secret, target_user_id=owner.user_id, operation_id=operation_id
+        )
+        return {"released": released}
+
     def _professor_service(owner: OwnerServices) -> ProfessorAnalyticsService:
         """Build a read-only analytics service for one authorised request."""
         return ProfessorAnalyticsService(ProfessorAnalyticsRepository(owner.store))
 
+    def _resolve_professor_student_id(owner: OwnerServices, public_id: str) -> str | None:
+        """Resolve a roster ID to its internal owner before auditing or reads."""
+        return ProfessorAnalyticsRepository(owner.store).resolve_public_student_id(
+            public_id
+        )
+
     def _research_service(owner: OwnerServices) -> ProfessorResearchService:
         """Build the research application service over its narrow repository."""
         from backend import api as api_facade
+        from backend.professor_analytics.guest_identity import (
+            guest_public_id,
+            is_guest_identity,
+        )
 
         repository_cls = api_facade.StudentStoreResearchRepository
-        return ProfessorResearchService(repository_cls(owner.store))
+
+        def project_actor_id(actor_user_id: str) -> str | None:
+            """Preserve signed-in actor IDs and pseudonymize persisted guests."""
+            profile = owner.store.get_user_by_id(actor_user_id)
+            if profile is None:
+                return None
+            if is_guest_identity(
+                profile.get("identifier"), profile.get("cognito_sub")
+            ):
+                return guest_public_id(actor_user_id)
+            return actor_user_id
+
+        return ProfessorResearchService(
+            repository_cls(owner.store), actor_id_projector=project_actor_id
+        )
 
     def _professor_role(owner: OwnerServices) -> str:
         """Reload the already-authorised persisted staff role for audit context."""
         profile = owner.store.get_user_by_id(owner.user_id) or {}
         return str(profile.get("role") or "student").strip().lower()
+
+    def _audit_professor_read(
+        request: Request,
+        owner: OwnerServices,
+        *,
+        action: str,
+        scope: str,
+        target_user_id: str | None = None,
+        notebook_id: str | None = None,
+        filters: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist an attributable analytics-read audit before loading data.
+
+        The access-audit repository is synchronous by design: an identifiable
+        lecturer read must fail closed when its audit insert cannot commit.
+        Only bounded route filters and stable identifiers cross this boundary;
+        prompt text, source contents, and storage paths never do.
+        """
+        safe_filters = dict(filters or {})
+        safe_metadata = dict(metadata or {})
+        try:
+            from backend import api as api_facade
+
+            api_facade.StudentStoreResearchRepository(owner.store).record_access_event(
+                ResearchAccessEventCreate(
+                    actor_user_id=str(owner.user_id),
+                    action=action,
+                    scope=scope,
+                    request_id=str(getattr(request.state, "request_id", "unknown")),
+                    target_user_id=(str(target_user_id) if target_user_id else None),
+                    notebook_id=(str(notebook_id) if notebook_id else None),
+                    filters=safe_filters,
+                    metadata={"actor_role": _professor_role(owner), **safe_metadata},
+                )
+            )
+        except Exception as error:
+            logger.warning(
+                "Professor analytics access audit unavailable request_id=%s action=%s",
+                getattr(request.state, "request_id", "unknown"),
+                action,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Professor analytics is temporarily unavailable",
+            ) from error
 
     def _research_unavailable(request: Request) -> HTTPException:
         """Log only correlation context and return a privacy-safe 503."""
@@ -465,13 +869,21 @@ def create_app(
 
     @app.get("/api/v1/professor/overview", response_model=OverviewResponse)
     def professor_overview(
+        request: Request,
         owner: OwnerServices = Depends(current_professor),
     ) -> OverviewResponse:
         """Return a compact class snapshot for teaching staff only."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.overview",
+            scope="identifiable_overview",
+        )
         return _professor_service(owner).overview()
 
     @app.get("/api/v1/professor/students", response_model=StudentsResponse)
     def professor_students(
+        request: Request,
         search: str = "",
         stage: str | None = None,
         attention_only: bool = False,
@@ -480,6 +892,19 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> StudentsResponse:
         """List privacy-minimised student rows with safe server-side filters."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.students",
+            scope="identifiable_roster",
+            filters={
+                "search": str(search or "").strip()[:120] or None,
+                "stage": str(stage or "").strip()[:80] or None,
+                "attention_only": bool(attention_only),
+                "min_score": min_score,
+                "max_score": max_score,
+            },
+        )
         return _professor_service(owner).students(
             search=search,
             stage=stage,
@@ -493,11 +918,22 @@ def create_app(
         response_model=StudentDetailResponse,
     )
     def professor_student_detail(
+        request: Request,
         student_id: str,
         owner: OwnerServices = Depends(current_professor),
     ) -> StudentDetailResponse:
         """Return one student's active learning journey and authorised transcript."""
-        detail = _professor_service(owner).student_detail(student_id)
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.student_detail",
+            scope="identifiable_student",
+            target_user_id=resolved_student_id,
+        )
+        detail = _professor_service(owner).student_detail(resolved_student_id)
         if detail is None:
             raise HTTPException(status_code=404, detail="Student not found")
         return detail
@@ -507,17 +943,251 @@ def create_app(
         response_model=ConversationTranscriptResponse,
     )
     def professor_conversation_transcript(
+        request: Request,
         student_id: str,
         notebook_id: str,
         owner: OwnerServices = Depends(current_professor),
     ) -> ConversationTranscriptResponse:
         """Return one selected student's active notebook transcript only."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.transcript",
+            scope="identifiable_transcript",
+            target_user_id=resolved_student_id,
+            notebook_id=notebook_id,
+        )
         transcript = _professor_service(owner).conversation_transcript(
-            student_id, notebook_id
+            resolved_student_id, notebook_id
         )
         if transcript is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return transcript
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+        response_model=NotebookWorkspaceResponse,
+    )
+    def professor_notebook_workspace(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> NotebookWorkspaceResponse:
+        """Return one authorised read-only notebook workspace for lecturers."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.workspace",
+            scope="identifiable_workspace",
+            target_user_id=resolved_student_id,
+            notebook_id=notebook_id,
+        )
+        workspace = _professor_service(owner).notebook_workspace(
+            resolved_student_id, notebook_id
+        )
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return workspace
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages",
+        response_model=ProfessorMessagePage,
+    )
+    def professor_notebook_messages(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        limit: int = Query(default=30, ge=1),
+        cursor: str | None = None,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ProfessorMessagePage:
+        """Return one paginated active-branch transcript page for lecturers."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.transcript",
+            scope="identifiable_transcript",
+            target_user_id=resolved_student_id,
+            notebook_id=notebook_id,
+            metadata={"paginated": True, "limit": limit, "cursor": bool(cursor)},
+        )
+        try:
+            page = _professor_service(owner).notebook_messages(
+                resolved_student_id,
+                notebook_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from None
+        if page is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return page
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources",
+        response_model=ProfessorSourcesResponse,
+    )
+    def professor_notebook_sources(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ProfessorSourcesResponse:
+        """Return allow-listed library sources for one owned notebook."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.sources",
+            scope="identifiable_sources",
+            target_user_id=resolved_student_id,
+            notebook_id=notebook_id,
+        )
+        payload = _professor_service(owner).notebook_sources(resolved_student_id, notebook_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return payload
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/journey",
+        response_model=ProfessorJourneyProjection,
+    )
+    def professor_notebook_journey(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ProfessorJourneyProjection:
+        """Return persisted journey state without transcript bodies."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.journey",
+            scope="identifiable_journey",
+            target_user_id=resolved_student_id,
+            notebook_id=notebook_id,
+        )
+        payload = _professor_service(owner).notebook_journey(resolved_student_id, notebook_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return payload
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/review",
+        response_model=ProfessorReviewProjection,
+    )
+    def professor_notebook_review(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ProfessorReviewProjection:
+        """Return persisted review projection without regeneration."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.review",
+            scope="identifiable_review",
+            target_user_id=resolved_student_id,
+            notebook_id=notebook_id,
+        )
+        payload = _professor_service(owner).notebook_review(resolved_student_id, notebook_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return payload
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{source_id}"
+    )
+    def professor_notebook_source(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        source_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> Response:
+        """Stream one library source after lecturer ownership checks."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.source",
+            scope="identifiable_source",
+            target_user_id=resolved_student_id,
+            notebook_id=notebook_id,
+            metadata={"source_id": str(source_id)[:160]},
+        )
+        repository = ProfessorAnalyticsRepository(owner.store)
+        source = repository.read_library_source(resolved_student_id, notebook_id, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+        payload = read_source_bytes(source)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Source is unavailable")
+        filename = quote(str(source.get("title") or "source"), safe="")
+        return Response(
+            content=payload,
+            media_type=str(source.get("mime") or "application/octet-stream"),
+            headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
+        )
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{attachment_id}"
+    )
+    def professor_conversation_attachment(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        attachment_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> Response:
+        """Stream one message-associated attachment after lecturer checks."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.attachment",
+            scope="identifiable_attachment",
+            target_user_id=resolved_student_id,
+            notebook_id=notebook_id,
+            metadata={"attachment_id": str(attachment_id)[:160]},
+        )
+        repository = ProfessorAnalyticsRepository(owner.store)
+        source = repository.read_attachment(resolved_student_id, notebook_id, attachment_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        payload = read_source_bytes(source)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Attachment is unavailable")
+        filename = quote(str(source.get("title") or "attachment"), safe="")
+        return Response(
+            content=payload,
+            media_type=str(source.get("mime") or "application/octet-stream"),
+            headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
+        )
 
     @app.get(
         "/api/v1/professor/critical-thinking",
@@ -534,9 +1204,16 @@ def create_app(
         response_model=EngagementResponse,
     )
     def professor_engagement(
+        request: Request,
         owner: OwnerServices = Depends(current_professor),
     ) -> EngagementResponse:
         """Return usage/session analytics, kept distinct from performance."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.engagement",
+            scope="identifiable_engagement",
+        )
         return _professor_service(owner).engagement()
 
     @app.get(
@@ -596,15 +1273,23 @@ def create_app(
     ) -> ResearchNotebookDetailResponse:
         """Return one audited transcript with automated and human coding."""
         try:
+            resolved_student_id = ProfessorAnalyticsRepository(
+                owner.store
+            ).resolve_notebook_owner(notebook_id)
+            if resolved_student_id is None:
+                raise HTTPException(status_code=404, detail="Research notebook not found")
             detail = _research_service(owner).notebook_detail(
                 notebook_id,
                 actor_user_id=owner.user_id,
                 actor_role=_professor_role(owner),
                 request_id=str(getattr(request.state, "request_id", "unknown")),
+                target_user_id=resolved_student_id,
                 transcript_loader=_professor_service(owner).conversation_transcript,
                 observation_limit=observation_limit,
                 observation_offset=observation_offset,
             )
+        except HTTPException:
+            raise
         except Exception as error:
             raise _research_unavailable(request) from error
         if detail is None:
@@ -897,6 +1582,59 @@ def create_app(
         except ValueError as error:
             raise _value_error(error) from error
 
+    @app.get(
+        "/api/v1/threads/{thread_id}/messages/exists",
+        response_model=bool,
+    )
+    def has_messages(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> bool:
+        """Return whether an owned notebook has a visible active message."""
+        try:
+            return owner.workspace.has_messages(thread_id)
+        except ValueError as error:
+            raise _value_error(error) from error
+
+    @app.get(
+        "/api/v1/threads/{thread_id}/messages/page",
+        response_model=MessagePage,
+    )
+    def list_message_page(
+        thread_id: str,
+        limit: int = Query(6, ge=1, le=100),
+        cursor: str | None = Query(default=None, max_length=2048),
+        owner: OwnerServices = Depends(current_owner),
+    ) -> MessagePage:
+        """Return a bounded newest-first page of an owned notebook transcript.
+
+        The response is chronological for straightforward rendering.  Cursor
+        validation, revision binding, visibility filtering, and source-owner
+        checks are performed by the persistence adapter.
+        """
+        try:
+            return MessagePage.model_validate(
+                owner.workspace.get_message_page(
+                    thread_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+            )
+        except ValueError as error:
+            raise _value_error(error) from error
+
+    @app.get("/api/v1/threads/{thread_id}/messages/title-context")
+    def title_context(
+        thread_id: str,
+        limit: int = Query(2, ge=1, le=2),
+        owner: OwnerServices = Depends(current_owner),
+    ) -> list[str]:
+        """Return only the bounded oldest user prompts used for title migration."""
+        try:
+            return owner.workspace.get_oldest_user_messages(thread_id, limit=limit)
+        except ValueError as error:
+            raise _value_error(error) from error
+
     @app.get("/api/v1/threads/{thread_id}/transcript.txt")
     def download_transcript(
         thread_id: str,
@@ -911,6 +1649,23 @@ def create_app(
         return Response(
             content=transcript.data,
             media_type=transcript.mime,
+            headers={"Content-Disposition": disposition},
+        )
+
+    @app.get("/api/v1/threads/{thread_id}/deep-analysis.pdf")
+    def download_deep_analysis_pdf(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> Response:
+        """Return a PDF built from the notebook's completed Sonnet Deep Review."""
+        try:
+            export = owner.workspace.export_deep_analysis_pdf(thread_id)
+        except ValueError as error:
+            raise _value_error(error) from error
+        disposition = "attachment; filename*=UTF-8''" + quote(export.filename)
+        return Response(
+            content=export.data,
+            media_type=export.mime,
             headers={"Content-Disposition": disposition},
         )
 
@@ -989,6 +1744,34 @@ def create_app(
             uploads.append((name, payload, upload.content_type))
         try:
             return owner.workspace.upload_sources(thread_id, uploads)
+        except ValueError as error:
+            raise _value_error(error) from error
+
+    @app.post("/api/v1/threads/{thread_id}/attachments")
+    async def upload_attachments(
+        thread_id: str,
+        files: list[UploadFile] = File(...),
+        owner: OwnerServices = Depends(current_owner),
+    ) -> list[dict[str, Any]]:
+        """Store private files used only by one submitted coaching turn."""
+        if len(files) > settings.max_files:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload at most {settings.max_files} files per message.",
+            )
+        max_bytes = max(1, int(settings.max_file_size_mb)) * 1024 * 1024
+        uploads: list[tuple[str, bytes, str | None]] = []
+        for upload in files:
+            payload = await upload.read(max_bytes + 1)
+            name = upload.filename or "upload.bin"
+            if len(payload) > max_bytes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{name} exceeds the {settings.max_file_size_mb} MB limit.",
+                )
+            uploads.append((name, payload, upload.content_type))
+        try:
+            return owner.workspace.upload_attachments(thread_id, uploads)
         except ValueError as error:
             raise _value_error(error) from error
 
@@ -1097,11 +1880,23 @@ def create_app(
         thread_id: str,
         owner: OwnerServices = Depends(current_owner),
     ) -> dict:
-        """Return persisted notebook learning metadata for the owned thread."""
+        """Return persisted notebook learning metadata for the owned thread.
+
+        Includes a read-only ``hmw_scaffold`` projection derived from the
+        authoritative stage and active conversation. Clients cannot set it.
+        """
         thread = owner.store.get_thread(thread_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        return dict(thread.get("metadata") or {})
+        payload = public_notebook_metadata(thread.get("metadata"))
+        journey = normalize_journey(payload.get("learning_journey"))
+        payload["hmw_scaffold"] = hmw_scaffold_projection(
+            str(journey.get("current_stage") or DEFAULT_STAGE),
+            owner.store.get_messages(thread_id),
+            enabled=settings.hmw_scaffold_enabled,
+            response_detail=str(journey.get("response_detail") or ""),
+        )
+        return payload
 
     @app.post("/api/v1/threads/{thread_id}/learning-state/select-stage")
     def select_learning_stage(
@@ -1121,7 +1916,7 @@ def create_app(
             status = 404 if "not found" in message.lower() else 400
             raise HTTPException(status_code=status, detail=message) from error
         record_stage_transition(outcome="selected")
-        return dict(metadata or {})
+        return public_notebook_metadata(metadata)
 
     @app.post(
         "/api/v1/threads/{thread_id}/messages/{message_id}/revise",
@@ -1231,6 +2026,11 @@ def create_app(
         try:
             # Rate limits apply inside CoachApplicationService only when a new
             # provider execution is claimed, so same-key waiters can converge.
+            begin_coach_turn_perf()
+            record_field("request_id", request_id)
+            auth_ms = getattr(http_request.state, "auth_context_ms", None)
+            if auth_ms is not None:
+                record_field("auth_context_ms", auth_ms)
             turn = owner.coach.submit(request)
         except RateLimitExceeded as error:
             _record_coach_rate_limit(
@@ -1286,7 +2086,7 @@ def create_app(
         logger.info(
             "coach_turn ok request_id=%s recommendation=%s auto_advanced=%s",
             request_id,
-            turn.assessment.recommendation.value,
+            _recommendation_metric_value(turn),
             bool(turn.auto_advanced_to),
         )
         _emit_coach_metric(
@@ -1296,18 +2096,170 @@ def create_app(
         )
         return turn
 
+    @app.post("/api/v1/threads/{thread_id}/deep-review", response_model=DeepReviewJob)
+    def start_deep_review(
+        thread_id: str,
+        http_request: Request,
+        payload: DeepReviewRequest | None = None,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> DeepReviewJob:
+        """Enqueue one server-owned explicit Deep Review for the owned notebook.
+
+        Returns immediately after the job is persisted. The browser cannot
+        choose Sonnet by sending ``specialist=review`` on
+        ``POST /api/v1/coach/turn``. Eligibility is loaded from authenticated
+        notebook state. Overlapping coaching turns are allowed.
+        """
+        body = payload or DeepReviewRequest()
+        header_key = http_request.headers.get("idempotency-key")
+        idempotency_key = body.idempotency_key
+        if header_key is not None:
+            if idempotency_key and idempotency_key != header_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Idempotency-Key header does not match the request body",
+                )
+            idempotency_key = header_key
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        selected_source_count = _selected_source_count(owner, thread_id)
+        request_id = str(getattr(http_request.state, "request_id", None) or "-")
+        logger.info(
+            "deep_review enqueue request_id=%s sources=%s",
+            request_id,
+            selected_source_count,
+        )
+        try:
+            job = owner.coach.enqueue_deep_review(
+                thread_id, idempotency_key=idempotency_key
+            )
+        except ConversationRevisionConflictError as error:
+            _emit_coach_metric(
+                outcome="revision_conflict",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            _emit_coach_metric(
+                outcome="rejected",
+                selected_source_count=selected_source_count,
+            )
+            logger.info("deep_review rejected request_id=%s", request_id)
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except Exception:
+            _emit_coach_metric(
+                outcome="failed",
+                selected_source_count=selected_source_count,
+            )
+            raise
+        logger.info(
+            "deep_review enqueued request_id=%s review_id=%s status=%s",
+            request_id,
+            job.review_id,
+            job.status.value,
+        )
+        _emit_coach_metric(
+            outcome="enqueued",
+            selected_source_count=selected_source_count,
+        )
+        return job
+
+    @app.get("/api/v1/threads/{thread_id}/deep-review", response_model=DeepReviewJob)
+    def get_deep_review(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> DeepReviewJob:
+        """Return the owner-scoped Deep Review job, including a completed snapshot.
+
+        Stale queued/running jobs are fail-closed to ``failed`` /
+        ``review_timeout``. Another student cannot read this notebook's job.
+        """
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            job = owner.coach.get_deep_review_job(thread_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        if job is None:
+            raise HTTPException(status_code=404, detail="Deep Review job not found")
+        return job
+
+    @app.get("/api/v1/threads/{thread_id}/journey-stage-reviews")
+    def get_journey_stage_reviews(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Return Journey stage-completion review checkpoints for one notebook."""
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            return owner.coach.get_journey_stage_reviews(thread_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/api/v1/threads/{thread_id}/journey-stage-reviews/read")
+    def mark_journey_stage_reviews_read(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Clear the Journey unread notification after the student views Journey."""
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            return owner.coach.mark_journey_stage_reviews_read(thread_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
     @app.post("/api/v1/coach/turn/stream")
     def coach_turn_stream(
         request: CoachRequest,
         http_request: Request,
         owner: OwnerServices = Depends(current_owner),
     ) -> StreamingResponse:
-        """Stream one coaching turn as NDJSON progress + token events."""
+        """Stream progress, a validated reply preview, and the saved turn.
+
+        Progress phases correspond to execution boundaries. ``reply_ready``
+        contains the final validated text before persistence and is ephemeral.
+        This endpoint does not emit fake token slices of a completed reply.
+        """
 
         request = _with_idempotency_header(request, http_request)
         if not owner.store.get_thread(request.thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
         selected_source_count = _selected_source_count(owner, request.thread_id)
+
+        stream_request_id = str(
+            getattr(http_request.state, "request_id", None) or "-"
+        )
+
+        def _log_stream_failure(outcome: str, error: BaseException) -> None:
+            """Log one terminal streaming failure without student content.
+
+            The streaming route is the only path the UI uses, so a failure
+            that is reported solely as an NDJSON ``error`` event would other-
+            wise leave no server-side trace to diagnose. Provider errors wrap
+            an operator-actionable root cause (expired credentials, throttling,
+            timeouts) in a generic student-facing message, so the chained cause
+            types are logged as well. Only exception type names are recorded.
+
+            Args:
+                outcome: Privacy-safe outcome label already sent to metrics.
+                error: Terminal exception raised by the worker thread.
+            """
+            causes: list[str] = []
+            cause = error.__cause__
+            while cause is not None and len(causes) < 4:
+                causes.append(type(cause).__name__)
+                cause = cause.__cause__
+            logger.warning(
+                "coach_turn_stream failed request_id=%s outcome=%s "
+                "category=%s exception=%s caused_by=%s",
+                stream_request_id,
+                outcome,
+                str(getattr(error, "category", "") or "-"),
+                type(error).__name__,
+                "<-".join(causes) or "-",
+            )
 
         def events():
             yield json.dumps(
@@ -1316,87 +2268,146 @@ def create_app(
                     "stage": request.current_stage,
                 }
             ) + "\n"
-            # Signal UI before the long provider submit so students see a
-            # thinking state instead of a blank assistant bubble.
-            yield json.dumps(
-                {"event": "status", "phase": "thinking"}
-            ) + "\n"
-            try:
-                turn = owner.coach.submit(request)
-            except RateLimitExceeded as error:
-                _record_coach_rate_limit(
-                    error,
-                    selected_source_count=selected_source_count,
-                    request_id=str(
-                        getattr(http_request.state, "request_id", None) or "-"
-                    ),
-                )
-                yield json.dumps(
+            bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = (
+                queue.SimpleQueue()
+            )
+
+            def _progress(phase: str) -> None:
+                label = PROGRESS_LABELS.get(phase, "")
+                bus.put(
                     {
-                        "event": "error",
-                        "detail": error.detail,
-                        "status": 429,
-                        "category": str(getattr(error, "category", "") or "throttled"),
-                        "retry_after": max(1, int(error.retry_after_seconds)),
+                        "event": "status",
+                        "phase": phase,
+                        "label": label,
                     }
-                ) + "\n"
-                return
-            except CoachIdempotencyConflictError as error:
-                _emit_coach_metric(
-                    outcome="idempotency_conflict",
-                    selected_source_count=selected_source_count,
                 )
-                yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 409}
-                ) + "\n"
+
+            def _reply_ready(response_text: str) -> None:
+                bus.put({"event": "reply_ready", "text": response_text})
+
+            def _worker() -> None:
+                try:
+                    begin_coach_turn_perf()
+                    record_field("request_id", stream_request_id)
+                    auth_ms = getattr(http_request.state, "auth_context_ms", None)
+                    if auth_ms is not None:
+                        record_field("auth_context_ms", auth_ms)
+                    completed = owner.coach.submit(
+                        request, progress=_progress, reply=_reply_ready
+                    )
+                    bus.put({"event": "_complete", "turn": completed})
+                except BaseException as error:
+                    bus.put(error)
+                finally:
+                    bus.put(None)
+
+            worker = threading.Thread(
+                target=_worker,
+                name="coach-turn-stream",
+                daemon=True,
+            )
+            worker.start()
+            turn = None
+            while True:
+                item = bus.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    error = item
+                    if isinstance(error, RateLimitExceeded):
+                        _record_coach_rate_limit(
+                            error,
+                            selected_source_count=selected_source_count,
+                            request_id=str(
+                                getattr(http_request.state, "request_id", None)
+                                or "-"
+                            ),
+                        )
+                        yield json.dumps(
+                            {
+                                "event": "error",
+                                "detail": error.detail,
+                                "status": 429,
+                                "category": str(
+                                    getattr(error, "category", "") or "throttled"
+                                ),
+                                "retry_after": max(1, int(error.retry_after_seconds)),
+                            }
+                        ) + "\n"
+                        return
+                    if isinstance(error, CoachIdempotencyConflictError):
+                        _emit_coach_metric(
+                            outcome="idempotency_conflict",
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {"event": "error", "detail": str(error), "status": 409}
+                        ) + "\n"
+                        return
+                    if isinstance(error, ConversationRevisionConflictError):
+                        _emit_coach_metric(
+                            outcome="revision_conflict",
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {"event": "error", "detail": str(error), "status": 409}
+                        ) + "\n"
+                        return
+                    if isinstance(
+                        error,
+                        (CoachRequestInProgressError, CoachRequestLeaseLostError),
+                    ):
+                        _emit_coach_metric(
+                            outcome="idempotency_in_progress",
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {"event": "error", "detail": str(error), "status": 409}
+                        ) + "\n"
+                        return
+                    if isinstance(error, ProviderUnavailableError):
+                        _log_stream_failure(
+                            provider_unavailable_outcome(error), error
+                        )
+                        _emit_coach_metric(
+                            outcome=provider_unavailable_outcome(error),
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {
+                                "event": "error",
+                                "detail": str(error),
+                                "status": 503,
+                                "category": provider_error_category(error),
+                            }
+                        ) + "\n"
+                        return
+                    if isinstance(error, ValueError):
+                        _log_stream_failure("rejected", error)
+                        _emit_coach_metric(
+                            outcome="rejected",
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {"event": "error", "detail": str(error), "status": 400}
+                        ) + "\n"
+                        return
+                    logger.exception(
+                        "coach_turn_stream unhandled request_id=%s",
+                        stream_request_id,
+                    )
+                    _emit_coach_metric(
+                        outcome="failed",
+                        selected_source_count=selected_source_count,
+                    )
+                    raise error
+                if item.get("event") == "_complete":
+                    turn = item["turn"]
+                    continue
+                yield json.dumps(item) + "\n"
+            worker.join(timeout=1.0)
+            if turn is None:
                 return
-            except ConversationRevisionConflictError as error:
-                _emit_coach_metric(
-                    outcome="revision_conflict",
-                    selected_source_count=selected_source_count,
-                )
-                yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 409}
-                ) + "\n"
-                return
-            except (CoachRequestInProgressError, CoachRequestLeaseLostError) as error:
-                _emit_coach_metric(
-                    outcome="idempotency_in_progress",
-                    selected_source_count=selected_source_count,
-                )
-                yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 409}
-                ) + "\n"
-                return
-            except ProviderUnavailableError as error:
-                _emit_coach_metric(
-                    outcome=provider_unavailable_outcome(error),
-                    selected_source_count=selected_source_count,
-                )
-                yield json.dumps(
-                    {
-                        "event": "error",
-                        "detail": str(error),
-                        "status": 503,
-                        "category": provider_error_category(error),
-                    }
-                ) + "\n"
-                return
-            except ValueError as error:
-                _emit_coach_metric(
-                    outcome="rejected",
-                    selected_source_count=selected_source_count,
-                )
-                yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 400}
-                ) + "\n"
-                return
-            except Exception:
-                _emit_coach_metric(
-                    outcome="failed",
-                    selected_source_count=selected_source_count,
-                )
-                raise
             _emit_coach_metric(
                 outcome="ok",
                 selected_source_count=selected_source_count,
@@ -1410,15 +2421,6 @@ def create_app(
                     "mode": graph.get("mode"),
                 }
             ) + "\n"
-            text = turn.response_text
-            chunk_size = 32
-            for index in range(0, len(text), chunk_size):
-                yield json.dumps(
-                    {
-                        "event": "token",
-                        "text": text[index : index + chunk_size],
-                    }
-                ) + "\n"
             yield json.dumps(
                 {"event": "done", "turn": turn.model_dump(mode="json")}
             ) + "\n"

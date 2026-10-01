@@ -27,9 +27,19 @@ Students
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
 Production coaching uses `MODEL_PROVIDER=agentcore` against runtime
-`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `DEFAULT`,
-currently liveVersion 19).
-Invokes are stateless; Aurora DSQL `messages` is the only durable transcript.
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `DEFAULT`;
+query the live version before each release).
+Invokes are transcript-stateless; Aurora DSQL `messages` is the only durable
+transcript. The backend fallback for
+`AGENTCORE_SESSION_AFFINITY_ENABLED` is `false` when unset, which keeps a fresh
+runtime session id per invoke; the local `.env.example` enables the existing
+compute-affinity path for its single-owner smoke setup. Production Compose
+enables affinity with unique Cognito owner identifiers. It remains a
+**compute** optimization only — DSQL stays authoritative and bounded history
+is still sent every turn — and `AGENTCORE_SESSION_GENERATION` must be bumped
+every time new runtime code assets are published. Skipping that bump lets
+returning students keep landing on warm microVMs still running the previous
+build.
 The published runtime source of truth is `agentcore_runtime/` in this
 repository (Q&A, Coaching, and Formative Review specialists). Do not treat
 AgentCore session memory, DynamoDB, or a JSON file as chat history.
@@ -405,6 +415,7 @@ aws ecr get-login-password --region "${AWS_REGION}" \
 
 docker buildx build \
   --platform linux/arm64 \
+  --build-arg GIT_SHA="$(git rev-parse HEAD)" \
   -t "${APP_IMAGE}" \
   --push .
 ```
@@ -436,6 +447,8 @@ Required production `.env` keys (host-only):
 - `MODEL_PROVIDER=agentcore`
 - `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
 - `AGENTCORE_QUALIFIER=DEFAULT`
+- `AGENTCORE_SESSION_AFFINITY_ENABLED=true`
+- `AGENTCORE_SESSION_GENERATION=7`
 - `AGENTCORE_MODEL_PROVIDER=bedrock`
 - `AGENTCORE_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - `AGENTCORE_MODEL_REGION=us-west-2`
@@ -452,15 +465,15 @@ Required production `.env` keys (host-only):
 - `ROUTER_MIN_CONFIDENCE=0.60`
 - `DEEP_REVIEW_INTERVAL_TURNS=3`
 
-Periodic Deep Review means every N newly executed, successful Coaching
-turns since the previous successfully persisted Deep Review. It is
-turn-based rather than time-based because it represents new learning
-evidence, not elapsed time. Opening the Review tab does not invoke a
-model. FastAPI/DSQL remain authoritative; AgentCore never writes stage
-state.
+Deep Review is an explicit FastAPI route
+(`POST /api/v1/threads/{thread_id}/deep-review`), not an automatic Sonnet
+call on the Fast Chat path. `DEEP_REVIEW_INTERVAL_TURNS` still bounds the
+eligibility counter (successful Coaching turns since the last persisted Deep
+Review). Opening the Review tab does not invoke a model. FastAPI/DSQL remain
+authoritative; AgentCore never writes stage state.
 
 - `GUARDRAIL_ID=<configured guardrail>`
-- `GUARDRAIL_VERSION=3`
+- `GUARDRAIL_VERSION=4`
 - `KNOWLEDGE_BASE_ID=<configured KB id>` (required when shared course sync is on)
 - `KNOWLEDGE_BASE_TYPE=MANAGED` (Compose sets this; `JUQNP8AZAZ` is MANAGED)
 - `KNOWLEDGE_BASE_REGION=us-west-2` (optional; falls back to `AWS_REGION`)
@@ -574,7 +587,9 @@ Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 2. Create notebook.
 3. Send message / generate coach turn.
 4. Upload source; preview source.
-5. Confirm stage transition (recommend → student confirm).
+5. Confirm stage transition. Production (`compose.prod.yaml`): coach ADVANCE
+   opens Ready; student moves with Journey **Work on this stage** or typed
+   `Move to <stage>`.
 6. Restart/remove/recreate the application container (no `/app/data` mount).
 7. Log back in; confirm notebook, messages, progress, and source still exist.
 8. Delete source/notebook; confirm S3 cleanup under the owner prefix.
@@ -585,6 +600,9 @@ Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 
 Until this smoke sequence passes, the migration is **not** complete and the
 application remains **READY FOR CONTROLLED PILOT** at best.
+
+Production selection mode (`STUDENT_STAGE_SELECTION=true` in `compose.prod.yaml`):
+step 5 must **not** auto-advance focus. Ready stays open until the student moves.
 
 ## CloudFront distribution and Caddy origin
 
@@ -632,7 +650,12 @@ Grant least privilege for:
 - Optional CloudWatch logs
 - When `MODEL_PROVIDER=agentcore`: `bedrock-agentcore:InvokeAgentRuntime` on
   runtime `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (and its
-  `DEFAULT` endpoint)
+  `DEFAULT` endpoint). Grant this only to the FastAPI/EC2 role. The
+  published runtime still dispatches on request `phase`, so that IAM
+  action is a privileged bypass of FastAPI authorization (including
+  `phase=review` / Sonnet). It is not a browser-reachable hole. See
+  [`SECURITY_BOUNDARIES.md`](../SECURITY_BOUNDARIES.md). Do not attempt to
+  close it in UI code.
 - Bedrock Knowledge Base **Retrieve only** (never `RetrieveAndGenerate`) as
   documented below
 - When `MODEL_PROVIDER=bedrock`: `bedrock:InvokeModel` and

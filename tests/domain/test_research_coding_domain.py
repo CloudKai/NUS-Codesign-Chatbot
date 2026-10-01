@@ -194,7 +194,7 @@ def test_application_converts_research_quotes_to_offsets_and_persists_atomically
             thread_id=thread_id,
             student_message=message,
             current_stage="problem_identification",
-            response_detail="long",  # Persisted Quick preference is authoritative.
+            response_detail="long",  # Persisted Guide preference is authoritative.
         )
     )
 
@@ -272,7 +272,10 @@ def test_auto_advance_keeps_offset_research_metadata_for_student_review(
     turn = service.submit(
         CoachRequest(
             thread_id=thread_id,
-            student_message="I defined the problem around unsafe crossing times.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
         )

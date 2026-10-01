@@ -18,6 +18,7 @@ from backend.repositories import (
     SQLitePhaseTransitionRepository,
 )
 from backend.settings import settings
+from backend.student_journey import THINKING_STAGES
 from backend.student_store import (
     RESEARCH_WORKFLOW_CONTRACT_KEY,
     CoachingStyleConflictError,
@@ -34,11 +35,19 @@ class _CallbackProvider:
     def __init__(self, callback: Callable[[], None]) -> None:
         self._callback = callback
         self.calls = 0
+        self.stage_review_calls = 0
 
     def assess(self, request: CoachRequest):
         self.calls += 1
         self._callback()
         return DeterministicCoachProvider(StageDecision.ADVANCE).assess(request)
+
+    def assess_stage_checkpoint(self, request: CoachRequest):
+        """Keep background stage-review invocations separate from coach calls."""
+        self.stage_review_calls += 1
+        return DeterministicCoachProvider(StageDecision.ADVANCE).assess_stage_checkpoint(
+            request
+        )
 
 
 class _SqliteDsqlProxy:
@@ -108,13 +117,47 @@ def _request(thread_id: str, *, key: str | None = None) -> CoachRequest:
     return CoachRequest(
         thread_id=thread_id,
         student_message=(
-            "I defined the crossing problem, affected older pedestrians, and "
-            "the safety context."
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
         ),
         current_stage="problem_identification",
         response_detail="short",
         idempotency_key=key,
     )
+
+
+def _manual_stage_request(
+    thread_id: str,
+    *,
+    key: str,
+    target: str = "reflection",
+) -> CoachRequest:
+    """Return an exact feature-gated manual-stage chat command."""
+    return CoachRequest(
+        thread_id=thread_id,
+        student_message=f"move me to {target}",
+        current_stage="problem_identification",
+        response_detail="short",
+        idempotency_key=key,
+    )
+
+
+def _unlock_manual_target(store: StudentStore, thread_id: str, target: str) -> None:
+    """Seed only prior completed phases so a manual target is legally unlocked."""
+    target_index = next(
+        index for index, stage in enumerate(THINKING_STAGES) if stage.id == target
+    )
+    if target_index == 0:
+        return
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["current_stage"] = "problem_identification"
+    journey["completed_stages"] = [
+        stage.id for stage in THINKING_STAGES[:target_index]
+    ]
+    metadata["learning_journey"] = journey
+    metadata["thinking_stage"] = "problem_identification"
+    store.update_thread(thread_id, metadata=metadata)
 
 
 def test_style_switch_during_provider_rolls_back_stale_profile_and_research(tmp_path):
@@ -203,6 +246,68 @@ def test_auto_advance_failure_rolls_back_messages_research_and_stage(tmp_path, m
     assert store.get_messages(thread_id) == []
     assert store.list_research_observations(notebook_id=thread_id) == []
     assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == (
+        "problem_identification"
+    )
+
+
+def test_manual_stage_command_atomically_rejects_pending_and_persists_turn(
+    tmp_path, monkeypatch
+):
+    store = StudentStore(tmp_path / "atomic-manual-stage.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    service, _progress = _service(store, auto_advance=True)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    _unlock_manual_target(store, thread_id, "reflection")
+
+    pending_turn = service.submit(_request(thread_id, key="manual-pending"))
+    assert pending_turn.pending_transition is not None
+    assert store.get_pending_phase_transition(thread_id) is not None
+
+    selected = service.submit(
+        _manual_stage_request(thread_id, key="manual-select", target="reflection")
+    )
+
+    assert selected.response_text.startswith("Moved to Stage: Reflection.")
+    assert "What to work on next:" in selected.response_text
+    assert selected.auto_advanced_to is None
+    assert selected.pending_transition is None
+    assert store.get_pending_phase_transition(thread_id) is None
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "reflection"
+    assert thread["metadata"]["learning_journey"]["current_stage"] == "reflection"
+    assert thread["metadata"]["learning_journey"]["completed_stages"] == [
+        stage.id for stage in THINKING_STAGES[:-1]
+    ]
+    messages = store.get_messages(thread_id)
+    assert [message["role"] for message in messages] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert messages[1]["metadata"]["decision_status"] == "rejected"
+
+
+def test_manual_stage_command_failure_rolls_back_stage_messages_and_pending(
+    tmp_path, monkeypatch
+):
+    store = StudentStore(tmp_path / "atomic-manual-failure.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    service, _progress = _service(store)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    _unlock_manual_target(store, thread_id, "reflection")
+
+    def injected_failure(_metadata):
+        raise RuntimeError("injected manual selection failure")
+
+    monkeypatch.setattr(store, "_split_notebook_metadata", injected_failure)
+    with pytest.raises(RuntimeError, match="injected manual selection failure"):
+        service.submit(_manual_stage_request(thread_id, key="manual-rollback"))
+
+    assert store.get_messages(thread_id) == []
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "problem_identification"
+    assert thread["metadata"]["learning_journey"]["current_stage"] == (
         "problem_identification"
     )
 
@@ -306,3 +411,30 @@ def test_atomic_auto_advance_runs_through_dsql_occ_adapter(tmp_path):
     )
     assert len(owner.get_messages(thread_id)) == 2
     assert len(owner.list_research_observations(notebook_id=thread_id)) == 1
+
+
+def test_atomic_manual_stage_selection_runs_through_dsql_occ_adapter(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "dsql-atomic-manual.sqlite3"
+    owner = StudentStore(database)
+    thread_id = owner.create_thread(model_id="mock", support_mode="guided")
+    dsql_store = _dsql_store_over_sqlite(database, owner)
+    service, _progress = _service(dsql_store)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    _unlock_manual_target(owner, thread_id, "deep_analysis")
+
+    turn = service.submit(
+        _manual_stage_request(thread_id, key="dsql-manual", target="deep_analysis")
+    )
+
+    assert turn.response_text.startswith(
+        "Moved to Stage: Ethics & Critical Thinking."
+    )
+    assert "What to work on next:" in turn.response_text
+    thread = owner.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "deep_analysis"
+    assert thread["metadata"]["learning_journey"]["completed_stages"] == [
+        stage.id for stage in THINKING_STAGES[:3]
+    ]
+    assert len(owner.get_messages(thread_id)) == 2

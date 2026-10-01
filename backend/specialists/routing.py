@@ -1,15 +1,15 @@
-"""Server-owned specialist selection.
+"""Server-owned specialist selection for mock/offline fallback.
 
-Production AgentCore uses a Claude Haiku 4.5 semantic router for free-text turns.
-This module still owns:
+Production AgentCore normal chat uses one Haiku ``fast_chat`` invoke. This
+module still owns:
 
 1. Explicit validated server-owned specialist/surface (never from the browser)
 2. Deterministic mock/offline fallback (conservative regex)
 3. Fail-closed coaching when a semantic route is missing or low-confidence
 
 Client-supplied specialist names are ignored unless application code already
-validated them. The router never decides stage advancement, source ownership,
-or database changes.
+validated them. Routing helpers never decide stage advancement, source
+ownership, or database changes.
 """
 
 from __future__ import annotations
@@ -50,6 +50,10 @@ _REVIEW_PATTERNS = (
 
 def looks_like_course_question(student_message: str) -> bool:
     """Return whether the message is a conservative course-information question.
+
+    These patterns stay narrow on purpose: :func:`select_specialist` uses them
+    for mock/offline ``qa`` routing. Retrieval recall is owned by
+    ``backend.retrieval_gate`` and must not widen this helper.
 
     Args:
         student_message: The current student contribution.

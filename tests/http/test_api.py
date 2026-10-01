@@ -6,6 +6,8 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
+from backend.application import CoachApplicationService
+from backend.domain import CoachTurn, EducationalAssessment
 from backend.settings import settings
 from backend.source_library import add_text_source
 from backend.student_store import StudentStore
@@ -103,8 +105,8 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": (
-                "I want to decide which crossing design gives older pedestrians enough "
-                "time and visibility to cross safely."
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
             ),
             "current_stage": "problem_identification",
             "response_detail": "short",
@@ -119,7 +121,9 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
     assert "ready for the next part" not in payload["response_text"].lower()
     assert "You’ve made this step clearer" not in payload["response_text"]
     assert "You've made this step clearer" not in payload["response_text"]
-    assert payload["response_text"].startswith("**Concept generation**")
+    assert payload["response_text"].startswith(
+        "**[Problem identification] -> [Concept generation] Ready**"
+    )
     assert "That's a solid start" in payload["response_text"]
     assert "Which group of older adults" in payload["response_text"]
     assert "I’ve moved you" not in payload["response_text"]
@@ -152,7 +156,10 @@ def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
         "/api/v1/coach/turn",
         json={
             **request,
-            "student_message": "Which design gives older pedestrians time to cross?",
+            "student_message": (
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
         },
     )
 
@@ -181,9 +188,60 @@ def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
     assert (advanced.get("learning_journey") or {}).get("current_stage") == "concept_generation"
 
 
+def test_confirm_advance_api_does_not_blank_existing_progress(tmp_path):
+    store = StudentStore(tmp_path / "confirm-keep-progress.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "learning_summary": "previous summary",
+            "working_conclusion": "previous conclusion",
+            "understanding_change": "previous change",
+            "critical_understanding": "Developing",
+        },
+    )
+    created = store.create_phase_transition(
+        {
+            "thread_id": thread_id,
+            "from_stage": "problem_identification",
+            "to_stage": "concept_generation",
+            "assessment": {
+                "current_stage": "problem_identification",
+                "contribution_summary": "The student named a focused question.",
+                "recommendation": "advance",
+                "learning_summary": "",
+                "working_conclusion": "",
+                "understanding_change": "",
+                "critical_understanding_level": "",
+            },
+        }
+    )
+    client = TestClient(create_app(store, auto_advance_stages=False))
+
+    resolved = client.post(
+        f"/api/v1/threads/{thread_id}/phase-transitions/{created['id']}/resolve",
+        json={"accepted": True},
+    )
+
+    assert resolved.status_code == 200
+    state = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
+    assert (state.get("learning_journey") or {}).get("current_stage") == (
+        "concept_generation"
+    )
+    assert state.get("learning_summary") == "previous summary"
+    assert state.get("working_conclusion") == "previous conclusion"
+    assert state.get("understanding_change") == "previous change"
+    assert state.get("critical_understanding") == "Developing"
+
+
 def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, caplog):
     store = StudentStore(tmp_path / "select-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
     client = TestClient(create_app(store, auto_advance_stages=False))
     monkeypatch.setattr(settings, "student_stage_selection", False)
 
@@ -216,7 +274,9 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
     body = selected.json()
     assert body["thinking_stage"] == "concept_generation"
     assert body["learning_journey"]["current_stage"] == "concept_generation"
-    assert body["learning_journey"]["completed_stages"] == []
+    assert body["learning_journey"]["completed_stages"] == [
+        "problem_identification"
+    ]
     stage_event = next(
         json.loads(record.getMessage())
         for record in caplog.records
@@ -226,18 +286,103 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
     assert stage_event["outcome"] == "selected"
 
 
-def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
+def test_notebook_apis_hide_internal_stage_review_worker_metadata(
+    tmp_path, monkeypatch
+):
+    """All broad notebook projections strip queue fencing and frozen scope."""
+    store = StudentStore(tmp_path / "stage-review-public-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata.update(
+        {
+            "learning_journey": journey,
+            "journey_stage_reviews": {
+                "jobs": {
+                    "problem_identification": {
+                        "status": "queued",
+                        "updated_at": "2026-09-03T00:00:00+00:00",
+                        "job_id": "job-proof",
+                        "review_id": "job-proof",
+                        "lease_token": "lease-proof",
+                        "target_token": "dirty-proof",
+                        "message_ids": ["message-proof"],
+                        "scope_frozen": True,
+                        "scope_version": 1,
+                    }
+                },
+                "reviews": {},
+                "revisit_dirty": {
+                    "problem_identification": {"token": "dirty-proof"}
+                },
+                "unread": False,
+            },
+        }
+    )
+    store.update_thread(thread_id, metadata=metadata)
+    client = TestClient(create_app(store, auto_advance_stages=False))
+
+    def _assert_public(value: dict) -> None:
+        reviews = value["journey_stage_reviews"]
+        assert set(reviews) == {"jobs", "reviews", "unread"}
+        assert reviews["jobs"]["problem_identification"] == {
+            "status": "queued",
+            "updated_at": "2026-09-03T00:00:00+00:00",
+            "error_code": None,
+        }
+        serialized = json.dumps(reviews)
+        for private_value in (
+            "job-proof",
+            "lease-proof",
+            "dirty-proof",
+            "message-proof",
+            "scope_frozen",
+            "revisit_dirty",
+        ):
+            assert private_value not in serialized
+
+    fetched = client.get(f"/api/v1/threads/{thread_id}")
+    assert fetched.status_code == 200
+    _assert_public(fetched.json()["metadata"])
+
+    listed = client.get("/api/v1/threads")
+    assert listed.status_code == 200
+    listed_thread = next(item for item in listed.json() if item["id"] == thread_id)
+    _assert_public(listed_thread["metadata"])
+
+    patched = client.patch(
+        f"/api/v1/threads/{thread_id}",
+        json={"name": "Projected notebook"},
+    )
+    assert patched.status_code == 200
+    _assert_public(patched.json()["metadata"])
+
+    state = client.get(f"/api/v1/threads/{thread_id}/learning-state")
+    assert state.status_code == 200
+    _assert_public(state.json())
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    selected = client.post(
+        f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+        json={"stage_id": "concept_generation"},
+    )
+    assert selected.status_code == 200
+    _assert_public(selected.json())
+
+
+def test_guide_requires_student_hmw_before_recommending_advance(tmp_path):
     store = StudentStore(tmp_path / "complex-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     store.update_thread(
         thread_id,
         metadata={
-            "response_detail": "long",
+            "response_detail": "short",
             "learning_journey": {
                 "current_stage": "problem_identification",
                 "completed_stages": [],
                 "stage_notes": {},
-                "response_detail": "long",
+                "response_detail": "short",
             },
         },
     )
@@ -245,7 +390,7 @@ def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
     request = {
         "thread_id": thread_id,
         "current_stage": "problem_identification",
-        "response_detail": "long",
+        "response_detail": "short",
     }
 
     client.post(
@@ -267,13 +412,42 @@ def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
         json={
             **request,
             "student_message": (
-                "I will compare signal timing and curb cuts for older pedestrians "
-                "near schools."
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
             ),
         },
     )
     assert third.status_code == 200
     assert third.json()["pending_transition"]["to_stage"] == "concept_generation"
+
+
+def test_free_guidance_unlocks_next_after_usable_idea_without_moving_stage(tmp_path):
+    """Free mode offers Next early while confirmation still owns the stage change."""
+    store = StudentStore(tmp_path / "free-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "response_detail": "long",
+            "learning_journey": {"response_detail": "long"},
+        },
+    )
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "current_stage": "problem_identification",
+            "response_detail": "long",
+            "student_message": "I want to evaluate a crossing design for older pedestrians.",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["pending_transition"]["to_stage"] == "concept_generation"
+    assert (
+        store.get_thread(thread_id)["metadata"]["thinking_stage"]
+        == "problem_identification"
+    )
 
 
 def test_first_coaching_turn_generates_a_concise_model_assisted_title(tmp_path):
@@ -310,11 +484,13 @@ def test_local_api_grounds_mock_reply_in_retrieved_selected_source(tmp_path):
         "/api/v1/coach/turn",
         json={
             "thread_id": thread_id,
-            "student_message": "What should I evaluate in this crossing design?",
+            "student_message": (
+                "Based on the selected source, what should I evaluate in this "
+                "crossing design?"
+            ),
             "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source["id"]],
-            "source_context": "--- [S1] Week 1 lecture ---\nOlder pedestrians may require longer crossing intervals.",
         },
     )
 
@@ -357,7 +533,6 @@ def test_local_api_persists_mock_response_citations(tmp_path):
             "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source["id"]],
-            "source_context": "--- [S1] Week 1 lecture ---\nOlder pedestrians may require longer crossing intervals.",
         },
     )
 
@@ -404,10 +579,6 @@ def test_local_api_resolves_selected_images_into_coach_turn(tmp_path, monkeypatc
             "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [created[0]["id"]],
-            "source_context": (
-                "--- [S1] crossing.png ---\n"
-                "[Image source. Inspect the accompanying image input.]"
-            ),
         },
     )
 
@@ -611,7 +782,7 @@ def test_operational_metrics_are_aggregate_and_do_not_log_student_content(
             "/api/v1/coach/turn",
             json={
                 "thread_id": thread_id,
-                "student_message": sensitive_prompt,
+                "student_message": "PRIVATE_STUDENT_PROMPT_DO_NOT_LOG What does the selected source say?",
                 "current_stage": "problem_identification",
                 "source_ids": [source["id"]],
                 "response_detail": "short",
@@ -771,6 +942,7 @@ def test_local_api_maps_safety_blocked_to_structured_503(tmp_path, monkeypatch, 
     assert error["status"] == 503
     assert error["category"] == "safety_blocked"
     assert error["detail"] == "AgentCore blocked this turn"
+    assert not any(event.get("event") == "reply_ready" for event in events)
     coach = next(
         json.loads(record.getMessage())
         for record in caplog.records
@@ -900,9 +1072,12 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
     assert kinds[0] == "started"
     assert kinds[1] == "status"
     assert events[1].get("phase") == "thinking"
-    assert "token" in kinds
+    assert "token" not in kinds
+    assert kinds.index("reply_ready") < kinds.index("done")
+    assert "saving" in [event.get("phase") for event in events if event.get("event") == "status"]
     assert kinds[-1] == "done"
     assert events[-1]["turn"]["response_text"]
+    assert next(event["text"] for event in events if event["event"] == "reply_ready") == events[-1]["turn"]["response_text"]
 
     graph = client.get(f"/api/v1/threads/{thread_id}/graph")
     assert graph.status_code == 200
@@ -1006,3 +1181,38 @@ def test_production_readiness_reports_cognito_configured_without_discovery(
     assert response.json()["mode"] == "production"
     assert response.json()["cognito_configured"] == "true"
     assert calls == [True]
+
+
+def test_qa_null_recommendation_does_not_crash_coach_metrics(tmp_path, monkeypatch):
+    """Q&A turns persist recommendation=None and must still emit done."""
+    store = StudentStore(tmp_path / "qa-metric.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    turn = CoachTurn(
+        response_text="Week 1 covers the course framing [S1].",
+        assessment=EducationalAssessment(
+            current_stage="problem_identification",
+            recommendation=None,
+            response_mode="qa",
+        ),
+    )
+
+    def _qa_submit(self, request, **_kwargs):
+        del self, request
+        return turn
+
+    monkeypatch.setattr(CoachApplicationService, "submit", _qa_submit)
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    payload = {
+        "thread_id": thread_id,
+        "student_message": "What is in Week 1 lecture?",
+        "current_stage": "problem_identification",
+        "response_detail": "short",
+        "idempotency_key": "qa-metric-key",
+    }
+    regular = client.post("/api/v1/coach/turn", json=payload)
+    streamed = client.post("/api/v1/coach/turn/stream", json=payload)
+    assert regular.status_code == 200
+    assert regular.json()["assessment"]["recommendation"] is None
+    events = [json.loads(line) for line in streamed.text.splitlines() if line.strip()]
+    assert events[-1]["event"] == "done"
+    assert events[-1]["turn"]["assessment"]["recommendation"] is None

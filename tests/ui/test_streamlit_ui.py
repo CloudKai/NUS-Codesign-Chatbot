@@ -3,17 +3,94 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+from saved_ui_workspace import saved_app
+
 import ui.chat as chat_module
 import ui.sources as sources_module
 import ui.studio as studio_module
 
 from backend.settings import settings
 from ui.components import facione_scores_table_html
+from ui.profile import COACHING_STYLE_COPY, COACHING_STYLE_VALUES
+
+
+def _coaching_style_radio(app: AppTest):
+    """Return the profile Coaching style radio from a running AppTest."""
+    return next(radio for radio in app.radio if radio.label == "Coaching style")
+
+
+def _visible_profile_copy(app: AppTest) -> str:
+    """Join markdown, captions, and radio captions so coaching-style copy can be asserted."""
+    markdown = "\n".join(item.value or "" for item in app.markdown)
+    captions = "\n".join(item.value or "" for item in app.caption)
+    radio_captions = "\n".join(
+        caption
+        for radio in app.radio
+        for caption in list(radio.proto.captions)
+    )
+    return f"{markdown}\n{captions}\n{radio_captions}"
 
 
 def _implementation_source(module: object) -> str:
     """Read the module that owns behavior behind a compatibility alias."""
     return Path(inspect.getfile(module)).read_text(encoding="utf-8")
+
+
+def _saved_app() -> AppTest:
+    """Start legacy interaction checks with a saved notebook already present."""
+    return saved_app()
+
+
+def _save_draft_with_message(app: AppTest) -> AppTest:
+    """Submit the first turn so notebook-only controls become available."""
+    app.chat_input[0].set_value("I want to explore road safety").run()
+    assert not app.exception
+    assert app.session_state["thread_id"]
+    return app
+
+
+def test_new_chat_is_saved_only_after_first_message() -> None:
+    """Opening and abandoning a draft leaves no notebook in persistent Recents."""
+    from backend.student_store import StudentStore
+
+    store = StudentStore()
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    assert app.session_state["thread_id"] is None
+    assert store.list_threads() == []
+    assert len(app.chat_message) == 1  # Unsaved Coach welcome.
+
+    next(button for button in app.button if button.label == "New chat").click().run()
+    assert not app.exception
+    assert app.session_state["thread_id"] is None
+    assert store.list_threads() == []
+
+    app.chat_input[0].set_value("I want to explore road safety").run()
+    assert not app.exception
+    thread_id = app.session_state["thread_id"]
+    assert thread_id
+    assert len(store.list_threads()) == 1
+    assert any(
+        message["role"] == "user"
+        and message["content"] == "I want to explore road safety"
+        for message in store.get_messages(thread_id)
+    )
+
+
+def _open_library(app: AppTest) -> AppTest:
+    """Open the center Library through the same navigation control as users."""
+    next(button for button in app.button if button.label == "Library").click().run()
+    assert app.session_state["center_view"] == "library"
+    assert not app.exception
+    return app
+
+
+def _return_to_chat_from_library(app: AppTest) -> AppTest:
+    """Toggle the active Library navigation item back to Chat."""
+    next(button for button in app.button if button.label == "Library").click().run()
+    assert app.session_state["center_view"] == "chat"
+    assert not app.exception
+    return app
 
 
 def test_facione_score_shows_numeric_value_before_icon():
@@ -49,6 +126,118 @@ def test_student_coach_error_copy_is_category_safe():
     assert "check the local provider" not in chat_py
 
 
+def test_composer_profile_is_opt_in_and_unavailable_in_production(monkeypatch):
+    """Keep browser-only composer diagnostics out of production script output."""
+    from ui.layout import composer_layout
+
+    rendered: list[str] = []
+    monkeypatch.setattr(
+        composer_layout.components,
+        "html",
+        lambda script, **_kwargs: rendered.append(script),
+    )
+    monkeypatch.setenv("CO_DESIGN_COMPOSER_PROFILE", "true")
+    monkeypatch.setattr(composer_layout.settings, "app_env", "development")
+    composer_layout.sync_composer_layout(max_file_size_mb=10)
+    assert "const PROFILE_ENABLED = true;" in rendered[-1]
+    assert "__cdComposerProfile" in rendered[-1]
+    assert "__cdComposerProfileSnapshot" in rendered[-1]
+    assert "__cdComposerProfileReset" in rendered[-1]
+
+    monkeypatch.setattr(composer_layout.settings, "app_env", "production")
+    composer_layout.sync_composer_layout(max_file_size_mb=10)
+    assert "const PROFILE_ENABLED = false;" in rendered[-1]
+
+
+def test_composer_typing_path_stays_local_and_structural() -> None:
+    """Keep ordinary typing out of the heavyweight composer layout path."""
+    composer_layout = Path("ui/layout/composer_layout.py").read_text(
+        encoding="utf-8"
+    )
+    resize_path = composer_layout.split(
+        "function scheduleTextareaResize(textarea, refreshMetrics = false)", 1
+    )[1].split("function observeTextareaWidth", 1)[0]
+    assert "if (resizeFrame) return;" in resize_path
+    assert "const composer = root();" not in resize_path
+    assert "chatInput(composer)" not in resize_path
+    assert "scheduleModelPlacement" not in resize_path
+    assert "currentTextarea.isConnected" in resize_path
+
+    width_observer = composer_layout.split("function observeTextareaWidth", 1)[1].split(
+        "function capTextarea", 1
+    )[0]
+    assert "new win.ResizeObserver((entries)" in width_observer
+    assert "scheduleApply" not in width_observer
+    assert "scheduleTextareaResize(observedTextarea, true);" in width_observer
+
+    input_handler = composer_layout.split("const onComposerDraft", 1)[1].split(
+        'composer.addEventListener("input"', 1
+    )[0]
+    assert "scheduleTextareaResize(textarea);" in input_handler
+    assert "scheduleApply" not in input_handler
+    paste_handler = composer_layout.split('"paste",', 1)[1].split(
+        "win.addEventListener", 1
+    )[0]
+    assert "onComposerDraft(event);" in paste_handler
+    assert "scheduleApply" not in paste_handler
+    assert "measurementMirror" in composer_layout
+    assert "model_placement_calls" in composer_layout
+    assert "textarea_resize_frames" in composer_layout
+    assert "attachment_annotation_calls" in composer_layout
+    assert "attachment_tooltip_bind_calls" in composer_layout
+    assert "overlay_rewrite_calls" in composer_layout
+    assert "native_tooltip_scan_calls" in composer_layout
+    assert "cd-native-upload-tip" in composer_layout
+    assert "uploadTipObserver" not in composer_layout
+    assert "hideNativeUploadTooltips();" in composer_layout.split(
+        "function showAttachTooltip", 1
+    )[1].split("function hideAttachTooltip", 1)[0]
+
+
+def test_composer_observes_native_send_stop_state_and_cleans_stopped_turn() -> None:
+    """Send-to-Stop must not depend on a viewport resize or a custom rerun."""
+    composer_layout = Path("ui/layout/composer_layout.py").read_text(
+        encoding="utf-8"
+    )
+    observer = composer_layout.split("const observer = new win.MutationObserver", 1)[
+        1
+    ].split("let overlayFrame", 1)[0]
+    assert 'record.attributeName === "data-testid"' in observer
+    assert 'current === "stChatInputSubmitButton"' in observer
+    assert 'current === "stChatInputStopButton"' in observer
+    assert 'record.attributeName === "disabled"' in observer
+    assert "if (structural || controlStateChanged) scheduleApply();" in observer
+    assert 'attributeFilter: ["data-testid", "disabled"]' in observer
+    assert "attributeOldValue: true" in observer
+    assert 'attributeFilter: ["style"' not in observer
+    assert 'attributeFilter: ["value"' not in observer
+
+    cleanup = composer_layout.split("function bindNativeStopCleanup", 1)[1].split(
+        "function apply", 1
+    )[0]
+    assert 'stChatInputStopButton' in cleanup
+    assert 'stChatInputSubmitButton' in cleanup
+    assert "hideStoppedInflightUi();" in cleanup
+    assert "clearStoppedInflightUi();" in cleanup
+    assert "scheduleApply();" in cleanup
+    assert 'input.addEventListener(' in cleanup
+    assert '"click"' in cleanup
+    assert "preventDefault" not in cleanup
+    assert "stopPropagation" not in cleanup
+    assert "function setBusyComposer" not in composer_layout
+    assert "cdComposerBusy" not in composer_layout
+
+    styles = Path("ui/assets/styles/30-chat.css").read_text(encoding="utf-8")
+    assert ".st-key-chat_inflight.cd-turn-stopped" in styles
+    assert "stStatusWidget" in styles
+    assert "inflight_user_message_row" in styles
+    assert "Collapse it to a single stop row" not in styles
+
+    chat = _implementation_source(chat_module)
+    composer_fragment = chat.split("def _render_composer_submit_fragment", 1)[1]
+    assert "StopException" not in composer_fragment
+
+
 def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
     """Rejecting a chat attachment leaves the notebook usable and unsent."""
     from ui import chat
@@ -72,9 +261,9 @@ def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
         "normalize_composer_value",
         lambda _value: ("Please review this attachment.", [FailedUpload()]),
     )
-    monkeypatch.setattr(chat.store, "upload_sources", reject_upload)
+    monkeypatch.setattr(chat.store, "upload_attachments", reject_upload)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
 
     assert not app.exception
     rendered_errors = "\n".join(error.value or "" for error in app.error)
@@ -92,7 +281,7 @@ def test_empty_assistant_rows_are_not_rendered():
     """Failed or skeleton assistant rows with no text stay off the chat log."""
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert not app.exception
     starting = len(app.chat_message)
     store = StudentStore()
@@ -103,7 +292,7 @@ def test_empty_assistant_rows_are_not_rendered():
 
 
 def test_streamlit_notebook_workspace_smoke():
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert not app.exception
     assert "AttributeError" not in "\n".join(
         str(exception.value) for exception in app.exception
@@ -121,41 +310,61 @@ def test_streamlit_notebook_workspace_smoke():
     assert "data-tooltip=" in sources_py
     assert "Max {settings.max_file_size_mb} MB per file" in sources_py
 
-    assert any(
+    assert not any(
         (button.key or "").startswith("profile-language-") for button in app.button
     )
     assert any(control.label == "Appearance" for control in app.segmented_control)
-    workspace_panel = next(
-        radio for radio in app.radio if radio.label == "Workspace panel"
+    assert not any(radio.label == "Workspace panel" for radio in app.radio)
+    assert any((button.key or "") == "mobile-nav-menu" for button in app.button)
+    assert any((button.key or "") == "mobile-new-chat" for button in app.button)
+    assert app.session_state["mobile_panel"] == "Chat"
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "cd-mobile-view" in rendered or 'data-panel="Chat"' in rendered
+    assert "Guidance Level:" not in rendered
+    assert any(control.label == "Coaching style" for control in app.radio)
+    coaching_style = _coaching_style_radio(app)
+    assert coaching_style.options == ["Guide", "Free"]
+    assert coaching_style.value == "Guide"
+    assert app.session_state["response_detail"] == "short"
+    assert app.session_state["learning_journey"]["response_detail"] == "short"
+    studio_section = next(
+        radio for radio in app.radio if radio.label == "Thinking Path section"
     )
-    assert workspace_panel.options == ["Journey", "Chat", "Sources"]
+    assert studio_section.options == ["Progression", "Review"]
+    app.session_state["studio_tab"] = "Review"
+    app.run()
+    assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Guidance Level:" not in rendered
-    assert any(
-        control.label == "Coaching style" for control in app.segmented_control
-    )
-    coaching_style = next(
-        control
-        for control in app.segmented_control
-        if control.label == "Coaching style"
-    )
-    assert coaching_style.options == ["Quick", "Strict"]
-    assert coaching_style.value == "Strict"
-    assert app.session_state["response_detail"] == "long"
-    assert app.session_state["learning_journey"]["response_detail"] == "long"
-    assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
-
-    assert '<span class="pane-title">Sources</span>' in rendered
-    assert f"Max {settings.max_file_size_mb} MB per file" in rendered
+    assert '<span class="pane-title">Sources</span>' not in rendered
     assert "Welcome to your critical-thinking coach" in rendered
     assert "What design challenge or problem are you working on today?" in rendered
-    notebook_title = next(
-        text_input for text_input in app.text_input if text_input.label == "Notebook title"
-    )
-    assert notebook_title.value == "Untitled notebook"
     assert '<span class="pane-title">Thinking Path</span>' in rendered
-    assert "CDE2300 Design Thinking Companion" in rendered
-    assert "Product Design and Innovation" in rendered
+    assert "CDE2300" in rendered
+    assert 'aria-label="Critical-thinking journey"' not in rendered
+    assert "Critical thinking (Facione)" in rendered
+    assert "0/4" in rendered
+    assert "Discussion summary" in rendered
+    assert "What to strengthen" in rendered
+    expander_labels = [expander.label for expander in app.expander]
+    assert {label for label in expander_labels} >= {
+        "Strengths",
+        "Areas for improvement",
+        "Working conclusion",
+        "Problem identification",
+        "Concept generation",
+    }
+    assert "Critical Thinking" not in expander_labels
+    assert expander_labels.index("Working conclusion") < expander_labels.index(
+        "Strengths"
+    )
+    assert expander_labels.index("Strengths") < expander_labels.index(
+        "Areas for improvement"
+    )
+    app.session_state["studio_tab"] = "Progression"
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert 'aria-label="Critical-thinking journey"' in rendered
     assert 'class="journey-short-label">Problem identification</span>' in rendered
     assert 'class="journey-short-label">Concept generation</span>' in rendered
@@ -166,27 +375,23 @@ def test_streamlit_notebook_workspace_smoke():
     assert 'class="journey-short-label">Concepts</span>' not in rendered
     assert 'class="journey-short-label">Specification</span>' not in rendered
     assert 'class="journey-short-label">Ethics & CT</span>' not in rendered
-    assert "Summary" in rendered
-    assert "Critical thinking (Facione)" in rendered
-    assert "0/4" in rendered
-    assert "Discussion summary" in rendered
-    assert "What to strengthen" in rendered
-    assert {expander.label for expander in app.expander} >= {
-        "Strengths",
-        "Areas for improvement",
-        "Working conclusion",
-        "Problem identification",
-        "Concept generation",
-        "Lecture Notes · 0",
-        "Readings · 0",
-        "My Sources · 0",
-    }
+    assert "Frame the design problem, who it affects, and why it matters." in rendered
+    chat_rendered = rendered
+    _open_library(app)
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert '<span class="pane-title">Sources</span>' in rendered
+    assert f"Max {settings.max_file_size_mb} MB per file" in rendered
+    assert "Welcome to your critical-thinking coach" not in rendered
+    expander_labels = [expander.label for expander in app.expander]
+    assert {"Lecture Notes · 0", "Readings · 0", "My Sources · 0"} <= set(
+        expander_labels
+    )
     sources_py = _implementation_source(sources_module)
     my_sources_at = sources_py.index('f"My Sources · {len(personal_sources)}"')
     lecture_at = sources_py.index('f"{group} · {len(group_all)}"')
     assert my_sources_at < lecture_at
-    assert '_ensure_sources_expander_state(group, default=False)' in sources_py
-    assert '_ensure_sources_expander_state("My Sources", default=True)' in sources_py
+    assert '_ensure_sources_expander_state(group, default=False' in sources_py
+    assert '_ensure_sources_expander_state("My Sources", default=True' in sources_py
     assert "source_card_locked_" in sources_py
     assert "disabled=locked" not in sources_py
     assert 'key="sources_filters"' in sources_py
@@ -194,7 +399,6 @@ def test_streamlit_notebook_workspace_smoke():
     assert "_render_source_sort_dropdown" in sources_py
     assert "personal_sources_all" in sources_py
     assert "Select all sources" in sources_py
-    assert "Frame the design problem, who it affects, and why it matters." in rendered
     assert "Add your first source" in rendered
     assert "Loading course materials in the background…" in _implementation_source(
         sources_module
@@ -215,30 +419,51 @@ def test_streamlit_notebook_workspace_smoke():
     assert "logger.exception" in sources_py
     assert "st.caption(_SOURCE_IMPORT_PARTIAL_ERROR)" in sources_py
     assert 'st.caption(\n                "Some lecture notes could not be imported:' not in sources_py
-    assert rendered.index('<span class="pane-title">Thinking Path</span>') < rendered.index(
-        'class="message-meta coach-welcome"'
-    ) < rendered.index('<span class="pane-title">Sources</span>')
+    # Library replaces Chat in the center while Thinking Path remains visible.
+    assert rendered.index('<span class="pane-title">Sources</span>') < rendered.index(
+        '<span class="pane-title">Thinking Path</span>'
+    )
+    assert 'class="message-meta coach-welcome"' in chat_rendered
+    _return_to_chat_from_library(app)
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert ".st-key-chat_log" in rendered
+    assert ".st-key-chat_inflight" in rendered
+    assert ".st-key-chat_panel" in rendered
     assert "overflow-y:auto" in rendered
+    assert "scroll-behavior:auto" in rendered
     assert "scrollbar-color:var(--cd-scrollbar) transparent" in rendered
     assert "max-height:calc(1em * 1.45 * 5)" in rendered
     assert "max-width:80ch" in rendered
     assert "max-width:min(100%, calc(80ch + 16px))" in rendered
     assert "max-height:none !important" in rendered
     assert "max-height:11rem" not in rendered
-    assert "min-height:4.5rem" in rendered
-    assert "MAX_ROWS = 5" in Path("ui/layout/composer_layout.py").read_text(
+    assert "min-height:5.5rem" in rendered
+    composer_layout = Path("ui/layout/composer_layout.py").read_text(
         encoding="utf-8"
     )
-    assert "MAX_COLS" not in Path("ui/layout/composer_layout.py").read_text(
-        encoding="utf-8"
-    )
+    assert "lineHeight * 5 + padY" in composer_layout
+    assert 'setProperty("height", "auto"' in composer_layout
+    assert 'addEventListener("input", onComposerDraft, true)' in composer_layout
+    assert "scheduleTextareaResize(textarea);" in composer_layout
+    assert "if (applyFrame) return;" in composer_layout
+    assert "full_apply_calls" in composer_layout
+    assert "textarea_resize_calls" in composer_layout
+    assert 'attributeFilter: ["data-testid", "disabled"]' in composer_layout
+    assert "characterData: true" not in composer_layout
+    assert "watchNativeUploadTooltips" not in composer_layout
+    assert "uploadTipObserver.observe(doc.body, { childList: true, subtree: true })" not in composer_layout
+    assert "hideNativeUploadTooltips();" in composer_layout
+    assert "CO_DESIGN_COMPOSER_PROFILE" in composer_layout
+    assert "MAX_COLS" not in composer_layout
+    assert "field-sizing:content" in rendered.replace(" ", "")
+    assert "contain:layoutstyle" in rendered.replace(" ", "")
     edit_layout = Path("ui/layout/user_message_edit_layout.py").read_text(
         encoding="utf-8"
     )
     assert "USER_BUBBLE_MAX_ROWS = 8" in edit_layout
     assert "USER_MESSAGE_EDIT_HEIGHT_PX" in edit_layout
-    assert "__cdUserEditCleanup" in edit_layout
+    assert "components.html" not in edit_layout
+    assert "def sync_user_message_edit_layout()" in edit_layout
     assert "--cd-user-bubble-max-rows:8" in rendered
     assert "--cd-user-bubble-max-height" in rendered
     chat_py = _implementation_source(chat_module)
@@ -259,7 +484,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert "creates a new conversation revision" in chat_py
     assert "remain in revision history" in chat_py
     assert "will replace the conversation after this point" not in chat_py
-    assert "truncate" not in chat_py.lower()
+    assert "store.truncate" not in chat_py
+    assert "store.delete_messages" not in chat_py
     assert "Save & resend" not in chat_py
     assert "Editing message" not in chat_py
     assert "composer_edit" not in chat_py
@@ -278,7 +504,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "stChatInputTextArea" in rendered
     assert "arrow_upward" in rendered
     assert "stChatInputStopButton" in rendered
-    assert "textarea:disabled" in rendered
+    assert "content:\"stop\"" in rendered
     assert 'type="compact"' in _implementation_source(chat_module)
     assert "cd-composer-card" in Path("ui/layout/composer_layout.py").read_text(encoding="utf-8")
     assert (
@@ -287,7 +513,7 @@ def test_streamlit_notebook_workspace_smoke():
     ) in rendered
     assert "stChatInputMicButton" in rendered
     assert "coach-welcome-title" in rendered
-    assert "st-key-topbar_navigation" in rendered
+    assert "st-key-notebook_topbar" in rendered  # retired selectors remain harmless
     assert "color:var(--cd-text) !important" in rendered
     assert "background:transparent !important" in rendered
     assert "place-items:center" in rendered
@@ -295,7 +521,7 @@ def test_streamlit_notebook_workspace_smoke():
         '[data-testid="stChatMessageAvatarCustom"] {\n'
         "        display:none !important;"
     ) in rendered
-    assert "st-key-topbar_profile" in rendered
+    assert "st-key-sidebar_profile" in rendered
     assert "gap:.82rem" in rendered
     assert "margin-bottom:.34rem" in rendered
     assert "journey-stage-detail" in rendered
@@ -308,44 +534,36 @@ def test_streamlit_notebook_workspace_smoke():
     assert ".journey-question-list {" in rendered
     assert '[role="listbox"] [role="option"]' in rendered
     assert "-webkit-text-fill-color:currentColor" in rendered
-    assert "--cd-bg:#F3F5F7" in rendered
-    assert "--cd-panel:#EEF1F4" in rendered
-    assert "--cd-text:#15202B" in rendered
-    assert "--cd-accent:#0F766E" in rendered
+    assert "--cd-bg:#F7F9FC" in rendered
+    assert "--cd-panel:#F7F9FB" in rendered
+    assert "--cd-text:#1F2933" in rendered
+    assert "--cd-accent:#179E90" in rendered
     assert "cd-col-resize-handle" in rendered
     assert "cd-col-rail" in rendered
     assert ":has(.st-key-studio_rail)" in rendered
-    assert any(button.label == "‹" for button in app.button)
-    assert any(button.label == "›" for button in app.button)
+    assert any((button.key or "") == "collapse-studio" for button in app.button)
     assert "cd-roadmap" in rendered
-    # Footer Next is present but disabled without a pending coach recommendation / local API.
-    assert any(button.label == "Next" for button in app.button)
     assert "IBM Plex Sans" in rendered
-    assert "background:var(--cd-panel)" in rendered
+    assert "background:var(--cd-nav)" in rendered
 
     button_labels = {button.label for button in app.button}
-    assert "Notebooks" in button_labels
-    assert len(app.file_uploader) >= 1
-    add_uploader = next(
-        uploader
-        for uploader in app.file_uploader
-        if (uploader.label or "") == "Add"
-    )
-    assert add_uploader.help == f"Max {settings.max_file_size_mb} MB per file"
-    assert add_uploader.proto.max_upload_size_mb == settings.max_file_size_mb
+    assert "New chat" in button_labels
+    assert "Search chats" in button_labels
+    assert "Library" in button_labels
+    assert "Notebooks" not in button_labels
+    assert '<span class="pane-title">Sources</span>' not in rendered
 
     assert any(input_widget.label == "Display name" for input_widget in app.text_input)
     assert any(control.label == "Appearance" for control in app.segmented_control)
-    assert "cd-profile-language-label" in rendered
-    assert any(
+    assert "cd-profile-language-label" not in rendered
+    assert not any(
         (button.key or "").startswith("profile-language-") for button in app.button
     )
     assert "cd-profile-menu" in rendered
     assert "cd-profile-help" not in rendered
     assert "Will input myself later" not in rendered
-    assert "cd-profile-logout-link" in rendered or any(
-        button.label == "Logout" for button in app.button
-    )
+    assert any((button.key or "") == "profile-logout-button" for button in app.button)
+    assert "cd-profile-logout-link" not in rendered
     assert "stTooltipHoverTarget" in rendered
     assert not any(
         (button.key or "").startswith("composer-model-") for button in app.button
@@ -363,7 +581,7 @@ def test_composer_has_no_model_picker_and_keeps_default_model():
     """Students cannot choose a model; the locked default stays in session."""
     from backend.models import DEFAULT_CHAT_MODEL_ID, DEFAULT_REASONING_EFFORT
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert app.session_state["selected_model"] == DEFAULT_CHAT_MODEL_ID
     assert app.session_state["reasoning_effort"] == DEFAULT_REASONING_EFFORT
     assert not any(
@@ -384,7 +602,8 @@ def test_add_pasted_source_then_chat_with_citation():
     from backend.source_library import add_text_source
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
+    _open_library(app)
     assert any((uploader.label or "") == "Add" for uploader in app.file_uploader)
 
     local_store = StudentStore()
@@ -403,10 +622,34 @@ def test_add_pasted_source_then_chat_with_citation():
         button.label == "Lecture evidence" for button in app.button
     )
 
+    # Start a clean AppTest tree when leaving Library; Streamlit's test harness
+    # otherwise retains removed source rename-form widget ids.
+    app = _saved_app()
     app.chat_input[0].set_value("What evidence does my source provide?").run()
     assert not app.exception
-    # Welcome + student turn + coach reply.
-    assert len(app.chat_message) == 3
+    thread_id = app.session_state["thread_id"]
+    persisted = [
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if str(message.get("content") or "").strip()
+    ]
+    assert [message.get("role") for message in persisted] == [
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    app.run()
+    assert not app.exception
+    persisted_after = [
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if str(message.get("content") or "").strip()
+    ]
+    assert [message.get("role") for message in persisted_after] == [
+        "assistant",
+        "user",
+        "assistant",
+    ]
     assert not any(
         (expander.label or "").startswith("Sources used (") for expander in app.expander
     )
@@ -420,12 +663,12 @@ def test_select_all_sources_renders_indeterminate_marker_for_partial_selection()
     from backend.source_library import add_text_source
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     local_store = StudentStore()
     thread_id = app.session_state["thread_id"]
     add_text_source(local_store, thread_id, "First source", "First source text.")
     add_text_source(local_store, thread_id, "Second source", "Second source text.")
-    app.run()
+    _open_library(app)
 
     next(
         checkbox
@@ -447,7 +690,7 @@ def test_multiple_selected_sources_do_not_force_sources_used_footer():
     from backend.source_library import add_text_source
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     local_store = StudentStore()
     thread_id = app.session_state["thread_id"]
     add_text_source(local_store, thread_id, "Lecture evidence", "First source.")
@@ -472,7 +715,7 @@ def test_pdf_source_opens_in_installed_viewer():
     from backend.student_store import StudentStore
     from pypdf import PdfWriter
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     pdf_buffer = BytesIO()
     writer = PdfWriter()
     writer.add_blank_page(width=612, height=792)
@@ -484,7 +727,7 @@ def test_pdf_source_opens_in_installed_viewer():
         [("Preview test.pdf", pdf_buffer.getvalue(), "application/pdf")],
     )
 
-    app.run()
+    _open_library(app)
     next(button for button in app.button if button.label == "Preview test.pdf").click().run()
 
     assert not app.exception
@@ -493,27 +736,35 @@ def test_pdf_source_opens_in_installed_viewer():
 
 
 def test_learning_studio_and_notebook_history_controls():
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Thinking Path" in rendered
-    assert "Summary" in rendered
+    app.session_state["studio_tab"] = "Review"
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Critical thinking (Facione)" in rendered
     assert "0/4" in rendered
     assert "Discussion summary" in rendered
-    next(button for button in app.button if button.label == "Notebooks").click().run()
+    assert "Critical Thinking" not in {
+        expander.label for expander in app.expander
+    }
+    next(button for button in app.button if button.label == "New chat").click().run()
     assert not app.exception
-    assert any(
-        text_input.label == "Search notebooks" for text_input in app.text_input
-    )
-    assert any(
-        button.label == "New notebook" for button in app.button
-    )
+    assert any(button.label == "Search chats" for button in app.button)
+    assert any(button.label == "Library" for button in app.button)
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "notebook-card-meta" in rendered
-    assert "notebook-card-activity" in rendered
-    assert "Last active" in rendered
-    assert "messages</div>" not in rendered
-    assert "of 5 stages" in rendered
+    assert "Recents" in rendered
+    assert "cd-nav-section-label" in rendered
+    assert 'class="notebook-card-meta"' not in rendered
+    assert app.session_state["thread_id"] is None
+    _save_draft_with_message(app)
+    app.session_state["studio_tab"] = "Review"
+    app.session_state["studio_tab"] = "Progression"
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Stage Progression" in rendered
 
 
 def test_notebook_activity_helpers_format_relative_time_and_counts():
@@ -529,66 +780,94 @@ def test_notebook_activity_helpers_format_relative_time_and_counts():
     assert _relative_activity("", now=now) == "Unknown"
 
 
-def test_language_theme_and_journey_has_no_manual_progression_control():
+def test_coaching_style_keeps_existing_short_long_mapping():
+    """Guide/Free remain a display layer over persisted short/long values."""
+    from ui.profile import _coaching_style_caption, _persist_coaching_style, _select_coaching_style
+
+    assert COACHING_STYLE_VALUES["Guide"] == "short"
+    assert COACHING_STYLE_VALUES["Free"] == "long"
+    assert "quick" not in COACHING_STYLE_VALUES.values()
+    assert "strict" not in COACHING_STYLE_VALUES.values()
+    assert _coaching_style_caption("short") == COACHING_STYLE_COPY["short"]
+    assert _coaching_style_caption("long") == COACHING_STYLE_COPY["long"]
+    assert "Keep me moving" not in _coaching_style_caption("short")
+    assert "Check the idea I have" not in _coaching_style_caption("long")
+    persist_source = inspect.getsource(_persist_coaching_style)
+    select_source = inspect.getsource(_select_coaching_style)
+    assert "COACHING_STYLE_VALUES" in persist_source
+    assert "save_journey(journey)" in select_source
+    coaching_block = "\n".join((select_source, persist_source))
+    assert "local_api_client" not in coaching_block
+    assert "store.update_thread" not in coaching_block
+
+
+def test_persisted_long_coaching_style_renders_strict_selected():
+    """Reloading a notebook stored as long must select Free, not the Guide default."""
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
+    thread_id = app.session_state["thread_id"]
+    assert _coaching_style_radio(app).value == "Guide"
+    StudentStore().update_thread(thread_id, metadata={"response_detail": "long"})
+
+    restored = _saved_app()
+    assert restored.session_state["thread_id"] == thread_id
+    assert restored.session_state["response_detail"] == "long"
+    assert restored.session_state["learning_journey"]["response_detail"] == "long"
+    assert restored.session_state["setting_coaching_style"] == "Free"
+    assert _coaching_style_radio(restored).value == "Free"
+    assert any(item.label == "Display name" for item in restored.text_input)
+    assert any(control.label == "Appearance" for control in restored.segmented_control)
+    assert not restored.exception
+
+
+def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
+    from backend.student_store import StudentStore
+
+    app = _saved_app()
     # Preferences live in the profile settings popover (content exposed to AppTest).
 
-    # Language is a select-only popover (no text caret).
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "cd-profile-language-label" in rendered
-    assert "cd-profile-language-tooltip" in rendered
-    assert "The coach responds in this language" in rendered
-    from ui.theme import _template_stylesheet
-
-    css = _template_stylesheet()
-    assert (
-        ".st-key-profile_language div[data-testid=\"stPopover\"] button > div > div:first-child"
-        in css
-    )
-    assert ".cd-profile-language-help:hover .cd-profile-language-tooltip" in css
-    assert "use_container_width=True" in Path("ui/profile.py").read_text(encoding="utf-8")
-    assert any(
+    assert "cd-profile-language-label" not in rendered
+    assert "The coach responds in this language" not in rendered
+    assert not any(
         (button.key or "").startswith("profile-language-") for button in app.button
     )
-    chinese = next(
-        button
-        for button in app.button
-        if button.label == "中文" and (button.key or "").startswith("profile-language-")
-    )
-    chinese.click().run()
-    assert app.session_state["response_language"] == "中文"
 
-    coaching_style = next(
-        control
-        for control in app.segmented_control
-        if control.label == "Coaching style"
-    )
-    assert coaching_style.options == ["Quick", "Strict"]
-    assert coaching_style.value == "Strict"
-    coaching_style.set_value("Quick").run()
+    coaching_style = _coaching_style_radio(app)
+    assert coaching_style.options == ["Guide", "Free"]
+    assert coaching_style.value == "Guide"
+    visible_copy = _visible_profile_copy(app)
+    assert COACHING_STYLE_COPY["short"] in visible_copy
+    assert COACHING_STYLE_COPY["long"] in visible_copy
+    assert "Keep me moving" not in visible_copy
+    assert "Check the idea I have" not in visible_copy
+    coaching_style.set_value("Free").run()
+    assert app.session_state["response_detail"] == "long"
+    assert app.session_state["learning_journey"]["response_detail"] == "long"
+    assert StudentStore().get_thread(app.session_state["thread_id"])["metadata"][
+        "response_detail"
+    ] == "long"
+    coaching_style = _coaching_style_radio(app)
+    assert coaching_style.value == "Free"
+    coaching_style.set_value("Guide").run()
     assert app.session_state["response_detail"] == "short"
     assert app.session_state["learning_journey"]["response_detail"] == "short"
-    coaching_style.set_value("Strict").run()
-    assert app.session_state["response_detail"] == "long"
-    assert app.session_state["learning_journey"]["response_detail"] == "long"
+    assert StudentStore().get_thread(app.session_state["thread_id"])["metadata"][
+        "response_detail"
+    ] == "short"
 
-    # A later notebook must start Strict even if this session had Quick selected.
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
-    coaching_style = next(
-        control
-        for control in app.segmented_control
-        if control.label == "Coaching style"
-    )
-    assert coaching_style.value == "Strict"
-    assert app.session_state["response_detail"] == "long"
-    assert app.session_state["learning_journey"]["response_detail"] == "long"
-    assert app.session_state["setting_coaching_style"] == "Strict"
+    # A later notebook must start Guide even if this session had Free selected.
+    next(button for button in app.button if button.label == "New chat").click().run()
+    coaching_style = _coaching_style_radio(app)
+    assert coaching_style.value == "Guide"
+    assert app.session_state["response_detail"] == "short"
+    assert app.session_state["learning_journey"]["response_detail"] == "short"
+    assert app.session_state["setting_coaching_style"] == "Guide"
+    _save_draft_with_message(app)
     created = StudentStore().get_thread(app.session_state["thread_id"])
     assert created is not None
-    assert created["metadata"]["response_detail"] == "long"
+    assert created["metadata"]["response_detail"] == "short"
 
     # Popover content remains available for further preference changes.
     appearance = next(
@@ -603,7 +882,7 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert not app.exception
 
     # Fresh session reload restores the stored appearance.
-    restored = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    restored = _saved_app()
     assert restored.session_state["appearance"] == "Dark"
     assert restored.session_state["setting_appearance"] == "Dark"
     assert StudentStore().get_user_preferences().get("appearance") == "Dark"
@@ -613,20 +892,142 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert not app.exception
 
 
-def test_journey_work_on_this_stage_appears_when_selection_enabled(monkeypatch):
+def test_journey_fresh_problem_stage_keeps_next_stage_locked(monkeypatch):
     from backend.settings import settings
 
     monkeypatch.setattr(settings, "student_stage_selection", True)
     monkeypatch.setattr(settings, "auto_advance_stages", False)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    select_buttons = [
-        button for button in app.button if button.label == "Work on this stage"
-    ]
-    assert len(select_buttons) == 4
+    app = _saved_app()
+    assert not any(button.label == "Work on this stage" for button in app.button)
+    compact_buttons = [button for button in app.button if button.label == "Work on.."]
+    assert compact_buttons == []
     captions = "\n".join(caption.value or "" for caption in app.caption)
-    assert "Choose a stage to work on." in captions
+    assert "Choose a stage to work on." not in captions
     assert not app.exception
+
+
+def test_journey_linear_accordion_and_ctas_follow_unlocked_frontier(monkeypatch):
+    """Journey previews are scalar and selection CTAs follow server access."""
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    monkeypatch.setattr(settings, "auto_advance_stages", False)
+    app = _saved_app()
+
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "problem_identification"
+    )
+    assert not any(button.label == "Work on this stage" for button in app.button)
+    assert not any(button.key == "journey-select-deep_analysis" for button in app.button)
+
+    app.session_state["journey_preview_stage"] = "reflection"
+    app.run()
+    assert app.session_state["journey_preview_stage"] == "reflection"
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "problem_identification"
+    )
+    assert any(
+        "Available after Ethics & Critical Thinking." in (caption.value or "")
+        for caption in app.caption
+    )
+    assert not any(button.key == "journey-select-reflection" for button in app.button)
+
+    app.session_state["journey_preview_stage"] = "deep_analysis"
+    app.run()
+    assert app.session_state["journey_preview_stage"] == "deep_analysis"
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "problem_identification"
+    )
+
+    from backend.student_store import StudentStore
+
+    store = StudentStore()
+    thread = store.get_thread(app.session_state["thread_id"]) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(app.session_state["thread_id"], metadata=metadata)
+    app.session_state["learning_journey"]["completed_stages"] = [
+        "problem_identification"
+    ]
+    app.run()
+    assert any(button.label == "Work on this stage" for button in app.button)
+    assert not any(button.key == "journey-select-problem_identification" for button in app.button)
+
+    app.button(key="journey-select-concept_generation").click().run()
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "concept_generation"
+    )
+    assert app.session_state["mobile_panel"] == "Chat"
+    assert "chat_follow_bottom" not in app.session_state
+    assert app.session_state["stage_move_notice"] is None
+    messages = store.get_messages(app.session_state["thread_id"])
+    briefing = [
+        message
+        for message in messages
+        if message.get("role") == "assistant"
+        and str(message.get("content") or "").startswith(
+            "Moved to Stage: Concept generation."
+        )
+    ]
+    assert len(briefing) == 1
+    assert "What to work on next:" in briefing[0]["content"]
+    assert not any(
+        str(message.get("content") or "").lower().startswith("move me to")
+        for message in messages
+        if message.get("role") == "user"
+    )
+    labels = [button.label for button in app.button]
+    assert "Work on this stage" not in labels
+    assert "Revisit" in labels
+    assert "Work on.." not in labels
+    assert "Suggested questions" in Path(
+        "ui/panels/studio.py"
+    ).read_text(encoding="utf-8")
+    assert not any(button.key == "journey-select-concept_generation" for button in app.button)
+    assert app.session_state["journey_preview_stage"] is None
+    assert not app.exception
+
+
+def test_journey_ready_next_stage_is_not_focus_highlighted(monkeypatch):
+    """Ready next stage keeps Work on this stage but is not the current card."""
+    from backend.settings import settings
+    from backend.student_store import StudentStore
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    monkeypatch.setattr(settings, "auto_advance_stages", False)
+    app = _saved_app()
+    store = StudentStore()
+    thread = store.get_thread(app.session_state["thread_id"]) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["current_stage"] = "concept_generation"
+    journey["completed_stages"] = [
+        "problem_identification",
+        "concept_generation",
+    ]
+    metadata["learning_journey"] = journey
+    store.update_thread(app.session_state["thread_id"], metadata=metadata)
+    app.session_state["learning_journey"]["current_stage"] = "concept_generation"
+    app.session_state["learning_journey"]["completed_stages"] = [
+        "problem_identification",
+        "concept_generation",
+    ]
+    app.run()
+    assert not app.exception
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "concept_generation"
+    )
+    assert any(button.label == "Work on this stage" for button in app.button)
+    assert any(
+        button.key == "journey-select-design_specification" for button in app.button
+    )
+    blob = "\n".join(str(markdown.value or "") for markdown in app.markdown)
+    assert "journey-state completed focus" in blob
+    assert "journey-state current focus" not in blob
+    assert "journey-state current" in blob
 
 
 def test_stale_appearance_widget_does_not_overwrite_stored_dark():
@@ -658,7 +1059,7 @@ def test_stale_appearance_widget_does_not_overwrite_stored_dark():
 def test_suggested_questions_are_view_only_and_do_not_change_the_composer():
     from backend.student_journey import stage_guidance_questions
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     starting_stage = app.session_state["learning_journey"]["current_stage"]
     questions = stage_guidance_questions(starting_stage)
     starting_messages = len(app.chat_message)
@@ -676,7 +1077,8 @@ def test_collapsed_sources_expander_survives_refresh():
     from backend.student_store import StudentStore
     from ui.sources import _sources_expander_widget_key
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
+    _open_library(app)
     key = _sources_expander_widget_key("Lecture Notes")
     app.session_state[key] = False
     app.run()
@@ -690,12 +1092,13 @@ def test_collapsed_sources_expander_survives_refresh():
     assert not app.exception
 
 
-def test_refresh_restores_last_open_notebook():
+def test_refresh_restores_last_open_notebook(monkeypatch):
     from backend.models import LOCKED_CHAT_MODEL_ID
     from backend.student_store import StudentStore
     from backend.student_support import DEFAULT_SUPPORT_MODE
+    from backend.workspace_service import WorkspaceService
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     local_store = StudentStore()
     first_id = app.session_state["thread_id"]
     assert local_store.get_user_preferences().get("active_thread_id") == first_id
@@ -709,39 +1112,121 @@ def test_refresh_restores_last_open_notebook():
 
     # Browser refresh clears Streamlit session; preferences should reopen the
     # notebook that was active before the reload.
+    calls = {"list_threads": 0, "update_preferences": 0}
+    original_list = WorkspaceService.list_threads
+    original_update = WorkspaceService.update_preferences
+
+    def counted_list(self, *args, **kwargs):
+        calls["list_threads"] += 1
+        return original_list(self, *args, **kwargs)
+
+    def counted_update(self, *args, **kwargs):
+        calls["update_preferences"] += 1
+        return original_update(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorkspaceService, "list_threads", counted_list)
+    monkeypatch.setattr(WorkspaceService, "update_preferences", counted_update)
     app.session_state["thread_id"] = None
     app.run()
     assert app.session_state["thread_id"] == other_id
     assert local_store.get_user_preferences().get("active_thread_id") == other_id
+    # The navigation rail still lists Recents once; session restore adds no
+    # second list call and no redundant active-notebook preference write.
+    assert calls == {"list_threads": 1, "update_preferences": 0}
     assert not app.exception
 
 
-def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
+def test_stale_preferred_notebook_uses_valid_fallback_and_persists_it():
+    """A removed saved ID still finds an owned notebook on reload."""
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    app = _saved_app()
+    local_store = StudentStore()
+    current_id = app.session_state["thread_id"]
+    local_store.update_user_preferences({"active_thread_id": "deleted-notebook"})
+    app.session_state["thread_id"] = None
+    app.run()
+
+    assert not app.exception
+    assert app.session_state["thread_id"] == current_id
+    assert local_store.get_user_preferences()["active_thread_id"] == current_id
+
+
+def test_short_title_skips_legacy_lookup_but_long_legacy_title_upgrades(monkeypatch):
+    """Only legacy-shaped titles need the oldest-message compatibility read."""
+    from backend.student_store import StudentStore
+    from backend.title_service import NotebookTitleService
+    from backend.workspace_service import WorkspaceService
+
+    app = _saved_app()
+    local_store = StudentStore()
+    thread_id = app.session_state["thread_id"]
+    calls = []
+    original = WorkspaceService.get_oldest_user_messages
+
+    def counted(self, *args, **kwargs):
+        calls.append(args)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorkspaceService, "get_oldest_user_messages", counted)
+    app.run()
+    assert not app.exception
+    assert calls == []
+
+    prompt = "Understand their pain and struggle and finding ways for them to walk safely"
+    local_store.add_message(thread_id, "user", prompt)
+    local_store.update_thread(thread_id, name=prompt[:70])
+    app.run()
+    assert not app.exception
+    assert len(calls) == 1
+    expected = NotebookTitleService.generate(prompt)
+    assert local_store.get_thread(thread_id)["name"] == expected
+
+    local_store.update_thread(thread_id, name="A deliberately detailed custom research notebook title")
+    app.run()
+    assert not app.exception
+    assert local_store.get_thread(thread_id)["name"] == (
+        "A deliberately detailed custom research notebook title"
+    )
+
+
+def test_current_notebook_title_is_editable_from_recent_chat_menu():
+    from backend.student_store import StudentStore
+
+    app = _saved_app()
+    next(button for button in app.button if button.label == "New chat").click().run()
+    _save_draft_with_message(app)
     current = StudentStore().get_thread(app.session_state["thread_id"])
     assert current
     title = next(
-        text_input for text_input in app.text_input if text_input.label == "Notebook title"
+        text_input
+        for text_input in app.text_input
+        if text_input.label == "Rename"
+        and "mobile-chat" in (text_input.key or "")
     )
     assert title.value == current["name"]
     # Enter-only form: value changes alone must not persist until Apply/Enter.
     title.set_value("Should Not Persist").run()
     assert StudentStore().get_thread(app.session_state["thread_id"])["name"] == current["name"]
     title = next(
-        text_input for text_input in app.text_input if text_input.label == "Notebook title"
+        text_input
+        for text_input in app.text_input
+        if text_input.label == "Rename"
+        and "mobile-chat" in (text_input.key or "")
     )
     title.set_value("Road Safety Research")
-    next(button for button in app.button if button.label == "Apply").click().run()
+    next(
+        button
+        for button in app.button
+        if button.label == "Apply"
+        and "mobile-chat" in (button.key or "")
+    ).click().run()
     assert StudentStore().get_thread(app.session_state["thread_id"])["name"] == (
         "Road Safety Research"
     )
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Road Safety Research" in rendered
+    assert "Road Safety Research" in {
+        button.label for button in app.button
+    }
     assert not app.exception
 
 
@@ -755,28 +1240,32 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     css = _template_stylesheet()
 
-    assert '_ENTER_HINT = "Press Enter to apply"' in rename_source
     assert '"help": _ENTER_HINT' not in rename_source
+    assert '_ENTER_HINT' not in rename_source
     assert 'help="Source actions"' in sources
     assert "data-tooltip=" in sources
     assert "Max {settings.max_file_size_mb} MB per file" in sources
     assert ".cd-sources-add-face::after" in css
     assert 'content:attr(data-tooltip)' in css
-    assert "with st.popover(initial)" in profile
-    assert 'help="Settings"' not in profile
+    assert ":material/settings:" in profile
+    assert 'icon=":material/account_circle:"' not in profile
+    assert 'help="Settings"' in profile
+    assert "cd-sidebar-profile-avatar" in profile
+    assert "cd-sidebar-profile-name" in profile
+    assert "profile_initial" in profile
     assert 'help="Collapse Thinking Path"' in workspace
-    assert 'help="Collapse Sources"' in workspace
-    assert 'help=f"Expand {label}"' in workspace
+    assert 'help=f"Expand Analyse / {label}"' in workspace
     assert (
         '[class*="st-key-source_card_"] [data-testid="stPopover"] button:focus-visible'
         in css
     )
-    assert 'content:"Press Enter to apply"' in css
-    assert (
-        '.st-key-current_notebook_identity [data-testid="stFormSubmitButton"]' in css
-    )
+    # Rename fields hide Streamlit's "Press Enter to submit form" chrome.
+    assert 'st-key-nav_rename_"] [data-testid="InputInstructions"]' in css
+    assert 'st-key-mobile_rename_"] [data-testid="InputInstructions"]' in css
+    assert 'st-key-source_rename_"] [data-testid="InputInstructions"]' in css
+    assert 'content:"Press Enter to apply"' not in css
     assert "position:relative !important" in css
-    assert "calc(100dvh - 9.2rem)" in css
+    assert "height:100vh" in css
     assert "ResizeObserver" in Path("ui/layout/sources_scroll.py").read_text(
         encoding="utf-8"
     )
@@ -792,78 +1281,188 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
 def test_notebook_history_card_highlights_active_notebook_without_folders():
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    app = _saved_app()
+    next(button for button in app.button if button.label == "New chat").click().run()
+    _save_draft_with_message(app)
     local_store = StudentStore()
     thread_id = app.session_state["thread_id"]
     local_store.update_thread(thread_id, name="Active research notebook")
 
     app.run()
-    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    title = next(
-        text_input for text_input in app.text_input if text_input.label == "Notebook title"
-    )
-    assert title.value == local_store.get_thread(thread_id)["name"]
-
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "notebook-current-badge" in rendered
-    assert "Active research notebook" in rendered
+    assert "Active research notebook" in {
+        button.label for button in app.button
+    }
     assert not app.exception
+
+
+def test_legacy_notebook_actions_and_back_do_not_remount_workspace(monkeypatch):
+    """Dialog callbacks switch views without incrementing the app-run count."""
+    from types import SimpleNamespace
+
+    import ui.notebooks as notebooks_module
+    import ui.session as session_module
+
+    class _SessionState(dict):
+        """Small attribute-compatible stand-in for Streamlit session state."""
+
+        def __getattr__(self, key):
+            return self[key]
+
+        def __setattr__(self, key, value):
+            self[key] = value
+
+    state = _SessionState(
+        {
+            "_app_runs": 11,
+            "pending_notebook_actions": None,
+            "reopen_notebooks_dialog": False,
+        }
+    )
+    fake_streamlit = SimpleNamespace(session_state=state)
+    monkeypatch.setattr(session_module, "st", fake_streamlit)
+    monkeypatch.setattr(notebooks_module, "st", fake_streamlit)
+    monkeypatch.setattr(
+        notebooks_module,
+        "request_notebook_actions",
+        session_module.request_notebook_actions,
+    )
+
+    notebooks_module._on_notebook_actions("thread-a")
+    assert state["_app_runs"] == 11
+    assert state["pending_notebook_actions"] == "thread-a"
+
+    notebooks_module._on_notebook_actions_back()
+    assert state["_app_runs"] == 11
+    assert state["pending_notebook_actions"] is None
+    assert state["reopen_notebooks_dialog"] is False
 
 
 def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    app = _saved_app()
+    next(button for button in app.button if button.label == "New chat").click().run()
+    _save_draft_with_message(app)
     deleted_thread_id = app.session_state["thread_id"]
 
-    app.session_state["pending_notebook_actions"] = deleted_thread_id
+    app.session_state["pending_delete_chat_id"] = deleted_thread_id
     app.run()
-    confirmation = next(
-        checkbox
-        for checkbox in app.checkbox
-        if checkbox.key == f"confirm-delete-{deleted_thread_id}"
-    )
-    confirmation.set_value(True).run()
     delete_button = next(
-        button for button in app.button if button.label == "Delete permanently"
+        button for button in app.button if button.label == "Delete" and "nav-delete-confirm" in (button.key or "")
     )
     assert not delete_button.disabled
     delete_button.click().run()
 
     assert StudentStore().get_thread(deleted_thread_id) is None
     assert app.session_state["thread_id"] != deleted_thread_id
-    assert app.session_state["pending_notebook_actions"] is None
-    # Closing/deleting from actions returns to the notebook library.
-    assert any(button.label == "New notebook" for button in app.button)
+    assert "pending_delete_chat_id" not in app.session_state or not app.session_state[
+        "pending_delete_chat_id"
+    ]
+    assert any(button.label == "New chat" for button in app.button)
+    assert not app.exception
+
+
+def test_dismissed_delete_dialog_does_not_remount_and_new_chat_clears_pending():
+    """Esc/dismiss marker and New chat must not leave a sticky Delete chat dialog."""
+    app = _saved_app()
+    thread_id = app.session_state["thread_id"]
+
+    app.session_state["pending_delete_chat_id"] = thread_id
+    app.session_state["_delete_chat_dialog_dismissed_id"] = thread_id
+    app.run()
+    assert not any(
+        (button.key or "").startswith("nav-delete-confirm")
+        or (button.key or "") == "nav-delete-cancel"
+        for button in app.button
+    )
+    assert "pending_delete_chat_id" not in app.session_state or not app.session_state[
+        "pending_delete_chat_id"
+    ]
+    assert not app.exception
+
+    app.session_state["pending_delete_chat_id"] = thread_id
+    if "_delete_chat_dialog_dismissed_id" in app.session_state:
+        del app.session_state["_delete_chat_dialog_dismissed_id"]
+    next(button for button in app.button if button.label == "New chat").click().run()
+    assert "pending_delete_chat_id" not in app.session_state or not app.session_state[
+        "pending_delete_chat_id"
+    ]
+    assert not any(
+        (button.key or "") == "nav-delete-confirm" for button in app.button
+    )
+    assert not app.exception
+
+
+def test_logout_requires_confirmation_dialog():
+    """Settings Logout opens a Cancel/Logout dialog instead of signing out immediately."""
+    app = _saved_app()
+    logout = next(
+        button
+        for button in app.button
+        if (button.key or "") == "profile-logout-button"
+    )
+    logout.click().run()
+    assert app.session_state["pending_logout_confirm"] is True
+    assert "_menu_popover_epoch_profile-settings" in app.session_state
+    assert int(app.session_state["_menu_popover_epoch_profile-settings"]) >= 1
+    assert any((button.key or "") == "profile-logout-cancel" for button in app.button)
+    assert any((button.key or "") == "profile-logout-confirm" for button in app.button)
+
+    cancel = next(
+        button
+        for button in app.button
+        if (button.key or "") == "profile-logout-cancel"
+    )
+    cancel.click().run()
+    assert (
+        "pending_logout_confirm" not in app.session_state
+        or not app.session_state["pending_logout_confirm"]
+    )
+    assert not any(
+        (button.key or "") == "profile-logout-confirm" for button in app.button
+    )
     assert not app.exception
 
 
 def test_notebook_actions_offers_transcript_download():
-    """Notebook Actions downloads the persisted chat, not a sidecar store."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
-    thread_id = app.session_state["thread_id"]
-    app.session_state["pending_notebook_actions"] = thread_id
-    app.run()
-    download = next(
-        control
-        for control in app.download_button
-        if control.label == "Download transcript"
+    """Chat menus expose on-click transcript prepare, not paint-time prefetch."""
+    app = _saved_app()
+    prepare = next(
+        button
+        for button in app.button
+        if (button.key or "").startswith(
+            ("nav-chat-prepare-transcript-", "mobile-chat-prepare-transcript-")
+        )
     )
-    assert "persisted messages" in str(download.help)
+    assert "transcript" in str(prepare.help).lower()
+    assert not any(
+        (control.key or "").startswith(
+            ("nav-chat-save-transcript-", "mobile-chat-save-transcript-")
+        )
+        for control in app.download_button
+    )
     assert not app.exception
 
 
+def test_transcript_download_is_prepared_on_click_only() -> None:
+    """Recents must not call download_transcript while painting closed menus."""
+    nav = Path("ui/panels/nav.py").read_text(encoding="utf-8")
+    assert "def prepare_transcript_export(" in nav
+    assert "def render_transcript_download_control(" in nav
+    assert "on_click=prepare_transcript_export" in nav
+    menu = nav.split("def render_chat_actions_menu", 1)[1].split(
+        "def _render_recent_menu", 1
+    )[0]
+    assert "store.download_transcript(" not in menu
+    assert "render_transcript_download_control(" in menu
+    notebooks = Path("ui/notebooks.py").read_text(encoding="utf-8")
+    assert "render_transcript_download_control(" in notebooks
+    assert "store.download_transcript(" not in notebooks
+
+
 def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation():
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    app = _saved_app()
+    next(button for button in app.button if button.label == "New chat").click().run()
     app.chat_input[0].set_value(
         "My focus is to evaluate whether the study evidence supports the main claim."
     ).run()
@@ -871,6 +1470,93 @@ def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation(
     assert not app.exception
     assert app.session_state["learning_journey"]["current_stage"] == "problem_identification"
     assert app.session_state["learning_journey"]["completed_stages"] == []
+
+
+def test_latest_message_edit_stays_in_the_chat_fragment():
+    """Editing the active user turn avoids an app-wide remount."""
+    from backend.student_store import StudentStore
+
+    app = _saved_app()
+    app.chat_input[0].set_value(
+        "I want to study safer street crossings for older pedestrians."
+    ).run()
+    assert not app.exception
+
+    thread_id = app.session_state["thread_id"]
+    user_message = next(
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if message.get("role") == "user"
+    )
+    edit = next(
+        button
+        for button in app.button
+        if button.key == f"edit-{user_message['id']}"
+    )
+    before_edit_runs = app.session_state["_app_runs"]
+    edit.click().run()
+
+    assert not app.exception
+    # AppTest.run() always drives a full script run (it cannot issue a
+    # fragment-scoped websocket rerun); the source contract below proves the
+    # callback itself does not request an additional app rerun.
+    assert app.session_state["_app_runs"] == before_edit_runs + 1
+    assert app.session_state["editing_message"] == user_message["id"]
+    assert "edit_confirm_message_id" not in app.session_state or app.session_state[
+        "edit_confirm_message_id"
+    ] in (None, "")
+    assert any(
+        text_area.key == f"edit-text-{user_message['id']}"
+        for text_area in app.text_area
+    )
+
+
+def test_earlier_message_edit_keeps_the_app_scoped_confirmation_dialog():
+    """Editing an earlier turn still opens the existing confirmation dialog."""
+    from backend.student_store import StudentStore
+
+    app = _saved_app()
+    app.chat_input[0].set_value("First framing question.").run()
+    app.chat_input[0].set_value("Second framing question.").run()
+    assert not app.exception
+
+    messages = [
+        message
+        for message in StudentStore().get_messages(app.session_state["thread_id"])
+        if message.get("role") == "user"
+    ]
+    assert len(messages) >= 2
+    earlier_id = messages[0]["id"]
+    next(
+        button
+        for button in app.button
+        if button.key == f"edit-{earlier_id}"
+    ).click().run()
+
+    assert not app.exception
+    assert app.session_state["edit_confirm_message_id"] == earlier_id
+    assert any(button.label == "Edit & continue" for button in app.button)
+
+    cancel_runs = app.session_state["_app_runs"]
+    next(button for button in app.button if button.label == "Cancel").click().run()
+    assert not app.exception
+    assert app.session_state["_app_runs"] > cancel_runs
+    assert app.session_state["edit_confirm_message_id"] in (None, "")
+
+    next(
+        button
+        for button in app.button
+        if button.key == f"edit-{earlier_id}"
+    ).click().run()
+    assert not app.exception
+    continue_button = next(
+        button for button in app.button if button.label == "Edit & continue"
+    )
+    continue_runs = app.session_state["_app_runs"]
+    continue_button.click().run()
+    assert not app.exception
+    assert app.session_state["_app_runs"] > continue_runs
+    assert app.session_state["editing_message"] == earlier_id
 
 
 def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
@@ -883,7 +1569,7 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
 
     monkeypatch.setattr(chat.store, "revise_message", reject_revise)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert not app.exception
     app.chat_input[0].set_value(
         "I want to study safer street crossings for older pedestrians."
@@ -935,3 +1621,91 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
     roles = [message["role"] for message in StudentStore().get_messages(thread_id)]
     assert "assistant" in roles
     assert "user" in roles
+
+
+def test_edit_failure_message_distinguishes_busy_conflicts():
+    """429 / notebook-busy revise failures get a specific wait-and-retry hint."""
+    from ui.panels.chat import (
+        _EDIT_BUSY_RETRY_MESSAGE,
+        _EDIT_GENERIC_FAILURE_MESSAGE,
+        _edit_failure_message,
+        _exception_is_coach_busy,
+    )
+
+    class _Resp:
+        status_code = 429
+
+    class _HttpError(Exception):
+        def __init__(self) -> None:
+            super().__init__("429 Too Many Requests")
+            self.response = _Resp()
+
+    busy = _HttpError()
+    assert _exception_is_coach_busy(busy)
+    assert _edit_failure_message(busy) == _EDIT_BUSY_RETRY_MESSAGE
+    assert _edit_failure_message(RuntimeError("boom")) == _EDIT_GENERIC_FAILURE_MESSAGE
+
+
+def test_pending_edit_retries_when_coach_is_temporarily_busy(monkeypatch):
+    """Revise retries briefly when the notebook lease is held by a finishing turn."""
+    from ui import chat
+    from backend.domain import CoachTurn, EducationalAssessment
+    from backend.student_store import StudentStore
+
+    calls = {"n": 0}
+
+    def flaky_revise(*_args, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+
+            class _Resp:
+                status_code = 429
+
+            error = Exception("429 Too Many Requests")
+            error.response = _Resp()  # type: ignore[attr-defined]
+            raise error
+        return CoachTurn(
+            response_text="Revised coach reply",
+            assessment=EducationalAssessment(current_stage="problem_identification"),
+        )
+
+    monkeypatch.setattr(chat.store, "revise_message", flaky_revise)
+    # Do not patch stdlib time.sleep — ui.panels.chat.time is the stdlib module.
+    monkeypatch.setattr(chat, "_REVISE_BUSY_SLEEP_SECONDS", 0)
+
+    app = _saved_app()
+    assert not app.exception
+    app.chat_input[0].set_value(
+        "I want to study safer street crossings for older pedestrians."
+    ).run()
+    assert not app.exception
+
+    thread_id = app.session_state["thread_id"]
+    user_message = next(
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if message.get("role") == "user"
+    )
+    app.session_state["pending_edit"] = {
+        "message_id": user_message["id"],
+        "prompt": "I want to study safer crossings near schools.",
+        "idempotency_key": "22222222-2222-2222-2222-222222222222",
+    }
+    app.run()
+
+    assert not app.exception
+    assert calls["n"] == 3
+    assert "pending_edit" not in app.session_state or app.session_state[
+        "pending_edit"
+    ] in (None, {})
+    editing = (
+        app.session_state["editing_message"]
+        if "editing_message" in app.session_state
+        else None
+    )
+    assert not editing
+    assert not any(
+        "Could not finish this edit" in (error.value or "")
+        or "still finishing another reply" in (error.value or "")
+        for error in app.error
+    )

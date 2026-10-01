@@ -26,6 +26,15 @@ from .domain import (
     ProvisionalResearchCoding,
     StageDecision,
 )
+from .coaching.workflow_navigation import (
+    apply_progression_effect,
+    progression_effect_for,
+)
+from .learning.hmw import (
+    HMW_SCAFFOLD_STAGE_ID,
+    student_hmw_candidate_present,
+    student_workable_hmw_present,
+)
 from .repositories import PhaseTransitionRepository
 from .student_journey import THINKING_STAGES
 
@@ -39,6 +48,22 @@ class AssessmentProvider(Protocol):
         """Return one provider result; legacy two-item adapters remain accepted."""
 
 
+_PI_HMW_GUARD_RESPONSE = (
+    "**Problem identification**\n\n"
+    "Let's keep refining the problem before moving on. Please draft your own "
+    "How Might We question naming the opportunity, who it is for, and the "
+    "outcome you want. What framing would you like to try?"
+)
+
+_PI_HMW_PROMOTE_RESPONSE = (
+    "**[Problem identification] -> [Concept generation] Ready**\n\n"
+    "That's a workable How Might We statement. You've identified the user, "
+    "the opportunity, and the outcome clearly enough to start exploring "
+    "solutions. We'll use this as your working HMW for now—you can refine "
+    "it later if your research changes your understanding."
+)
+
+
 def _review_orchestration(
     provider_result: ProviderAssessmentResult,
 ) -> dict[str, Any]:
@@ -48,6 +73,7 @@ def _review_orchestration(
         "qualifying_coaching_turn": bool(provider_result.qualifying_coaching_turn),
         "deep_review_succeeded": bool(provider_result.deep_review_succeeded),
         "review_trigger": provider_result.review_trigger,
+        "needs_source_retrieval": bool(provider_result.needs_source_retrieval),
     }
 
 
@@ -79,21 +105,237 @@ def _next_stage(stage_id: str) -> str | None:
 def _normalize_terminal_assessment(
     request: CoachRequest, assessment: EducationalAssessment
 ) -> EducationalAssessment:
-    """Prevent a provider from recommending advancement beyond Reflection."""
+    """Pass Reflection ADVANCE through as complete-in-place (no next stage).
+
+    ADVANCE on Reflection means the stage purpose is met. The workflow must
+    not invent a sixth phase or rewrite the recommendation to STAY; persist
+    records Reflection in ``completed_stages`` while focus stays put.
+    """
+    del request  # Authority is request.current_stage at the call site.
+    return assessment
+
+
+def _formative_review_stays(
+    request: CoachRequest, assessment: EducationalAssessment
+) -> EducationalAssessment:
+    """Keep Deep Review formative so FastAPI remains stage authority.
+
+    Args:
+        request: Authoritative coach request. ``specialist=review`` is
+            server-stamped only.
+        assessment: Provider assessment, which may still mention ADVANCE as
+            readiness information.
+
+    Returns:
+        The same assessment, or a STAY copy when this turn is Deep Review.
+    """
+    if str(request.specialist or "").strip().lower() != "review":
+        return assessment
+    if assessment.recommendation is StageDecision.STAY:
+        return assessment
+    return assessment.model_copy(update={"recommendation": StageDecision.STAY})
+
+
+def _is_free_mode(request: CoachRequest) -> bool:
+    """Return whether the turn uses Free coaching (``response_detail=long``)."""
+    return str(request.response_detail or "").strip().lower() == "long"
+
+
+def _clear_hmw_scaffold_flags(
+    assessment: EducationalAssessment,
+) -> EducationalAssessment:
+    """Clear HMW scaffold unlock markers on an assessment."""
     if (
-        request.current_stage == THINKING_STAGES[-1].id
-        and assessment.recommendation is StageDecision.ADVANCE
+        assessment.hmw_scaffold_ready is False
+        and assessment.hmw_scaffold_guarded is False
     ):
-        return assessment.model_copy(
+        return assessment
+    return assessment.model_copy(
+        update={"hmw_scaffold_ready": False, "hmw_scaffold_guarded": False}
+    )
+
+
+def _require_student_hmw_for_problem_identification_advance(
+    request: CoachRequest, assessment: EducationalAssessment
+) -> EducationalAssessment:
+    """Block Problem Identification ADVANCE without a student HMW attempt.
+
+    Haiku still judges HMW quality. This guard only checks whether the
+    current active user contribution looks like a student-authored How
+    Might We candidate. System copy, sources, Coach examples, Q&A, and
+    Deep Review cannot satisfy it. Free mode skips this guard so a usable
+    idea can recommend Next without an HMW string.
+
+    Args:
+        request: Authoritative coach request for this turn.
+        assessment: Provider assessment, which may recommend ADVANCE.
+
+    Returns:
+        The same assessment, or a STAY copy when Problem Identification
+        ADVANCE lacks a student HMW candidate.
+    """
+    # This is application-owned metadata; never carry a provider-supplied
+    # guarded marker into the persisted assessment.
+    assessment = assessment.model_copy(update={"hmw_scaffold_guarded": False})
+    if _is_free_mode(request):
+        return _clear_hmw_scaffold_flags(assessment)
+    if request.current_stage != HMW_SCAFFOLD_STAGE_ID:
+        return assessment
+    if assessment.recommendation is not StageDecision.ADVANCE:
+        return assessment
+    if str(assessment.response_mode or "").strip().lower() == "qa":
+        return assessment
+    if student_hmw_candidate_present(request.student_message):
+        return assessment.model_copy(update={"hmw_scaffold_guarded": False})
+    rationale = str(assessment.recommendation_rationale or "").strip()
+    # A revision intentionally starts a fresh active branch. Do not carry the
+    # scaffold visibility marker onto that replacement when the superseded
+    # branch contained a completed HMW; the active projection must not
+    # resurrect stale completion/visibility. A subsequent fresh Coaching turn
+    # can unlock or guard the scaffold again from its own assessment.
+    scaffold_guarded = not bool(str(request.revise_user_message_id or "").strip())
+    return assessment.model_copy(
+        update={
+            "recommendation": StageDecision.STAY,
+            "readiness_candidate": False,
+            "hmw_scaffold_ready": False,
+            # A server-rejected advance is itself the authoritative signal that
+            # the student needs the construction scaffold. Keep that
+            # application-owned visibility marker separate from model readiness:
+            # the persisted assessment remains STAY/not-ready while the active
+            # branch can safely render the scaffold even when the provider
+            # returned hmw_scaffold_ready=false.
+            "hmw_scaffold_guarded": scaffold_guarded,
+            "recommendation_rationale": rationale
+            or (
+                "Problem Identification advances only after a student-authored "
+                "How Might We attempt."
+            ),
+        }
+    )
+
+
+def _hmw_guard_applies(
+    request: CoachRequest,
+    assessment: EducationalAssessment,
+    *,
+    needs_source_retrieval: bool = False,
+) -> bool:
+    """Return whether the server rejected this PI ADVANCE recommendation."""
+    if _is_free_mode(request):
+        return False
+    return (
+        request.current_stage == HMW_SCAFFOLD_STAGE_ID
+        and assessment.recommendation is StageDecision.ADVANCE
+        and str(assessment.response_mode or "").strip().lower() != "qa"
+        and not student_hmw_candidate_present(request.student_message)
+        # Let the existing application-owned RAG fallback run first. The
+        # final retrieval-backed pass is still normalized below, with no
+        # additional retrieval caused by the HMW guard itself.
+        and not (needs_source_retrieval and not request.retrieval_required)
+    )
+
+
+def _promote_free_mode_advance(
+    request: CoachRequest,
+    assessment: EducationalAssessment,
+) -> EducationalAssessment:
+    """In Free mode, promote coaching STAY to ADVANCE for a usable idea.
+
+    Free must not require HMW wording, two concepts, a full specification,
+    exhaustive ethics, or a polished reflection. Empty messages, Q&A, and
+    Deep Review stay STAY. Meta/status turns are handled separately via
+    ``progression_effect=none`` after this helper runs.
+
+    Args:
+        request: Authoritative coach request for this turn.
+        assessment: Assessment after HMW guards and formative-review STAY.
+
+    Returns:
+        The same assessment, or an ADVANCE copy when Free coaching should
+        unlock Next without an artifact bar.
+    """
+    if not _is_free_mode(request):
+        return assessment
+    assessment = _clear_hmw_scaffold_flags(assessment)
+    if str(request.specialist or "").strip().lower() == "review":
+        return assessment
+    if str(assessment.response_mode or "").strip().lower() == "qa":
+        return assessment
+    if assessment.recommendation is None:
+        return assessment
+    if not str(request.student_message or "").strip():
+        return assessment
+    if assessment.recommendation is StageDecision.ADVANCE:
+        return assessment
+    rationale = str(assessment.recommendation_rationale or "").strip()
+    return assessment.model_copy(
+        update={
+            "recommendation": StageDecision.ADVANCE,
+            "readiness_candidate": True,
+            "hmw_scaffold_ready": False,
+            "hmw_scaffold_guarded": False,
+            "recommendation_rationale": rationale
+            or (
+                "Free mode: the student shared a usable idea or draft for "
+                "this stage and can press Next."
+            ),
+        }
+    )
+
+
+def _promote_student_hmw_for_problem_identification_advance(
+    request: CoachRequest,
+    assessment: EducationalAssessment,
+    response_text: str,
+) -> tuple[EducationalAssessment, str]:
+    """Promote PI STAY to ADVANCE when the student authored a structural HMW.
+
+    Haiku may still recommend stay and keep probing after a workable HMW.
+    The application owns progression when the active message satisfies the
+    structural completion contract.
+
+    Args:
+        request: Authoritative coach request for this turn.
+        assessment: Provider assessment after the reject-without-candidate guard.
+        response_text: Provider response text for this turn.
+
+    Returns:
+        Updated assessment and response text for downstream stage machinery.
+    """
+    if request.current_stage != HMW_SCAFFOLD_STAGE_ID:
+        return assessment, response_text
+    if str(assessment.response_mode or "").strip().lower() == "qa":
+        return assessment, response_text
+    if not student_workable_hmw_present(request.student_message):
+        return assessment, response_text
+    if assessment.recommendation is StageDecision.ADVANCE:
+        return (
+            assessment.model_copy(
+                update={
+                    "hmw_scaffold_ready": False,
+                    "hmw_scaffold_guarded": False,
+                }
+            ),
+            response_text,
+        )
+    rationale = str(assessment.recommendation_rationale or "").strip()
+    return (
+        assessment.model_copy(
             update={
-                "recommendation": StageDecision.STAY,
-                "recommendation_rationale": (
-                    "Reflection is the terminal Thinking Path stage; the student's "
-                    "work remains here for final calibration or completion."
+                "recommendation": StageDecision.ADVANCE,
+                "readiness_candidate": False,
+                "hmw_scaffold_ready": False,
+                "hmw_scaffold_guarded": False,
+                "recommendation_rationale": rationale
+                or (
+                    "Student authored a workable How Might We statement with "
+                    "user, opportunity, and outcome."
                 ),
             }
-        )
-    return assessment
+        ),
+        _PI_HMW_PROMOTE_RESPONSE,
+    )
 
 
 @dataclass
@@ -151,21 +393,45 @@ class CoachWorkflow:
         provider_result = _provider_result(self.provider.assess(request))
         response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
+        assessment = _formative_review_stays(request, assessment)
+        hmw_guarded = _hmw_guard_applies(
+            request,
+            assessment,
+            needs_source_retrieval=provider_result.needs_source_retrieval,
+        )
+        assessment = _require_student_hmw_for_problem_identification_advance(
+            request, assessment
+        )
+        if hmw_guarded:
+            response_text = _PI_HMW_GUARD_RESPONSE
+        assessment, response_text = _promote_student_hmw_for_problem_identification_advance(
+            request, assessment, response_text
+        )
+        assessment = _promote_free_mode_advance(request, assessment)
+        # Application-owned progression gate: AFTER HMW guard/promote, BEFORE
+        # PendingPhaseTransition. Meta/status/prior-review cannot open Ready.
+        assessment = apply_progression_effect(
+            assessment,
+            progression_effect_for(
+                request.student_message,
+                current_stage=request.current_stage,
+            ),
+        )
         if assessment.current_stage != request.current_stage:
             raise ValueError("Assessment stage does not match the active journey stage")
         pending: PendingPhaseTransition | None = None
         if assessment.recommendation is StageDecision.ADVANCE:
             next_stage = _next_stage(request.current_stage)
-            if next_stage is None:
-                raise ValueError("Reflection cannot advance to another stage")
-            pending = PendingPhaseTransition(
-                id=str(uuid4()),
-                thread_id=request.thread_id,
-                from_stage=request.current_stage,
-                to_stage=next_stage,
-                assessment=assessment,
-                created_at=datetime.now(timezone.utc).isoformat(),
-            )
+            # Reflection ADVANCE is complete-in-place: no pending Next target.
+            if next_stage is not None:
+                pending = PendingPhaseTransition(
+                    id=str(uuid4()),
+                    thread_id=request.thread_id,
+                    from_stage=request.current_stage,
+                    to_stage=next_stage,
+                    assessment=assessment,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
         turn = CoachTurn(
             response_text=response_text,
             assessment=assessment,
@@ -180,18 +446,24 @@ class CoachWorkflow:
         self._last_conversation_memory[request.thread_id] = (
             provider_result.conversation_memory
         )
-        self._last_review_orchestration[request.thread_id] = _review_orchestration(
-            provider_result
-        )
+        orchestration = _review_orchestration(provider_result)
+        if hmw_guarded:
+            orchestration.update(
+                {"hmw_guarded": True, "needs_source_retrieval": False}
+            )
+        self._last_review_orchestration[request.thread_id] = orchestration
         return turn
 
     def _run_graph(self, request: CoachRequest) -> CoachTurn:
         """Execute the multi-step LangGraph workflow with a durable checkpointer."""
         graph = self._ensure_graph()
+        # Unique namespace per run so a RAG fallback retry cannot resume the
+        # first Haiku graph checkpoint for the same notebook thread_id.
+        run_ns = f"coach-{uuid4().hex}"
         config = {
             "configurable": {
                 "thread_id": request.thread_id,
-                "checkpoint_ns": "coach",
+                "checkpoint_ns": run_ns,
             }
         }
         self._last_research_coding.pop(request.thread_id, None)
@@ -215,7 +487,7 @@ class CoachWorkflow:
             "mode": "langgraph",
             "checkpoint": {
                 "thread_id": request.thread_id,
-                "checkpoint_ns": "coach",
+                "checkpoint_ns": run_ns,
             },
         }
         return turn
@@ -244,6 +516,15 @@ class CoachWorkflow:
             projection after a conversation revision.
         """
         return self._last_conversation_memory.pop(thread_id, None)
+
+    def peek_needs_source_retrieval(self, thread_id: str) -> bool:
+        """Return whether the latest provider result asked for source evidence.
+
+        Does not consume orchestration flags. Used by the application-owned
+        RAG fallback before persist.
+        """
+        data = self._last_review_orchestration.get(thread_id) or {}
+        return bool(data.get("needs_source_retrieval"))
 
     def take_review_orchestration(self, thread_id: str) -> dict[str, Any]:
         """Consume Review orchestration flags after a provider turn.
@@ -296,6 +577,21 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         provider_result = _provider_result(workflow.provider.assess(request))
         response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
+        assessment = _formative_review_stays(request, assessment)
+        hmw_guarded = _hmw_guard_applies(
+            request,
+            assessment,
+            needs_source_retrieval=provider_result.needs_source_retrieval,
+        )
+        assessment = _require_student_hmw_for_problem_identification_advance(
+            request, assessment
+        )
+        if hmw_guarded:
+            response_text = _PI_HMW_GUARD_RESPONSE
+        assessment, response_text = _promote_student_hmw_for_problem_identification_advance(
+            request, assessment, response_text
+        )
+        assessment = _promote_free_mode_advance(request, assessment)
         if assessment.current_stage != request.current_stage:
             raise ValueError(
                 "Assessment stage does not match the active journey stage"
@@ -308,9 +604,12 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         workflow._last_conversation_memory[request.thread_id] = (
             provider_result.conversation_memory
         )
-        workflow._last_review_orchestration[request.thread_id] = _review_orchestration(
-            provider_result
-        )
+        orchestration = _review_orchestration(provider_result)
+        if hmw_guarded:
+            orchestration.update(
+                {"hmw_guarded": True, "needs_source_retrieval": False}
+            )
+        workflow._last_review_orchestration[request.thread_id] = orchestration
         return {
             "request": request.model_dump(mode="json"),
             "response_text": response_text,
@@ -321,19 +620,28 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
     def recommend(state: dict) -> dict:
         request = CoachRequest.model_validate(state["request"])
         assessment = EducationalAssessment.model_validate(state["assessment"])
+        # Application-owned progression gate: AFTER HMW guard/promote (assess),
+        # BEFORE PendingPhaseTransition. Same helper as sequential path.
+        assessment = apply_progression_effect(
+            assessment,
+            progression_effect_for(
+                request.student_message,
+                current_stage=request.current_stage,
+            ),
+        )
         pending: PendingPhaseTransition | None = None
         if assessment.recommendation is StageDecision.ADVANCE:
             next_stage = _next_stage(request.current_stage)
-            if next_stage is None:
-                raise ValueError("Reflection cannot advance to another stage")
-            pending = PendingPhaseTransition(
-                id=str(uuid4()),
-                thread_id=request.thread_id,
-                from_stage=request.current_stage,
-                to_stage=next_stage,
-                assessment=assessment,
-                created_at=datetime.now(timezone.utc).isoformat(),
-            )
+            # Reflection ADVANCE is complete-in-place: no pending Next target.
+            if next_stage is not None:
+                pending = PendingPhaseTransition(
+                    id=str(uuid4()),
+                    thread_id=request.thread_id,
+                    from_stage=request.current_stage,
+                    to_stage=next_stage,
+                    assessment=assessment,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
         steps = list(state.get("steps_completed") or [])
         steps.append("recommend")
         return {

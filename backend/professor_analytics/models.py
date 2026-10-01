@@ -63,6 +63,7 @@ class OverviewResponse(BaseModel):
     facione_profile: dict[str, ScoreValue] = Field(default_factory=dict)
     weekly_activity: list[dict[str, Any]] = Field(default_factory=list)
     attention_students: list[StudentListItem] = Field(default_factory=list)
+    attention_students_count: int = 0
     summary: str
 
 
@@ -92,13 +93,160 @@ class ConversationTranscriptResponse(BaseModel):
 
     notebook_id: str
     title: str
+    stage: str | None = None
+    last_active: str | None = None
     messages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProfessorNotebookSummary(BaseModel):
+    """Notebook header metadata for a lecturer workspace."""
+
+    id: str
+    title: str
+    current_stage: str | None = None
+    last_active: str | None = None
+    student_messages: int = 0
+    coach_messages: int = 0
+    assistant_messages: int = 0
+    completed_stage_count: int = 0
+
+
+class ProfessorMessageAttachment(BaseModel):
+    """Allow-listed attachment descriptor on one transcript message."""
+
+    id: str
+    title: str
+    mime: str
+    kind: str
+    size: int = 0
+
+
+class ProfessorMessageCitation(BaseModel):
+    """Allow-listed citation descriptor on one transcript message."""
+
+    id: str
+    label: str | None = None
+    title: str | None = None
+
+
+class ProfessorTranscriptMessage(BaseModel):
+    """One active-branch transcript row for lecturer pagination."""
+
+    id: str
+    role: str
+    content: str
+    created_at: str | None = None
+    attachments: list[ProfessorMessageAttachment] = Field(default_factory=list)
+    citations: list[ProfessorMessageCitation] = Field(default_factory=list)
+
+
+class ProfessorMessagePage(BaseModel):
+    """One paginated active-branch transcript page for lecturers."""
+
+    notebook: ProfessorNotebookSummary
+    messages: list[ProfessorTranscriptMessage] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class ProfessorSourcesResponse(BaseModel):
+    """Grouped library sources for one authorised notebook."""
+
+    notebook: ProfessorNotebookSummary
+    sources: list[ProfessorSourceSummary] = Field(default_factory=list)
+
+
+class ProfessorJourneyStage(BaseModel):
+    """One thinking-path stage with persisted completion state."""
+
+    id: str
+    label: str
+    state: str
+
+
+class ProfessorJourneyProjection(BaseModel):
+    """Read-only journey projection without transcript bodies."""
+
+    notebook: ProfessorNotebookSummary
+    current_stage: str | None = None
+    completed_stages: list[str] = Field(default_factory=list)
+    stages: list[ProfessorJourneyStage] = Field(default_factory=list)
+    hmw_scaffold: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProfessorReviewStage(BaseModel):
+    """One safe, normalized Thinking Path checkpoint for lecturer Review."""
+
+    stage_id: str
+    stage: str
+    summary: str = ""
+    strengths: list[str] = Field(default_factory=list)
+    areas_to_revisit: list[str] = Field(default_factory=list)
+    reasoning_progress: str = ""
+    facione_scores: dict[str, int] = Field(default_factory=dict)
+
+
+class ProfessorReviewProjection(BaseModel):
+    """Safe read-only Review projection for one lecturer-visible notebook.
+
+    ``stage_reviews`` is keyed by the persisted Thinking Path stage id and
+    contains only normalized checkpoint copy, not worker leases or message
+    linkage.  The established summary, score, section, and conclusion fields
+    remain present for older lecturer clients.
+    """
+
+    notebook: ProfessorNotebookSummary
+    summary: str = ""
+    facione_scores: dict[str, Any] = Field(default_factory=dict)
+    strength_sections: list[dict[str, Any]] = Field(default_factory=list)
+    improvement_sections: list[dict[str, Any]] = Field(default_factory=list)
+    conclusion: str = ""
+    stage_reviews: dict[str, ProfessorReviewStage] = Field(default_factory=dict)
+    has_personalized_assessment: bool = False
+
+
+class ProfessorWorkspaceTranscript(BaseModel):
+    """Active-branch transcript messages without duplicated notebook metadata."""
+
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProfessorSourceSummary(BaseModel):
+    """Allow-listed source metadata for lecturer workspace lists."""
+
+    id: str
+    title: str
+    kind: str | None = None
+    mime: str | None = None
+    size: int = 0
+    group: str | None = None
+    selected: bool = False
+    origin: str | None = None
+    locked: bool = False
+    has_file: bool = False
+
+
+class ProfessorLearningState(BaseModel):
+    """Read-only journey, HMW, and Review projections for one notebook."""
+
+    journey: dict[str, Any] = Field(default_factory=dict)
+    hmw_scaffold: dict[str, Any] = Field(default_factory=dict)
+    review: dict[str, Any] = Field(default_factory=dict)
+
+
+class NotebookWorkspaceResponse(BaseModel):
+    """Read-only student notebook workspace for lecturer review."""
+
+    notebook: ProfessorNotebookSummary
+    transcript: ProfessorWorkspaceTranscript
+    sources: list[ProfessorSourceSummary] = Field(default_factory=list)
+    learning: ProfessorLearningState = Field(default_factory=ProfessorLearningState)
 
 
 class CriticalThinkingResponse(BaseModel):
     """Teaching-focused assessment aggregates, not a claim of causal impact."""
 
     dimensions: dict[str, ScoreValue] = Field(default_factory=dict)
+    stage_distribution: list[StageDistributionItem] = Field(default_factory=list)
     distribution: list[dict[str, Any]] = Field(default_factory=list)
     stage_comparison: list[dict[str, Any]] = Field(default_factory=list)
     trend: list[dict[str, Any]] = Field(default_factory=list)

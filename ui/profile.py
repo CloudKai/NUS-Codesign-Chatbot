@@ -1,4 +1,4 @@
-"""Profile settings popover for local appearance, language, and coaching style."""
+"""Profile settings popover for local appearance, coaching style, and logout."""
 
 from __future__ import annotations
 
@@ -7,25 +7,35 @@ from html import escape
 
 import streamlit as st
 import streamlit.components.v1 as components
-from streamlit.errors import StreamlitAPIException
 
 from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 
-from ui.auth_gate import app_logout_url, logout_user
+from ui.auth_gate import auth_login_url, logout_user
 from ui.components import profile_initial
-from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
+from ui.constants import APPEARANCE_MODES
+from ui.html_embed import wrap_component_html
 from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
-from ui.runtime import rerun_fragment, store
+from ui.runtime import store
 from ui.session import save_journey
-from ui.settings import persist_appearance, persist_response_language
+from ui.settings import persist_appearance
 
 
 COACHING_STYLE_LABELS = {
-    "short": "Quick",
-    "long": "Strict",
+    "short": "Guide",
+    "long": "Free",
 }
 COACHING_STYLE_VALUES = {
     label: detail for detail, label in COACHING_STYLE_LABELS.items()
+}
+COACHING_STYLE_COPY = {
+    "short": (
+        "Lighter coaching through the Thinking Path; progress once your "
+        "thinking is workable."
+    ),
+    "long": (
+        "Bring what you already have to this stage, get a check, then Next. "
+        "The coach will not hold you to improve structure."
+    ),
 }
 
 
@@ -33,36 +43,45 @@ def persist_display_name() -> None:
     """Store the local display name used by the profile shell."""
     cleaned = " ".join(str(st.session_state.profile_display_name or "").split())[:80]
     st.session_state.display_name = cleaned or "Student"
-    store.update_thread(
-        st.session_state.thread_id,
-        metadata={"display_name": st.session_state.display_name},
-    )
+    if st.session_state.get("thread_id"):
+        store.update_thread(
+            st.session_state.thread_id,
+            metadata={"display_name": st.session_state.display_name},
+        )
 
 
-def _sync_profile_avatar_initial(initial: str) -> None:
-    """Update the popover trigger after a fragment-local display-name edit."""
-    encoded_initial = json.dumps(initial)
+def _sync_profile_trigger_label(display_name: str) -> None:
+    """Update the static sidebar identity after a fragment-local name edit."""
+    encoded_name = json.dumps(display_name)
+    encoded_initials = json.dumps(profile_initial(display_name))
     components.html(
-        f"""
+        wrap_component_html(
+            f"""
 <script>
 (() => {{
-  const button = window.parent.document.querySelector(
-    '.st-key-topbar_profile [data-testid="stPopover"] button'
-  );
-  const label = button?.querySelector('p');
-  if (label) {{
-    label.textContent = {encoded_initial};
+  const root = window.parent.document.querySelector('.st-key-sidebar_profile');
+  if (!root) {{
+    return;
+  }}
+  const name = root.querySelector('.cd-sidebar-profile-name');
+  const avatar = root.querySelector('.cd-sidebar-profile-avatar');
+  if (name) {{
+    name.textContent = {encoded_name};
+  }}
+  if (avatar) {{
+    avatar.textContent = {encoded_initials};
   }}
 }})();
 </script>
-        """,
+            """
+        ),
         height=0,
         width=0,
     )
 
 
 @st.fragment
-def _render_display_name_fragment(display_name: str) -> None:
+def _render_display_name_fragment(display_name: str, *, collapsed: bool) -> None:
     """Render display-name editing without redrawing the workspace."""
     st.text_input(
         "Display name",
@@ -73,18 +92,8 @@ def _render_display_name_fragment(display_name: str) -> None:
         placeholder="Student",
     )
     current_name = str(st.session_state.get("display_name") or "Student")
-    _sync_profile_avatar_initial(profile_initial(current_name))
-
-
-@st.fragment
-def _render_language_fragment() -> None:
-    """Render response-language selection without redrawing the workspace."""
-    current_language = str(st.session_state.response_language or "English")
-    if current_language not in RESPONSE_LANGUAGES:
-        current_language = "English"
-        st.session_state.response_language = current_language
-    st.session_state.setting_response_language = current_language
-    _render_language_dropdown(current_language)
+    if not collapsed:
+        _sync_profile_trigger_label(current_name)
 
 
 def _select_coaching_style(detail: str) -> None:
@@ -104,6 +113,28 @@ def _persist_coaching_style() -> None:
         _select_coaching_style(detail)
 
 
+def _coaching_style_caption(detail: str) -> str:
+    """Return the short explanation shown under one coaching-style option."""
+    return COACHING_STYLE_COPY[detail]
+
+
+def _open_account_sign_in() -> None:
+    """Navigate a guest to Cognito's combined sign-in and sign-up page."""
+    login_url = auth_login_url()
+    if not login_url:
+        st.error("Account sign-in is temporarily unavailable.")
+        return
+    st.html(
+        f"""
+<script>
+window.location.replace({json.dumps(login_url)});
+</script>
+""",
+        unsafe_allow_javascript=True,
+    )
+    st.stop()
+
+
 @st.fragment
 def _render_coaching_style_fragment() -> None:
     """Render response-detail preferences without redrawing the workspace."""
@@ -113,106 +144,159 @@ def _render_coaching_style_fragment() -> None:
     journey = normalize_journey(st.session_state.learning_journey)
     current_detail = journey["response_detail"]
     labels = [COACHING_STYLE_LABELS[detail] for detail in RESPONSE_DETAILS]
+    captions = [_coaching_style_caption(detail) for detail in RESPONSE_DETAILS]
     st.session_state.setting_coaching_style = COACHING_STYLE_LABELS[current_detail]
     with st.container(key="profile_coaching_style"):
-        st.segmented_control(
+        st.radio(
             "Coaching style",
             labels,
+            captions=captions,
             key="setting_coaching_style",
             on_change=_persist_coaching_style,
+            width="stretch",
         )
 
 
-def render_profile_menu() -> None:
-    """Render the upper-right profile avatar that opens a compact settings menu."""
-    display_name = str(st.session_state.get("display_name") or "Student")
-    initial = profile_initial(display_name)
-    with st.container(key="topbar_profile"):
-        with st.popover(initial):
-            with st.container(key="profile_menu_root"):
-                st.markdown(
-                    '<div class="cd-profile-menu" hidden></div>',
-                    unsafe_allow_html=True,
-                )
-                _render_display_name_fragment(display_name)
-                st.segmented_control(
-                    "Appearance",
-                    APPEARANCE_MODES,
-                    key="setting_appearance",
-                    # This widget intentionally stays outside a fragment. Its
-                    # normal widget rerun must re-execute streamlit_app.py so
-                    # the complete theme and layout stylesheet is re-injected.
-                    on_change=persist_appearance,
-                )
-                _render_language_fragment()
-                _render_coaching_style_fragment()
-                st.divider()
-                # --- Logout (same-tab) ---
-                # Prefer a real <a target="_self"> to the local API logout callback.
-                # st.link_button opens a new tab; components.html top-navigation is
-                # sandboxed and was leaving the authenticated session stuck.
-                logout_url = app_logout_url()
-                with st.container(key="profile-logout"):
-                    if logout_url:
-                        st.markdown(
-                            '<a class="cd-profile-logout-link" '
-                            f'href="{escape(logout_url, quote=True)}" '
-                            'target="_self" rel="noopener">Logout</a>',
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        if st.button(
-                            "Logout",
-                            key="profile-logout-fallback",
-                            use_container_width=True,
-                            type="secondary",
-                        ):
-                            logout_user()
-
-
-def _render_language_dropdown(current_language: str) -> None:
-    """Render Language as a select-only menu (no text caret), left-aligned.
-
-    Uses a popover + button pattern so the control cannot be typed into while
-    keeping the value left-aligned in the trigger.
-    """
-    with st.container(key="profile_language"):
+def _render_profile_menu_body(*, display_name: str, collapsed: bool) -> None:
+    """Render the settings popover contents shared by expanded and collapsed rails."""
+    with st.container(key="profile_menu_root"):
         st.markdown(
-            '<div class="cd-profile-language-head">'
-            '<span class="cd-profile-language-label">Language</span>'
-            '<span class="cd-profile-language-help" tabindex="0" '
-            'aria-label="The coach responds in this language">'
-            "?"
-            '<span class="cd-profile-language-tooltip" role="tooltip">'
-            "The coach responds in this language"
-            "</span>"
-            "</span>"
-            "</div>",
+            '<div class="cd-profile-menu" hidden></div>',
             unsafe_allow_html=True,
         )
-        with st.popover(
-            current_language,
-            use_container_width=True,
-            key=menu_popover_widget_key("profile-language"),
-        ):
-            for index, language in enumerate(RESPONSE_LANGUAGES):
-                if st.button(
-                    language,
-                    key=f"profile-language-{index}",
-                    use_container_width=True,
+        guest_active = st.session_state.get("_auth_bound_kind") == "guest"
+        if not guest_active:
+            _render_display_name_fragment(display_name, collapsed=collapsed)
+        if guest_active:
+            st.caption(
+                "Guest work stays in this browser. Losing the cookie may make history "
+                "inaccessible. Sign in or sign up to add your guest notebooks "
+                "to your account automatically."
+            )
+            if collapsed and st.button(
+                "Sign in or sign up",
+                key="profile-guest-sign-in",
+                use_container_width=True,
+                type="secondary",
+            ):
+                _open_account_sign_in()
+        st.segmented_control(
+            "Appearance",
+            APPEARANCE_MODES,
+            key="setting_appearance",
+            # This widget intentionally stays outside a fragment. Its
+            # normal widget rerun must re-execute streamlit_app.py so
+            # the complete theme and layout stylesheet is re-injected.
+            on_change=persist_appearance,
+        )
+        _render_coaching_style_fragment()
+        st.divider()
+        with st.container(key="profile-logout"):
+            st.button(
+                "Logout",
+                key="profile-logout-button",
+                use_container_width=True,
+                type="secondary",
+                on_click=_on_open_logout_confirm,
+            )
+
+
+def _on_open_logout_confirm() -> None:
+    """Arm logout confirmation and close Settings so only the dialog remains."""
+    st.session_state.pending_logout_confirm = True
+    close_menu_popover("profile-settings")
+
+
+def dismiss_logout_dialog() -> None:
+    """Clear pending logout when the dialog is closed via X / outside / Esc."""
+    st.session_state.pop("pending_logout_confirm", None)
+
+
+@st.dialog("Log out?", on_dismiss=dismiss_logout_dialog)
+def confirm_logout_dialog() -> None:
+    """Confirm sign-out from the profile settings menu."""
+    if not st.session_state.get("pending_logout_confirm"):
+        return
+    st.write(
+        "You will be signed out of this session on this device. "
+        "You can sign in again anytime."
+    )
+    cancel_column, confirm_column = st.columns(2)
+    if cancel_column.button(
+        "Cancel",
+        use_container_width=True,
+        key="profile-logout-cancel",
+    ):
+        dismiss_logout_dialog()
+        st.rerun()
+    if confirm_column.button(
+        "Logout",
+        type="primary",
+        use_container_width=True,
+        key="profile-logout-confirm",
+    ):
+        dismiss_logout_dialog()
+        logout_user()
+
+
+def mount_pending_logout_dialog() -> None:
+    """Open the logout confirmation when Settings requested it."""
+    if not st.session_state.get("pending_logout_confirm"):
+        return
+    confirm_logout_dialog()
+
+
+def render_profile_menu(*, collapsed: bool = False) -> None:
+    """Render the sidebar identity row; only the settings icon opens the menu."""
+    display_name = str(st.session_state.get("display_name") or "Student")
+    initials = profile_initial(display_name)
+    settings_popover_key = menu_popover_widget_key("profile-settings")
+    with st.container(key="sidebar_profile"):
+        if collapsed:
+            with st.popover(
+                ":material/settings:",
+                type="tertiary",
+                help="Settings",
+                key=settings_popover_key,
+            ):
+                _render_profile_menu_body(
+                    display_name=display_name,
+                    collapsed=True,
+                )
+            return
+
+        identity_col, settings_col = st.columns([0.82, 0.18], gap="small")
+        with identity_col:
+            # Static identity — avatar and name are not interactive.
+            st.markdown(
+                '<div class="cd-sidebar-profile-identity" aria-hidden="false">'
+                f'<span class="cd-sidebar-profile-avatar" aria-hidden="true">'
+                f"{escape(initials)}</span>"
+                f'<span class="cd-sidebar-profile-name">{escape(display_name)}</span>'
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        with settings_col:
+            with st.container(key="sidebar_profile_settings"):
+                with st.popover(
+                    ":material/settings:",
                     type="tertiary",
+                    help="Settings",
+                    key=settings_popover_key,
                 ):
-                    if language != current_language:
-                        st.session_state.setting_response_language = language
-                        persist_response_language()
-                    close_menu_popover("profile-language")
-                    try:
-                        rerun_fragment()
-                    except StreamlitAPIException:
-                        # Button clicks already rerun this fragment. AppTest
-                        # invokes the handler during a full script run, where
-                        # scope="fragment" is rejected.
-                        pass
+                    _render_profile_menu_body(
+                        display_name=display_name,
+                        collapsed=False,
+                    )
+        if st.session_state.get("_auth_bound_kind") == "guest":
+            with st.container(key="sidebar_guest_sign_in"):
+                if st.button(
+                    "Sign in or sign up",
+                    key="profile-guest-sign-in",
+                    use_container_width=True,
+                    type="secondary",
+                ):
+                    _open_account_sign_in()
 
 
 def inject_profile_leave_helper() -> None:
@@ -224,19 +308,34 @@ def inject_profile_leave_helper() -> None:
 def _sync_profile_popover_close_on_leave() -> None:
     """Close the profile menu only after the pointer leaves its chrome.
 
-    Uses mouseenter/mouseleave on the popover body (not document mousemove) so
-    widget rerenders and Language portals do not false-close the menu.
+    Desktop (fine pointer + hover): mouseleave closes after a short delay.
+    Touch / coarse pointers: leave-to-close is disabled — the first tap inside
+    the menu otherwise looks like a leave (no :hover) and closes immediately.
+    Streamlit already closes on outside tap / Escape.
     """
     components.html(
-        """
+        wrap_component_html(
+            """
 <script>
 (() => {
   const doc = window.parent.document;
   const win = window.parent;
-  const LEAVE_MS = 320;
+  const isNode = (value) => Boolean(value) && typeof value.nodeType === "number";
+  const LEAVE_MS = 420;
+  const INTERACT_MS = 1800;
+  const finePointer = win.matchMedia(
+    "(hover: hover) and (pointer: fine)"
+  ).matches;
 
   if (typeof win.__cdProfileLeaveCleanup === "function") {
     try { win.__cdProfileLeaveCleanup(); } catch (_) {}
+  }
+
+  // Touch / stylus: do not auto-close on leave — first in-menu tap would
+  // schedule a close because :hover never sticks on those devices.
+  if (!finePointer) {
+    win.__cdProfileLeaveCleanup = () => {};
+    return;
   }
 
   let leaveTimer = null;
@@ -246,14 +345,16 @@ def _sync_profile_popover_close_on_leave() -> None:
 
   function profileButton() {
     return doc.querySelector(
-      '.st-key-topbar_profile [data-testid="stPopover"] button'
+      '.st-key-sidebar_profile [data-testid="stPopover"] button'
     );
   }
 
   function profileBody() {
     return doc.querySelector(
       '[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root), ' +
-      '[data-testid="stPopoverBody"]:has(.cd-profile-menu)'
+      '[data-testid="stPopoverBody"]:has(.cd-profile-menu), ' +
+      '[data-testid="stPopoverBody"][aria-label=":material/settings:"], ' +
+      '[data-testid="stPopoverBody"][aria-label="Settings"]'
     );
   }
 
@@ -262,16 +363,29 @@ def _sync_profile_popover_close_on_leave() -> None:
     return !!(button && button.getAttribute("aria-expanded") === "true");
   }
 
+  function markInteract() {
+    win.__cdProfileInteractUntil = Date.now() + INTERACT_MS;
+    cancelClose();
+  }
+
+  function recentlyInteracted() {
+    return !!(
+      win.__cdProfileInteractUntil &&
+      Date.now() < win.__cdProfileInteractUntil
+    );
+  }
+
   function nodeInsideProfile(node) {
     if (!node || !(node instanceof Element)) {
       return false;
     }
     if (
-      node.closest(".st-key-topbar_profile") ||
+      node.closest(".st-key-sidebar_profile") ||
       node.closest(".st-key-profile_menu_root") ||
       node.closest('[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)') ||
       node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)') ||
-      node.closest('[data-testid="stPopoverBody"]:has([class*="st-key-profile-language-"])')
+      node.closest('[data-testid="stPopoverBody"][aria-label=":material/settings:"]') ||
+      node.closest('[data-testid="stPopoverBody"][aria-label="Settings"]')
     ) {
       return true;
     }
@@ -298,12 +412,32 @@ def _sync_profile_popover_close_on_leave() -> None:
     if (button && button.matches(":hover")) {
       return true;
     }
+    if (nodeInsideProfile(doc.activeElement)) {
+      return true;
+    }
     if (
       doc.querySelector(
         '[data-baseweb="popover"]:hover, [data-baseweb="menu"]:hover, ' +
         '[role="listbox"]:hover, [data-testid="stTooltipContent"]:hover'
       )
     ) {
+      return true;
+    }
+    return false;
+  }
+
+  function shouldStayOpen() {
+    if (!isOpen()) {
+      return false;
+    }
+    if (recentlyInteracted()) {
+      return true;
+    }
+    if (pointerStillInside()) {
+      return true;
+    }
+    // Popover DOM can briefly detach during a widget/fragment rerun.
+    if (!profileBody() && isOpen()) {
       return true;
     }
     return false;
@@ -317,6 +451,9 @@ def _sync_profile_popover_close_on_leave() -> None:
   }
 
   function closeProfile() {
+    if (shouldStayOpen()) {
+      return;
+    }
     const button = profileButton();
     if (button && button.getAttribute("aria-expanded") === "true") {
       button.click();
@@ -327,21 +464,7 @@ def _sync_profile_popover_close_on_leave() -> None:
     cancelClose();
     leaveTimer = win.setTimeout(() => {
       leaveTimer = null;
-      if (!isOpen()) {
-        return;
-      }
-      const body = profileBody();
-      if (!body) {
-        // Popover DOM may be rebuilding after a widget rerun — retry once.
-        leaveTimer = win.setTimeout(() => {
-          leaveTimer = null;
-          if (isOpen() && profileBody() && !pointerStillInside()) {
-            closeProfile();
-          }
-        }, 180);
-        return;
-      }
-      if (pointerStillInside()) {
+      if (!isOpen() || shouldStayOpen()) {
         return;
       }
       closeProfile();
@@ -358,6 +481,12 @@ def _sync_profile_popover_close_on_leave() -> None:
       return;
     }
     scheduleClose();
+  }
+
+  function onPointerDown(event) {
+    if (nodeInsideProfile(event.target)) {
+      markInteract();
+    }
   }
 
   function unbind(node, enter, leave) {
@@ -385,11 +514,13 @@ def _sync_profile_popover_close_on_leave() -> None:
       body.addEventListener("mouseenter", onEnter);
       body.addEventListener("mouseleave", onLeave);
       cancelClose();
+      markInteract();
     }
   }
 
   const body = doc.body;
-  if (body instanceof win.Node) {
+  if (isNode(body)) {
+    body.addEventListener("pointerdown", onPointerDown, true);
     observer = new win.MutationObserver(() => {
       bind();
     });
@@ -403,6 +534,9 @@ def _sync_profile_popover_close_on_leave() -> None:
     unbind(boundBody, onEnter, onLeave);
     boundButton = null;
     boundBody = null;
+    if (body instanceof win.Node) {
+      body.removeEventListener("pointerdown", onPointerDown, true);
+    }
     if (observer) {
       observer.disconnect();
       observer = null;
@@ -410,7 +544,8 @@ def _sync_profile_popover_close_on_leave() -> None:
   };
 })();
 </script>
-        """,
+            """
+        ),
         height=0,
         width=0,
     )

@@ -31,25 +31,39 @@ DEFAULT_MODEL_REGION = "us-west-2"
 MODEL_ROLE_ROUTER = "router"
 MODEL_ROLE_QA = "qa"
 MODEL_ROLE_COACHING = "coaching"
+MODEL_ROLE_FAST_CHAT = "fast_chat"
 MODEL_ROLE_REVIEW_INCREMENTAL = "review_incremental"
 MODEL_ROLE_REVIEW_DEEP = "review_deep"
 MODEL_ROLES = (
     MODEL_ROLE_ROUTER,
     MODEL_ROLE_QA,
     MODEL_ROLE_COACHING,
+    MODEL_ROLE_FAST_CHAT,
     MODEL_ROLE_REVIEW_INCREMENTAL,
     MODEL_ROLE_REVIEW_DEEP,
+)
+REQUIRED_MODEL_ROLES = (
+    MODEL_ROLE_COACHING,
+    MODEL_ROLE_FAST_CHAT,
+    MODEL_ROLE_REVIEW_DEEP,
+)
+OPTIONAL_LEGACY_MODEL_ROLES = (
+    MODEL_ROLE_ROUTER,
+    MODEL_ROLE_QA,
+    MODEL_ROLE_REVIEW_INCREMENTAL,
 )
 LIGHTWEIGHT_MODEL_ROLES = (
     MODEL_ROLE_ROUTER,
     MODEL_ROLE_QA,
     MODEL_ROLE_COACHING,
+    MODEL_ROLE_FAST_CHAT,
     MODEL_ROLE_REVIEW_INCREMENTAL,
 )
 ROLE_ENV_KEYS: dict[str, tuple[str, str]] = {
     MODEL_ROLE_ROUTER: ("ROUTER_MODEL_PROVIDER", "ROUTER_MODEL_ID"),
     MODEL_ROLE_QA: ("QA_MODEL_PROVIDER", "QA_MODEL_ID"),
     MODEL_ROLE_COACHING: ("COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
+    MODEL_ROLE_FAST_CHAT: ("COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
     MODEL_ROLE_REVIEW_INCREMENTAL: (
         "REVIEW_INCREMENTAL_MODEL_PROVIDER",
         "REVIEW_INCREMENTAL_MODEL_ID",
@@ -147,6 +161,10 @@ class RuntimeModelConfig:
     guardrail_version: str
     guardrail_latest_message: bool = True
     role: str = ""
+    # Deep Review is the only runtime role with an extended Bedrock read
+    # window. ``None`` deliberately preserves the existing Botocore default
+    # for Fast Chat and legacy roles.
+    bedrock_read_timeout_seconds: int | None = None
 
     @property
     def uses_bedrock_model(self) -> bool:
@@ -169,15 +187,50 @@ class RuntimeModelConfig:
             "guardrail_latest_message": bool(self.guardrail_latest_message)
             if self.uses_bedrock_model
             else False,
+            "bedrock_read_timeout_seconds": self.bedrock_read_timeout_seconds,
             "pinned_strands_agents": _PINNED_STRANDS,
             "pinned_bedrock_agentcore": _PINNED_BEDROCK_AGENTCORE,
             "pinned_pydantic": _PINNED_PYDANTIC,
+        }
+
+    def safe_response_provenance(self) -> dict[str, str]:
+        """Return student-safe loaded-model identifiers for the companion.
+
+        These fields travel on InvokeAgentRuntime JSON next to cache and
+        cycle telemetry. They never include env dumps, IAM, secrets, prompts,
+        guardrail identifiers, or student text.
+
+        Returns:
+            Short identifier strings keyed as ``runtime_model_*``.
+        """
+        return {
+            "runtime_model_role": self.role or "legacy",
+            "runtime_model_provider": self.provider,
+            "runtime_model_id": self.model_id,
+            "runtime_model_region": self.region,
+            "runtime_strands_agents": _PINNED_STRANDS,
         }
 
 
 def _clean(value: Any) -> str:
     """Return a stripped string from an environment-like value."""
     return str(value or "").strip()
+
+
+def _deep_review_read_timeout(values: Mapping[str, Any]) -> int:
+    """Return the validated runtime-only Deep Review read timeout."""
+    raw = _clean(values.get("DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS")) or "180"
+    try:
+        timeout = int(raw)
+    except ValueError as error:
+        raise RuntimeModelError(
+            "DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS must be an integer"
+        ) from error
+    if not 30 <= timeout <= 600:
+        raise RuntimeModelError(
+            "DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS must be between 30 and 600"
+        )
+    return timeout
 
 
 def validate_provider_model_pair(provider: str, model_id: str) -> None:
@@ -276,9 +329,11 @@ def role_model_config_from_mapping(
     """Build one role's model config from environment-style keys.
 
     When no per-role keys are present, every role reuses the legacy
-    ``AGENTCORE_MODEL_*`` pair. When any role key is present, all five roles
-    must be complete. Partial role configuration fails closed instead of
-    substituting Haiku for Sonnet, Sonnet for Haiku, or Luna for Claude.
+    ``AGENTCORE_MODEL_*`` pair. When any role key is present, required
+    active roles (Q&A optional, Coaching/fast_chat, Deep Review) must be
+    complete. Legacy router and Incremental Review are validated only when
+    their environment keys are set. Partial required configuration fails
+    closed instead of substituting Haiku for Sonnet.
 
     Args:
         values: Typically ``os.environ``.
@@ -313,9 +368,22 @@ def role_model_config_from_mapping(
             guardrail_version=guardrail_version,
             guardrail_latest_message=True,
             role=cleaned_role,
+            bedrock_read_timeout_seconds=(
+                _deep_review_read_timeout(data)
+                if cleaned_role == MODEL_ROLE_REVIEW_DEEP
+                else None
+            ),
         )
     config = runtime_model_config_from_mapping(data)
-    return replace(config, role=cleaned_role)
+    return replace(
+        config,
+        role=cleaned_role,
+        bedrock_read_timeout_seconds=(
+            _deep_review_read_timeout(data)
+            if cleaned_role == MODEL_ROLE_REVIEW_DEEP
+            else None
+        ),
+    )
 
 
 def role_model_config_from_environ(role: str) -> RuntimeModelConfig:
@@ -323,10 +391,20 @@ def role_model_config_from_environ(role: str) -> RuntimeModelConfig:
     return role_model_config_from_mapping(os.environ, role)
 
 
+def _role_env_configured(values: Mapping[str, Any] | None, role: str) -> bool:
+    """Return whether provider or model env keys are set for one role."""
+    cleaned = _clean(role).lower()
+    keys = ROLE_ENV_KEYS.get(cleaned)
+    if not keys:
+        return False
+    data = values or {}
+    return bool(_clean(data.get(keys[0])) or _clean(data.get(keys[1])))
+
+
 def validate_all_role_configs(
     values: Mapping[str, Any] | None = None,
 ) -> dict[str, RuntimeModelConfig]:
-    """Validate every model role. Fail closed on the first unsafe pair.
+    """Validate required model roles. Optional legacy roles load when configured.
 
     Args:
         values: Optional mapping. Defaults to ``os.environ``.
@@ -335,10 +413,18 @@ def validate_all_role_configs(
         Mapping of role name to validated config.
 
     Raises:
-        RuntimeModelError: When any role cannot be loaded.
+        RuntimeModelError: When a required role cannot be loaded.
     """
     data = values if values is not None else os.environ
-    return {role: role_model_config_from_mapping(data, role) for role in MODEL_ROLES}
+    if not role_env_keys_present(data):
+        return {role: role_model_config_from_mapping(data, role) for role in MODEL_ROLES}
+    roles: dict[str, RuntimeModelConfig] = {}
+    for role in REQUIRED_MODEL_ROLES:
+        roles[role] = role_model_config_from_mapping(data, role)
+    for role in OPTIONAL_LEGACY_MODEL_ROLES:
+        if _role_env_configured(data, role):
+            roles[role] = role_model_config_from_mapping(data, role)
+    return roles
 
 
 def runtime_model_config_from_environ() -> RuntimeModelConfig:
@@ -356,7 +442,9 @@ def bedrock_model_kwargs(config: RuntimeModelConfig) -> dict[str, Any]:
         Keyword arguments including ``model_id``, ``region_name``, and
         guardrail settings. ``guardrail_latest_message`` is True so input
         evaluation targets the latest untrusted user turn, not the trusted
-        system curriculum.
+        system curriculum. Prompt caching is not configured here:
+        ``CacheConfig(strategy="auto")`` would cache student messages.
+        Fast-chat prefix caching uses SystemContentBlock cachePoint instead.
 
     Raises:
         RuntimeModelError: When the config is not the Bedrock Converse path.
@@ -403,13 +491,17 @@ def log_runtime_model_config(config: RuntimeModelConfig) -> None:
     meta = config.provenance()
     logger.info(
         "runtime_model_loaded role=%s provider=%s model_id=%s region=%s "
-        "guardrail_configured=%s guardrail_latest_message=%s strands_pin=%s",
+        "guardrail_configured=%s guardrail_latest_message=%s "
+        "bedrock_read_timeout_seconds=%s strands_pin=%s",
         meta["role"],
         meta["agentcore_model_provider"],
         meta["foundation_model_id"],
         meta["model_region"],
         str(meta["guardrail_configured"]).lower(),
         str(meta["guardrail_latest_message"]).lower(),
+        meta["bedrock_read_timeout_seconds"]
+        if meta["bedrock_read_timeout_seconds"] is not None
+        else "none",
         meta["pinned_strands_agents"],
     )
 
@@ -432,10 +524,24 @@ def load_runtime_model(config: RuntimeModelConfig | None = None) -> Any:
     log_runtime_model_config(resolved)
     if resolved.uses_bedrock_model:
         try:
+            from botocore.config import Config as BotocoreConfig
             from strands.models import BedrockModel
         except ImportError as error:  # pragma: no cover - companion tests skip Strands
             raise RuntimeModelError("strands-agents is not installed") from error
-        return BedrockModel(**bedrock_model_kwargs(resolved))
+        # Botocore's default retry budget would multiply Strands Agent
+        # throttling retries. ``total_max_attempts`` counts the initial call,
+        # so 1 means a single Converse attempt and the Agent-level
+        # ModelRetryStrategy stays the only Converse retry layer. The legacy
+        # ``max_attempts`` key would instead be normalised to two attempts.
+        client_config_kwargs: dict[str, Any] = {
+            "retries": {"total_max_attempts": 1, "mode": "standard"},
+        }
+        if resolved.bedrock_read_timeout_seconds is not None:
+            client_config_kwargs["read_timeout"] = resolved.bedrock_read_timeout_seconds
+        return BedrockModel(
+            **bedrock_model_kwargs(resolved),
+            boto_client_config=BotocoreConfig(**client_config_kwargs),
+        )
     try:
         from strands.models.openai_responses import OpenAIResponsesModel
     except ImportError as error:  # pragma: no cover - optional Luna extra

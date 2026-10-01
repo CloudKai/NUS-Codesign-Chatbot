@@ -8,6 +8,7 @@ import pytest
 
 from backend.chat_service import ChatOptions, StudentChatEngine, response_input_for_model
 from backend.source_library import (
+    CHAT_ATTACHMENT_ORIGIN,
     CourseMaterialSyncCoordinator,
     LectureNotesSyncResult,
     SourceImportError,
@@ -66,6 +67,23 @@ def test_notebook_source_crud_selection_and_file_cleanup(tmp_path, monkeypatch):
     assert not path.exists()
 
 
+def test_chat_attachment_is_hidden_from_reusable_sources(tmp_path, monkeypatch):
+    """Private turn attachments remain readable but never become selected Sources."""
+    store, thread_id, _ = make_notebook(tmp_path, monkeypatch)
+    attachment = add_file_sources(
+        store,
+        thread_id,
+        [("photo.png", b"private image bytes", "image/png")],
+        origin=CHAT_ATTACHMENT_ORIGIN,
+        selected=False,
+    )[0]
+
+    assert attachment["selected"] is False
+    assert attachment["metadata"]["origin"] == CHAT_ATTACHMENT_ORIGIN
+    assert list_visible_sources(store, thread_id) == []
+    assert get_visible_source(store, thread_id, attachment["id"])["id"] == attachment["id"]
+
+
 def test_source_paths_cannot_escape_notebook_storage(tmp_path, monkeypatch):
     store, thread_id, _ = make_notebook(tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="Unsafe source path"):
@@ -94,9 +112,7 @@ def test_virtual_course_source_context_does_not_synthesize_placeholder():
         "title": "Week 1 Introduction to innovation v3.pdf",
         "kind": "file",
         "extractedText": "",
-        "object_key": (
-            "course/lectureNotes/Week 1 Introduction to innovation v3.pdf"
-        ),
+        "object_key": ("course/lectureNotes/Week 1 Introduction to innovation v3.pdf"),
         "metadata": {
             "virtual_course_source": True,
             "shared_course_object": True,
@@ -153,7 +169,7 @@ def test_lecture_notes_folder_syncs_updates_and_removes_sources(tmp_path, monkey
 
     assert first.added == 1
     assert first.skipped == 0
-    assert source["selected"] is True
+    assert source["selected"] is False
     assert source["metadata"]["origin"] == "lecture_notes_folder"
     assert source["metadata"]["lecture_note_relative_path"] == "lectureNotes/week-01.txt"
     assert source["metadata"]["course_material_group"] == "Lecture Notes"
@@ -180,7 +196,7 @@ def test_lecture_notes_folder_syncs_updates_and_removes_sources(tmp_path, monkey
     assert store.list_sources(thread_id) == []
 
 
-def test_locked_course_sources_cannot_be_unselected(tmp_path, monkeypatch):
+def test_locked_course_sources_are_view_only_not_chat_selected(tmp_path, monkeypatch):
     from backend import source_library
 
     store, thread_id, _files_dir = make_notebook(tmp_path, monkeypatch)
@@ -200,21 +216,23 @@ def test_locked_course_sources_cannot_be_unselected(tmp_path, monkeypatch):
         [("mine.txt", b"Personal upload", "text/plain")],
     )[0]
 
-    with pytest.raises(ValueError, match="cannot be unselected"):
-        store.set_source_selected(thread_id, locked["id"], False)
-    assert store.get_source(thread_id, locked["id"])["selected"] is True
+    assert locked["selected"] is False
+    with pytest.raises(ValueError, match="view-only"):
+        store.set_source_selected(thread_id, locked["id"], True)
+    assert store.get_source(thread_id, locked["id"])["selected"] is False
 
     store.set_source_selected(thread_id, personal["id"], False)
     store.set_all_sources_selected(thread_id, False)
     sources = {item["id"]: item for item in store.list_sources(thread_id)}
-    assert sources[locked["id"]]["selected"] is True
+    assert sources[locked["id"]]["selected"] is False
     assert sources[personal["id"]]["selected"] is False
 
     store.set_all_sources_selected(thread_id, True)
     sources = {item["id"]: item for item in store.list_sources(thread_id)}
-    assert sources[locked["id"]]["selected"] is True
+    assert sources[locked["id"]]["selected"] is False
     assert sources[personal["id"]]["selected"] is True
-
+    selected_only = list_visible_sources(store, thread_id, selected_only=True)
+    assert [item["id"] for item in selected_only] == [personal["id"]]
 
 def test_lecture_notes_sync_skips_upload_compression(tmp_path, monkeypatch):
     from backend import source_library
@@ -568,12 +586,8 @@ def test_shared_course_sync_references_course_keys_not_user_copies(tmp_path, mon
     monkeypatch.setattr(app_settings, "max_lecture_notes", 50)
     monkeypatch.setattr(app_settings, "max_course_material_size_mb", 1)
     reset_file_storage_cache()
-    monkeypatch.setattr(
-        "backend.persistence.factory.get_file_storage", lambda: memory
-    )
-    monkeypatch.setattr(
-        "backend.persistence.factory.get_course_file_storage", lambda: memory
-    )
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: memory)
+    monkeypatch.setattr("backend.persistence.factory.get_course_file_storage", lambda: memory)
 
     store, thread_id, _files_dir = make_notebook(tmp_path, monkeypatch)
     first = sync_lecture_notes_folder(store, thread_id)
@@ -614,3 +628,167 @@ def test_shared_course_sync_references_course_keys_not_user_copies(tmp_path, mon
     assert failed.errors
     assert store.list_sources(thread_id) == []
     assert list_visible_sources(store, thread_id) == []
+
+
+def _install_shared_memory_catalog(monkeypatch, memory, *, max_lecture_notes: int = 50):
+    """Point course listing at an in-memory shared ``course/`` catalog."""
+    from backend.persistence.factory import reset_file_storage_cache
+    from backend.settings import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "file_storage_provider", "memory")
+    monkeypatch.setattr(app_settings, "course_materials_prefix", "course/")
+    monkeypatch.setattr(app_settings, "course_materials_bucket", "course-test")
+    monkeypatch.setattr(app_settings, "course_material_sync_enabled", True)
+    monkeypatch.setattr(app_settings, "max_lecture_notes", max_lecture_notes)
+    monkeypatch.setattr(app_settings, "max_course_material_size_mb", 1)
+    reset_file_storage_cache()
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: memory)
+    monkeypatch.setattr("backend.persistence.factory.get_course_file_storage", lambda: memory)
+
+
+def test_shared_course_catalog_excludes_bedrock_metadata_sidecars(tmp_path, monkeypatch):
+    """Sidecar JSON is an indexing artifact, not a student-visible course file."""
+    from backend.persistence.memory_files import MemoryFileStorage
+    from backend.retrieval import (
+        course_material_id_from_object_key,
+        retrieval_sources_from_notebook,
+    )
+    from backend.sources.kb_metadata import is_metadata_sidecar_key
+
+    pdf_keys = (
+        "course/lectureNotes/week1.pdf",
+        "course/lectureNotes/week2.pdf",
+        "course/readings/read1.pdf",
+    )
+    sidecar_keys = tuple(f"{key}.metadata.json" for key in pdf_keys)
+    memory = MemoryFileStorage()
+    for key in pdf_keys:
+        memory.put_bytes(key=key, data=b"%PDF-1.4 catalog", content_type="application/pdf")
+    for key in sidecar_keys:
+        memory.put_bytes(
+            key=key,
+            data=b'{"metadataAttributes":{}}',
+            content_type="application/json",
+        )
+    _install_shared_memory_catalog(monkeypatch, memory)
+
+    store, thread_id, _files_dir = make_notebook(tmp_path, monkeypatch)
+    personal = add_file_sources(
+        store,
+        thread_id,
+        [("mine.json", b'{"note":"personal"}', "application/json")],
+    )[0]
+
+    visible = list_visible_sources(store, thread_id)
+    selected = list_visible_sources(store, thread_id, selected_only=True)
+    course_visible = [item for item in visible if item["metadata"].get("shared_course_object")]
+    course_keys = [item["object_key"] for item in course_visible]
+    course_ids = {item["id"] for item in course_visible}
+    course_material_ids = {item["metadata"].get("course_material_id") for item in course_visible}
+
+    assert all(is_metadata_sidecar_key(key) for key in sidecar_keys)
+    assert len(course_visible) == 3
+    assert set(course_keys) == set(pdf_keys)
+    assert {item["metadata"]["course_material_group"] for item in course_visible} == {
+        "Lecture Notes",
+        "Readings",
+    }
+    assert (
+        sum(
+            1
+            for item in course_visible
+            if item["metadata"]["course_material_group"] == "Lecture Notes"
+        )
+        == 2
+    )
+    assert (
+        sum(1 for item in course_visible if item["metadata"]["course_material_group"] == "Readings")
+        == 1
+    )
+    assert not any(key.endswith(".metadata.json") for key in course_keys)
+    assert not any(virtual_course_source_id(key) in course_ids for key in sidecar_keys)
+    assert all(
+        get_visible_source(store, thread_id, virtual_course_source_id(key)) is None
+        for key in sidecar_keys
+    )
+    assert course_material_ids == {course_material_id_from_object_key(key) for key in pdf_keys}
+    assert "lecture_week1_pdf_metadata" not in course_material_ids
+    assert all(
+        item["selected"] is False and item["metadata"]["locked_source"] is True
+        for item in course_visible
+    )
+    selected_course_keys = {
+        item["object_key"] for item in selected if item["metadata"].get("shared_course_object")
+    }
+    assert selected_course_keys == set()
+    assert personal["title"] == "mine.json"
+    assert any(item["id"] == personal["id"] for item in visible)
+    assert any(item["id"] == personal["id"] for item in selected)
+
+    retrieval = retrieval_sources_from_notebook(course_visible)
+    retrieval_keys = {item.object_key for item in retrieval}
+    retrieval_ids = {item.course_material_id for item in retrieval}
+    assert retrieval_keys == set(pdf_keys)
+    assert retrieval_ids == {course_material_id_from_object_key(key) for key in pdf_keys}
+
+    memory.put_bytes(
+        key="course/lectureNotes/notes.JSON",
+        data=b'{"topic":"innovation"}',
+        content_type="application/json",
+    )
+    assert is_metadata_sidecar_key("course/lectureNotes/notes.JSON") is False
+    json_visible = list_visible_sources(store, thread_id)
+    json_course_keys = {
+        item["object_key"] for item in json_visible if item["metadata"].get("shared_course_object")
+    }
+    assert json_course_keys == set(pdf_keys) | {"course/lectureNotes/notes.JSON"}
+    assert any(item["id"] == personal["id"] for item in json_visible)
+
+
+def test_shared_course_catalog_sidecars_do_not_consume_max_lecture_notes(tmp_path, monkeypatch):
+    """Sidecars that sort first must not fill the shared-catalog cap."""
+    from backend.persistence.memory_files import MemoryFileStorage
+
+    memory = MemoryFileStorage()
+    memory.put_bytes(
+        key="course/lectureNotes/aaa.pdf.metadata.json",
+        data=b"{}",
+        content_type="application/json",
+    )
+    memory.put_bytes(
+        key="course/lectureNotes/zzz.pdf",
+        data=b"%PDF-1.4 z",
+        content_type="application/pdf",
+    )
+    _install_shared_memory_catalog(monkeypatch, memory, max_lecture_notes=1)
+
+    store, thread_id, _ = make_notebook(tmp_path, monkeypatch)
+    visible = list_visible_sources(store, thread_id)
+    assert [item["object_key"] for item in visible] == ["course/lectureNotes/zzz.pdf"]
+
+
+def test_local_lecture_notes_scan_excludes_metadata_sidecars(tmp_path, monkeypatch):
+    """Local sibling sidecars must not be imported as course content."""
+    from backend import source_library
+    from backend.source_library import course_material_fingerprint
+
+    store, thread_id, _ = make_notebook(tmp_path, monkeypatch)
+    course_root = tmp_path / "lecture_notes"
+    notes = course_root / "lectureNotes"
+    notes.mkdir(parents=True)
+    pdf = notes / "week1.pdf"
+    pdf.write_bytes(b"%PDF-1.4 local")
+    (notes / "week1.pdf.metadata.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(source_library.settings, "lecture_notes_dir", course_root)
+    monkeypatch.setattr(source_library.settings, "max_lecture_notes", 50)
+    monkeypatch.setattr(source_library.settings, "max_course_material_size_mb", 1)
+
+    fingerprint = course_material_fingerprint()
+    assert [item[0] for item in fingerprint] == ["lectureNotes/week1.pdf"]
+
+    result = sync_lecture_notes_folder(store, thread_id)
+    sources = store.list_sources(thread_id)
+    assert result.added == 1
+    assert len(sources) == 1
+    assert sources[0]["title"] == "week1.pdf"
+    assert sources[0]["metadata"]["lecture_note_relative_path"] == ("lectureNotes/week1.pdf")

@@ -34,6 +34,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Course filename or canonical course/ object key.",
     )
     parser.add_argument(
+        "--second-source",
+        default="",
+        help=(
+            "Optional second course filename or key. Uses the multi-id in "
+            "filter instead of equals."
+        ),
+    )
+    parser.add_argument(
         "--i-approve-live-bedrock",
         action="store_true",
         help="Required acknowledgement that this calls live Bedrock Retrieve.",
@@ -48,6 +56,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def refuse_reason(args: argparse.Namespace) -> str | None:
     """Return a refusal message when the live Retrieve diagnostic must not run."""
+    if args.dry_run:
+        return None
     if not args.i_approve_live_bedrock:
         return "live course retrieval requires --i-approve-live-bedrock"
     return None
@@ -120,18 +130,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         or str(settings.aws_region or "").strip()
         or "us-west-2"
     )
-    object_key = canonical_object_key(resolve_course_object_key(args.source))
-    material_id = course_material_id_from_object_key(object_key)
+    filter_mode = str(settings.normalized_knowledge_base_metadata_filter_mode)
+    print(
+        f"metadata_filter_mode={filter_mode} (production-equivalent)",
+        file=sys.stderr,
+    )
+    source_args = [str(args.source or "").strip()]
+    second = str(getattr(args, "second_source", "") or "").strip()
+    if second:
+        source_args.append(second)
+    resolved: list[tuple[str, str, str]] = []
+    for raw in source_args:
+        object_key = canonical_object_key(resolve_course_object_key(raw))
+        material_id = course_material_id_from_object_key(object_key)
+        group = "lectureNotes" if "/lectureNotes/" in object_key else "readings"
+        resolved.append((object_key, material_id, group))
+    object_key, material_id, group = resolved[0]
+    material_ids = [item[1] for item in resolved if item[1]]
+    if filter_mode == "required" and len(material_ids) == 1:
+        filter_kind = "equals"
+    elif filter_mode == "required" and len(material_ids) > 1:
+        filter_kind = "in"
+    else:
+        filter_kind = "none"
     expanded = expand_session_query_text(args.query)
-    title = Path(object_key).name
-    group = "lectureNotes" if "/lectureNotes/" in object_key else "readings"
     payload = {
         "knowledge_base_id": knowledge_base_id or "(empty)",
         "region": region,
         "expanded_query": expanded,
         "course_material_id": material_id,
+        "course_material_ids": material_ids,
         "object_key": object_key,
-        "strict_metadata_filter": bool(settings.knowledge_base_strict_metadata_filter),
+        "object_keys": [item[0] for item in resolved],
+        "metadata_filter_mode": filter_mode,
+        "filter_kind": filter_kind,
         "mock_openai": bool(settings.mock_openai),
         "model_provider": settings.model_provider,
     }
@@ -147,7 +179,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         knowledge_base_id,
         region=region,
         course_bucket=str(settings.course_materials_bucket or "").strip(),
-        strict_metadata_filter=bool(settings.knowledge_base_strict_metadata_filter),
+        metadata_filter_mode=filter_mode,
         knowledge_base_type=str(settings.normalized_knowledge_base_type),
     )
     inner = retriever._runtime_client()
@@ -156,22 +188,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     recorder = _RecordingRetrieveClient(inner)
     retriever._client = recorder
-    source = RetrievalSource(
-        source_id="diag-course",
-        label="S1",
-        title=title,
-        text="",
-        group=group,
-        object_key=object_key,
-        course_material_id=material_id,
-        virtual_course_source=True,
-        shared_course_object=True,
-    )
+    sources = []
+    for index, (key, mid, grp) in enumerate(resolved, start=1):
+        sources.append(
+            RetrievalSource(
+                source_id=f"diag-course-{index}",
+                label=f"S{index}",
+                title=Path(key).name,
+                text="",
+                group=grp,
+                object_key=key,
+                course_material_id=mid,
+                virtual_course_source=True,
+                shared_course_object=True,
+            )
+        )
     result = retriever.retrieve(
         RetrievalQuery(
             current_message=str(args.query or "").strip(),
             current_stage="problem_identification",
-            sources=(source,),
+            sources=tuple(sources),
         )
     )
     first_filter = False
@@ -186,6 +222,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "raw_retrieve_result_count": recorder.raw_counts[-1] if recorder.raw_counts else 0,
         "raw_retrieve_counts_by_call": recorder.raw_counts,
         "post_validation_result_count": len(result.chunks),
+        "metadata_filter_applied": first_filter,
         "strict_metadata_filter_applied": first_filter,
         "fallback_occurred": len(recorder.calls) > 1,
         "course_retrieval_status": result.course_retrieval_status,

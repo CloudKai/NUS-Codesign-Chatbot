@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 
 from fastapi.testclient import TestClient
-from streamlit.testing.v1 import AppTest
+from saved_ui_workspace import saved_app
 
 from backend.api import create_app
 from backend.api_client import LocalApiClient
@@ -14,10 +14,16 @@ from backend.source_library import CourseMaterialSyncCoordinator
 from backend.student_store import StudentStore
 
 
-def _install_inprocess_api(monkeypatch, *, auto_advance: bool) -> LocalApiClient:
+def _install_inprocess_api(
+    monkeypatch,
+    *,
+    auto_advance: bool,
+    stage_selection: bool = False,
+) -> LocalApiClient:
     """Point Streamlit UI modules at an in-process FastAPI app on the test DB."""
     monkeypatch.setattr(settings, "use_local_api", True)
     monkeypatch.setattr(settings, "auto_advance_stages", auto_advance)
+    monkeypatch.setattr(settings, "student_stage_selection", stage_selection)
     store = StudentStore()
     client = LocalApiClient(
         "http://testserver",
@@ -31,7 +37,7 @@ def _install_inprocess_api(monkeypatch, *, auto_advance: bool) -> LocalApiClient
 def test_inprocess_streamlit_chat_path_still_smoke_tests():
     """Retain one AppTest on the in-process coach path (USE_LOCAL_API=false)."""
     assert settings.use_local_api is False
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     assert len(app.chat_input) == 1
     app.chat_input[0].set_value(
@@ -44,7 +50,7 @@ def test_inprocess_streamlit_chat_path_still_smoke_tests():
 def test_authenticated_inprocess_path_confirms_pending_transition():
     """Cognito-scoped sessions retain full Thinking Path confirmation behavior."""
     assert settings.use_local_api is False
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
 
     app.chat_input[0].set_value(
         "I want to evaluate a crossing design for older pedestrians."
@@ -53,7 +59,8 @@ def test_authenticated_inprocess_path_confirms_pending_transition():
         "Which design gives older pedestrians enough time and visibility?"
     ).run()
     app.chat_input[0].set_value(
-        "Older adults near schools need a longer crossing interval than the current signal."
+        "How might we improve road crossings for older pedestrians so that "
+        "they can cross safely without rushing?"
     ).run()
 
     next_button = next(
@@ -73,7 +80,7 @@ def test_authenticated_inprocess_path_confirms_pending_transition():
 def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch):
     client = _install_inprocess_api(monkeypatch, auto_advance=False)
     try:
-        app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+        app = saved_app()
         assert not app.exception
         thread_id = app.session_state["thread_id"]
 
@@ -88,7 +95,8 @@ def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch)
         assert not app.exception
 
         app.chat_input[0].set_value(
-            "Older adults near schools need a longer crossing interval than the current signal."
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
         ).run()
         assert not app.exception
 
@@ -108,7 +116,7 @@ def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch)
 def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
     client = _install_inprocess_api(monkeypatch, auto_advance=True)
     try:
-        app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+        app = saved_app()
         assert not app.exception
         thread_id = app.session_state["thread_id"]
 
@@ -123,7 +131,8 @@ def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
         assert not app.exception
 
         app.chat_input[0].set_value(
-            "Older adults near schools need a longer crossing interval than the current signal."
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
         ).run()
         assert not app.exception
 
@@ -131,6 +140,159 @@ def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
         state = client.learning_state(thread_id)
         assert (state.get("learning_journey") or {}).get("current_stage") == "concept_generation"
         assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
+    finally:
+        client.close()
+
+
+def test_streamlit_stage_selection_refreshes_authoritative_stage_and_status(monkeypatch):
+    """The local-only selector remounts from the API's persisted Journey state."""
+    client = _install_inprocess_api(
+        monkeypatch,
+        auto_advance=False,
+        stage_selection=True,
+    )
+    try:
+        app = saved_app()
+        assert not app.exception
+        thread_id = app.session_state["thread_id"]
+        store = StudentStore()
+        thread = store.get_thread(thread_id) or {}
+        metadata = dict(thread.get("metadata") or {})
+        journey = dict(metadata.get("learning_journey") or {})
+        journey["completed_stages"] = ["problem_identification"]
+        metadata["learning_journey"] = journey
+        store.update_thread(thread_id, metadata=metadata)
+        app.session_state["learning_journey"]["completed_stages"] = [
+            "problem_identification"
+        ]
+        app.run()
+
+        select = next(
+            button
+            for button in app.button
+            if button.key == "journey-select-concept_generation"
+        )
+        select.click().run()
+
+        persisted = client.learning_state(thread_id)
+        assert persisted["thinking_stage"] == "concept_generation"
+        assert persisted["learning_journey"]["current_stage"] == "concept_generation"
+        assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
+        assert app.session_state["mobile_panel"] == "Chat"
+        assert "chat_follow_bottom" not in app.session_state
+        assert app.session_state["stage_move_notice"] is None
+        messages = client.get_messages(thread_id)
+        briefing = [
+            message
+            for message in messages
+            if message.get("role") == "assistant"
+            and str(message.get("content") or "").startswith(
+                "Moved to Stage: Concept generation."
+            )
+        ]
+        assert len(briefing) == 1
+        assert "What to work on next:" in briefing[0]["content"]
+
+        app.chat_input[0].set_value(
+            "I need to examine the trade-off between crossing safety and traffic delay."
+        ).run()
+        assert not app.exception
+        assert app.session_state["stage_move_notice"] is None
+        messages = client.get_messages(thread_id)
+        normal_assistant = [
+            message for message in messages if message["role"] == "assistant"
+        ][-1]
+        normal_assessment = (
+            (normal_assistant.get("metadata") or {}).get("assessment") or {}
+        )
+        assert normal_assessment["current_stage"] == "concept_generation"
+
+        app.chat_input[0].set_value("What stage am I in?").run()
+        assert not app.exception
+        messages = client.get_messages(thread_id)
+        assistant = [message for message in messages if message["role"] == "assistant"][-1]
+        assert "Concept generation" in assistant["content"]
+        assessment = (assistant.get("metadata") or {}).get("assessment") or {}
+        assert assessment["current_stage"] == "concept_generation"
+        assert assessment["response_mode"] == "qa"
+        assert assessment.get("citations") == []
+        assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
+    finally:
+        client.close()
+
+
+def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
+    monkeypatch,
+):
+    """Exact move-me-to updates journey with a coach briefing, no user row."""
+    client = _install_inprocess_api(
+        monkeypatch,
+        auto_advance=False,
+        stage_selection=True,
+    )
+    try:
+        app = saved_app()
+        assert not app.exception
+        thread_id = app.session_state["thread_id"]
+        store = StudentStore()
+        thread = store.get_thread(thread_id) or {}
+        metadata = dict(thread.get("metadata") or {})
+        journey = dict(metadata.get("learning_journey") or {})
+        journey["completed_stages"] = ["problem_identification"]
+        metadata["learning_journey"] = journey
+        store.update_thread(thread_id, metadata=metadata)
+        app.session_state["learning_journey"]["completed_stages"] = [
+            "problem_identification"
+        ]
+        app.run()
+
+        app.chat_input[0].set_value("move me to Concept generation").run()
+
+        assert not app.exception
+        state = client.learning_state(thread_id)
+        assert state["thinking_stage"] == "concept_generation"
+        assert state["learning_journey"]["current_stage"] == "concept_generation"
+        assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
+        assert app.session_state["stage_move_notice"] is None
+        messages = client.get_messages(thread_id)
+        briefing = [
+            message
+            for message in messages
+            if message.get("role") == "assistant"
+            and str(message.get("content") or "").startswith(
+                "Moved to Stage: Concept generation."
+            )
+        ]
+        assert len(briefing) == 1
+        assert "What to work on next:" in briefing[0]["content"]
+        assert not any(
+            str(message.get("content") or "").lower().startswith("move me to")
+            for message in messages
+            if message.get("role") == "user"
+        )
+
+        app.chat_input[0].set_value("Hi, can I move to Concept Generation?").run()
+        assert not app.exception
+        assert app.session_state["stage_move_notice"] is None
+        assert client.get_messages(thread_id) == messages
+
+        app.chat_input[0].set_value("move me to Reflection").run()
+        assert not app.exception
+        assert (
+            app.session_state["stage_move_notice"]
+            == "Must complete Ethics & Critical Thinking to reach Reflection"
+        )
+        assert client.learning_state(thread_id)["thinking_stage"] == "concept_generation"
+        assert client.get_messages(thread_id) == messages
+
+        app.chat_input[0].set_value(
+            "I am reflecting on how evidence changed my design decision."
+        ).run()
+        assert not app.exception
+        assert app.session_state["stage_move_notice"] is None
+        messages = client.get_messages(thread_id)
+        assistant = [message for message in messages if message["role"] == "assistant"][-1]
+        assert assistant["metadata"]["assessment"]["current_stage"] == "concept_generation"
     finally:
         client.close()
 

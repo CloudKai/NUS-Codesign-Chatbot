@@ -41,6 +41,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Course filename or canonical course/ object key.",
     )
     parser.add_argument(
+        "--second-source",
+        default="",
+        help=(
+            "Optional second course filename or key. Dry-run and live then "
+            "exercise the multi-id in filter instead of equals."
+        ),
+    )
+    parser.add_argument(
         "--i-approve-live-bedrock",
         action="store_true",
         help="Required acknowledgement that this calls live Bedrock Retrieve.",
@@ -50,8 +58,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=1,
         help=(
-            "Maximum Retrieve API calls (default 1, maximum 2). Use 2 to "
-            "allow the production metadata-filter fallback."
+            "Maximum Retrieve API calls (default 1, maximum 2). A second "
+            "call is a second diagnostic query, not an unfiltered retry."
         ),
     )
     parser.add_argument(
@@ -91,6 +99,36 @@ def resolve_course_object_key(source: str) -> str:
     if cleaned.startswith("lectureNotes/") or cleaned.startswith("readings/"):
         return f"course/{cleaned}"
     return f"course/lectureNotes/{cleaned}"
+
+
+def _filter_preview(material_ids: list[str], mode: str) -> dict[str, Any]:
+    """Return a secret-safe preview of the Retrieve metadata filter.
+
+    Args:
+        material_ids: Canonical ``course_material_id`` values.
+        mode: Settings-derived filter mode.
+
+    Returns:
+        Filter kind and values that production would send. ``required``
+        with one id is ``equals``; several ids are ``in``. Other modes
+        send no metadata filter.
+    """
+    cleaned = [str(item).strip() for item in material_ids if str(item).strip()]
+    if mode != "required" or not cleaned:
+        return {"kind": "none", "course_material_ids": cleaned, "filter": None}
+    if len(cleaned) == 1:
+        return {
+            "kind": "equals",
+            "course_material_ids": cleaned,
+            "filter": {
+                "equals": {"key": "course_material_id", "value": cleaned[0]}
+            },
+        }
+    return {
+        "kind": "in",
+        "course_material_ids": cleaned,
+        "filter": {"in": {"key": "course_material_id", "value": cleaned}},
+    }
 
 
 class _CappedRetrieveClient:
@@ -184,10 +222,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         or str(settings.aws_region or "").strip()
         or "us-west-2"
     )
-    object_key = canonical_object_key(resolve_course_object_key(args.source))
-    material_id = course_material_id_from_object_key(object_key)
-    title = Path(object_key).name
-    group = "lectureNotes" if "/lectureNotes/" in object_key else "readings"
+    filter_mode = str(settings.normalized_knowledge_base_metadata_filter_mode)
+    print(
+        f"metadata_filter_mode={filter_mode} (production-equivalent)",
+        file=sys.stderr,
+    )
+    source_args = [str(args.source or "").strip()]
+    second = str(getattr(args, "second_source", "") or "").strip()
+    if second:
+        source_args.append(second)
+    resolved: list[tuple[str, str, str]] = []
+    for raw in source_args:
+        object_key = canonical_object_key(resolve_course_object_key(raw))
+        material_id = course_material_id_from_object_key(object_key)
+        group = "lectureNotes" if "/lectureNotes/" in object_key else "readings"
+        resolved.append((object_key, material_id, group))
+    object_key, material_id, group = resolved[0]
+    material_ids = [item[1] for item in resolved if item[1]]
+    filter_preview = _filter_preview(material_ids, filter_mode)
     payload: dict[str, Any] = {
         "kb_configured": int(bool(knowledge_base_id)),
         "region": region,
@@ -197,8 +249,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "course_materials_prefix": str(settings.course_materials_prefix or ""),
         "expanded_query": expand_session_query_text(args.query),
         "object_key": object_key,
+        "object_keys": [item[0] for item in resolved],
         "course_material_id": material_id,
-        "strict_metadata_filter": bool(settings.knowledge_base_strict_metadata_filter),
+        "course_material_ids": material_ids,
+        "metadata_filter_mode": filter_mode,
+        "filter_preview": filter_preview,
         "knowledge_base_type": str(settings.normalized_knowledge_base_type),
         "model_provider": settings.model_provider,
         "mock_openai": bool(settings.mock_openai),
@@ -220,7 +275,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         knowledge_base_id,
         region=region,
         course_bucket=str(settings.course_materials_bucket or "").strip(),
-        strict_metadata_filter=bool(settings.knowledge_base_strict_metadata_filter),
+        metadata_filter_mode=filter_mode,
         knowledge_base_type=str(settings.normalized_knowledge_base_type),
     )
     inner = retriever._runtime_client()
@@ -234,22 +289,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     recorder = _CappedRetrieveClient(inner, max_requests=int(args.max_requests))
     retriever._client = recorder
-    source = RetrievalSource(
-        source_id="diag-course",
-        label="S1",
-        title=title,
-        text="",
-        group=group,
-        object_key=object_key,
-        course_material_id=material_id,
-        virtual_course_source=True,
-        shared_course_object=True,
-    )
+    sources = []
+    for index, (key, mid, grp) in enumerate(resolved, start=1):
+        sources.append(
+            RetrievalSource(
+                source_id=f"diag-course-{index}",
+                label=f"S{index}",
+                title=Path(key).name,
+                text="",
+                group=grp,
+                object_key=key,
+                course_material_id=mid,
+                virtual_course_source=True,
+                shared_course_object=True,
+            )
+        )
     result = retriever.retrieve(
         RetrievalQuery(
             current_message=str(args.query or "").strip(),
             current_stage="problem_identification",
-            sources=(source,),
+            sources=tuple(sources),
         )
     )
     category = _status_category(
@@ -271,8 +330,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "sanitized_s3_uris_by_call": recorder.sanitized_uris,
         "caller_identity": identity,
         "object_key": object_key,
+        "object_keys": [item[0] for item in resolved],
         "course_material_id": material_id,
-        "strict_metadata_filter": bool(settings.knowledge_base_strict_metadata_filter),
+        "course_material_ids": material_ids,
+        "metadata_filter_mode": filter_mode,
+        "filter_preview": filter_preview,
         "knowledge_base_type": str(settings.normalized_knowledge_base_type),
     }
     print(json.dumps(report, indent=2))

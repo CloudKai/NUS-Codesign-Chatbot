@@ -12,20 +12,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .learning.deep_analysis_pdf import (
+    DeepAnalysisPdfExport,
+    build_deep_analysis_pdf,
+)
 from .persistence.object_keys import sanitize_filename
 from .source_library import (
     CourseMaterialSyncCoordinator,
     LectureNotesSyncResult,
     add_file_sources,
     backfill_legacy_sources,
+    CHAT_ATTACHMENT_ORIGIN,
     get_visible_source,
     is_locked_course_source,
     list_visible_sources,
     read_source_bytes,
 )
+from .specialists.review_orchestration import (
+    DEEP_REVIEW_SNAPSHOT_KEY,
+    JOURNEY_STAGE_REVIEWS_KEY,
+    public_journey_stage_reviews,
+)
+from .student_journey import normalize_journey
 from .student_store import StudentStore
 
 _TRANSCRIPT_ROLES = {"user": "Student", "assistant": "Coach"}
+MESSAGE_PAGE_SIZE = 6
 
 
 @dataclass(frozen=True)
@@ -44,6 +56,17 @@ class TranscriptExport:
     data: bytes
     filename: str
     mime: str = "text/plain; charset=utf-8"
+
+
+def public_attachment(source: dict[str, Any]) -> dict[str, Any]:
+    """Return the small safe descriptor stored on a chat message."""
+    return {
+        "id": str(source.get("id") or ""),
+        "title": str(source.get("title") or "Attachment"),
+        "mime": str(source.get("mime") or "application/octet-stream"),
+        "kind": str(source.get("kind") or "file"),
+        "size": max(0, int(source.get("size") or 0)),
+    }
 
 
 def format_notebook_transcript(
@@ -109,9 +132,38 @@ def public_source(source: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def professor_public_source(source: dict[str, Any]) -> dict[str, Any]:
+    """Return a source record safe for lecturer read-only workspace views.
+
+    Lecturer APIs must not expose extracted text, storage keys, or filesystem
+    paths. File bytes are served only from the dedicated source endpoint.
+    """
+    payload = public_source(source)
+    payload.pop("extracted_text", None)
+    return payload
+
+
+def public_notebook_metadata(metadata: Any) -> dict[str, Any]:
+    """Return notebook metadata without internal Journey worker state.
+
+    Queue ids, dirty tokens, frozen transcript ids, and lease fields are
+    persistence/worker details. All notebook-facing API routes share this
+    projection so a broader thread or learning-state response cannot bypass
+    the dedicated Journey review projection.
+    """
+    payload = dict(metadata) if isinstance(metadata, dict) else {}
+    if JOURNEY_STAGE_REVIEWS_KEY in payload:
+        payload[JOURNEY_STAGE_REVIEWS_KEY] = public_journey_stage_reviews(
+            payload.get(JOURNEY_STAGE_REVIEWS_KEY)
+        )
+    return payload
+
+
 def public_thread(thread: dict[str, Any]) -> dict[str, Any]:
     """Return a notebook record for API/UI consumers."""
-    return dict(thread)
+    payload = dict(thread)
+    payload["metadata"] = public_notebook_metadata(payload.get("metadata"))
+    return payload
 
 
 class WorkspaceService:
@@ -207,6 +259,44 @@ class WorkspaceService:
             raise ValueError("Notebook not found")
         return self._store.get_messages(thread_id)
 
+    def has_messages(self, thread_id: str) -> bool:
+        """Return whether an owned notebook has any visible chat rows."""
+        return self._store.has_messages(thread_id)
+
+    def get_message_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = MESSAGE_PAGE_SIZE,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one bounded, revision-bound page of notebook history."""
+        return self._store.get_message_page(
+            thread_id,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    def get_messages_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = MESSAGE_PAGE_SIZE,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for :meth:`get_message_page`."""
+        return self.get_message_page(thread_id, limit=limit, cursor=cursor)
+
+    def get_message_metadata(self, thread_id: str) -> list[dict[str, Any]]:
+        """Return active message metadata without transcript bodies."""
+        return self._store.get_message_metadata(thread_id)
+
+    def get_oldest_user_messages(
+        self, thread_id: str, *, limit: int = 2
+    ) -> list[str]:
+        """Return at most two oldest active user prompts for title migration."""
+        return self._store.get_oldest_user_messages(thread_id, limit=limit)
+
     def export_transcript(self, thread_id: str) -> TranscriptExport:
         """Return a ``.txt`` transcript projected from persisted messages.
 
@@ -230,6 +320,34 @@ class WorkspaceService:
         return TranscriptExport(
             data=text.encode("utf-8"),
             filename=transcript_filename(title),
+        )
+
+    def export_deep_analysis_pdf(self, thread_id: str) -> DeepAnalysisPdfExport:
+        """Return a PDF built from the notebook's Sonnet Deep Review snapshot.
+
+        Args:
+            thread_id: Owned notebook id.
+
+        Returns:
+            PDF bytes and download filename.
+
+        Raises:
+            ValueError: When the notebook is missing/not owned, or no usable
+                Deep Review snapshot has been persisted yet.
+        """
+        thread = self._store.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        metadata = dict(thread.get("metadata") or {})
+        snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+        if not isinstance(snapshot, dict) or not snapshot:
+            raise ValueError("Deep Analysis PDF is not ready yet")
+        title = str(thread.get("name") or "").strip() or "Untitled notebook"
+        journey = normalize_journey(metadata.get("learning_journey"))
+        return build_deep_analysis_pdf(
+            title=title,
+            snapshot=snapshot,
+            journey=journey,
         )
 
     def get_messages_at_revision(
@@ -287,6 +405,24 @@ class WorkspaceService:
             self._store, thread_id, uploads, origin=origin
         )
         return [public_source(source) for source in created]
+
+    def upload_attachments(
+        self,
+        thread_id: str,
+        uploads: Iterable[tuple[str, bytes, str | None]],
+    ) -> list[dict[str, Any]]:
+        """Store private current-turn attachments outside the Sources library."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        created = add_file_sources(
+            self._store,
+            thread_id,
+            uploads,
+            origin=CHAT_ATTACHMENT_ORIGIN,
+            selected=False,
+            extra_metadata={"hidden_from_sources": True},
+        )
+        return [public_attachment(source) for source in created]
 
     def set_source_selected(
         self, thread_id: str, source_id: str, selected: bool

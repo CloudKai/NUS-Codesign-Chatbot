@@ -9,7 +9,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
+
 from backend.persistence.dsql_schema import DSQL_SCHEMA, iter_dsql_ddl_statements
+from scripts.dsql import cli as _DSQL_CLI
 
 _INIT_DSQL_PATH = Path(__file__).resolve().parents[2] / "scripts" / "init_dsql.py"
 _SPEC = importlib.util.spec_from_file_location("co_design_init_dsql_tests", _INIT_DSQL_PATH)
@@ -24,6 +27,9 @@ build_revision_null_backfill_update = _INIT_DSQL.build_revision_null_backfill_up
 column_default_is_zero = _INIT_DSQL.column_default_is_zero
 initialize_empty_workflow_contract = _INIT_DSQL.initialize_empty_workflow_contract
 plan_missing_message_revision_statements = _INIT_DSQL.plan_missing_message_revision_statements
+plan_guest_session_migration = _INIT_DSQL.plan_guest_session_migration
+inspect_guest_session_migration = _INIT_DSQL.inspect_guest_session_migration
+apply_guest_session_migration = _INIT_DSQL.apply_guest_session_migration
 plan_missing_notebooks_conversation_revision_statements = (
     _INIT_DSQL.plan_missing_notebooks_conversation_revision_statements
 )
@@ -69,6 +75,100 @@ class _WorkflowContractConnection:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _GuestMigrationResult:
+    """Fetchable rows for the fake admin catalog and async-index adapter."""
+
+    def __init__(self, rows: list[dict[str, Any]] | None = None):
+        self.rows = rows or []
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        return list(self.rows)
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return self.rows[0] if self.rows else None
+
+
+class _GuestMigrationAdminState:
+    """Shared fake-admin catalog and execution log across connections."""
+
+    def __init__(self):
+        self.columns: set[str] = set()
+        self.indexes: set[str] = set()
+        self.executed: list[str] = []
+        self.events: list[str] = []
+        self.commits = 0
+        self.rollbacks = 0
+        self.closed = 0
+
+
+class _GuestMigrationAdminConnection:
+    """Fake DSQL admin connection supporting catalog reads and migration SQL."""
+
+    def __init__(self, state: _GuestMigrationAdminState):
+        self.state = state
+
+    def execute(self, sql: str, params: Any = None) -> _GuestMigrationResult:
+        normalized = " ".join(sql.split())
+        upper = normalized.upper()
+        if "INFORMATION_SCHEMA.COLUMNS" in upper:
+            assert tuple(params or ()) == ("guest_sessions",)
+            return _GuestMigrationResult(
+                [
+                    {
+                        "column_name": name,
+                        "column_default": None,
+                        "is_nullable": "YES",
+                    }
+                    for name in sorted(self.state.columns)
+                ]
+            )
+        self.state.executed.append(normalized)
+        self.state.events.append(normalized)
+        if upper.startswith("CREATE TABLE"):
+            self.state.columns = {
+                "token_digest",
+                "owner_user_id",
+                "created_at",
+                "expires_at",
+                "revoked_at",
+                "claim_user_id",
+                "claim_operation_id",
+                "claim_result_text",
+                "claim_expires_at",
+                "preview_user_id",
+                "preview_operation_id",
+                "preview_fingerprint",
+                "preview_expires_at",
+            }
+            return _GuestMigrationResult()
+        if upper.startswith("ALTER TABLE GUEST_SESSIONS ADD COLUMN"):
+            self.state.columns.add(normalized.split()[5])
+            return _GuestMigrationResult()
+        if upper.startswith("CREATE INDEX ASYNC"):
+            index_name = normalized.split()[6]
+            if index_name in self.state.indexes:
+                return _GuestMigrationResult()
+            self.state.indexes.add(index_name)
+            return _GuestMigrationResult([{"job_id": f"job-{index_name}"}])
+        if upper.startswith("GRANT "):
+            return _GuestMigrationResult()
+        raise AssertionError(f"Unexpected admin SQL: {sql}")
+
+    def commit(self) -> None:
+        self.state.commits += 1
+        self.state.events.append("COMMIT")
+
+    def rollback(self) -> None:
+        self.state.rollbacks += 1
+
+    def close(self) -> None:
+        self.state.closed += 1
+
+
+def _fake_guest_admin(state: _GuestMigrationAdminState):
+    return lambda **_kwargs: _GuestMigrationAdminConnection(state)
 
 
 def _initialize_contract(connection: _WorkflowContractConnection) -> str:
@@ -156,6 +256,160 @@ def test_fresh_messages_schema_includes_revision_columns_only():
     )
     assert "conversation_revision INTEGER NOT NULL DEFAULT 0" in notebooks_sql
     assert "conversation_revision INTEGER NOT NULL DEFAULT 0" in DSQL_SCHEMA
+
+
+def test_fresh_dsql_schema_has_additive_guest_session_table_and_indexes():
+    statement = next(
+        sql
+        for sql in iter_dsql_ddl_statements()
+        if sql.lstrip().upper().startswith(
+            "CREATE TABLE IF NOT EXISTS GUEST_SESSIONS"
+        )
+    )
+    assert "token_digest TEXT PRIMARY KEY" in statement
+    assert "owner_user_id TEXT NOT NULL" in statement
+    assert "revoked_at TEXT" in statement
+    assert "FOREIGN KEY" not in statement
+
+
+def test_guest_session_admin_migration_plan_is_additive_and_shape_checked():
+    planned = plan_guest_session_migration(set())
+    assert planned[0].startswith("CREATE TABLE IF NOT EXISTS guest_sessions")
+    for field in (
+        "claim_user_id", "claim_operation_id", "claim_result_text", "claim_expires_at",
+        "preview_user_id", "preview_operation_id", "preview_fingerprint", "preview_expires_at",
+    ):
+        assert f"{field} TEXT" in planned[0]
+    assert any("CREATE INDEX ASYNC IF NOT EXISTS" in sql for sql in planned)
+    assert planned[-1] == (
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE guest_sessions "
+        "TO co_design_app"
+    )
+
+    existing = plan_guest_session_migration(
+        {"token_digest", "owner_user_id", "created_at", "expires_at", "revoked_at"}
+    )
+    assert not any("CREATE TABLE" in sql for sql in existing)
+    assert any("CREATE INDEX ASYNC IF NOT EXISTS" in sql for sql in existing)
+
+    with pytest.raises(RuntimeError, match="unexpected shape"):
+        plan_guest_session_migration({"token_digest", "owner_user_id"})
+
+
+def test_inspect_guest_session_migration_uses_admin_catalog_and_closes_connection():
+    state = _GuestMigrationAdminState()
+    connection = _GuestMigrationAdminConnection(state)
+    with patch.object(_DSQL_CLI, "_connect_admin", return_value=connection):
+        plan = inspect_guest_session_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+            admin_user="admin",
+        )
+
+    assert plan[0].startswith("CREATE TABLE IF NOT EXISTS guest_sessions")
+    assert state.closed == 1
+    assert state.commits == 0
+    assert state.executed == []
+
+
+def test_guest_session_dry_run_has_no_ddl_or_grant_and_apply_waits_then_reruns_safely():
+    state = _GuestMigrationAdminState()
+    waits: list[str] = []
+    connect_admin = _fake_guest_admin(state)
+
+    with (
+        patch.object(_DSQL_CLI, "_connect_admin", side_effect=connect_admin),
+        patch.object(
+            _DSQL_CLI,
+            "wait_for_async_index_job",
+            side_effect=lambda **kwargs: (
+                waits.append(kwargs["job_id"]),
+                state.events.append(f"WAIT {kwargs['job_id']}"),
+            ),
+        ),
+    ):
+        dry_plan = apply_guest_session_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+            dry_run=True,
+        )
+        assert state.executed == []
+        assert state.commits == 0
+        assert any(sql.startswith("GRANT ") for sql in dry_plan)
+
+        applied = apply_guest_session_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+        )
+        assert applied == dry_plan
+
+    assert [sql.split()[0:3] for sql in state.executed] == [
+        ["CREATE", "TABLE", "IF"],
+        ["CREATE", "INDEX", "ASYNC"],
+        ["CREATE", "INDEX", "ASYNC"],
+        ["GRANT", "SELECT,", "INSERT,"],
+    ]
+    assert waits == [
+        "job-idx_guest_sessions_owner_expires",
+        "job-idx_guest_sessions_expires",
+    ]
+    assert state.events.index("WAIT job-idx_guest_sessions_owner_expires") < state.events.index(
+        next(sql for sql in state.executed if "idx_guest_sessions_expires" in sql)
+    )
+    assert state.events.index("WAIT job-idx_guest_sessions_expires") < state.events.index(
+        next(sql for sql in state.executed if sql.startswith("GRANT "))
+    )
+
+    state.executed.clear()
+    waits.clear()
+    with (
+        patch.object(_DSQL_CLI, "_connect_admin", side_effect=connect_admin),
+        patch.object(
+            _DSQL_CLI,
+            "wait_for_async_index_job",
+            side_effect=lambda **kwargs: waits.append(kwargs["job_id"]),
+        ),
+    ):
+        rerun = apply_guest_session_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+        )
+    assert not any(sql.startswith("CREATE TABLE") for sql in state.executed)
+    assert len(rerun) == 3
+    assert waits == []
+
+
+def test_init_dsql_guest_sessions_only_cli_dispatches_dry_run(capsys):
+    applied: list[dict[str, Any]] = []
+
+    def fake_migration(**kwargs):
+        applied.append(kwargs)
+        return ["CREATE TABLE IF NOT EXISTS guest_sessions (id TEXT)"]
+
+    with patch.object(_DSQL_CLI, "apply_guest_session_migration", fake_migration):
+        result = _INIT_DSQL.main(
+            [
+                "--endpoint",
+                "ep.example",
+                "--region",
+                "us-west-2",
+                "--guest-sessions-only",
+                "--dry-run",
+            ]
+        )
+
+    assert result == 0
+    assert applied == [
+        {
+            "endpoint": "ep.example",
+            "region": "us-west-2",
+            "database": "postgres",
+            "admin_user": "admin",
+            "dry_run": True,
+        }
+    ]
+    output = capsys.readouterr().out
+    assert "Dry run only" in output
 
 
 def test_column_default_is_zero_recognizes_catalog_forms():

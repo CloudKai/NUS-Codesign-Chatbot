@@ -20,6 +20,10 @@ compatibility wrappers over ``notebooks`` so API and UI churn stays limited.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import json
 import shutil
 import sqlite3
 import threading
@@ -43,6 +47,7 @@ from .persistence.store.contracts import (
     dump_json as _dump,
     load_json as _load,
     utc_now,
+    utc_now_after,
 )
 from .persistence.store.sqlite_schema import (
     NOTEBOOK_CHILD_DELETE_PLAN,
@@ -51,13 +56,22 @@ from .persistence.store.sqlite_schema import (
 from .persistence.store.operations import StoreOperations, bind_store_operations
 from .persistence.store.migrations import (
     migrate_message_revisions,
+    migrate_guest_claim_columns,
     migrate_notebook_revision,
     migrate_oauth_login_states,
     migrate_users_table,
     repair_misbound_notebook_foreign_key,
 )
+from .persistence.guest_sessions import (
+    GUEST_SESSION_TTL,
+    guest_secret_digest,
+    guest_time_text,
+    new_guest_owner_identifier,
+    new_guest_secret,
+    normalize_guest_time,
+)
 from .settings import settings
-from .student_journey import DEFAULT_RESPONSE_DETAIL, DEFAULT_STAGE
+from .student_journey import DEFAULT_RESPONSE_DETAIL, DEFAULT_STAGE, normalize_journey
 from . import workflow_contract as _workflow_contract
 from .workflow_contract import workflow_contract_is_ready, workflow_contract_payload
 
@@ -67,6 +81,79 @@ if TYPE_CHECKING:
 
 RESEARCH_WORKFLOW_CONTRACT_KEY = _workflow_contract.WORKFLOW_CONTRACT_KEY
 RESEARCH_WORKFLOW_CONTRACT_VERSION = _workflow_contract.WORKFLOW_CONTRACT_VERSION
+
+_MESSAGE_PAGE_DEFAULT_LIMIT = 6
+_MESSAGE_PAGE_MAX_LIMIT = 100
+_MESSAGE_PAGE_CURSOR_VERSION = 1
+
+
+class MessagePageCursorError(ValueError):
+    """Raised when a history-page cursor is malformed or not notebook-bound."""
+
+    status_code = 400
+
+
+class MessagePageRevisionConflictError(MessagePageCursorError):
+    """Raised when a history-page cursor belongs to an older revision."""
+
+    status_code = 409
+
+
+def _encode_message_page_cursor(
+    *,
+    thread_id: str,
+    revision: int,
+    created_at: str,
+    message_id: str,
+) -> str:
+    """Encode a private keyset position bound to one notebook revision."""
+    payload = {
+        "v": _MESSAGE_PAGE_CURSOR_VERSION,
+        "thread_id": str(thread_id),
+        "revision": int(revision),
+        "created_at": str(created_at),
+        "message_id": str(message_id),
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_message_page_cursor(value: str) -> dict[str, Any]:
+    """Decode and minimally validate an opaque message-page cursor."""
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("Invalid message cursor")
+    try:
+        padded = text + "=" * (-len(text) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+    except (ValueError, TypeError, UnicodeDecodeError, binascii.Error) as error:
+        raise ValueError("Invalid message cursor") from error
+    if not isinstance(decoded, dict) or decoded.get("v") != _MESSAGE_PAGE_CURSOR_VERSION:
+        raise ValueError("Invalid message cursor")
+    thread_id = str(decoded.get("thread_id") or "").strip()
+    created_at = str(decoded.get("created_at") or "")
+    message_id = str(decoded.get("message_id") or "").strip()
+    try:
+        revision = int(decoded.get("revision"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Invalid message cursor") from error
+    if not thread_id or revision < 0 or not created_at or not message_id:
+        raise ValueError("Invalid message cursor")
+    return {
+        "thread_id": thread_id,
+        "revision": revision,
+        "created_at": created_at,
+        "message_id": message_id,
+    }
+
+
+def _utc_now_datetime() -> datetime:
+    """Return timezone-aware UTC now for lease expiry.
+
+    Tests monkeypatch this function to control reclaim timing without sleeps.
+    Message ``created_at`` stamps still use :func:`utc_now`.
+    """
+    return datetime.now(timezone.utc)
 
 
 class StudentStore:
@@ -91,6 +178,7 @@ class StudentStore:
         self._operations: StoreOperations = bind_store_operations(self)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            migrate_guest_claim_columns(connection)
             self._migrate_oauth_login_states(connection)
             self._migrate_users_table(connection)
             self._migrate_notebooks_conversation_revision(connection)
@@ -135,6 +223,375 @@ class StudentStore:
             raise RuntimeError(
                 "Research workflow contract is not ready; use explicit reset/bootstrap"
             )
+
+    def create_guest_session(
+        self, *, now: datetime | None = None
+    ) -> tuple[str, str]:
+        """Create a guest owner and return its owner id and one-time secret.
+
+        The raw secret is returned only to the caller and is never stored. The
+        owner identifier and 400-day expiry are generated by the server.
+        """
+        moment = normalize_guest_time(now)
+        created_at = guest_time_text(moment)
+        expires_at = guest_time_text(moment + GUEST_SESSION_TTL)
+        secret = new_guest_secret()
+        digest = guest_secret_digest(secret)
+        identifier = new_guest_owner_identifier()
+        owner_id = str(uuid.uuid4())
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "INSERT INTO users (id, identifier, display_name, role, "
+                "preferences_text, created_at) VALUES (?, ?, ?, 'student', ?, ?)",
+                (
+                    owner_id,
+                    identifier,
+                    "Guest workspace",
+                    _dump({"role": "student", "auth": "guest"}),
+                    created_at,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO guest_sessions "
+                "(token_digest, owner_user_id, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?)",
+                (digest, owner_id, created_at, expires_at),
+            )
+        return owner_id, secret
+
+    def validate_guest_session(
+        self, secret: str, *, now: datetime | None = None
+    ) -> str | None:
+        """Resolve a valid, non-revoked guest secret to its persisted owner."""
+        if not isinstance(secret, str) or not secret:
+            return None
+        now_text = guest_time_text(normalize_guest_time(now))
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT owner_user_id FROM guest_sessions "
+                "WHERE token_digest=? AND revoked_at IS NULL AND claim_operation_id IS NULL "
+                "AND expires_at>?",
+                (guest_secret_digest(secret), now_text),
+            ).fetchone()
+        return str(row["owner_user_id"]) if row else None
+
+    def renew_guest_session(
+        self, secret: str, *, now: datetime | None = None
+    ) -> bool:
+        """Slide a valid guest session expiry by 400 days; return success."""
+        if not isinstance(secret, str) or not secret:
+            return False
+        moment = normalize_guest_time(now)
+        now_text = guest_time_text(moment)
+        expires_at = guest_time_text(moment + GUEST_SESSION_TTL)
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE guest_sessions SET expires_at="
+                "CASE WHEN expires_at < ? THEN ? ELSE expires_at END "
+                "WHERE token_digest=? AND revoked_at IS NULL AND expires_at>?",
+                (
+                    expires_at,
+                    expires_at,
+                    guest_secret_digest(secret),
+                    now_text,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def revoke_guest_session(
+        self, secret: str, *, now: datetime | None = None
+    ) -> bool:
+        """Revoke a guest secret without deleting its owner or workspace."""
+        if not isinstance(secret, str) or not secret:
+            return False
+        revoked_at = guest_time_text(normalize_guest_time(now))
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE guest_sessions SET revoked_at=? "
+                "WHERE token_digest=? AND revoked_at IS NULL",
+                (revoked_at, guest_secret_digest(secret)),
+            )
+        return cursor.rowcount == 1
+
+    def _guest_claim_inventory(self, connection: Any, guest_user_id: str) -> dict[str, Any]:
+        """Read the transferable notebook/source inventory inside one transaction."""
+        notebooks = connection.execute(
+            "SELECT id, title, updated_at, conversation_revision FROM notebooks "
+            "WHERE user_id=? ORDER BY id", (guest_user_id,),
+        ).fetchall()
+        sources = connection.execute(
+            "SELECT id, notebook_id, kind, title, content_type, byte_size, object_key, "
+            "extracted_text_key, metadata_text, updated_at FROM sources WHERE notebook_id IN "
+            "(SELECT id FROM notebooks WHERE user_id=?) ORDER BY id", (guest_user_id,),
+        ).fetchall()
+        notebook_snapshot = [
+            (str(row["id"]), str(row["updated_at"]), int(row["conversation_revision"] or 0))
+            for row in notebooks
+        ]
+        source_snapshot = [
+            (str(row["id"]), row["object_key"], row["extracted_text_key"])
+            for row in sources
+        ]
+        preview_notebooks: list[dict[str, Any]] = []
+        sources_by_notebook: dict[str, list[Any]] = {}
+        for source in sources:
+            sources_by_notebook.setdefault(str(source["notebook_id"]), []).append(source)
+        for notebook in notebooks:
+            notebook_sources = sources_by_notebook.get(str(notebook["id"]), [])
+            preview_notebooks.append({
+                "notebook_id": str(notebook["id"]),
+                "title": str(notebook["title"] or "Untitled notebook"),
+                "files": [str(row["title"] or "Untitled file") for row in notebook_sources
+                          if str(row["kind"] or "") == "file"],
+            })
+        fingerprint_data = {
+            "notebooks": [dict(row) for row in notebooks],
+            "sources": [dict(row) for row in sources],
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(fingerprint_data, ensure_ascii=False, sort_keys=True, default=str,
+                       separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return {
+            "notebook_snapshot": notebook_snapshot,
+            "source_snapshot": source_snapshot,
+            "fingerprint": fingerprint,
+            "preview": {
+                "notebooks": preview_notebooks,
+                "notebook_count": len(preview_notebooks),
+                "file_count": sum(len(item["files"]) for item in preview_notebooks),
+            },
+        }
+
+    def create_guest_claim_preview(
+        self, *, secret: str, target_user_id: str
+    ) -> dict[str, Any] | None:
+        """Persist an expiring, account-bound preview without fencing guest access."""
+        if not secret:
+            return None
+        digest = guest_secret_digest(secret)
+        moment = normalize_guest_time()
+        now_text = guest_time_text(moment)
+        expires_at = guest_time_text(moment + timedelta(minutes=10))
+        with self._lock, self._connect() as connection:
+            session = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_digest=?",
+                (digest,),
+            ).fetchone()
+            if not session:
+                return None
+            if session["revoked_at"]:
+                if (str(session["claim_user_id"] or "") != target_user_id
+                    or str(session["claim_expires_at"] or "") <= now_text):
+                    return None
+                completed = _load(session["claim_result_text"], {})
+                return {
+                    "operation_id": str(session["claim_operation_id"] or ""),
+                    "already_claimed": True,
+                    **(completed if isinstance(completed, dict) else {}),
+                }
+            if str(session["expires_at"] or "") <= now_text:
+                return None
+            pending_user = str(session["claim_user_id"] or "")
+            pending_operation = str(session["claim_operation_id"] or "")
+            if pending_operation and pending_user != target_user_id:
+                return None
+            inventory = self._guest_claim_inventory(connection, str(session["owner_user_id"]))
+            operation_id = pending_operation or str(uuid.uuid4())
+            connection.execute(
+                "UPDATE guest_sessions SET preview_user_id=?, preview_operation_id=?, "
+                "preview_fingerprint=?, preview_expires_at=? WHERE token_digest=?",
+                (target_user_id, operation_id, inventory["fingerprint"], expires_at, digest),
+            )
+        return {"operation_id": operation_id, **inventory["preview"]}
+
+    def begin_guest_claim(
+        self, *, secret: str, target_user_id: str, operation_id: str
+    ) -> dict[str, Any] | None:
+        """Fence guest workspace writes and return the transfer inventory snapshot."""
+        digest = guest_secret_digest(secret)
+        now_text = guest_time_text(normalize_guest_time())
+        with self._lock, self._connect() as connection:
+            session = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_digest=?", (digest,)
+            ).fetchone()
+            if not session or session["revoked_at"] or str(session["expires_at"]) <= now_text:
+                return None
+            existing_user = str(session["claim_user_id"] or "")
+            existing_op = str(session["claim_operation_id"] or "")
+            if existing_op and existing_user != target_user_id:
+                return None
+            pending_same_operation = existing_user == target_user_id and existing_op == operation_id
+            if (str(session["preview_user_id"] or "") != target_user_id
+                or str(session["preview_operation_id"] or "") != operation_id
+                or (str(session["preview_expires_at"] or "") <= now_text
+                    and not pending_same_operation)):
+                return None
+            inventory = self._guest_claim_inventory(connection, str(session["owner_user_id"]))
+            if str(session["preview_fingerprint"] or "") != inventory["fingerprint"]:
+                return {"preview_changed": True}
+            # New claim operations set the fence. Existing same-account retries
+            # retain their fence across process restarts.
+            connection.execute(
+                "UPDATE guest_sessions SET claim_user_id=?, claim_operation_id=? "
+                "WHERE token_digest=? AND revoked_at IS NULL",
+                (target_user_id, operation_id, digest),
+            )
+            guest_user_id = str(session["owner_user_id"])
+        return {
+            "guest_user_id": guest_user_id,
+            "notebooks": inventory["notebook_snapshot"],
+            "sources": inventory["source_snapshot"],
+            "fingerprint": inventory["fingerprint"],
+            "expires_at": str(session["expires_at"]),
+        }
+
+    def release_guest_claim(
+        self, *, secret: str, target_user_id: str, operation_id: str
+    ) -> bool:
+        """Release a pending fence only for its Cognito owner and guest credential."""
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE guest_sessions SET claim_user_id=NULL, claim_operation_id=NULL "
+                "WHERE token_digest=? AND revoked_at IS NULL AND claim_user_id=? "
+                "AND claim_operation_id=?",
+                (guest_secret_digest(secret), target_user_id, operation_id),
+            )
+        return cursor.rowcount == 1
+
+    def guest_claim_cleanup_info(
+        self, *, secret: str, target_user_id: str, operation_id: str
+    ) -> tuple[str, list[str]] | None:
+        """Return cleanup identifiers only for this owner's claim tombstone."""
+        with self._connect() as connection:
+            session = connection.execute(
+                "SELECT owner_user_id, claim_result_text FROM guest_sessions "
+                "WHERE token_digest=? AND revoked_at IS NOT NULL "
+                "AND claim_user_id=? AND claim_operation_id=?",
+                (guest_secret_digest(secret), target_user_id, operation_id),
+            ).fetchone()
+        if not session:
+            return None
+        result = _load(session["claim_result_text"], {})
+        notebook_ids = result.get("notebook_ids", []) if isinstance(result, dict) else []
+        return str(session["owner_user_id"]), [str(value) for value in notebook_ids]
+
+    def guest_claim_transfer(
+        self, *, secret: str, target_user_id: str, operation_id: str,
+        expected_sources: list[tuple[str, str | None, str | None]],
+        expected_notebooks: list[tuple[str, str, int]],
+        expected_fingerprint: str,
+        key_map: dict[str, str],
+    ) -> dict[str, Any] | None:
+        """Atomically transfer notebooks, source references, and claim fence.
+
+        Copies are performed and verified by the application before this method.
+        A source snapshot mismatch aborts without changing ownership so the
+        request can be retried with a fresh copy plan. A valid guest active
+        notebook becomes the account's active notebook in that same commit.
+        """
+        digest = guest_secret_digest(secret)
+        now_text = guest_time_text(normalize_guest_time())
+        with self._lock, self._connect() as connection:
+            session = connection.execute(
+                "SELECT * FROM guest_sessions WHERE token_digest=?", (digest,)
+            ).fetchone()
+            if not session:
+                return None
+            if session["revoked_at"]:
+                if (str(session["claim_user_id"] or "") == target_user_id
+                    and str(session["claim_operation_id"] or "") == operation_id
+                    and str(session["claim_expires_at"] or "") > now_text):
+                    return _load(session["claim_result_text"], {})
+                return None
+            if str(session["expires_at"] or "") <= now_text:
+                return None
+            if (str(session["claim_user_id"] or "") != target_user_id
+                or str(session["claim_operation_id"] or "") != operation_id):
+                return None
+            guest_user_id = str(session["owner_user_id"])
+            sources = connection.execute(
+                "SELECT id, notebook_id, object_key, extracted_text_key "
+                "FROM sources WHERE notebook_id IN "
+                "(SELECT id FROM notebooks WHERE user_id=?) ORDER BY id",
+                (guest_user_id,),
+            ).fetchall()
+            actual = sorted((str(row["id"]), row["object_key"], row["extracted_text_key"]) for row in sources)
+            if actual != sorted(expected_sources):
+                raise ValueError("Guest workspace changed during claim; retry preview")
+            notebook_rows = connection.execute(
+                "SELECT id, updated_at, conversation_revision FROM notebooks "
+                "WHERE user_id=? ORDER BY id", (guest_user_id,)
+            ).fetchall()
+            actual_notebooks = [(str(r["id"]), str(r["updated_at"]), int(r["conversation_revision"] or 0)) for r in notebook_rows]
+            if actual_notebooks != sorted(expected_notebooks):
+                raise ValueError("Guest workspace changed during claim; retry preview")
+            if self._guest_claim_inventory(connection, guest_user_id)["fingerprint"] != expected_fingerprint:
+                raise ValueError("Guest workspace changed during claim; retry preview")
+            for row in sources:
+                source_id = str(row["id"])
+                object_key = row["object_key"]
+                extracted_key = row["extracted_text_key"]
+                new_object = key_map.get(str(object_key), object_key) if object_key else None
+                new_extracted = key_map.get(str(extracted_key), extracted_key) if extracted_key else None
+                metadata = connection.execute(
+                    "SELECT metadata_text FROM sources WHERE id=?", (source_id,)
+                ).fetchone()
+                payload = _load(metadata["metadata_text"] if metadata else None, {})
+                if isinstance(payload, dict):
+                    for field in ("object_key", "extracted_text_key"):
+                        value = payload.get(field)
+                        if value and str(value) in key_map:
+                            payload[field] = key_map[str(value)]
+                connection.execute(
+                    "UPDATE sources SET object_key=?, extracted_text_key=?, metadata_text=? "
+                    "WHERE id=?", (new_object, new_extracted, _dump(payload), source_id)
+                )
+            notebooks = connection.execute(
+                "SELECT id FROM notebooks WHERE user_id=? ORDER BY id", (guest_user_id,)
+            ).fetchall()
+            notebook_ids = [str(row["id"]) for row in notebooks]
+            guest_preferences_row = connection.execute(
+                "SELECT preferences_text FROM users WHERE id=?", (guest_user_id,)
+            ).fetchone()
+            guest_preferences = _load(
+                guest_preferences_row["preferences_text"] if guest_preferences_row else None,
+                {},
+            )
+            active_guest_notebook = (
+                str(guest_preferences.get("active_thread_id") or "").strip()
+                if isinstance(guest_preferences, dict) else ""
+            )
+            for notebook_id in notebook_ids:
+                connection.execute("UPDATE notebooks SET user_id=? WHERE id=? AND user_id=?",
+                                   (target_user_id, notebook_id, guest_user_id))
+            if active_guest_notebook in notebook_ids:
+                account_preferences_row = connection.execute(
+                    "SELECT preferences_text FROM users WHERE id=?", (target_user_id,)
+                ).fetchone()
+                account_preferences = _load(
+                    account_preferences_row["preferences_text"]
+                    if account_preferences_row else None,
+                    {},
+                )
+                if not isinstance(account_preferences, dict):
+                    account_preferences = {}
+                connection.execute(
+                    "UPDATE users SET preferences_text=?, updated_at=? WHERE id=?",
+                    (
+                        _dump({**account_preferences, "active_thread_id": active_guest_notebook}),
+                        utc_now(),
+                        target_user_id,
+                    ),
+                )
+            result = {"notebook_ids": notebook_ids, "notebook_count": len(notebook_ids)}
+            connection.execute(
+                "UPDATE guest_sessions SET revoked_at=?, claim_user_id=?, "
+                "claim_operation_id=?, claim_result_text=?, claim_expires_at=expires_at "
+                "WHERE token_digest=? AND revoked_at IS NULL",
+                (now_text, target_user_id, operation_id, _dump(result), digest),
+            )
+        return result
 
     def _bound_operations(self) -> StoreOperations:
         """Return operation groups, binding lazily for legacy test constructors."""
@@ -270,6 +727,86 @@ class StudentStore:
             isinstance(meta, dict)
             and meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER
         )
+
+    @classmethod
+    def _message_is_visible(cls, row: Any) -> bool:
+        """Return whether a persisted row belongs in the student transcript.
+
+        Coach idempotency reservations and empty assistant transition
+        skeletons are implementation details.  Keeping this predicate in the
+        store makes full and paginated history projections agree.
+        """
+        meta = _load(row["metadata_text"], {})
+        if cls._is_coach_idempotency_marker_meta(meta):
+            return False
+        role = str(row["role"] or "").strip().lower()
+        if role == "assistant":
+            try:
+                has_content = bool(str(row["content"] or "").strip())
+            except (KeyError, IndexError, TypeError):
+                has_content = bool(row["has_content"])
+            if not has_content:
+                return False
+        return True
+
+    @staticmethod
+    def _message_source_ids(row: Any, meta: dict[str, Any]) -> list[str]:
+        """Extract stable source/attachment ids from one message row."""
+        values: list[Any] = []
+        cited = _load(row["cited_source_ids_text"], None)
+        if cited is not None:
+            values.append(cited)
+        for key in ("source_ids", "attachment_source_ids", "source_refs", "attachments"):
+            if key in meta:
+                values.append(meta.get(key))
+
+        source_ids: list[str] = []
+        seen: set[str] = set()
+
+        def add(value: Any) -> None:
+            if isinstance(value, str):
+                candidate = value.strip()
+                if candidate and candidate not in seen:
+                    seen.add(candidate)
+                    source_ids.append(candidate)
+                return
+            if isinstance(value, dict):
+                for key in ("id", "source_id", "sourceId"):
+                    if value.get(key):
+                        add(value[key])
+                        break
+                return
+            if isinstance(value, (list, tuple, set)):
+                for item in value:
+                    add(item)
+
+        for value in values:
+            add(value)
+        return source_ids
+
+    @staticmethod
+    def _message_slim_projection(row: Any) -> dict[str, Any]:
+        """Build the metadata-only shape consumed by the HMW projection."""
+        meta = _load(row["metadata_text"], {})
+        if not isinstance(meta, dict):
+            meta = {}
+        assessment = _load(row["assessment_text"], None)
+        if isinstance(assessment, dict):
+            meta = dict(meta)
+            meta["assessment"] = assessment
+        cited = _load(row["cited_source_ids_text"], None)
+        if cited is not None:
+            meta = dict(meta)
+            meta["source_refs"] = cited
+        has_content = row["has_content"] if "has_content" in row.keys() else bool(
+            str(row["content"] or "").strip()
+        )
+        return {
+            "id": str(row["id"]),
+            "role": str(row["role"]),
+            "content": "visible" if bool(has_content) else "",
+            "metadata": meta,
+        }
 
     @staticmethod
     def _collect_idempotency_keys_from_meta(meta: Any) -> list[str]:
@@ -809,7 +1346,7 @@ class StudentStore:
     ) -> str:
         """Create a notebook and return its id (``thread_id`` compatibility).
 
-        New notebooks start on Strict coaching (``response_detail=long``).
+        New notebooks start on Guide coaching (``response_detail=short``).
         """
         from backend.student_journey import DEFAULT_STAGE
 
@@ -1059,6 +1596,1019 @@ class StudentStore:
                 ),
             )
 
+    _SETTINGS_MERGE_ATTEMPTS = 8
+
+    def _update_settings_text_only(
+        self,
+        connection: Any,
+        thread_id: str,
+        row: Any,
+        metadata: dict[str, Any],
+    ) -> bool:
+        """Write ``settings_text`` without changing stage or conversation revision.
+
+        The live ``current_stage`` column is copied into the metadata blob so
+        ``_split_notebook_metadata`` cannot persist a stale journey stage. The
+        UPDATE predicate uses ``updated_at`` so a concurrent settings writer
+        forces a retry instead of last-write-wins.
+
+        Args:
+            connection: Open store connection.
+            thread_id: Owned notebook id.
+            row: Notebooks row selected in this transaction.
+            metadata: Merged metadata after the caller mutated settings keys.
+
+        Returns:
+            ``True`` when one owned row was updated.
+        """
+        live_stage = str(row["current_stage"] or DEFAULT_STAGE)
+        journey = dict(metadata.get("learning_journey") or {})
+        journey["current_stage"] = live_stage
+        metadata["learning_journey"] = journey
+        metadata["thinking_stage"] = live_stage
+        _, _, settings_text = self._split_notebook_metadata(metadata)
+        now = utc_now()
+        expected_updated_at = row["updated_at"]
+        if expected_updated_at:
+            updated = connection.execute(
+                """
+                UPDATE notebooks
+                SET settings_text=?, updated_at=?
+                WHERE id=? AND user_id=? AND updated_at=?
+                """,
+                (
+                    settings_text,
+                    now,
+                    thread_id,
+                    self.owner_id,
+                    expected_updated_at,
+                ),
+            )
+        else:
+            updated = connection.execute(
+                """
+                UPDATE notebooks
+                SET settings_text=?, updated_at=?
+                WHERE id=? AND user_id=?
+                """,
+                (settings_text, now, thread_id, self.owner_id),
+            )
+        return int(getattr(updated, "rowcount", 0) or 0) > 0
+
+    def start_or_get_deep_review_job(
+        self,
+        thread_id: str,
+        *,
+        review_id: str,
+        reviewed_revision: int,
+        stage_at_start: str,
+        source_ids: list[str],
+        message_ids: list[str],
+        base_checkpoint_revision: int | None = None,
+        base_checkpoint_version: int | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Persist a queued Deep Review job, or return the in-flight job.
+
+        Does not insert transcript rows or change ``current_stage`` /
+        ``conversation_revision``. Duplicate starts while a job is queued or
+        running reuse that job.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Candidate id used only when this call creates a job.
+            reviewed_revision: Conversation revision frozen at enqueue.
+            stage_at_start: Thinking Path stage at enqueue.
+            source_ids: Selected source ids frozen at enqueue.
+            message_ids: Active message ids frozen at enqueue.
+            base_checkpoint_revision: Prior checkpoint revision frozen at
+                enqueue, when a checkpoint-capable snapshot exists.
+            base_checkpoint_version: Prior checkpoint version frozen at enqueue.
+
+        Returns:
+            ``(job, created)`` where *created* is ``True`` only for a new job.
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_KEY,
+            deep_review_job_is_active,
+            new_deep_review_job,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        if not cleaned_id:
+            raise ValueError("review_id is required")
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                existing = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if deep_review_job_is_active(existing):
+                    return existing, False
+                job = new_deep_review_job(
+                    review_id=cleaned_id,
+                    reviewed_revision=reviewed_revision,
+                    stage_at_start=stage_at_start,
+                    source_ids=source_ids,
+                    message_ids=message_ids,
+                    started_at=utc_now(),
+                    base_checkpoint_revision=base_checkpoint_revision,
+                    base_checkpoint_version=base_checkpoint_version,
+                )
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return job, True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be queued"
+        )
+
+    def mark_deep_review_job_running(self, thread_id: str, review_id: str) -> bool:
+        """Mark a queued Deep Review job running for *review_id*.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id that must still own the in-flight slot.
+
+        Returns:
+            ``True`` when this worker claimed the running state.
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_KEY,
+            DEEP_REVIEW_JOB_QUEUED,
+            DEEP_REVIEW_JOB_RUNNING,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return False
+                status = str(job.get("status") or "")
+                if status == DEEP_REVIEW_JOB_RUNNING:
+                    return True
+                if status != DEEP_REVIEW_JOB_QUEUED:
+                    return False
+                job["status"] = DEEP_REVIEW_JOB_RUNNING
+                job["updated_at"] = utc_now()
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could start"
+        )
+
+    def complete_deep_review_job(
+        self,
+        thread_id: str,
+        *,
+        review_id: str,
+        snapshot: dict[str, Any],
+    ) -> None:
+        """Persist a Deep Review snapshot and mark the job completed.
+
+        Resets ``coaching_turns_since_deep_review`` to ``0``. Does not insert
+        messages, change ``current_stage``, or require a matching
+        ``conversation_revision``.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id that must still own the in-flight slot.
+            snapshot: Validated ``deep_review_snapshot`` payload.
+
+        Raises:
+            ValueError: When the notebook is missing.
+            ConversationRevisionConflictError: When settings could not be saved.
+        """
+        from backend.specialists.review_orchestration import (
+            COUNTER_SETTINGS_KEY,
+            DEEP_REVIEW_JOB_COMPLETED,
+            DEEP_REVIEW_JOB_FAILED,
+            DEEP_REVIEW_JOB_KEY,
+            DEEP_REVIEW_SNAPSHOT_KEY,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        if not isinstance(snapshot, dict) or not snapshot:
+            raise ValueError("Deep Review snapshot is required")
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return
+                if str(job.get("status") or "") in {
+                    DEEP_REVIEW_JOB_COMPLETED,
+                    DEEP_REVIEW_JOB_FAILED,
+                }:
+                    return
+                now = utc_now()
+                job["status"] = DEEP_REVIEW_JOB_COMPLETED
+                job["updated_at"] = now
+                job["error_code"] = None
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                metadata[DEEP_REVIEW_SNAPSHOT_KEY] = dict(snapshot)
+                metadata[COUNTER_SETTINGS_KEY] = 0
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be saved"
+        )
+
+    def fail_deep_review_job(
+        self,
+        thread_id: str,
+        *,
+        review_id: str,
+        error_code: str,
+    ) -> None:
+        """Mark a Deep Review job failed without changing the counter or snapshot.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id that must still own the in-flight slot.
+            error_code: Privacy-safe failure code such as ``review_timeout``.
+
+        Raises:
+            ValueError: When the notebook is missing.
+            ConversationRevisionConflictError: When settings could not be saved.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_COMPLETED,
+            DEEP_REVIEW_JOB_FAILED,
+            DEEP_REVIEW_JOB_KEY,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        cleaned_error = str(error_code or "").strip() or "review_failed"
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return
+                if str(job.get("status") or "") == DEEP_REVIEW_JOB_COMPLETED:
+                    return
+                job["status"] = DEEP_REVIEW_JOB_FAILED
+                job["updated_at"] = utc_now()
+                job["error_code"] = cleaned_error
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be marked failed"
+        )
+
+    def start_or_get_stage_review_job(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        notebook_revision: int | None = None,
+        job_id: str | None = None,
+        reason: str = "completion",
+        target_token: str | None = None,
+        message_ids: list[str] | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Mark one stage review as queued, or return the in-flight/complete job.
+
+        When a completed checkpoint's ``conversation_revision`` is older than
+        ``notebook_revision``, the job is re-queued so a revisit can replace
+        that stage's Review slice.
+
+        Args:
+            thread_id: Owned notebook id.
+            stage_id: Completed Thinking Path stage id.
+            notebook_revision: Conversation revision used for revisit refresh.
+                Defaults to the notebook's current revision when omitted.
+            job_id: Optional durable fencing id. A new id is generated when
+                omitted; old callers remain compatible.
+            reason: ``completion`` or ``revisit_exit`` metadata for the job.
+            target_token: Optional revisit-dirty token represented by the job.
+            message_ids: Optional frozen active stage-message ids.
+
+        Returns:
+            ``(blob, created)`` where *created* is ``True`` only when this call
+            newly queued the stage.
+
+        Raises:
+            ValueError: Missing notebook or unknown stage.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_REASON_COMPLETION,
+            STAGE_REVIEW_QUEUED,
+            STAGE_REVIEW_SCOPE_VERSION,
+            parse_journey_stage_reviews,
+            stage_review_should_enqueue,
+        )
+        from backend.student_journey import STAGE_BY_ID
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        now = utc_now()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                thread = self._thread_dict(row)
+                metadata = dict(thread.get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                if notebook_revision is None:
+                    try:
+                        revision = int(thread.get("conversation_revision") or 0)
+                    except (TypeError, ValueError):
+                        revision = 0
+                else:
+                    try:
+                        revision = int(notebook_revision)
+                    except (TypeError, ValueError):
+                        revision = 0
+                if not stage_review_should_enqueue(
+                    blob,
+                    stage_id=cleaned_stage,
+                    notebook_revision=revision,
+                ):
+                    return blob, False
+                cleaned_job_id = str(job_id or uuid.uuid4()).strip() or str(uuid.uuid4())
+                frozen_message_ids = [
+                    str(item).strip()
+                    for item in (message_ids or [])
+                    if str(item).strip()
+                ][:256]
+                if message_ids is None:
+                    frozen_message_ids = self._stage_message_ids(
+                        connection,
+                        thread_id=thread_id,
+                        stage_id=cleaned_stage,
+                        active_revision=revision,
+                    )
+                blob["jobs"][cleaned_stage] = {
+                    "status": STAGE_REVIEW_QUEUED,
+                    "job_id": cleaned_job_id,
+                    "review_id": cleaned_job_id,
+                    "reason": str(reason or STAGE_REVIEW_REASON_COMPLETION).strip()
+                    or STAGE_REVIEW_REASON_COMPLETION,
+                    "target_token": str(target_token or "").strip() or None,
+                    "conversation_revision": max(0, revision),
+                    "message_ids": frozen_message_ids,
+                    "scope_frozen": True,
+                    "scope_version": STAGE_REVIEW_SCOPE_VERSION,
+                    "updated_at": now,
+                    "started_at": None,
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "error_code": None,
+                }
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return blob, True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could be queued"
+        )
+
+    def _stage_message_ids(
+        self,
+        connection: Any,
+        *,
+        thread_id: str,
+        stage_id: str,
+        active_revision: int,
+    ) -> list[str]:
+        """Return active message ids evidenced in one Thinking Path stage.
+
+        The list is captured inside the same transaction as a stage transition
+        or coach turn.  It is intentionally metadata-based so it works for
+        legacy rows and never copies private transcript content into settings.
+        """
+        rows = connection.execute(
+            f"""
+            SELECT id, metadata_text, assessment_text
+            FROM messages
+            WHERE notebook_id=?
+              AND {self._active_at_revision_sql()}
+            ORDER BY created_at ASC, id ASC
+            """,
+            (thread_id, active_revision, active_revision),
+        ).fetchall()
+        ids: list[str] = []
+        for row in rows:
+            metadata = _load(row["metadata_text"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            assessment = _load(row["assessment_text"], {})
+            if not isinstance(assessment, dict):
+                assessment = {}
+            row_stage = str(metadata.get("thinking_stage") or "").strip()
+            assessed_stage = str(assessment.get("current_stage") or "").strip()
+            if row_stage != stage_id and assessed_stage != stage_id:
+                continue
+            message_id = str(row["id"] or "").strip()
+            if message_id:
+                ids.append(message_id)
+        return ids[-256:]
+
+    @staticmethod
+    def _stage_review_job_id(job: dict[str, Any] | None) -> str:
+        """Return the durable fencing id from one normalized stage job."""
+        if not isinstance(job, dict):
+            return ""
+        return str(job.get("job_id") or job.get("review_id") or "").strip()
+
+    def _queue_stage_review_in_metadata(
+        self,
+        connection: Any,
+        *,
+        thread_id: str,
+        metadata: dict[str, Any],
+        stage_id: str,
+        active_revision: int,
+        reason: str,
+        target_token: str | None = None,
+        force: bool = False,
+    ) -> tuple[dict[str, Any], bool]:
+        """Queue one fenced stage review while the caller owns a DB transaction.
+
+        This helper mutates *metadata* only. The caller must persist the
+        notebook row in the same transaction, making stage-change + review
+        queue atomic for SQLite and the DSQL OCC wrapper.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_ACTIVE,
+            STAGE_REVIEW_REASON_COMPLETION,
+            STAGE_REVIEW_REASON_REVISIT_EXIT,
+            STAGE_REVIEW_QUEUED,
+            STAGE_REVIEW_SCOPE_VERSION,
+            parse_journey_stage_reviews,
+        )
+        from backend.student_journey import STAGE_BY_ID
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        cleaned_reason = str(reason or STAGE_REVIEW_REASON_COMPLETION).strip()
+        if cleaned_reason not in {
+            STAGE_REVIEW_REASON_COMPLETION,
+            STAGE_REVIEW_REASON_REVISIT_EXIT,
+        }:
+            cleaned_reason = STAGE_REVIEW_REASON_COMPLETION
+        blob = parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+        existing = dict(blob["jobs"].get(cleaned_stage) or {})
+        existing_status = str(existing.get("status") or "").strip().lower()
+        cleaned_token = str(target_token or "").strip() or None
+        dirty = dict(blob.get("revisit_dirty", {}).get(cleaned_stage) or {})
+        dirty_token = str(dirty.get("token") or "").strip() or None
+        if (
+            force
+            and cleaned_reason == STAGE_REVIEW_REASON_COMPLETION
+            and dirty_token
+        ):
+            # A re-completion supersedes any older envelope, but its frozen
+            # scope must still absorb all substantive work recorded while the
+            # stage was complete.  Completion clears this exact token only
+            # after the new worker commits successfully.
+            cleaned_token = dirty_token
+        if existing_status in STAGE_REVIEW_ACTIVE and not (
+            force and cleaned_reason == STAGE_REVIEW_REASON_COMPLETION
+        ):
+            # At most one worker may run a stage job. A newer revisit token is
+            # retained in ``revisit_dirty`` and will be flushed after this job
+            # completes (or on the next safe read/restart seam).
+            return blob, False
+        if not force and cleaned_reason == STAGE_REVIEW_REASON_REVISIT_EXIT:
+            if not dirty_token:
+                return blob, False
+            if cleaned_token and cleaned_token != dirty_token:
+                return blob, False
+            cleaned_token = dirty_token
+        if not force and cleaned_reason == STAGE_REVIEW_REASON_COMPLETION:
+            # A completion retry is allowed after ``failed``; a complete
+            # checkpoint remains idempotent unless the caller explicitly asks
+            # for a revisit refresh.
+            if existing_status == "complete":
+                return blob, False
+        frozen_message_ids = self._stage_message_ids(
+            connection,
+            thread_id=thread_id,
+            stage_id=cleaned_stage,
+            active_revision=max(0, int(active_revision)),
+        )
+        now = utc_now()
+        new_job_id = str(uuid.uuid4())
+        blob["jobs"][cleaned_stage] = {
+            "status": STAGE_REVIEW_QUEUED,
+            "job_id": new_job_id,
+            "review_id": new_job_id,
+            "reason": cleaned_reason,
+            "target_token": cleaned_token,
+            "conversation_revision": max(0, int(active_revision)),
+            "message_ids": frozen_message_ids,
+            "scope_frozen": True,
+            "scope_version": STAGE_REVIEW_SCOPE_VERSION,
+            "updated_at": now,
+            "started_at": None,
+            "lease_token": None,
+            "lease_expires_at": None,
+            "error_code": None,
+        }
+        metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+        return blob, True
+
+    def _mark_stage_review_dirty_in_metadata(
+        self,
+        metadata: dict[str, Any],
+        *,
+        stage_id: str,
+        conversation_revision: int,
+    ) -> str:
+        """Record one coalesced substantive revisit token in *metadata*."""
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            parse_journey_stage_reviews,
+        )
+
+        blob = parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+        token = str(uuid.uuid4())
+        blob["revisit_dirty"][str(stage_id).strip()] = {
+            "token": token,
+            "conversation_revision": max(0, int(conversation_revision)),
+            "updated_at": utc_now(),
+        }
+        metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+        return token
+
+    def mark_stage_review_running(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        job_id: str | None = None,
+        lease_token: str | None = None,
+    ) -> bool:
+        """Atomically claim one queued stage review for a worker.
+
+        ``job_id`` fences stale workers after a newer exit queues a refresh.
+        ``lease_token`` prevents two processes from executing the same durable
+        queued job concurrently.  The optional arguments preserve old callers.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_QUEUED,
+            STAGE_REVIEW_RUNNING,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        now = utc_now()
+        requested_job_id = str(job_id or "").strip()
+        requested_lease = str(lease_token or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                job = dict(blob["jobs"].get(cleaned_stage) or {})
+                status = str(job.get("status") or "")
+                current_job_id = self._stage_review_job_id(job)
+                if requested_job_id and current_job_id != requested_job_id:
+                    return False
+                if status == STAGE_REVIEW_RUNNING:
+                    # A running job is owned by the lease token that claimed
+                    # it.  A duplicate submit cannot execute concurrently.
+                    return bool(
+                        requested_lease
+                        and str(job.get("lease_token") or "").strip()
+                        == requested_lease
+                    )
+                if status != STAGE_REVIEW_QUEUED:
+                    return False
+                if not current_job_id:
+                    current_job_id = requested_job_id or str(uuid.uuid4())
+                worker_lease = requested_lease or str(uuid.uuid4())
+                job["status"] = STAGE_REVIEW_RUNNING
+                job["job_id"] = current_job_id
+                job["review_id"] = current_job_id
+                job["updated_at"] = now
+                job["started_at"] = now
+                job["lease_token"] = worker_lease
+                job["lease_expires_at"] = (
+                    _utc_now_datetime()
+                    + timedelta(
+                        seconds=max(1, int(settings.deep_review_job_timeout_seconds))
+                    )
+                ).isoformat()
+                blob["jobs"][cleaned_stage] = job
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could start"
+        )
+
+    def complete_stage_review_job(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        checkpoint: dict[str, Any],
+        job_id: str | None = None,
+        lease_token: str | None = None,
+    ) -> bool:
+        """Persist one successful Journey stage checkpoint and set unread.
+
+        Completion is fenced by ``job_id`` and, when supplied, the worker
+        ``lease_token``. A stale worker therefore cannot overwrite a newer
+        checkpoint. The optional arguments preserve the historical method
+        shape for local callers.
+
+        Returns:
+            ``True`` when this worker completed the current job; ``False`` when
+            the job was already replaced or finalized.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_COMPLETE,
+            STAGE_REVIEW_RUNNING,
+            normalize_stage_checkpoint,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        cleaned = normalize_stage_checkpoint(checkpoint, stage_id=cleaned_stage)
+        if cleaned is None:
+            raise ValueError("Stage checkpoint is empty")
+        requested_job_id = str(job_id or "").strip()
+        requested_lease = str(lease_token or "").strip()
+        now = utc_now()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                job = dict(blob["jobs"].get(cleaned_stage) or {})
+                current_job_id = self._stage_review_job_id(job)
+                if requested_job_id and current_job_id != requested_job_id:
+                    return False
+                if requested_lease and str(job.get("lease_token") or "").strip() != requested_lease:
+                    return False
+                status = str(job.get("status") or "").strip().lower()
+                if status in {STAGE_REVIEW_COMPLETE, "failed"}:
+                    return False
+                if requested_job_id and status != STAGE_REVIEW_RUNNING:
+                    return False
+                if requested_lease and status != STAGE_REVIEW_RUNNING:
+                    return False
+                blob["reviews"][cleaned_stage] = cleaned
+                completed_job = {
+                    "status": STAGE_REVIEW_COMPLETE,
+                    "job_id": current_job_id or requested_job_id or None,
+                    "review_id": current_job_id or requested_job_id or None,
+                    "reason": str(job.get("reason") or "completion").strip()
+                    or "completion",
+                    "target_token": str(job.get("target_token") or "").strip()
+                    or None,
+                    "conversation_revision": max(
+                        0, int(job.get("conversation_revision") or 0)
+                    ),
+                    "message_ids": list(job.get("message_ids") or [])[:256],
+                    "scope_frozen": job.get("scope_frozen") is True,
+                    "scope_version": max(
+                        0,
+                        int(job.get("scope_version") or 0),
+                    ),
+                    "updated_at": now,
+                    "started_at": job.get("started_at"),
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "error_code": None,
+                }
+                blob["jobs"][cleaned_stage] = completed_job
+                dirty = dict(blob.get("revisit_dirty", {}).get(cleaned_stage) or {})
+                target_token = str(job.get("target_token") or "").strip()
+                dirty_token = str(dirty.get("token") or "").strip()
+                if target_token and dirty_token == target_token:
+                    blob["revisit_dirty"].pop(cleaned_stage, None)
+                blob["unread"] = True
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could be saved"
+        )
+
+    def fail_stage_review_job(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        error_code: str = "review_failed",
+        job_id: str | None = None,
+        lease_token: str | None = None,
+    ) -> bool:
+        """Mark one stage review failed without rolling back completion.
+
+        The job and lease tokens fence failure writes just like successful
+        completion writes. Revisit-dirty work remains durable after failure so
+        a later safe read or stage exit can retry it.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_COMPLETE,
+            STAGE_REVIEW_FAILED,
+            STAGE_REVIEW_RUNNING,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        requested_job_id = str(job_id or "").strip()
+        requested_lease = str(lease_token or "").strip()
+        now = utc_now()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                prior_job = dict(blob["jobs"].get(cleaned_stage) or {})
+                current_job_id = self._stage_review_job_id(prior_job)
+                if requested_job_id and current_job_id != requested_job_id:
+                    return False
+                if requested_lease and str(prior_job.get("lease_token") or "").strip() != requested_lease:
+                    return False
+                status = str(prior_job.get("status") or "").strip().lower()
+                if status in {STAGE_REVIEW_COMPLETE, STAGE_REVIEW_FAILED}:
+                    return False
+                if requested_job_id and status != STAGE_REVIEW_RUNNING:
+                    return False
+                if requested_lease and status != STAGE_REVIEW_RUNNING:
+                    return False
+                blob["jobs"][cleaned_stage] = {
+                    "status": STAGE_REVIEW_FAILED,
+                    "job_id": current_job_id or requested_job_id or None,
+                    "review_id": current_job_id or requested_job_id or None,
+                    "reason": str(prior_job.get("reason") or "completion").strip()
+                    or "completion",
+                    "target_token": str(prior_job.get("target_token") or "").strip()
+                    or None,
+                    "conversation_revision": max(
+                        0, int(prior_job.get("conversation_revision") or 0)
+                    ),
+                    "message_ids": list(prior_job.get("message_ids") or [])[:256],
+                    "scope_frozen": prior_job.get("scope_frozen") is True,
+                    "scope_version": max(
+                        0,
+                        int(prior_job.get("scope_version") or 0),
+                    ),
+                    "updated_at": now,
+                    "started_at": prior_job.get("started_at"),
+                    "lease_token": None,
+                    "lease_expires_at": None,
+                    "error_code": str(error_code or "review_failed").strip()
+                    or "review_failed",
+                }
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could be marked failed"
+        )
+
+    def requeue_stage_review_job(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        job_id: str | None = None,
+    ) -> bool:
+        """Requeue one stale running stage job under its existing fencing id.
+
+        Requeue is used only after the bounded worker lease has expired. It
+        preserves the frozen target token and message ids so restart recovery
+        cannot silently broaden the review scope.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_QUEUED,
+            STAGE_REVIEW_RUNNING,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        requested_job_id = str(job_id or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                job = dict(blob["jobs"].get(cleaned_stage) or {})
+                current_job_id = self._stage_review_job_id(job)
+                if requested_job_id and current_job_id != requested_job_id:
+                    return False
+                if str(job.get("status") or "").strip().lower() != STAGE_REVIEW_RUNNING:
+                    return False
+                job["status"] = STAGE_REVIEW_QUEUED
+                job["updated_at"] = utc_now()
+                job["started_at"] = None
+                job["lease_token"] = None
+                job["lease_expires_at"] = None
+                job["error_code"] = None
+                blob["jobs"][cleaned_stage] = job
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could be requeued"
+        )
+
+    def flush_stage_review_revisit(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Queue one durable refresh for a previously marked stage revisit.
+
+        The method is intentionally explicit: callers invoke it only after an
+        actual stage exit or after a worker discovers newer dirty work.  A
+        missing marker is a no-op, so navigation and idempotent replay cannot
+        manufacture a Haiku request.
+
+        Returns:
+            ``(journey_stage_reviews, created)``.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_REASON_REVISIT_EXIT,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                thread = self._thread_dict(row)
+                metadata = dict(thread.get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                # This is the authoritative atomic exit guard.  A worker may
+                # finish after a student turn, but it must not manufacture a
+                # refresh while the student is still on the reviewed stage.
+                # The notebook row is read in the same write transaction that
+                # queues the successor, so a concurrent stage change cannot be
+                # decided from a stale service-side snapshot.
+                current_stage = str(row["current_stage"] or DEFAULT_STAGE).strip()
+                if current_stage == cleaned_stage:
+                    return blob, False
+                dirty = dict(blob.get("revisit_dirty", {}).get(cleaned_stage) or {})
+                token = str(dirty.get("token") or "").strip()
+                if not token:
+                    return blob, False
+                revision = self._notebook_revision_value(row)
+                queued_blob, created = self._queue_stage_review_in_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=metadata,
+                    stage_id=cleaned_stage,
+                    active_revision=revision,
+                    reason=STAGE_REVIEW_REASON_REVISIT_EXIT,
+                    target_token=token,
+                )
+                if not created:
+                    return queued_blob, False
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return queued_blob, True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review refresh could be queued"
+        )
+
+    def mark_journey_stage_reviews_read(self, thread_id: str) -> dict[str, Any]:
+        """Clear the Journey unread flag after the student views Journey.
+
+        Returns:
+            The updated ``journey_stage_reviews`` blob.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            parse_journey_stage_reviews,
+        )
+
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                if not blob["unread"]:
+                    return blob
+                blob["unread"] = False
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return blob
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Journey unread could be cleared"
+        )
+
     def select_learning_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
         """Set the notebook's current stage and reject active pending transitions.
 
@@ -1072,9 +2622,10 @@ class StudentStore:
             The updated notebook metadata dict (includes ``learning_journey``).
 
         Raises:
-            ValueError: When the notebook is missing or ``stage_id`` is unknown.
+            ValueError: When the notebook is missing, ``stage_id`` is unknown,
+                or the stage is beyond the student's unlocked frontier.
         """
-        from backend.student_journey import STAGE_BY_ID, normalize_journey, set_current_stage
+        from backend.student_journey import STAGE_BY_ID
 
         cleaned_stage = str(stage_id or "").strip()
         if cleaned_stage not in STAGE_BY_ID:
@@ -1089,21 +2640,34 @@ class StudentStore:
                 raise ValueError("Notebook not found")
             thread = self._thread_dict(row)
             current_meta = dict(thread.get("metadata") or {})
-            journey = normalize_journey(current_meta.get("learning_journey"))
-            next_journey = set_current_stage(journey, cleaned_stage)
-            current_meta["learning_journey"] = next_journey
-            current_meta["thinking_stage"] = cleaned_stage
             now = utc_now()
             active_revision = self._notebook_revision_value(row)
-            connection.execute(
-                f"""
-                UPDATE messages
-                SET decision_status='rejected', decision_at=?
-                WHERE notebook_id=? AND decision_status='pending'
-                  AND {self._active_at_revision_sql()}
-                """,
-                (now, thread_id, active_revision, active_revision),
+            prior_journey = dict(current_meta.get("learning_journey") or {})
+            prior_stage = str(
+                prior_journey.get("current_stage")
+                or row["current_stage"]
+                or DEFAULT_STAGE
+            ).strip()
+            current_meta = self._selected_learning_stage_metadata(
+                connection,
+                thread_id=thread_id,
+                metadata=current_meta,
+                stage_id=cleaned_stage,
+                active_revision=active_revision,
+                decision_at=now,
             )
+            if prior_stage != cleaned_stage:
+                # The marker is written by substantive turns while a completed
+                # stage is active.  Only an actual stage change flushes it;
+                # selecting the same stage is idempotent navigation.
+                self._queue_stage_review_in_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=current_meta,
+                    stage_id=prior_stage,
+                    active_revision=active_revision,
+                    reason="revisit_exit",
+                )
             current_stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
             )
@@ -1123,6 +2687,121 @@ class StudentStore:
                 ),
             )
             return current_meta
+
+    def validate_learning_stage_selection(self, thread_id: str, stage_id: str) -> None:
+        """Validate a stage selection without changing notebook state.
+
+        This read-only preflight protects idempotency reservations from being
+        created for locked exact chat commands.  The transactional
+        ``_selected_learning_stage_metadata`` seam remains authoritative and
+        repeats the same check immediately before any write.
+
+        Args:
+            thread_id: Owned notebook id.
+            stage_id: Canonical Thinking Path stage id.
+
+        Raises:
+            ValueError: When the notebook is missing, the stage is unknown, or
+                the stage is beyond the unlocked frontier.
+        """
+        from backend.student_journey import (
+            STAGE_BY_ID,
+            normalize_journey,
+            selectable_stage_ids,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Notebook not found")
+            metadata = self._thread_dict(row).get("metadata") or {}
+            journey = normalize_journey(metadata.get("learning_journey"))
+            allowed = set(selectable_stage_ids(journey))
+            active_revision = self._notebook_revision_value(row)
+            pending = connection.execute(
+                f"""
+                SELECT proposed_stage FROM messages
+                WHERE notebook_id=? AND decision_status='pending'
+                  AND {self._active_at_revision_sql()}
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (thread_id, active_revision, active_revision),
+            ).fetchone()
+            if pending is not None:
+                pending_to = str(pending["proposed_stage"] or "").strip()
+                if pending_to in STAGE_BY_ID:
+                    allowed.add(pending_to)
+            if cleaned_stage not in allowed:
+                raise ValueError(f"Thinking stage is locked: {cleaned_stage}")
+
+    def _selected_learning_stage_metadata(
+        self,
+        connection: Any,
+        *,
+        thread_id: str,
+        metadata: dict[str, Any],
+        stage_id: str,
+        active_revision: int,
+        decision_at: str,
+    ) -> dict[str, Any]:
+        """Return selected-stage metadata and reject active pending transitions.
+
+        The caller owns the surrounding transaction. Both the standalone
+        selection API and a persisted manual-selection chat turn use this
+        helper so their journey and pending-transition semantics cannot drift.
+        Stage authorization is validated before any pending-transition update
+        or metadata mutation, so an illegal request is fail-closed and atomic.
+        A pending Ready destination remains selectable even when
+        ``completed_stages`` briefly lags after revise.
+        """
+        from backend.student_journey import (
+            STAGE_BY_ID,
+            normalize_journey,
+            selectable_stage_ids,
+            set_current_stage,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        journey = normalize_journey(metadata.get("learning_journey"))
+        allowed = set(selectable_stage_ids(journey))
+        pending = connection.execute(
+            f"""
+            SELECT proposed_stage FROM messages
+            WHERE notebook_id=? AND decision_status='pending'
+              AND {self._active_at_revision_sql()}
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (thread_id, active_revision, active_revision),
+        ).fetchone()
+        if pending is not None:
+            pending_to = str(pending["proposed_stage"] or "").strip()
+            if pending_to in STAGE_BY_ID:
+                allowed.add(pending_to)
+        if cleaned_stage not in allowed:
+            raise ValueError(f"Thinking stage is locked: {cleaned_stage}")
+        selected = dict(metadata)
+        selected["learning_journey"] = set_current_stage(journey, cleaned_stage)
+        selected["thinking_stage"] = cleaned_stage
+        connection.execute(
+            f"""
+            UPDATE messages
+            SET decision_status='rejected', decision_at=?
+            WHERE notebook_id=? AND decision_status='pending'
+              AND {self._active_at_revision_sql()}
+            """,
+            (decision_at, thread_id, active_revision, active_revision),
+        )
+        return selected
 
     @staticmethod
     def _split_notebook_metadata(
@@ -1193,26 +2872,27 @@ class StudentStore:
         """Remove local and object-storage files owned by a deleted notebook."""
         from backend.persistence.factory import get_file_storage
         from backend.persistence.object_keys import notebook_prefix
+        from backend.sources.chunk_cache import invalidate_cached_chunks_for_prefix
 
-        if settings.file_storage_provider != "local":
-            get_file_storage().delete_prefix(
-                notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
-            )
-            return
-        # Local provider: remove both object-key tree (if used) and legacy dirs.
+        prefix = notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
         try:
-            get_file_storage().delete_prefix(
-                notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
-            )
-        except Exception:  # noqa: BLE001 - best-effort local cleanup
-            pass
-        for root, allowed in (
-            (settings.files_dir / "threads" / notebook_id, settings.files_dir),
-            (settings.workspaces_dir / notebook_id, settings.workspaces_dir),
-        ):
-            resolved = root.resolve()
-            if resolved.exists() and allowed in resolved.parents:
-                shutil.rmtree(resolved, ignore_errors=True)
+            if settings.file_storage_provider != "local":
+                get_file_storage().delete_prefix(prefix)
+                return
+            # Local provider: remove both object-key tree (if used) and legacy dirs.
+            try:
+                get_file_storage().delete_prefix(prefix)
+            except Exception:  # noqa: BLE001 - best-effort local cleanup
+                pass
+            for root, allowed in (
+                (settings.files_dir / "threads" / notebook_id, settings.files_dir),
+                (settings.workspaces_dir / notebook_id, settings.workspaces_dir),
+            ):
+                resolved = root.resolve()
+                if resolved.exists() and allowed in resolved.parents:
+                    shutil.rmtree(resolved, ignore_errors=True)
+        finally:
+            invalidate_cached_chunks_for_prefix(prefix)
 
     def add_message(
         self,
@@ -1267,8 +2947,19 @@ class StudentStore:
             ).fetchone()
             if existing:
                 # Bump created_at when materializing a pending-transition skeleton
-                # so the assistant reply sorts after the user turn. Preserve any
-                # existing revision stamp / predecessor / superseded markers.
+                # so the assistant reply sorts after the user turn. Anchor on the
+                # newest sibling: a bare utc_now() can tie with a user row written
+                # in the same microsecond, and the id tiebreaker is a random UUID.
+                # Preserve any existing revision stamp / predecessor / superseded
+                # markers.
+                newest = connection.execute(
+                    "SELECT MAX(created_at) AS newest FROM messages "
+                    "WHERE notebook_id=? AND id<>?",
+                    (thread_id, message_id),
+                ).fetchone()
+                skeleton_stamp = utc_now_after(
+                    str(newest["newest"]) if newest and newest["newest"] else ""
+                )
                 connection.execute(
                     """
                     UPDATE messages
@@ -1295,7 +2986,7 @@ class StudentStore:
                         decision_at,
                         _dump(meta),
                         content,
-                        now,
+                        skeleton_stamp,
                         message_id,
                         thread_id,
                     ),
@@ -1388,7 +3079,7 @@ class StudentStore:
             return True
         if expiry.tzinfo is None:
             return True
-        return expiry <= datetime.now(timezone.utc)
+        return expiry <= _utc_now_datetime()
 
     def _recorded_coach_turn(
         self,
@@ -1495,10 +3186,12 @@ class StudentStore:
             if (
                 isinstance(metadata, dict)
                 and metadata.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER
-                and metadata.get("status") == "completed"
             ):
                 turn = metadata.get("turn")
                 if isinstance(turn, dict):
+                    # persist_coach_turn saves the exact payload atomically
+                    # before complete_coach_request marks the lease complete.
+                    # Keep this lookup read-only; claim/complete owns promotion.
                     return turn
             recorded = self._recorded_coach_turn(
                 connection,
@@ -1535,7 +3228,7 @@ class StudentStore:
         *,
         idempotency_key: str,
         request_fingerprint: str,
-        lease_seconds: int = 180,
+        lease_seconds: int | None = None,
     ) -> CoachRequestReservation:
         """Reserve or replay an owned coach request without running a provider.
 
@@ -1544,11 +3237,31 @@ class StudentStore:
         reservation unique for the owner, notebook, and caller-provided key on
         both SQLite and Aurora DSQL.  Leases make a request recoverable after a
         worker or container restart; they never represent a completed turn.
+
+        ``lease_seconds`` defaults to
+        :attr:`backend.settings.Settings.coach_idempotency_lease_seconds`,
+        which is derived from AgentCore and Retrieve timeouts so the
+        reservation outlives the timeout-bounded Fast Chat path (two
+        Retrieves + two AgentCore invokes). A shorter hard-coded lease can
+        be reclaimed while the original worker is still running, which
+        discards a successful generation (``CoachRequestLeaseLostError``).
+
+        This DSQL/SQLite lease is the durable mutex. ``CoachRateLimiter`` is
+        process-local and must not be the only guard. Single-process
+        assumption: production starts one Uvicorn worker. If workers are
+        added, each process has its own in-memory limiter, so two workers
+        can both pass the notebook slot. Duplicate provider execution is
+        then prevented only while this lease is still valid. Keep the
+        derived lease above bounded execution; do not add workers without
+        treating this marker as the cross-process lock.
         """
         key = str(idempotency_key or "").strip()
         fingerprint = str(request_fingerprint or "").strip()
         if not key or not fingerprint:
             raise ValueError("Coach idempotency key and fingerprint are required")
+        if lease_seconds is None:
+            lease_seconds = int(settings.coach_idempotency_lease_seconds)
+        lease_seconds = int(lease_seconds)
         if lease_seconds < 1:
             raise ValueError("Coach idempotency lease must be positive")
         marker_id = self._coach_marker_id(thread_id, key)
@@ -1584,7 +3297,7 @@ class StudentStore:
                     "status": "pending",
                     "lease_token": lease_token,
                     "lease_expires_at": (
-                        datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+                        _utc_now_datetime() + timedelta(seconds=lease_seconds)
                     ).isoformat(),
                 }
                 connection.execute(
@@ -1635,6 +3348,19 @@ class StudentStore:
                 raise CoachIdempotencyConflictError(
                     "Idempotency key was already used for a different coach request"
                 )
+            completed = metadata.get("turn")
+            if isinstance(completed, dict):
+                if metadata.get("status") != "completed":
+                    metadata.update({"status": "completed"})
+                    metadata.pop("lease_token", None)
+                    metadata.pop("lease_expires_at", None)
+                    connection.execute(
+                        "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                        (_dump(metadata), marker_id, thread_id),
+                    )
+                return CoachRequestReservation(
+                    "completed", marker_id, turn_payload=completed
+                )
             recorded = self._recorded_coach_turn(
                 connection,
                 thread_id,
@@ -1652,11 +3378,6 @@ class StudentStore:
                 return CoachRequestReservation(
                     "completed", marker_id, turn_payload=recorded
                 )
-            completed = metadata.get("turn")
-            if metadata.get("status") == "completed" and isinstance(completed, dict):
-                return CoachRequestReservation(
-                    "completed", marker_id, turn_payload=completed
-                )
             if (
                 metadata.get("status") == "pending"
                 and not self._coach_request_has_expired(metadata)
@@ -1669,7 +3390,7 @@ class StudentStore:
                     "status": "pending",
                     "lease_token": lease_token,
                     "lease_expires_at": (
-                        datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+                        _utc_now_datetime() + timedelta(seconds=lease_seconds)
                     ).isoformat(),
                 }
             )
@@ -1789,8 +3510,12 @@ class StudentStore:
         idempotency_key: str | None = None,
         idempotency_lease_token: str | None = None,
         idempotency_fingerprint: str | None = None,
+        idempotency_turn_payload: dict[str, Any] | None = None,
         research_observation: ResearchObservationCreate | None = None,
         auto_advance: AtomicAutoAdvance | None = None,
+        validated_completion_stage: str | None = None,
+        manual_stage_selection_to: str | None = None,
+        mark_stage_review_dirty: bool | None = None,
         review_counter_qualifying: bool | None = None,
         review_counter_deep_succeeded: bool | None = None,
     ) -> tuple[str, str]:
@@ -1799,15 +3524,20 @@ class StudentStore:
         Provider, retrieval, and object-storage work must finish before this
         method is called. The user row, assistant assessment/citations/pending
         decision, optional auto-advance, optional research observation, and
-        notebook summary either commit together or roll back. Research evidence
-        stores offsets into the referenced student message rather than a
-        transcript copy.
+        notebook summary, optional validated Phase 2 completion, and optional
+        feature-gated manual stage selection either commit together or roll
+        back. A validated Phase 2 completion records the current stage in
+        ``completed_stages`` while leaving the focus and pending transition
+        unchanged. Research evidence stores offsets into the referenced
+        student message rather than a transcript copy.
 
         When ``existing_user_message_id`` is set (edit/revise path), the user
         message is already durable from the revision transaction. Content is not
         rewritten destructively; metadata may be refreshed without clearing
         lineage columns. An assistant row stamped with the expected revision is
-        inserted.
+        inserted. Validated completion may still run on that path so a
+        replacement ADVANCE re-marks ``completed_stages`` after the revision
+        rolled them back.
 
         The periodic Deep Review counter is recomputed from the notebook
         ``settings_text`` row inside this transaction, not from a
@@ -1815,11 +3545,45 @@ class StudentStore:
         in the UPDATE predicate so a concurrent replica cannot last-write-wins
         overwrite ``coaching_turns_since_deep_review`` (or the rest of
         settings) while ``conversation_revision`` stays unchanged.
+
+        When ``idempotency_turn_payload`` is provided, the exact completed
+        turn is written onto the pending marker in this same transaction.
+        Waiters can then replay that payload instead of reconstructing a slim
+        assessment from message rows before ``complete_coach_request``.
+
+        When ``mark_stage_review_dirty`` is true and the entry stage was
+        already complete, this transaction records a coalesced revisit token.
+        That token is flushed into one frozen stage-review job only when the
+        student subsequently leaves that stage.
         """
         cleaned_user = user_content.strip()
         cleaned_assistant = assistant_content.strip()
         if not cleaned_user or not cleaned_assistant:
             raise ValueError("Completed coach turns require both messages")
+        manual_target = str(manual_stage_selection_to or "").strip() or None
+        completion_stage = str(validated_completion_stage or "").strip() or None
+        if manual_target is not None:
+            from backend.student_journey import STAGE_BY_ID
+
+            if manual_target not in STAGE_BY_ID:
+                raise ValueError(f"Unknown thinking stage: {manual_target}")
+            if auto_advance is not None:
+                raise ValueError("Manual stage selection cannot also auto-advance")
+            if existing_user_message_id is not None:
+                raise ValueError("Manual stage selection is not available during revision")
+        if completion_stage is not None:
+            from backend.student_journey import STAGE_BY_ID, THINKING_STAGES
+
+            if completion_stage not in STAGE_BY_ID:
+                raise ValueError(f"Unknown completion stage: {completion_stage}")
+            if auto_advance is not None or manual_target is not None:
+                raise ValueError(
+                    "Validated completion cannot combine with a stage mutation"
+                )
+            # Revision is allowed: edit rolls completed_stages back, then the
+            # replacement ADVANCE re-records completion with the new pending.
+            if completion_stage != expected_stage:
+                raise ValueError("Validated completion stage does not match the coach turn")
         user_id = str(existing_user_message_id or uuid.uuid4())
         assistant_id = assistant_message_id or str(uuid.uuid4())
         assistant_meta = dict(assistant_metadata)
@@ -1846,6 +3610,39 @@ class StudentStore:
         proposed_stage = assistant_meta.pop("proposed_stage", None)
         decision_status = assistant_meta.pop("decision_status", None)
         assistant_meta.pop("pending_transition_id", None)
+        if completion_stage is not None:
+            stage_ids = [stage.id for stage in THINKING_STAGES]
+            expected_index = stage_ids.index(completion_stage)
+            proposed_stage = str(proposed_stage or "").strip()
+            assessment_recommendation = (
+                assessment.get("recommendation")
+                if isinstance(assessment, dict)
+                else None
+            )
+            is_terminal = completion_stage == THINKING_STAGES[-1].id
+            if str(assessment_recommendation or "").strip().lower() != "advance":
+                raise ValueError(
+                    "Validated completion requires an ADVANCE recommendation"
+                )
+            if is_terminal:
+                # Reflection complete-in-place: no next-stage pending row.
+                if decision_status not in {None, "", "pending"}:
+                    raise ValueError(
+                        "Terminal Reflection completion must not carry a "
+                        "confirmed transition"
+                    )
+                if proposed_stage:
+                    raise ValueError(
+                        "Terminal Reflection completion cannot propose a next stage"
+                    )
+            elif (
+                decision_status != "pending"
+                or expected_index + 1 >= len(stage_ids)
+                or proposed_stage != stage_ids[expected_index + 1]
+            ):
+                raise ValueError(
+                    "Validated completion requires a pending ADVANCE recommendation"
+                )
         if auto_advance is None and decision_status and decision_status != "pending":
             raise ValueError("New coach transition status must be pending")
         if auto_advance is not None:
@@ -1881,6 +3678,14 @@ class StudentStore:
                 )
             thread = self._thread_dict(notebook)
             current_meta = dict(thread.get("metadata") or {})
+            entry_stage = active_stage
+            entry_journey = dict(current_meta.get("learning_journey") or {})
+            entry_completed = {
+                str(item).strip()
+                for item in (entry_journey.get("completed_stages") or [])
+                if str(item).strip()
+            }
+            entry_stage_was_complete = entry_stage in entry_completed
             summary_metadata = dict(summary_metadata)
             if (
                 review_counter_qualifying is not None
@@ -1912,6 +3717,7 @@ class StudentStore:
                 raise ConversationRevisionConflictError(
                     "The conversation was revised before the coaching turn was saved"
                 )
+            marker_metadata: dict[str, Any] | None = None
             if idempotency_marker_id is not None:
                 marker = connection.execute(
                     "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
@@ -1934,8 +3740,19 @@ class StudentStore:
                         "Coach request lease was claimed by another worker"
                     )
 
+            if manual_target is not None:
+                current_meta = self._selected_learning_stage_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=current_meta,
+                    stage_id=manual_target,
+                    active_revision=active_revision,
+                    decision_at=utc_now(),
+                )
+                current_journey = dict(current_meta.get("learning_journey") or {})
+
             user_created_at = utc_now()
-            assistant_created_at = utc_now()
+            assistant_created_at = utc_now_after(user_created_at)
             if existing_user_message_id:
                 owned_user = connection.execute(
                     """
@@ -2084,17 +3901,75 @@ class StudentStore:
                     )
                 journey_meta = next_journey
                 current_meta["thinking_stage"] = auto_advance.to_stage
+            elif manual_target is not None:
+                journey_meta = current_journey
+                current_meta["thinking_stage"] = manual_target
+            elif completion_stage is not None:
+                from .student_journey import mark_stage_completed
+
+                journey_meta = mark_stage_completed(current_journey, completion_stage)
             else:
                 journey_meta = current_journey
             for key in _PROGRESS_KEYS:
                 if key in summary_metadata:
                     journey_meta[key] = summary_metadata[key]
             current_meta["learning_journey"] = journey_meta
+            if (
+                bool(mark_stage_review_dirty)
+                and entry_stage_was_complete
+                and manual_target is None
+            ):
+                # This is intentionally after the user/assistant rows have
+                # been staged and before the notebook UPDATE. The marker is
+                # therefore committed only with a successful coach turn.
+                self._mark_stage_review_dirty_in_metadata(
+                    current_meta,
+                    stage_id=entry_stage,
+                    conversation_revision=active_revision,
+                )
+            target_stage = (
+                auto_advance.to_stage
+                if auto_advance is not None
+                else manual_target or expected_stage
+            )
+            if target_stage != entry_stage:
+                self._queue_stage_review_in_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=current_meta,
+                    stage_id=entry_stage,
+                    active_revision=active_revision,
+                    reason="revisit_exit",
+                )
+            # Initial completion checkpoints are queued durably in this same
+            # transaction. The post-commit seam only submits already persisted
+            # jobs; it never infers a refresh from current_stage.
+            from backend.specialists.review_orchestration import (
+                STAGE_REVIEW_REASON_COMPLETION,
+                newly_completed_stage_ids,
+            )
+
+            newly_completed = newly_completed_stage_ids(
+                list(entry_completed),
+                list(journey_meta.get("completed_stages") or []),
+            )
+            for completed_stage in newly_completed:
+                self._queue_stage_review_in_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=current_meta,
+                    stage_id=completed_stage,
+                    active_revision=active_revision,
+                    reason=STAGE_REVIEW_REASON_COMPLETION,
+                    force=True,
+                )
             stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
             )
             expected_saved_stage = (
-                auto_advance.to_stage if auto_advance is not None else expected_stage
+                auto_advance.to_stage
+                if auto_advance is not None
+                else manual_target or expected_stage
             )
             if stage != expected_saved_stage:
                 raise ValueError("Coach summary cannot change the notebook stage")
@@ -2144,6 +4019,24 @@ class StudentStore:
                 raise ConversationRevisionConflictError(
                     "The conversation was revised before the coaching turn was saved"
                 )
+            if (
+                idempotency_marker_id is not None
+                and isinstance(marker_metadata, dict)
+                and isinstance(idempotency_turn_payload, dict)
+            ):
+                # Same transaction as the durable user/assistant rows so a
+                # waiter cannot reconstruct a slim assessment from messages
+                # before complete_coach_request stores the exact turn.
+                marker_metadata = dict(marker_metadata)
+                marker_metadata["turn"] = idempotency_turn_payload
+                connection.execute(
+                    "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                    (
+                        _dump(marker_metadata),
+                        idempotency_marker_id,
+                        thread_id,
+                    ),
+                )
         return user_id, assistant_id
 
     @staticmethod
@@ -2155,6 +4048,7 @@ class StudentStore:
             "student_user_id": str(row["student_user_id"]),
             "student_display_name": row["student_display_name"],
             "student_email": row["student_email"],
+            "is_guest": bool(row["is_guest"]),
             "user_message_id": str(row["user_message_id"]),
             "assistant_message_id": str(row["assistant_message_id"]),
             "conversation_revision": int(row["conversation_revision"] or 0),
@@ -2208,7 +4102,10 @@ class StudentStore:
                 f"""
                 SELECT o.*, n.user_id AS student_user_id,
                        u.display_name AS student_display_name,
-                       u.email AS student_email
+                       u.email AS student_email,
+                       CASE WHEN u.identifier LIKE 'guest:%'
+                                  AND COALESCE(u.cognito_sub, '') = ''
+                            THEN 1 ELSE 0 END AS is_guest
                 FROM research_observations o
                 JOIN notebooks n ON n.id=o.notebook_id
                 JOIN users u ON u.id=n.user_id
@@ -2246,7 +4143,10 @@ class StudentStore:
                 f"""
                 SELECT o.*, n.user_id AS student_user_id,
                        u.display_name AS student_display_name,
-                       u.email AS student_email
+                       u.email AS student_email,
+                       CASE WHEN u.identifier LIKE 'guest:%'
+                                  AND COALESCE(u.cognito_sub, '') = ''
+                            THEN 1 ELSE 0 END AS is_guest
                 FROM research_observations o
                 JOIN notebooks n ON n.id=o.notebook_id
                 JOIN users u ON u.id=n.user_id
@@ -2711,6 +4611,11 @@ class StudentStore:
         ``ConversationRevisionConflictError`` on CAS miss so SQLite rolls back.
         """
         from backend.student_journey import STAGE_BY_ID, THINKING_STAGES, normalize_journey
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_ACTIVE,
+            parse_journey_stage_reviews,
+        )
 
         cleaned = content.strip()
         if not cleaned:
@@ -2961,6 +4866,29 @@ class StudentStore:
                 journey["critical_reflection"] = ""
                 journey.pop("learning_summary", None)
 
+            # Revision is append-only, but it also rolls the active learning
+            # frontier back to the replacement message's entry stage.  Any
+            # revisit marker or in-flight checkpoint for a stage that is no
+            # longer completed belongs to the superseded branch.  Pruning the
+            # active envelope fences its worker by job id (and dropping the
+            # marker prevents a later exit from manufacturing a duplicate).
+            review_blob = parse_journey_stage_reviews(
+                current_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
+            )
+            completed_after = {
+                str(stage_id).strip()
+                for stage_id in (journey.get("completed_stages") or [])
+                if str(stage_id).strip()
+            }
+            for stage_id in list(review_blob.get("revisit_dirty") or {}):
+                if stage_id not in completed_after:
+                    review_blob["revisit_dirty"].pop(stage_id, None)
+            for stage_id, job in list((review_blob.get("jobs") or {}).items()):
+                status = str((job or {}).get("status") or "").strip().lower()
+                if stage_id not in completed_after and status in STAGE_REVIEW_ACTIVE:
+                    review_blob["jobs"].pop(stage_id, None)
+            current_meta[JOURNEY_STAGE_REVIEWS_KEY] = review_blob
+
             current_meta["learning_journey"] = journey
             current_meta["thinking_stage"] = restored_stage
             current_meta["last_workflow_user_message_id"] = replacement_id
@@ -3058,6 +4986,327 @@ class StudentStore:
             )
         return prior
 
+    def get_message_metadata(self, thread_id: str) -> list[dict[str, Any]]:
+        """Return active message metadata without loading transcript bodies.
+
+        This narrow projection exists for compatibility maintenance such as
+        importing legacy upload descriptors.  It is owner- and current
+        revision-bound and deliberately omits ``content`` so large histories
+        are not rehydrated merely to inspect attachments.
+        """
+        with self._lock, self._connect() as connection:
+            # Keep ownership, revision, and the metadata projection in one
+            # read transaction.  This prevents a concurrent revision from
+            # changing the active branch between the two reads.
+            connection.execute("BEGIN")
+            thread_row = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not thread_row:
+                raise ValueError("Notebook not found")
+            rows = connection.execute(
+                """
+                SELECT m.id, m.role, m.metadata_text
+                FROM messages AS m
+                JOIN notebooks AS n ON n.id = m.notebook_id
+                WHERE n.id=? AND n.user_id=?
+                  AND COALESCE(m.conversation_revision, 0) <=
+                      COALESCE(n.conversation_revision, 0)
+                  AND (m.superseded_at_revision IS NULL OR
+                       m.superseded_at_revision >
+                       COALESCE(n.conversation_revision, 0))
+                  AND LOWER(COALESCE(m.metadata_text, '')) LIKE '%"uploads"%'
+                ORDER BY m.created_at ASC, m.id ASC
+                """,
+                (thread_id, self.owner_id),
+            ).fetchall()
+        metadata_rows: list[dict[str, Any]] = []
+        for row in rows:
+            metadata = _load(row["metadata_text"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            if self._is_coach_idempotency_marker_meta(metadata):
+                continue
+            # The SQL filter is a cheap candidate reduction; the JSON check
+            # keeps malformed or unrelated metadata from reaching backfill.
+            if not isinstance(metadata.get("uploads"), list):
+                continue
+            metadata_rows.append(
+                {
+                    "id": str(row["id"]),
+                    "role": str(row["role"]),
+                    "metadata": metadata,
+                }
+            )
+        return metadata_rows
+
+    def has_messages(self, thread_id: str) -> bool:
+        """Return whether an owned notebook has a visible active message.
+
+        This is an existence-only projection for notebook-open welcome seeding.
+        It does not select message bodies or metadata rows, and it treats the
+        internal idempotency marker plus empty assistant skeletons as absent.
+
+        Raises:
+            ValueError: When the notebook is missing or not owned.
+        """
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN")
+            row = connection.execute(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM messages AS m
+                    WHERE m.notebook_id=n.id
+                      AND COALESCE(m.conversation_revision, 0) <=
+                          COALESCE(n.conversation_revision, 0)
+                      AND (m.superseded_at_revision IS NULL OR
+                           m.superseded_at_revision >
+                           COALESCE(n.conversation_revision, 0))
+                      AND NOT (
+                          LOWER(COALESCE(m.role, ''))='assistant'
+                          AND TRIM(COALESCE(m.content, ''))=''
+                      )
+                      AND LOWER(COALESCE(m.metadata_text, '')) NOT LIKE
+                          '%"_internal_type": "coach_idempotency"%'
+                      AND LOWER(COALESCE(m.metadata_text, '')) NOT LIKE
+                          '%"_internal_type":"coach_idempotency"%'
+                ) THEN 1 ELSE 0 END AS has_messages
+                FROM notebooks AS n
+                WHERE n.id=? AND n.user_id=?
+                """,
+                (thread_id, self.owner_id),
+            ).fetchone()
+        if not row:
+            raise ValueError("Notebook not found")
+        return bool(row["has_messages"])
+
+    def get_oldest_user_messages(
+        self, thread_id: str, *, limit: int = 2
+    ) -> list[str]:
+        """Return a bounded oldest-user prompt projection for title migration.
+
+        This intentionally selects at most two user bodies and never hydrates
+        assistant replies or the remainder of a long notebook transcript.
+        """
+        thread = self.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        bounded_limit = max(1, min(2, int(limit)))
+        revision = int(thread.get("conversation_revision") or 0)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT content
+                FROM messages
+                WHERE notebook_id=? AND role='user'
+                  AND {self._active_at_revision_sql()}
+                ORDER BY created_at ASC, id ASC
+                LIMIT ?
+                """,
+                (thread_id, revision, revision, bounded_limit),
+            ).fetchall()
+        return [str(row["content"] or "") for row in rows]
+
+    def get_message_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = _MESSAGE_PAGE_DEFAULT_LIMIT,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a newest-first keyset page projected chronologically.
+
+        The cursor carries the notebook id and current conversation revision;
+        stale, foreign, malformed, or tampered cursors fail closed.  Rows are
+        filtered before becoming public messages, while aggregate source and
+        HMW state are computed from metadata-only active rows.
+        """
+        try:
+            page_limit = int(limit)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Invalid message page limit") from error
+        if page_limit < 1 or page_limit > _MESSAGE_PAGE_MAX_LIMIT:
+            raise ValueError("Invalid message page limit")
+
+        position: dict[str, Any] | None = None
+        if cursor is not None:
+            try:
+                position = _decode_message_page_cursor(cursor)
+            except ValueError as error:
+                raise MessagePageCursorError(str(error)) from error
+            # Validation and all projections below intentionally share one
+            # connection/read transaction with the notebook revision lookup.
+
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN")
+            notebook_row = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not notebook_row:
+                raise ValueError("Notebook not found")
+            thread = self._thread_dict(notebook_row)
+            revision = int(notebook_row["conversation_revision"] or 0)
+            if position is not None:
+                if position["thread_id"] != str(thread_id):
+                    raise MessagePageCursorError("Invalid message cursor")
+                if position["revision"] != revision:
+                    raise MessagePageRevisionConflictError(
+                        "The notebook changed; reload the latest messages"
+                    )
+                anchor = connection.execute(
+                    f"""
+                    SELECT * FROM messages
+                    WHERE notebook_id=? AND id=? AND created_at=?
+                      AND {self._active_at_revision_sql()}
+                    """,
+                    (
+                        thread_id,
+                        position["message_id"],
+                        position["created_at"],
+                        revision,
+                        revision,
+                    ),
+                ).fetchone()
+                if anchor is None or not self._message_is_visible(anchor):
+                    raise MessagePageCursorError("Invalid message cursor")
+
+            # The SQL page is intentionally a little wider than the public
+            # page: internal rows and empty assistant skeletons must not consume
+            # slots.
+            fetch_limit = max(page_limit + 16, 32)
+            visible_rows: list[Any] = []
+            created_before = position["created_at"] if position else None
+            id_before = position["message_id"] if position else None
+            while True:
+                clauses = [
+                    "notebook_id=?",
+                    self._active_at_revision_sql(),
+                ]
+                parameters: list[Any] = [thread_id, revision, revision]
+                if created_before is not None and id_before is not None:
+                    clauses.append("(created_at < ? OR (created_at = ? AND id < ?))")
+                    parameters.extend([created_before, created_before, id_before])
+                batch = connection.execute(
+                    f"""
+                    SELECT * FROM messages
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (*parameters, fetch_limit),
+                ).fetchall()
+                if not batch:
+                    break
+                visible_rows.extend(row for row in batch if self._message_is_visible(row))
+                last = batch[-1]
+                created_before = str(last["created_at"] or "")
+                id_before = str(last["id"])
+                if len(visible_rows) >= page_limit + 1 or len(batch) < fetch_limit:
+                    break
+
+            page_desc = visible_rows[: page_limit + 1]
+            has_more = len(page_desc) > page_limit
+            page_rows_desc = page_desc[:page_limit]
+            messages = [
+                self._public_message_dict(row)
+                for row in reversed(page_rows_desc)
+            ]
+
+            # Compute exact visible count, source ids, and HMW state from the
+            # same revision snapshot without selecting aggregate message bodies.
+            aggregate_rows = connection.execute(
+                f"""
+                SELECT id, role, metadata_text, assessment_text,
+                       cited_source_ids_text,
+                       CASE WHEN TRIM(COALESCE(content, '')) <> ''
+                            THEN 1 ELSE 0 END AS has_content
+                FROM messages
+                WHERE notebook_id=?
+                  AND {self._active_at_revision_sql()}
+                ORDER BY created_at ASC, id ASC
+                """,
+                (thread_id, revision, revision),
+            ).fetchall()
+            owned_source_rows = connection.execute(
+                "SELECT id FROM sources WHERE notebook_id=?",
+                (thread_id,),
+            ).fetchall()
+            owned_source_ids = {str(row["id"]) for row in owned_source_rows}
+            total_count = 0
+            source_ids: list[str] = []
+            seen_source_ids: set[str] = set()
+            slim_messages: list[dict[str, Any]] = []
+            for row in aggregate_rows:
+                if not self._message_is_visible(row):
+                    continue
+                total_count += 1
+                slim_messages.append(self._message_slim_projection(row))
+
+            # Only return source identifiers referenced by this page. They are
+            # validated against this owner's notebook before crossing the API
+            # boundary; older-page identifiers arrive when that page is loaded.
+            for row in page_rows_desc:
+                metadata = _load(row["metadata_text"], {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                for source_id in self._message_source_ids(row, metadata):
+                    if source_id in owned_source_ids and source_id not in seen_source_ids:
+                        seen_source_ids.add(source_id)
+                        source_ids.append(source_id)
+
+            from .learning.hmw import hmw_scaffold_anchor_message, hmw_scaffold_projection
+
+            journey = normalize_journey(
+                (thread.get("metadata") or {}).get("learning_journey")
+            )
+            hmw_scaffold = hmw_scaffold_projection(
+                journey.get("current_stage"),
+                slim_messages,
+                enabled=settings.hmw_scaffold_enabled,
+                response_detail=journey.get("response_detail"),
+            )
+            anchor = (
+                hmw_scaffold_anchor_message(slim_messages)
+                if hmw_scaffold.get("available")
+                else None
+            )
+            hmw_scaffold = {
+                **hmw_scaffold,
+                "anchor_message_id": (
+                    str(anchor.get("id") or "") if isinstance(anchor, dict) else ""
+                ),
+            }
+            next_cursor = None
+            if has_more and page_rows_desc:
+                oldest = page_rows_desc[-1]
+                next_cursor = _encode_message_page_cursor(
+                    thread_id=thread_id,
+                    revision=revision,
+                    created_at=str(oldest["created_at"] or ""),
+                    message_id=str(oldest["id"]),
+                )
+            return {
+                "messages": messages,
+                "next_cursor": next_cursor,
+                "total_count": total_count,
+                "conversation_revision": revision,
+                "source_ids": source_ids,
+                "hmw_scaffold": hmw_scaffold,
+            }
+
+    def get_messages_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = _MESSAGE_PAGE_DEFAULT_LIMIT,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for :meth:`get_message_page`."""
+        return self.get_message_page(thread_id, limit=limit, cursor=cursor)
+
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
         """Return messages active at the notebook's current conversation revision."""
         thread = self.get_thread(thread_id)
@@ -3103,6 +5352,9 @@ class StudentStore:
             ).fetchall()
         messages: list[dict[str, Any]] = []
         for row in rows:
+            # Preserve the legacy full-history contract: only internal
+            # idempotency reservations are hidden here. Empty assistant
+            # skeletons are filtered only by the bounded page projection.
             meta = _load(row["metadata_text"], {})
             if self._is_coach_idempotency_marker_meta(meta):
                 continue
@@ -3297,6 +5549,8 @@ class StudentStore:
                 (status, resolved_at, transition_id),
             )
             if accepted and metadata_patch:
+                from backend.coaching.progress_fields import overlay_progress_fields
+
                 progress = _load(notebook["progress_text"], {})
                 if not isinstance(progress, dict):
                     progress = {}
@@ -3313,7 +5567,67 @@ class StudentStore:
                 }
                 next_meta = {**current_meta, **metadata_patch}
                 if isinstance(metadata_patch.get("learning_journey"), dict):
-                    next_meta["learning_journey"] = metadata_patch["learning_journey"]
+                    next_meta["learning_journey"] = dict(
+                        metadata_patch["learning_journey"]
+                    )
+                journey_blob = next_meta.get("learning_journey")
+                preserved = overlay_progress_fields(
+                    progress,
+                    journey_blob if isinstance(journey_blob, dict) else {},
+                    metadata_patch,
+                )
+                if isinstance(journey_blob, dict):
+                    journey_blob.update(preserved)
+                    next_meta["learning_journey"] = journey_blob
+                next_meta.update(preserved)
+                source_stage = str(
+                    notebook["current_stage"] or DEFAULT_STAGE
+                ).strip()
+                target_stage = str(
+                    (journey_blob or {}).get("current_stage")
+                    or next_meta.get("thinking_stage")
+                    or source_stage
+                ).strip()
+                if target_stage != source_stage:
+                    # Flush only durable substantive revisit work. Rejected
+                    # decisions and same-stage confirmations never queue a
+                    # refresh, and this write remains atomic with the stage
+                    # transition itself.
+                    self._queue_stage_review_in_metadata(
+                        connection,
+                        thread_id=thread_id,
+                        metadata=next_meta,
+                        stage_id=source_stage,
+                        active_revision=revision,
+                        reason="revisit_exit",
+                    )
+                from backend.specialists.review_orchestration import (
+                    STAGE_REVIEW_REASON_COMPLETION,
+                    newly_completed_stage_ids,
+                )
+
+                prior_progress = _load(notebook["progress_text"], {})
+                if not isinstance(prior_progress, dict):
+                    prior_progress = {}
+                completed_before = list(
+                    prior_progress.get("completed_stages") or []
+                )
+                completed_after = list(
+                    (journey_blob or {}).get("completed_stages") or []
+                )
+                for completed_stage in newly_completed_stage_ids(
+                    completed_before,
+                    completed_after,
+                ):
+                    self._queue_stage_review_in_metadata(
+                        connection,
+                        thread_id=thread_id,
+                        metadata=next_meta,
+                        stage_id=completed_stage,
+                        active_revision=revision,
+                        reason=STAGE_REVIEW_REASON_COMPLETION,
+                        force=True,
+                    )
                 stage, progress_text, settings_text = self._split_notebook_metadata(
                     next_meta
                 )
@@ -3406,20 +5720,53 @@ class StudentStore:
         thread_id: str,
         *,
         selected_only: bool = False,
+        include_extracted_text: bool = True,
     ) -> list[dict[str, Any]]:
-        """List owned sources for a notebook."""
+        """List owned sources for a notebook.
+
+        Args:
+            thread_id: Owned notebook id.
+            selected_only: When True, only selected rows are returned.
+            include_extracted_text: When False, skip object-storage reads of
+                ``extracted.txt``. SQLite legacy extracted text is still
+                returned when present.
+
+        Returns:
+            Normalized source dictionaries.
+        """
         return self._bound_operations().sources.list(
             thread_id,
             selected_only=selected_only,
-            normalize=self._source_dict,
+            include_extracted_text=include_extracted_text,
+            normalize=lambda row: self._source_dict(
+                row, include_extracted_text=include_extracted_text
+            ),
         )
 
-    def get_source(self, thread_id: str, source_id: str) -> dict[str, Any] | None:
-        """Return one owned source or ``None``."""
+    def get_source(
+        self,
+        thread_id: str,
+        source_id: str,
+        *,
+        include_extracted_text: bool = True,
+    ) -> dict[str, Any] | None:
+        """Return one owned source or ``None``.
+
+        Args:
+            thread_id: Owned notebook id.
+            source_id: Source id to load.
+            include_extracted_text: When False, skip object-storage reads of
+                ``extracted.txt``. UI callers keep the default True.
+
+        Returns:
+            The normalized source dictionary, or ``None`` when missing.
+        """
         return self._bound_operations().sources.get(
             thread_id,
             source_id,
-            normalize=self._source_dict,
+            normalize=lambda row: self._source_dict(
+                row, include_extracted_text=include_extracted_text
+            ),
         )
 
     def find_source_by_path(
@@ -3434,12 +5781,23 @@ class StudentStore:
             normalize=self._source_dict,
         )
 
-    def _source_dict(self, row: Any) -> dict[str, Any]:
-        """Normalize a sources row for callers (legacy keys preserved)."""
+    def _source_dict(
+        self, row: Any, *, include_extracted_text: bool = True
+    ) -> dict[str, Any]:
+        """Normalize a sources row for callers (legacy keys preserved).
+
+        Args:
+            row: One ``sources`` database row.
+            include_extracted_text: When False, skip object-storage hydration.
+
+        Returns:
+            A source dictionary with legacy response keys preserved.
+        """
         return self._bound_operations().sources.as_dict(
             row,
             deserialize=_load,
             load_extracted=self._load_extracted_text,
+            include_extracted_text=include_extracted_text,
         )
 
     def set_source_selected(

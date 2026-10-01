@@ -1,0 +1,609 @@
+"""Server-side Q&A vs Coaching mode policy for one Fast Chat turn.
+
+There is no extra LLM router. Normal chat still makes exactly one AgentCore
+``phase=fast_chat`` invoke. Haiku returns ``mode``, and this module constrains
+what that label is allowed to *mean* downstream.
+
+How confidence is derived
+=========================
+:func:`backend.retrieval_gate.classify_retrieval_intent` is recall-oriented for
+explicit source cues (including a project message that mentions "lecture" or
+"week 2"). That remains correct for Retrieve on named material. Generic
+coaching questions with selected sources no longer retrieve — that false
+positive was worse because an empty Retrieve can author an evidence-gap reply.
+
+Mode enforcement still uses a **conservative** threshold. Every ordinary turn
+receives one deterministic mode expectation; ``ambiguous`` remains a retrieval
+classification, not a third model response mode:
+
+- ``high_confidence_source`` **and no first-person project reasoning**
+  → the server expects ``mode=qa``.
+- ``high_confidence_personal`` → the server expects ``mode=coaching``.
+- narrow implicit selected-source requests → the server expects ``mode=qa``.
+- idle text, weak questions, or mixed source+project language → the server
+  expects ``mode=coaching``. Mixed turns retrieve only when they explicitly
+  ask to use a source; merely mentioning a lecture or filename is insufficient.
+
+Mixed detection uses first-person project cues (``I think``, ``I interviewed``,
+``my problem``, ``should I choose``, ``help me think``, …). A factual question
+that merely contains ``lecture`` / ``week 2`` / ``S1`` stays source. A project
+turn that merely mentions those tokens becomes ambiguous so coaching is not
+flattened.
+
+Enforcement (option A: coerce downstream to Q&A, keep the prose)
+===============================================================
+When the server expects Q&A and the model returns ``mode=coaching``:
+
+- keep ``response_text`` (do not rewrite the student-facing prose)
+- set ``response_mode=qa``, ``recommendation=None``,
+  ``qualifying_coaching_turn=False``
+- the workflow therefore cannot open a pending stage transition (it only
+  opens one on ADVANCE) and no stay/advance is persisted
+
+Coercing to Q&A (rather than keeping ``mode=coaching`` while stripping side
+effects) preserves the existing invariant that coaching requires a
+stay/advance recommendation.
+
+When the server expects coaching, a returned coaching recommendation is
+kept. The server never invents stay/advance if Haiku returned Q&A — that
+would fabricate a stage recommendation. The runtime hint still asks for
+coaching on high-confidence personal turns.
+
+Clients never supply this policy. FastAPI stamps it from the authoritative
+student message and selected-source metadata, then overwrites any
+client-supplied values.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from backend.retrieval import (
+    COURSE_RETRIEVAL_EMPTY_CONTEXT,
+    COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
+)
+from backend.coaching.workflow_navigation import (
+    is_compound_status_guidance_request,
+    is_current_stage_status_request,
+    is_exact_confirm_command,
+    is_stage_progression_request,
+    is_terminal_completion_request,
+    manual_stage_selection_target,
+    progression_effect_for,
+    workflow_skips_retrieval,
+)
+from backend.retrieval_gate import (
+    INTENT_AMBIGUOUS,
+    INTENT_HIGH_CONFIDENCE_PERSONAL,
+    INTENT_HIGH_CONFIDENCE_SOURCE,
+    RetrievalClassification,
+    RetrievalIntent,
+    classify_retrieval_intent,
+)
+
+ExpectedResponseMode = Literal["qa", "coaching"]
+
+# Re-export navigation helpers for existing callers and tests.
+__all__ = (
+    "ExpectedResponseMode",
+    "ModeEnforcement",
+    "ModePolicy",
+    "QA_EVIDENCE_GAP_RESPONSE",
+    "RUNTIME_HINT_COACHING",
+    "RUNTIME_HINT_QA",
+    "enforce_model_mode",
+    "is_compound_status_guidance_request",
+    "is_current_stage_status_request",
+    "is_exact_confirm_command",
+    "is_private_attachment_question",
+    "is_stage_progression_request",
+    "is_terminal_completion_request",
+    "looks_like_information_request",
+    "looks_like_project_reasoning",
+    "manual_stage_selection_target",
+    "overlay_mode_policy",
+    "policy_from_request",
+    "progression_effect_for",
+    "qa_evidence_gap_turn",
+    "resolve_mode_policy",
+    "runtime_mode_hint",
+    "should_author_qa_evidence_gap",
+    "workflow_skips_retrieval",
+)
+
+RUNTIME_HINT_QA = (
+    "This turn is source Q&A: Q&A rules take precedence over Coaching. "
+    "Answer from current retrieved excerpts only, or state the evidence gap. "
+    "Do not ask a Socratic or project question. Do not connect the answer to "
+    "the student's project unless they asked. Do not recommend stay or advance."
+)
+RUNTIME_HINT_COACHING = (
+    "This turn should use Coaching semantics: respond Socratically and include "
+    "a stay or advance recommendation."
+)
+
+QA_EVIDENCE_GAP_RESPONSE = (
+    "I couldn't find a matching validated excerpt for that question in the "
+    "currently selected course material. Try asking about a specific topic, "
+    "week, or reading, or adjust the selected sources."
+)
+
+# Project deliberation is used to keep source-adjacent project reasoning in
+# Coaching, so a turn is never forced into Q&A just because it mentions a
+# lecture or a week. These
+# are deliberately person-agnostic: students frame design work in the third
+# person ("the core problem is that students skip the week 2 lecture") as
+# often as the first. Over-matching here is safe — it keeps Coaching semantics
+# — while under-matching can silently strip a legitimate recommendation.
+_PROJECT_REASONING = (
+    re.compile(
+        r"^\s*i (think|thought|want|changed|chose|decided|will|am)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^\s*i['’]m\b", re.IGNORECASE),
+    re.compile(r"^\s*let'?s\b", re.IGNORECASE),
+    re.compile(
+        r"\b(my|our) (users?|idea|design|concept|stakeholders?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bwould this (idea|design|concept|option)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(does|would) this (idea|design|concept|option) solve\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(my|our) (problem|project|prototype|option|target users?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(i|we) interviewed\b", re.IGNORECASE),
+    re.compile(r"\b(i|we) (spoke|talked) (to|with)\b", re.IGNORECASE),
+    re.compile(r"\bhelp (me|us) (think|decide|choose|work through)\b", re.IGNORECASE),
+    re.compile(
+        r"\bshould (i|we) (choose|pick|go with|use|select|focus|prioriti[sz]e)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(the|our|this) (core |real |main )?problem is\b", re.IGNORECASE),
+    re.compile(r"\bproblem statement\b", re.IGNORECASE),
+    re.compile(r"\btrade-?offs?\b", re.IGNORECASE),
+    re.compile(r"\boption [ab1-9]\b", re.IGNORECASE),
+    re.compile(r"\b(refine|narrow down|pivot|reframe) (the|our|my)\b", re.IGNORECASE),
+    re.compile(r"\b(we|our team) (think|want|chose|decided|believe)\b", re.IGNORECASE),
+)
+
+# Forcing Q&A additionally requires the turn to actually ask for information.
+# A declarative project statement that cites a lecture is reasoning, not a
+# lookup, so it must keep its coaching semantics.
+_INFORMATION_REQUEST = re.compile(
+    r"\?|^\s*(what|why|how|when|where|which|who|explain|describe|define|list|"
+    r"summar(?:y|ise|ize)|tell me|show me|give me|walk me through|"
+    r"help me (?:understand|interpret|analy[sz]e))\b",
+    re.IGNORECASE,
+)
+
+# A current-turn attachment is evidence for the student's request, not an
+# implicit request to search the whole course catalogue.  Keep this matcher
+# deliberately small and deterministic; the model still decides whether the
+# attachment is in scope in the same Fast Chat call.
+_ATTACHMENT_REFERENCE = re.compile(
+    r"\b(attached|attachment|uploaded|upload|file|pdf|document|image|photo|"
+    r"diagram|scan)\b",
+    re.IGNORECASE,
+)
+# Deictic pointers to the just-uploaded file ("this article", "like this")
+# even when the turn is not phrased as a question.
+_DEICTIC_EVIDENCE = re.compile(
+    r"\b(?:this|that|the|my)\s+"
+    r"(?:article|paper|study|pdf|document|file|report|source|attachment|"
+    r"upload|image|photo|diagram|scan|material)s?\b"
+    r"|\bsource materials?\b"
+    r"|\b(?:like|see|per|from)\s+this\b"
+    r"|\bi just (?:added|uploaded|attached)\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_ACTION = re.compile(
+    r"\b(outline|extract|list|identify|review|analy[sz]e|summar(?:y|ise|ize))\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_DIRECTIVE = re.compile(
+    r"^\s*(?:(?:can|could|would)\s+(?:you\s+)?(?:please\s+)?|please\s+)?"
+    r"(?:outline|extract|list|identify|review|analy[sz]e|summar(?:y|ise|ize))\b",
+    re.IGNORECASE,
+)
+_COURSE_REFERENCE = re.compile(
+    r"\b(lecture|lectures|week|weeks|course|cde2300|product\s+design|"
+    r"design\s+thinking|jtbd|how\s+might\s+we|reading|readings|syllabus|"
+    r"class\s+materials?|(?:lecture|course|class|the)\s+notes)\b",
+    re.IGNORECASE,
+)
+
+_EXPLICIT_MIXED_SOURCE_CUES = {
+    "according_to_source",
+    "bare_source_label",
+    "based_on_source",
+    "bracket_source_label",
+    "citation_request",
+    "compare_to_source",
+    "course_grounding",
+    "evidence_request",
+    "selected_source_title",
+    "selected_source_phrase",
+    "uploaded_document",
+    "what_evidence_says",
+    "what_source_says",
+}
+
+@dataclass(frozen=True)
+class ModePolicy:
+    """Deterministic mode expectation for one student turn.
+
+    Attributes:
+        intent: Overlay intent used for the hint and enforcement. Mixed
+            source+project turns are ``ambiguous``.
+        expected_mode: ``qa`` or ``coaching`` for current server-stamped
+            requests; ``None`` remains accepted for old serialized requests.
+        retrieve: Effective retrieval decision. Mixed project/source turns
+            retrieve only when they explicitly request source use.
+        retrieval_intent: Raw retrieval-gate intent before the overlay.
+        mixed: True when source cues fired but the turn is project
+            deliberation or is not an information request.
+    """
+
+    intent: RetrievalIntent
+    expected_mode: ExpectedResponseMode | None
+    retrieve: bool
+    retrieval_intent: RetrievalIntent
+    mixed: bool = False
+
+
+@dataclass(frozen=True)
+class ModeEnforcement:
+    """Downstream mode after applying :class:`ModePolicy` to the model label.
+
+    Attributes:
+        effective_mode: Mode the rest of the turn must use.
+        overridden: True when the server coerced coaching→qa.
+        qualifying_coaching_turn: Whether the Deep Review counter may increment.
+    """
+
+    effective_mode: ExpectedResponseMode
+    overridden: bool
+    qualifying_coaching_turn: bool
+
+
+def _normalized_text(value: str) -> str:
+    """Return compact text for intent matching."""
+    return " ".join(str(value or "").split()).strip()
+
+
+def looks_like_project_reasoning(student_message: str) -> bool:
+    """Return whether the turn deliberates about the student's own project.
+
+    Args:
+        student_message: Current student contribution. Not logged.
+
+    Returns:
+        True when a person-agnostic project-deliberation matcher fires.
+    """
+    text = _normalized_text(student_message)
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _PROJECT_REASONING)
+
+
+def looks_like_information_request(student_message: str) -> bool:
+    """Return whether the turn asks for information rather than asserting.
+
+    Args:
+        student_message: Current student contribution. Not logged.
+
+    Returns:
+        True for questions and direct information requests. Declarative
+        project statements return False even when they name a lecture.
+    """
+    text = _normalized_text(student_message)
+    if not text:
+        return False
+    return bool(_INFORMATION_REQUEST.search(text))
+
+
+def is_private_attachment_question(
+    student_message: str,
+    *,
+    attachment_count: int = 0,
+) -> bool:
+    """Return whether this turn should retrieve only current attachments.
+
+    This is a retrieval-scope hint, not a relevance classifier. It applies
+    when the turn has private attachments and no explicit course comparison.
+    Deictic references to the upload (``this article``, ``like this``) scope
+    to the attachment even without a question mark. Explicit course
+    comparisons keep the combined attachment + course retrieval path. Chat
+    history stays in the prompt either way so students can still compare the
+    file with earlier replies.
+    """
+    if int(attachment_count or 0) <= 0:
+        return False
+    text = _normalized_text(student_message)
+    if not text:
+        return False
+    # Course / notes comparisons keep combined attachment + course RAG.
+    if _COURSE_REFERENCE.search(text):
+        return False
+
+    evidence_ref = bool(
+        _ATTACHMENT_REFERENCE.search(text) or _DEICTIC_EVIDENCE.search(text)
+    )
+    # "so like this article…" and similar deixis always use the upload.
+    if evidence_ref:
+        return True
+
+    asks_for_information = looks_like_information_request(text)
+    # Attached-file verbs are commonly written as polite requests without a
+    # question mark ("Could you outline…", "Please analyze…") or as direct
+    # imperatives ("List the claims"). Keep this narrow and retain the
+    # project-reasoning guard below so "analyze my idea" is not re-scoped.
+    if not asks_for_information and not _ATTACHMENT_DIRECTIVE.search(text):
+        return False
+    if looks_like_project_reasoning(text):
+        return False
+    if _ATTACHMENT_ACTION.search(text):
+        return True
+    # Short questions such as "what themes do you notice?" implicitly refer
+    # to the only newly supplied evidence. Project deliberation remains on the
+    # normal path unless it explicitly names the attachment.
+    return True
+
+
+def overlay_mode_policy(
+    classification: RetrievalClassification,
+    student_message: str,
+) -> ModePolicy:
+    """Derive the mode overlay from one retrieval classification.
+
+    Args:
+        classification: Result of :func:`classify_retrieval_intent`.
+        student_message: Same student text, used only for mixed detection.
+
+    Returns:
+        A :class:`ModePolicy` with a deterministic Q&A or Coaching expectation.
+    """
+    project = looks_like_project_reasoning(student_message)
+    asks_for_information = looks_like_information_request(student_message)
+    explicit_source_use = bool(
+        set(classification.cues).intersection(_EXPLICIT_MIXED_SOURCE_CUES)
+    )
+    mixed = classification.intent == INTENT_HIGH_CONFIDENCE_SOURCE and (
+        project or (not asks_for_information and not explicit_source_use)
+    )
+    if mixed:
+        return ModePolicy(
+            intent=INTENT_AMBIGUOUS,
+            expected_mode="coaching",
+            retrieve=classification.retrieve and explicit_source_use,
+            retrieval_intent=classification.intent,
+            mixed=True,
+        )
+    if classification.intent == INTENT_HIGH_CONFIDENCE_SOURCE:
+        return ModePolicy(
+            intent=INTENT_HIGH_CONFIDENCE_SOURCE,
+            expected_mode="qa",
+            retrieve=classification.retrieve,
+            retrieval_intent=classification.intent,
+        )
+    if classification.intent == INTENT_HIGH_CONFIDENCE_PERSONAL:
+        return ModePolicy(
+            intent=INTENT_HIGH_CONFIDENCE_PERSONAL,
+            expected_mode="coaching",
+            retrieve=classification.retrieve,
+            retrieval_intent=classification.intent,
+        )
+    return ModePolicy(
+        intent=INTENT_AMBIGUOUS,
+        expected_mode="qa" if classification.retrieve else "coaching",
+        retrieve=classification.retrieve,
+        retrieval_intent=classification.intent,
+    )
+
+
+def resolve_mode_policy(
+    student_message: str,
+    *,
+    selected_source_titles: Iterable[str] = (),
+    selected_source_filenames: Iterable[str] = (),
+    has_selected_sources: bool | None = None,
+) -> ModePolicy:
+    """Classify retrieval and overlay the conservative mode policy.
+
+    Args:
+        student_message: Authoritative current student contribution.
+        selected_source_titles: Server-owned selected source titles.
+        selected_source_filenames: Server-owned selected source filenames.
+        has_selected_sources: When True, selected-source questions retrieve.
+
+    Returns:
+        One :class:`ModePolicy`. Cue names never include student text.
+    """
+    classification = classify_retrieval_intent(
+        student_message,
+        selected_source_titles=selected_source_titles,
+        selected_source_filenames=selected_source_filenames,
+        has_selected_sources=has_selected_sources,
+    )
+    return overlay_mode_policy(classification, student_message)
+
+
+def runtime_mode_hint(expected_mode: str | None) -> str:
+    """Return the one-sentence runtime hint, or empty when unconstrained.
+
+    Args:
+        expected_mode: ``qa``, ``coaching``, or ``None``.
+
+    Returns:
+        A single sentence, or ``""`` when the model should choose.
+    """
+    cleaned = str(expected_mode or "").strip().lower()
+    if cleaned == "qa":
+        return RUNTIME_HINT_QA
+    if cleaned == "coaching":
+        return RUNTIME_HINT_COACHING
+    return ""
+
+
+def enforce_model_mode(
+    expected_mode: str | None,
+    model_mode: str,
+) -> ModeEnforcement:
+    """Apply the server policy to the model's returned ``mode``.
+
+    Args:
+        expected_mode: Server expectation, or ``None`` when unconstrained.
+        model_mode: ``qa`` or ``coaching`` from FastChatTurnOutput.
+
+    Returns:
+        Downstream mode, override flag, and counter eligibility.
+
+    Raises:
+        ValueError: When ``model_mode`` is not ``qa`` or ``coaching``.
+    """
+    returned = str(model_mode or "").strip().lower()
+    if returned not in {"qa", "coaching"}:
+        raise ValueError("model_mode must be qa or coaching")
+    expected = str(expected_mode or "").strip().lower()
+    if expected not in {"qa", "coaching"}:
+        expected = ""
+    if expected == "qa" and returned == "coaching":
+        return ModeEnforcement(
+            effective_mode="qa",
+            overridden=True,
+            qualifying_coaching_turn=False,
+        )
+    if returned == "qa":
+        return ModeEnforcement(
+            effective_mode="qa",
+            overridden=False,
+            qualifying_coaching_turn=False,
+        )
+    return ModeEnforcement(
+        effective_mode="coaching",
+        overridden=False,
+        qualifying_coaching_turn=True,
+    )
+
+
+def policy_from_request(request: object) -> ModePolicy:
+    """Return the stamped policy, or classify from the student message.
+
+    Args:
+        request: A :class:`backend.domain.CoachRequest`-shaped object.
+
+    Returns:
+        The server-stamped overlay when ``mode_policy_intent`` is set;
+        otherwise a message-only classification (no selected-source titles).
+    """
+    intent_raw = str(getattr(request, "mode_policy_intent", "") or "").strip().lower()
+    expected_raw = str(
+        getattr(request, "expected_response_mode", "") or ""
+    ).strip().lower()
+    expected_mode: ExpectedResponseMode | None = None
+    if expected_raw == "qa":
+        expected_mode = "qa"
+    elif expected_raw == "coaching":
+        expected_mode = "coaching"
+    stamped: RetrievalIntent | None = None
+    if intent_raw == INTENT_HIGH_CONFIDENCE_SOURCE:
+        stamped = INTENT_HIGH_CONFIDENCE_SOURCE
+    elif intent_raw == INTENT_HIGH_CONFIDENCE_PERSONAL:
+        stamped = INTENT_HIGH_CONFIDENCE_PERSONAL
+    elif intent_raw == INTENT_AMBIGUOUS:
+        stamped = INTENT_AMBIGUOUS
+    if stamped is None:
+        return resolve_mode_policy(
+            str(getattr(request, "student_message", "") or "")
+        )
+    return ModePolicy(
+        intent=stamped,
+        expected_mode=expected_mode,
+        retrieve=bool(getattr(request, "retrieval_required", False)),
+        retrieval_intent=stamped,
+    )
+
+
+def should_author_qa_evidence_gap(request: object) -> bool:
+    """Return whether FastAPI should author a Q&A evidence-gap reply.
+
+    Only a source-dependent Q&A turn that actually required and attempted
+    retrieval may surface the canned gap. Generic Coaching turns must not
+    reach this path even when sources are selected.
+
+    High-confidence source Q&A with selected sources and no validated chunks
+    must not invoke the model, so prior assistant text cannot become course
+    facts. Mixed/unconstrained turns still go to the provider.
+
+    Args:
+        request: Prepared :class:`~backend.domain.CoachRequest`.
+
+    Returns:
+        True when the server should persist ``QA_EVIDENCE_GAP_RESPONSE``
+        without an AgentCore invoke.
+    """
+    if str(getattr(request, "expected_response_mode", "") or "").strip().lower() != "qa":
+        return False
+    if not bool(getattr(request, "retrieval_required", False)):
+        return False
+    if bool(getattr(request, "allow_model_knowledge", False)):
+        return False
+    if getattr(request, "retrieved_chunks", None):
+        return False
+    source_ids = getattr(request, "source_ids", None) or []
+    retrieved_context = str(getattr(request, "source_context", "") or "")
+    gap_note = (
+        COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT in retrieved_context
+        or COURSE_RETRIEVAL_EMPTY_CONTEXT in retrieved_context
+    )
+    # Course-catalog Q&A may leave personal ``source_ids`` empty while still
+    # fail-closing on an empty or unavailable Knowledge Base Retrieve.
+    if gap_note:
+        return True
+    if not source_ids:
+        return False
+    # Image-only Q&A has selected sources but no textual retrieve. The model
+    # still needs the vision turn; do not author a course-material gap. A
+    # mixed image + textual-source turn remains grounded: its course claims
+    # still require a validated textual chunk.
+    image_inputs = getattr(request, "image_inputs", None) or []
+    image_ids = {
+        str(item.get("source_id") or "")
+        if isinstance(item, dict)
+        else str(getattr(item, "source_id", "") or "")
+        for item in image_inputs
+    }
+    source_ids = {str(source_id) for source_id in source_ids}
+    image_only = bool(image_inputs) and source_ids and source_ids <= image_ids
+    if image_only and not retrieved_context.strip():
+        return False
+    return True
+
+
+def qa_evidence_gap_turn(request: object) -> Any:
+    """Return a Q&A CoachTurn that states the current evidence gap.
+
+    Args:
+        request: Prepared request whose stage is copied onto the assessment.
+
+    Returns:
+        A ``CoachTurn`` with ``response_mode=qa``, no recommendation, and no
+        citations. Does not invoke a model.
+    """
+    from backend.domain import CoachTurn, EducationalAssessment
+
+    stage = str(getattr(request, "current_stage", "") or "problem_identification")
+    return CoachTurn(
+        response_text=QA_EVIDENCE_GAP_RESPONSE,
+        assessment=EducationalAssessment(
+            current_stage=stage,
+            response_mode="qa",
+        ),
+    )

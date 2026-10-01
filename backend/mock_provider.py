@@ -24,6 +24,7 @@ from .specialists.routing import (
     select_specialist,
 )
 from .student_journey import (
+    DEFAULT_STAGE,
     STAGE_BY_ID,
     THINKING_STAGES,
     next_stage_id,
@@ -51,11 +52,12 @@ _FACIONE_BEHAVIORS_BY_STAGE = {
 
 
 def _prior_assessed_turns(request: CoachRequest) -> int:
-    """Count prior assessments eligible for the active Quick/Strict profile.
+    """Count prior assessments eligible for the active Guide/Free profile.
 
-    Profile-tagged Quick assessments do not satisfy Strict. Untagged legacy
-    assessments remain eligible for both profiles so existing conversations do
-    not lose progression after this internal metadata was introduced.
+    Profile-tagged Guide (quick) assessments do not satisfy Free. Untagged
+    legacy assessments remain eligible for both profiles so existing
+    conversations do not lose progression after this internal metadata was
+    introduced. Stored ``coaching_profile`` still uses quick/strict tokens.
     """
     active_profile = "strict" if request.response_detail == "long" else "quick"
     count = 0
@@ -218,8 +220,14 @@ class DeterministicCoachProvider:
 
     provider_id = "mock"
 
-    def __init__(self, recommendation: StageDecision | None = None):
+    def __init__(
+        self,
+        recommendation: StageDecision | None = None,
+        *,
+        hmw_scaffold_ready: bool = False,
+    ):
         self.recommendation = recommendation
+        self.hmw_scaffold_ready = bool(hmw_scaffold_ready)
         self.last_prepared_prompt: PreparedCoachPrompt | None = None
         self.last_stage_id: str | None = None
 
@@ -231,27 +239,29 @@ class DeterministicCoachProvider:
         """Build a repeatable coaching turn with visible, guided progression.
 
         An explicit recommendation keeps unit tests fully controllable. In the
-        normal local demonstration, Quick guidance recommends advance after one
-        follow-up contribution at the stage; Strict waits for a second follow-up
-        so progression is a little stricter. This is turn-based demo behavior, not
-        a claim that the mock provider semantically evaluated the writing.
+        normal local demonstration, Guide recommends advance after one
+        follow-up contribution at the stage; Free recommends ADVANCE after the
+        first usable idea so the student can press Next without a structure
+        ladder. This is turn-based demo behavior, not a claim that the mock
+        provider semantically evaluated the writing.
         """
         prepared = compose_coach_prompt(request)
         self.last_prepared_prompt = prepared
         self.last_stage_id = request.current_stage
+        requested = str(request.specialist or "").strip().lower()
         specialist = select_specialist(
             request.student_message, requested=request.specialist
         )
         if specialist == SPECIALIST_QA:
             return self._qa_result(request)
-        if specialist == SPECIALIST_REVIEW:
+        if requested == SPECIALIST_REVIEW:
             return self._review_result(request)
         stage = STAGE_BY_ID[request.current_stage]
         prior_stage_contributions = _prior_assessed_turns(request)
-        advance_after = 2 if request.response_detail == "long" else 1
+        advance_after = 0 if request.response_detail == "long" else 1
         guided_recommendation = (
             StageDecision.ADVANCE
-            if prior_stage_contributions >= advance_after and stage.id != "reflection"
+            if prior_stage_contributions >= advance_after
             else StageDecision.STAY
         )
         recommendation = self.recommendation or guided_recommendation
@@ -287,6 +297,7 @@ class DeterministicCoachProvider:
         evidence_block = f"{evidence_note}\n\n" if evidence_note else ""
         assessment = EducationalAssessment(
             current_stage=stage.id,
+            response_mode="coaching",
             contribution_summary=summary or "Student shared an initial contribution.",
             stage_assessment=(
                 f"The contribution is clear enough to move into {upcoming.short_label}."
@@ -313,11 +324,21 @@ class DeterministicCoachProvider:
             facione_scores=_mock_facione_scores(stage.id, is_advancing=is_advancing),
             review_strengths=strengths,
             review_improvements=improvements,
+            hmw_scaffold_ready=self.hmw_scaffold_ready,
         )
         if is_advancing and upcoming:
             follow_up = next_questions[0] if next_questions else upcoming.reflection_prompt
+            hmw_feedback = ""
+            if stage.id == "problem_identification" and summary:
+                hmw_feedback = (
+                    "This is a clear How Might We direction because it identifies "
+                    "the people you are designing for, the opportunity you are "
+                    "exploring, and the outcome you want to achieve. Keep that "
+                    "intended benefit in view as you generate concepts.\n\n"
+                )
             response = (
                 f"**{upcoming.label}**\n\n"
+                f"{hmw_feedback}"
                 f"That's a solid start—now let's look more carefully at "
                 f"{upcoming.short_label.lower()}. {upcoming.description}\n\n"
                 f"{evidence_block}"
@@ -360,11 +381,15 @@ class DeterministicCoachProvider:
             recommendation_rationale="Q&A specialist does not recommend Thinking Path changes.",
             guidance_questions=[],
             learning_summary="The student asked a course-information question.",
+            response_mode="qa",
+            hmw_scaffold_ready=False,
         )
         return ProviderAssessmentResult(
             response_text=response,
             assessment=assessment,
             research_coding=None,
+            specialist="qa",
+            qualifying_coaching_turn=False,
         )
 
     def _review_result(self, request: CoachRequest) -> ProviderAssessmentResult:
@@ -387,9 +412,72 @@ class DeterministicCoachProvider:
             learning_summary="Formative review of the student's reasoning.",
             review_strengths=["You located the work in a concrete setting."],
             review_improvements=["Name who is affected and what success would look like."],
+            review_depth="deep",
+            review_model="global.anthropic.claude-sonnet-4-6",
+            review_trigger="explicit",
+            review_stage_feedback=[
+                {
+                    "stage_id": request.current_stage,
+                    "strengths": [
+                        "You located the work in a concrete setting."
+                    ],
+                    "areas_to_develop": [
+                        "Name who is affected and what success would look like."
+                    ],
+                    "supporting_message_refs": [],
+                }
+            ],
         )
         return ProviderAssessmentResult(
             response_text=response,
             assessment=assessment,
             research_coding=None,
+            specialist="review",
+            qualifying_coaching_turn=False,
+            deep_review_succeeded=True,
+            review_trigger="explicit",
+        )
+
+    def assess_stage_checkpoint(
+        self, request: CoachRequest
+    ) -> ProviderAssessmentResult:
+        """Return a deterministic Journey stage-completion checkpoint."""
+        stage = STAGE_BY_ID.get(request.current_stage) or STAGE_BY_ID[DEFAULT_STAGE]
+        summary = " ".join(request.student_message.split())[:500]
+        assessment = EducationalAssessment(
+            current_stage=stage.id,
+            contribution_summary=summary or f"Completed {stage.label}.",
+            stage_assessment=f"Formative checkpoint for {stage.label}.",
+            critical_understanding_level="Not assessed",
+            confidence=0.55,
+            recommendation=StageDecision.STAY,
+            recommendation_rationale="Stage checkpoints do not change the Thinking Path.",
+            guidance_questions=[],
+            learning_summary=(
+                f"The student completed {stage.label} with a clearer "
+                "contribution and rationale."
+            ),
+            understanding_change=(
+                f"Reasoning in {stage.short_label} became more specific."
+            ),
+            review_strengths=[
+                f"Produced a usable {stage.short_label} contribution.",
+                "Connected the work to earlier Thinking Path context.",
+            ],
+            review_improvements=[
+                "One assumption or limitation still needs a later revisit.",
+            ],
+            facione_scores=_mock_facione_scores(stage.id, is_advancing=False),
+            review_depth="incremental",
+            review_model="mock-haiku-stage-checkpoint",
+            review_trigger="stage_checkpoint",
+        )
+        return ProviderAssessmentResult(
+            response_text=assessment.learning_summary or "",
+            assessment=assessment,
+            research_coding=None,
+            specialist="review",
+            qualifying_coaching_turn=False,
+            deep_review_succeeded=False,
+            review_trigger="stage_checkpoint",
         )

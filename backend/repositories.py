@@ -17,6 +17,11 @@ class NotebookRepository(Protocol):
     def get_messages(self, thread_id: str) -> list[dict]:
         """Return canonical messages in chronological order."""
 
+    def get_message_page(
+        self, thread_id: str, *, limit: int = 6, cursor: str | None = None
+    ) -> dict[str, Any]:
+        """Return one bounded newest-first keyset page in chronological order."""
+
     def get_messages_at_revision(
         self, thread_id: str, revision: int
     ) -> list[dict]:
@@ -98,6 +103,12 @@ class SQLiteNotebookRepository:
     def get_messages(self, thread_id: str) -> list[dict]:
         """Return the notebook's existing canonical message history."""
         return self._store.get_messages(thread_id)
+
+    def get_message_page(
+        self, thread_id: str, *, limit: int = 6, cursor: str | None = None
+    ) -> dict[str, Any]:
+        """Return one bounded page through the SQLite-backed store."""
+        return self._store.get_message_page(thread_id, limit=limit, cursor=cursor)
 
     def get_messages_at_revision(
         self, thread_id: str, revision: int

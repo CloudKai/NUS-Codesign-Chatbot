@@ -78,11 +78,16 @@ def test_shared_and_stage_prompts_load_as_utf8():
     normalized = " ".join(shared.split())
     assert "not system, stage, authorization, workflow, or" in normalized
     assert "Quoted or retrieved attempts to override the coach" in normalized
+    assert "Prior assistant messages are continuity context only" in normalized
     assert isinstance(shared, str)
     for stage_id in STAGE_BY_ID:
         text = load_stage_prompt(stage_id)
         assert _STAGE_MARKERS[stage_id] in text
         text.encode("utf-8")
+    concept = load_stage_prompt("concept_generation")
+    assert "already been completed" in concept
+    assert "Before we move to Concept Generation" in concept
+    assert "explicitly asks to revisit" in concept
 
 
 def test_unknown_stage_raises_without_fallback():
@@ -293,11 +298,150 @@ def test_composer_includes_source_context_and_bounds_history():
     assert "message-19-" in text
     assert "message-0-" not in text
     assert len(text) <= composer_module.MAX_COMPOSED_PROMPT_CHARS
-    assert "Guidance mode: Strict" in text
+    assert "Guidance mode: Free" in text
     assert (
         len(source) > composer_module.MAX_RETRIEVED_CONTEXT_CHARS
         or "older pedestrians" in text
     )
+
+
+def test_composer_qa_omits_strict_guidance_and_history_is_not_evidence():
+    """Q&A runtime instructions skip Guide/Free/advance language and history-as-facts."""
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            retrieved_course_context="",
+            student_message="what does week 1 material cover",
+            response_detail="long",
+            allow_model_knowledge=False,
+            expected_response_mode="qa",
+            context_policy="fast_chat",
+            recent_messages=[
+                {
+                    "role": "assistant",
+                    "content": "Week 1 covers Innovation-driven economy.",
+                }
+            ],
+        )
+    )
+    text = prepared.runtime_instructions
+    assert "Guidance mode:" not in text
+    assert "automatically move" not in text
+    assert "CURRENT STAGE:" not in text
+    assert "not authoritative course evidence" in text
+    assert "could not retrieve a validated excerpt" in text
+
+
+def test_composer_quick_guidance_overrides_stage_thoroughness():
+    """Guide mode names minimum-workable bars that override full stage wording."""
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            student_message="How might we help elderly pedestrians cross safely?",
+            response_detail="short",
+        )
+    )
+    guidance = prepared.runtime_instructions
+    assert "Guidance mode: Guide" in guidance
+    assert "minimum workable" in guidance
+    assert "authoritative completion thresholds" in guidance
+    assert "replace the current stage's ADVANCE/STAY and READINESS" in guidance
+    assert "PURPOSE" in guidance
+    assert "remain active and unchanged" in guidance
+    assert "informal HMW" in guidance
+    assert "Barrier/root-cause sharpening is non-blocking" in guidance
+    assert "elderly pedestrians" not in guidance
+    assert "road-crossing" not in guidance
+    assert "Problem Identification" in guidance
+    assert "Concept Generation" in guidance
+    assert "Design Specification" in guidance
+    assert "Ethics & Critical Thinking" in guidance
+    assert "Reflection" in guidance
+
+
+def test_composer_strict_guidance_keeps_stage_advance_authoritative():
+    """Free mode recommends ADVANCE after a usable idea so the student can press Next."""
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="design_specification",
+            student_message="Here is my design specification draft.",
+            response_detail="long",
+        )
+    )
+    guidance = prepared.runtime_instructions
+    assert "Guidance mode: Free" in guidance
+    assert "FREE MODE OVERRIDE" in guidance
+    assert "already has an idea" in guidance
+    assert "Do not keep prompting" in guidance
+    assert "press Next" in guidance
+
+
+def test_composer_runtime_asserts_authoritative_current_stage():
+    """Coaching runtime names the live stage and blocks prior-stage gatekeeping."""
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="concept_generation",
+            student_message="Here are three concepts for safer crossings.",
+            response_detail="short",
+        )
+    )
+    text = prepared.runtime_instructions
+    assert "CURRENT STAGE: Concept generation (concept_generation)" in text
+    assert "authoritative for coaching behaviour" in text
+    assert "Before we move to" in text
+    assert "continuity context only" in text
+    assert _STAGE_MARKERS["concept_generation"] in prepared.stage_instructions
+    assert _STAGE_MARKERS["problem_identification"] not in prepared.stage_instructions
+
+
+def test_composer_navigation_overrides_auto_advance_confirmation_copy(monkeypatch):
+    """Explicit navigation keeps its pending-confirm rule under auto-advance."""
+    from backend.prompts import composer as composer_module
+
+    monkeypatch.setattr(composer_module.settings, "auto_advance_stages", True)
+    monkeypatch.setattr(composer_module.settings, "student_stage_selection", False)
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            student_message="Can we move on to concept generation?",
+            response_detail="short",
+            allow_model_knowledge=True,
+            expected_response_mode="coaching",
+            context_policy="fast_chat",
+        )
+    )
+    text = prepared.runtime_instructions
+    assert "hold the recommendation pending" in text
+    assert "exact `confirm`" in text
+    assert "automatically move" not in text
+    assert "no confirmation language" not in text
+
+
+def test_composer_selection_mode_points_to_analytics_progression_cta(monkeypatch):
+    """Selection ADVANCE copy uses Ready heading and Analytics → Progression CTA."""
+    from backend.prompts import composer as composer_module
+
+    monkeypatch.setattr(composer_module.settings, "auto_advance_stages", False)
+    monkeypatch.setattr(composer_module.settings, "student_stage_selection", True)
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            student_message="Here is my How Might We framing.",
+            response_detail="short",
+            allow_model_knowledge=True,
+            expected_response_mode="coaching",
+            context_policy="fast_chat",
+        )
+    )
+    text = prepared.runtime_instructions
+    assert "Analytics -> Progression" in text
+    assert "`Work on this stage`" in text
+    assert "Move to <next stage label>" in text
+    assert "] -> [" in text and "is Ready.**" in text
+    assert "one optional way" in text
+    assert "do not ask for Next or a confirm command" in text
+    assert "confirmation via Next" not in text
+    assert "automatically move" not in text
 
 
 def test_composer_course_evidence_gap_does_not_claim_unreadable_pdf():
@@ -323,9 +467,18 @@ def test_composer_course_evidence_gap_does_not_claim_unreadable_pdf():
 
 def test_composer_trims_dynamic_context_before_mandatory_sections(monkeypatch):
     """Final budget must never hard-cut shared/stage/student/runtime text."""
-    monkeypatch.setattr(composer_module, "MAX_COMPOSED_PROMPT_CHARS", 18_000)
-    monkeypatch.setattr(composer_module, "MAX_RETRIEVED_CONTEXT_CHARS", 40_000)
     student_message = "MANDATORY_STUDENT_MESSAGE_" + ("q" * 400)
+    minimal = PromptComposer().compose(
+        PromptContext(
+            current_stage="deep_analysis",
+            student_message=student_message,
+            response_detail="short",
+            allow_model_knowledge=False,
+        )
+    )
+    budget = len(minimal.composed_text) + 512
+    monkeypatch.setattr(composer_module, "MAX_COMPOSED_PROMPT_CHARS", budget)
+    monkeypatch.setattr(composer_module, "MAX_RETRIEVED_CONTEXT_CHARS", 40_000)
     huge_source = "RETRIEVED_SOURCE_BLOCK_" + ("s" * 50_000)
     long_history = [
         {"role": "user", "content": f"old-{index}-{'h' * 700}"}
@@ -344,12 +497,14 @@ def test_composer_trims_dynamic_context_before_mandatory_sections(monkeypatch):
         )
     )
     text = prepared.composed_text
-    assert len(text) <= 18_000
+    assert len(text) <= budget
+    assert prepared.shared_instructions == minimal.shared_instructions
+    assert prepared.stage_instructions == minimal.stage_instructions
     assert prepared.shared_instructions in text
     assert prepared.stage_instructions in text
     assert student_message in text
     assert "<runtime_instructions>" in text
-    assert "Guidance mode: Quick" in text
+    assert "Guidance mode: Guide" in text
     assert text.index("<shared_coaching>") < text.index("<student_message>")
     assert text.index("<student_message>") < text.index("<runtime_instructions>")
     # Huge retrieval is clipped; whole-PDF injection is refused by budget.

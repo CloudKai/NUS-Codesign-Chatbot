@@ -2,7 +2,7 @@
 
 Canonical **pedagogy** for production AgentCore lives in
 `agentcore_runtime/prompts/`. FastAPI sends **application runtime rules**
-(stage id, Quick/Strict, language, allowed `[S#]`, source-grounding,
+(stage id, Guide/Free, language, allowed `[S#]`, source-grounding,
 research-coding contract). `backend/prompts/` remains the composer used by
 mock, OpenAI, and Bedrock Converse, and is the token-budget stand-in for
 AgentCore planning. Do not treat those two packages as competing curricula
@@ -17,19 +17,16 @@ FastAPI (Cognito, notebook ownership, selected sources, RAG)
     ↓
 DSQL / SQLite  (authoritative transcript + persisted stage)
     ↓
-HistoryContextPlanner  (full DSQL history, or memory + recent)
+HistoryContextPlanner  (fast_chat: memory + last 6 / 3000 hist tokens; Deep Review: broader)
     ↓
 runtime_context + runtime_instructions   ← application rules
-untrusted turn (project, evidence, student text)
+untrusted turn (project, optional evidence, student text)
     ↓
 ONE AgentCore Runtime
-    ├── Haiku 4.5 router (qa | coaching | review)
-    ├── Q&A specialist (Haiku 4.5)
-    ├── Coaching specialist + stage prompts (Haiku 4.5)
-    ├── Incremental Review (Haiku 4.5; after Coaching)
-    └── Deep Review (Sonnet 4.6; periodic / event / explicit)
+    ├── fast_chat (Haiku 4.5; one call chooses coaching | qa)
+    └── Deep Review (Sonnet 4.6; POST /api/v1/threads/{id}/deep-review)
     ↓
-structured output  (router_turn | coach_turn | qa_turn | review_turn)
+structured output  (fast_chat_turn | review_turn)
     ↓
 FastAPI validates → workflow → atomic DSQL persist
 ```
@@ -37,10 +34,56 @@ FastAPI validates → workflow → atomic DSQL persist
 Integrate-Bedrock is the production shell. AgentCore is the pedagogical
 brain. DSQL is transcript/state authority. AgentCore Memory is not used.
 
-Periodic Deep Review means every N newly executed, successful Coaching
-turns since the previous successfully persisted Deep Review. It is
-turn-based rather than time-based because it represents new learning
-evidence, not elapsed time. The Review tab is display-only.
+Deep Review is an explicit FastAPI operation
+(`POST /api/v1/threads/{thread_id}/deep-review`). FastAPI stamps
+`specialist=review` only after client-controlled fields are discarded.
+`POST /api/v1/coach/turn` cannot choose Sonnet. Unlock still requires 3
+successful Coaching replies; opening the Review tab is display-only until
+the student starts Deep Review. Deep Review structured output includes
+`stage_reviews` so Strengths / Areas are attributed by Thinking Path stage.
+Holistic synthesis, Facione, and working conclusion stay whole-conversation
+fields. Incremental Review keeps the flatter `review_turn` contract.
+
+Deep Review context policy:
+
+- `full_history` for first reviews, conversations at or below
+  `DEEP_REVIEW_CHECKPOINT_TOKEN_THRESHOLD` (default 20,000 estimated
+  transcript tokens), compact results that are not meaningfully cheaper,
+  incompatible/legacy snapshots, Reflection when
+  `DEEP_REVIEW_FORCE_FULL_FINAL=true`, and any uncertain compatibility check.
+- `checkpoint_delta` only when the transcript is above that threshold and
+  compacting saves at least 1,000 estimated tokens and at least 20% of the
+  full transcript. The payload is the prior Sonnet review (including
+  persisted `readiness_evidence`), exact validated student evidence anchors,
+  all raw active turns since that checkpoint, and current frozen source
+  context. Still one Sonnet invoke.
+- `ref_map` contains only `M#` labels actually exposed in that invocation.
+  FastAPI maps those labels to durable message ids. Unexposed historical
+  labels cannot persist.
+
+Checkpoints are not rolling summaries, Fast Chat memory, or AgentCore
+Memory, and they do not replace DSQL as conversation authority.
+
+### How Might We scaffold
+
+Problem Identification may show a read-only How Might We card in the chat
+log immediately after the Coaching response that first makes the scaffold
+useful. Haiku sets `hmw_scaffold_ready=true` when at least two of three
+framing components (user, problem, outcome) are reasonably clear and the
+student has not yet authored a valid working HMW. FastAPI shows the card when
+the latest qualifying PI Coaching assessment is `ready=true` and
+`recommendation=stay`. There is no minimum Coaching-turn count. A valid
+student-authored HMW sets `ready=false` and `recommendation=advance`; the
+card hides and existing stage machinery may move to Concept Generation.
+Equivalent prose without an HMW stays in Problem Identification. FastAPI
+also requires a deterministic student HMW candidate in the active user
+message before accepting ADVANCE, and promotes STAY to ADVANCE when the
+message satisfies ``student_workable_hmw_present()`` (candidate plus ``for``
+and ``so that`` after the How Might We marker) even if the model keeps probing.
+Zero extra model or Retrieve calls. Clients cannot write the flag.
+
+Legacy router / Q&A / Coaching / Incremental Review payloads remain in the
+runtime for compatibility and are unused on the active FastAPI path.
 
 ## Framework preservation matrix
 
@@ -53,7 +96,7 @@ evidence, not elapsed time. The Review tab is display-only.
 | Silent vs surface ethics / AT-EAI | POC ethics blocks | shared + `deep_analysis.md` | runtime shared + `ethics_critical.md` | MERGE |
 | CLEAR / Facione / HCTSR research | not in POC runtime | shared coaching + research models | runtime shared + same structured fields | PRESERVE |
 | Source grounding / citations | POC Q&A tools | composer + RAG | untrusted evidence `[S#]`; no KB tools | KEEP APPLICATION-SIDE |
-| Quick/Strict | n/a | composer runtime instructions | `runtime_context.response_detail` | KEEP APPLICATION-SIDE |
+| Guide/Free | n/a | composer runtime instructions | `runtime_context.response_detail` (`guide`/`free`) | KEEP APPLICATION-SIDE |
 | Research independence | n/a | shared coaching | runtime shared coaching | PRESERVE |
 | Q&A specialist | POC + unrestricted KB tools | none | runtime `prompts/qa.md`, pre-retrieved evidence | IMPROVE |
 | Scoring specialist | markdown critique | application Review tab | Formative Review specialist, not a grade | MERGE / RENAME |
@@ -102,9 +145,9 @@ changes.
 | Ingestion | Existing upload/text/URL/course-sync code extracts bounded text. Raw bytes and derived text remain separate objects under S3 in production. |
 | Source authority | `sources.selected` plus notebook ownership determines the only documents eligible for a turn. Unselected and other-notebook sources never reach retrieval. |
 | Query | Current student message has the strongest weight. The last two student messages, project context, and learning summary provide lower-weight continuity. |
-| Chunking | `LocalChunkRetriever` creates sentence-aware ~1,800-character chunks with 220-character overlap at query time. No new database migration is needed. |
+| Chunking | `LocalChunkRetriever` uses sentence-aware ~1,800-character chunks with 220-character overlap. FastAPI hydrates selected student sources from disposable `derived/chunks.v1.json` when valid (in-process LRU); missing or invalid artifacts fall back to chunking extracted text at query time. No new database migration is needed. |
 | Ranking | Deterministic weighted lexical/BM25-style scoring uses term rarity, phrase overlap, title matches, and source diversity. Generic queries receive bounded representative excerpts. |
-| Budget | At most 8 chunks, at most 2 per source, and at most 16,000 retrieved characters enter the composer. The composer retains its independent 24,000-character retrieval ceiling. |
+| Budget | Fast chat: deterministic retrieval gate, then at most `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4) chunks and `FAST_CHAT_RETRIEVAL_MAX_CHARS` (default 8,000) characters. Deep Review may use the larger composer ceiling. |
 | Images | Selected images travel as model image inputs; a text marker preserves their stable `[S#]` mapping. |
 | Citations | `[S#]` is stable for the selected-source order. Internal chunk IDs such as `S1-C2` are audit metadata only and are never student-facing citation syntax. |
 | Audit | The assistant message records `retrieval_refs` containing source ID, stable label, chunk ID, focused excerpt, and score. `source_refs` remains reserved for sources actually cited in the response. |
@@ -126,8 +169,13 @@ The composer orders and delimits these sections:
 2. the one authoritative Thinking Path stage prompt;
 3. student project context;
 4. retrieved source excerpts;
-5. bounded learning summary and, unless the provider already sends DSQL
-   history as conversation messages, recent conversation;
+5. bounded learning summary / derived ConversationMemory and, unless the
+   provider already sends DSQL history as conversation messages, recent
+   conversation. Fast chat sends at most 6 recent verbatim message objects,
+   and at most ~3,000 estimated recent-history tokens, with each historical
+   message capped at ~1,500 estimated tokens. The current student message
+   stays separate and is not history-capped. Deep Review may keep a larger
+   window.
 6. the current student message;
 7. runtime rules for language, detail, grounding, citations, and structured
    assessment.
@@ -152,8 +200,11 @@ The composer exposes two bounded products in addition to `composed_text`:
 Mock, OpenAI, and Bedrock Converse still send the ordered `composed_text`.
 AgentCore sends trusted instructions in a dedicated `trusted_instructions`
 harness field and keeps DSQL history plus the untrusted current turn in
-`messages`. Token budgeting still counts the full `composed_text` so the split
-cannot overflow the window.
+`messages`. Fast-chat token budgeting estimates the AgentCore system prompt
+through `agentcore_runtime/system_prompt_budget.py` (the same canonical
+loader the runtime uses) plus the untrusted turn, history, memory, RAG, and
+per-message overhead. That local total is what the 12k/16k Fast Chat
+targets mean. It is not a Bedrock CountTokens measurement.
 
 AgentCore omits duplicated `<recent_messages>` from the untrusted turn because
 the same turns are already Converse `messages`. When history no longer fits,

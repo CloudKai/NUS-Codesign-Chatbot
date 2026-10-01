@@ -210,20 +210,26 @@ def _stage_assessment_as_text(value: Any) -> Any:
 
 
 class EducationalAssessment(BaseModel):
-    """Validated coaching assessment produced for one student contribution."""
+    """Validated coaching assessment produced for one student contribution.
+
+    New Fast Chat turns persist a slim subset (stage, optional stay/advance,
+    citations). Historical rows may still contain Facione and review fields.
+    Missing strings default empty so old full payloads and new slim payloads
+    both parse.
+    """
 
     current_stage: str
-    contribution_summary: str = Field(min_length=1, max_length=2_000)
-    stage_assessment: str = Field(min_length=1, max_length=4_000)
+    contribution_summary: str = Field(default="", max_length=2_000)
+    stage_assessment: str = Field(default="", max_length=4_000)
     evidence_identified: list[str] = Field(default_factory=list)
     assumptions_identified: list[str] = Field(default_factory=list)
     missing_reasoning_elements: list[str] = Field(default_factory=list)
-    critical_understanding_level: str = Field(min_length=1, max_length=120)
-    confidence: float = Field(ge=0.0, le=1.0)
-    recommendation: StageDecision
-    recommendation_rationale: str = Field(min_length=1, max_length=4_000)
+    critical_understanding_level: str = Field(default="", max_length=120)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    recommendation: StageDecision | None = None
+    recommendation_rationale: str = Field(default="", max_length=4_000)
     guidance_questions: list[str] = Field(default_factory=list, max_length=3)
-    learning_summary: str = Field(min_length=1, max_length=4_000)
+    learning_summary: str = Field(default="", max_length=4_000)
     working_conclusion: str = Field(default="", max_length=4_000)
     understanding_change: str = Field(default="", max_length=4_000)
     citations: list[CitationReference] = Field(default_factory=list)
@@ -236,6 +242,11 @@ class EducationalAssessment(BaseModel):
     review_depth: str | None = Field(default=None, max_length=32)
     review_model: str | None = Field(default=None, max_length=128)
     review_trigger: str | None = Field(default=None, max_length=64)
+    response_mode: str = Field(default="", max_length=32)
+    hmw_scaffold_ready: bool = False
+    hmw_scaffold_guarded: bool = False
+    review_stage_contract: str | None = Field(default=None, max_length=16)
+    review_stage_feedback: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -261,7 +272,10 @@ class EducationalAssessment(BaseModel):
             data["stage_assessment"] = _stage_assessment_as_text(stage)
         recommendation = data.get("recommendation")
         if isinstance(recommendation, str):
-            data["recommendation"] = recommendation.strip().lower()
+            cleaned = recommendation.strip().lower()
+            data["recommendation"] = cleaned or None
+        if data.get("hmw_scaffold_ready") is not True:
+            data["hmw_scaffold_ready"] = False
         return data
 
     @field_validator("guidance_questions")
@@ -272,6 +286,12 @@ class EducationalAssessment(BaseModel):
         if any(not value.endswith("?") for value in cleaned):
             raise ValueError("Guidance questions must end with a question mark")
         return cleaned
+
+    @field_validator("hmw_scaffold_ready", mode="before")
+    @classmethod
+    def coerce_hmw_scaffold_ready(cls, value: Any) -> bool:
+        """Persist only JSON true; omit, null, strings, and other values are false."""
+        return value is True
 
     @field_validator("review_strengths", "review_improvements")
     @classmethod
@@ -289,6 +309,39 @@ class EducationalAssessment(BaseModel):
             seen.add(key)
             cleaned.append(item[:400])
         return cleaned[:4]
+
+    def persisted_mapping(self) -> dict[str, Any]:
+        """Return the JSON object stored on one assistant message.
+
+        Fast Chat persists a slim subset so new Coaching/Q&A rows do not look
+        like Deep Review assessments. Historical full objects still parse.
+        """
+        data = self.model_dump(mode="json")
+        data.pop("review_stage_feedback", None)
+        if data.get("hmw_scaffold_guarded") is not True:
+            data.pop("hmw_scaffold_guarded", None)
+        mode = str(self.response_mode or "").strip().lower()
+        if mode not in {"qa", "coaching"}:
+            return data
+        slim: dict[str, Any] = {
+            "current_stage": data.get("current_stage"),
+            "response_mode": mode,
+            "citations": list(data.get("citations") or []),
+        }
+        recommendation = data.get("recommendation")
+        if recommendation in {"stay", "advance"}:
+            slim["recommendation"] = recommendation
+            rationale = str(data.get("recommendation_rationale") or "").strip()
+            if rationale:
+                slim["recommendation_rationale"] = rationale
+        if data.get("readiness_candidate"):
+            slim["readiness_candidate"] = True
+        if data.get("hmw_scaffold_ready") is True:
+            slim["hmw_scaffold_ready"] = True
+        if data.get("hmw_scaffold_guarded") is True:
+            slim["hmw_scaffold_guarded"] = True
+        return slim
+
 
 class PendingPhaseTransition(BaseModel):
     """A student-visible stage transition that awaits an explicit decision."""
@@ -346,6 +399,11 @@ class CoachRequest(BaseModel):
     # Never a notebook id; clients cannot make this authoritative.
     student_id: str | None = Field(default=None, max_length=128)
     source_ids: list[str] = Field(default_factory=list)
+    # Per-turn uploads are stored privately with the student message. They are
+    # not selected notebook Sources and must be resolved server-side.
+    attachment_source_ids: list[str] = Field(default_factory=list, max_length=5)
+    # Server-filled display titles for current-turn attachments (prompt presence).
+    attachment_titles: list[str] = Field(default_factory=list, max_length=5)
     source_context: str = ""
     student_project_context: str = ""
     conversation_summary: str = ""
@@ -375,6 +433,21 @@ class CoachRequest(BaseModel):
     # authoritative. Persisted on notebook settings_text.
     coaching_turns_since_deep_review: int = Field(default=0, ge=0)
     deep_review_interval_turns: int = Field(default=3, ge=1, le=50)
+    # Server-filled Deep Review job id. Clients cannot make this authoritative.
+    review_id: str | None = Field(default=None, max_length=64)
+    # Server-filled retrieval decision. Clients cannot make this authoritative.
+    retrieval_required: bool = False
+    # Server-filled Q&A/coaching mode policy. Clients cannot make these
+    # authoritative; ``_authoritative_request`` overwrites both from the
+    # student message and selected-source metadata.
+    expected_response_mode: str | None = Field(default=None, max_length=16)
+    mode_policy_intent: str = Field(default="", max_length=64)
+    # Server-filled Deep Review context plan. Clients cannot make these
+    # authoritative; ``_prepare_authoritative_turn`` clears them.
+    deep_review_context_mode: str = Field(default="", max_length=32)
+    deep_review_compact_context: str = ""
+    deep_review_ref_map: dict[str, str] = Field(default_factory=dict)
+    deep_review_context_metrics: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("current_stage")
     @classmethod
@@ -396,6 +469,29 @@ class CoachRequest(BaseModel):
             raise ValueError("source_ids must be unique")
         return cleaned
 
+    @field_validator("attachment_source_ids")
+    @classmethod
+    def attachment_source_ids_must_be_unique(cls, values: list[str]) -> list[str]:
+        """Normalize bounded current-turn attachment identifiers."""
+        cleaned = [str(value).strip() for value in values if str(value).strip()]
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("attachment_source_ids must be unique")
+        return cleaned
+
+    @field_validator("attachment_titles")
+    @classmethod
+    def attachment_titles_must_be_bounded(cls, values: list[str]) -> list[str]:
+        """Normalize display titles for current-turn attachment prompt notes."""
+        cleaned: list[str] = []
+        for value in values:
+            title = " ".join(str(value or "").split()).strip()
+            if not title:
+                continue
+            cleaned.append(title[:200])
+            if len(cleaned) >= 5:
+                break
+        return cleaned
+
     @field_validator("specialist")
     @classmethod
     def specialist_must_be_known_or_empty(cls, value: str | None) -> str | None:
@@ -404,6 +500,91 @@ class CoachRequest(BaseModel):
         if cleaned in {"qa", "coaching", "review"}:
             return cleaned
         return None
+
+    @field_validator("review_id")
+    @classmethod
+    def review_id_must_be_token_or_empty(cls, value: str | None) -> str | None:
+        """Keep a short server-owned Deep Review job id. Unknown values become None."""
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            return None
+        if len(cleaned) > 64:
+            return None
+        return cleaned
+
+    @field_validator("expected_response_mode")
+    @classmethod
+    def expected_response_mode_must_be_qa_or_coaching(
+        cls, value: str | None
+    ) -> str | None:
+        """Keep only server-owned qa/coaching hints. Unknown values become None."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"qa", "coaching"}:
+            return cleaned
+        return None
+
+    @field_validator("mode_policy_intent")
+    @classmethod
+    def mode_policy_intent_must_be_known(cls, value: str) -> str:
+        """Keep only graded intent tokens. Unknown values become empty."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {
+            "high_confidence_source",
+            "high_confidence_personal",
+            "ambiguous",
+        }:
+            return cleaned
+        return ""
+
+    @field_validator("deep_review_context_mode")
+    @classmethod
+    def deep_review_context_mode_must_be_known(cls, value: str) -> str:
+        """Keep only server-owned Deep Review context modes."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"full_history", "checkpoint_delta"}:
+            return cleaned
+        return ""
+
+
+class DeepReviewRequest(BaseModel):
+    """Student request to start an explicit Deep Review.
+
+    Ownership, stage, history, sources, and specialist are never accepted
+    from the browser. FastAPI loads those from authenticated notebook state
+    and stamps ``specialist=review`` only after sanitization.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+
+
+class DeepReviewJobStatus(StrEnum):
+    """Durable status of one background Deep Review job."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DeepReviewJob(BaseModel):
+    """Enqueue and poll envelope for one owner-scoped Deep Review job."""
+
+    review_id: str = Field(min_length=1, max_length=64)
+    status: DeepReviewJobStatus
+    reviewed_revision: int = Field(ge=0)
+    stage_at_start: str | None = None
+    started_at: str | None = None
+    updated_at: str | None = None
+    error_code: str | None = Field(default=None, max_length=64)
+    snapshot: dict[str, Any] | None = None
+    conversation_revision: int | None = Field(default=None, ge=0)
 
 
 class CoachTurn(BaseModel):
@@ -463,6 +644,9 @@ class ProviderAssessmentResult(BaseModel):
     qualifying_coaching_turn: bool = False
     deep_review_succeeded: bool = False
     review_trigger: str | None = None
+    # Transient orchestration flag from FastChatTurnOutput. Not educational
+    # assessment, research coding, or a persisted student-facing field.
+    needs_source_retrieval: bool = False
 
     @model_validator(mode="after")
     def holistic_candidate_is_reflection_only(self) -> "ProviderAssessmentResult":
@@ -572,6 +756,26 @@ class MessageCreateRequest(BaseModel):
     role: Literal["assistant"] = "assistant"
     content: str = Field(min_length=1, max_length=100_000)
     metadata: WelcomeMessageMetadata = Field(default_factory=WelcomeMessageMetadata)
+
+
+class MessagePage(BaseModel):
+    """One owner- and conversation-revision-bound page of visible messages.
+
+    ``messages`` is returned in chronological order even though the backing
+    keyset query reads newest-first.  ``next_cursor`` is opaque to clients and
+    is only valid for the same notebook revision.  The aggregate projections
+    let a notebook open render its shell without loading the complete
+    transcript.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    next_cursor: str | None = None
+    total_count: int = Field(default=0, ge=0)
+    conversation_revision: int = Field(default=0, ge=0)
+    source_ids: list[str] = Field(default_factory=list)
+    hmw_scaffold: dict[str, Any] = Field(default_factory=dict)
 
 
 class SourceUpdateRequest(BaseModel):

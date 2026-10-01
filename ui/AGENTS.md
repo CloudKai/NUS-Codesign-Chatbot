@@ -31,22 +31,25 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `auth_gate.py` | Signed-out shell, Cognito login dialog, logout helpers |
 | `auth/cookies.py` | Cookie helpers extracted from the login gate; `_cookie_value` remains a patch seam on `auth_gate` |
 | `constants.py` | Response languages and appearance modes |
+| `coach_welcome.py` | Seeded welcome copy and the progressive How Might We scaffold card (shown after the first useful Coach turn when FastAPI projects availability; hidden after a valid student HMW) |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
-| `toasts.py` | Corner toast helper (timed slide-in; falls back to `st.toast`) |
+| `toasts.py` | Corner toast helper (timed slide-in; dismiss/timers live on the parent window; falls back to `st.toast`) |
 | `assets/styles/` | Ordered static CSS partials (edit the matching component file) |
 | `theme.py` | Loads `assets/styles/` in fixed order, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |
 | `runtime.py` | Compatibility alias for `services/runtime.py` (cached store/workspace/coach, `WorkspaceFacade`, coach helpers, rerun) |
-| `session.py` | Session defaults (Strict coaching / `response_detail=long`), notebook create/select/delete, `save_journey()` |
+| `session.py` | Session defaults (Guide coaching / `response_detail=short`), notebook create/select/delete, `save_journey()` |
 | `rename.py` | Shared Enter-only rename forms, draft discard, select-all helper |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
-| `profile.py` | Compact settings popover (display name, Coaching style Quick/Strict, appearance, language, logout) |
-| `workspace.py` | Mobile panel radio and three-column studio/chat/sources layout |
+| `profile.py` | Compact settings popover (display name, Coaching style Guide/Free, appearance, logout) |
+| `workspace.py` | Gemini mobile header (menu overlay / new chat / chat ⋮) and three-column nav/chat/studio layout |
 | `chat.py` | Compatibility alias for `panels/chat.py` (messages, citations, composer, `handle_prompt()`) |
 | `sources.py` | Compatibility alias for `panels/sources.py` (library, search/filter, add/viewer dialogs) |
-| `studio.py` | Compatibility alias for `panels/studio.py` (five-phase Journey/Review, pending transitions) |
+| `studio.py` | Compatibility alias for `panels/studio.py` (five-phase Journey/Review, pending transitions). Review stage expanders remount when notebook or current stage changes; keys stay stable within a stage. |
+| `panels/nav.py` | Gemini-style left chat rail: New chat, Search, Library, Recents rename/delete |
+| `panels/search.py` | Center Search chats pane (substring match via `list_threads`) |
 | `professor.py` | Lecturer Research/analytics workbench. Do not relocate. CSS lives in `assets/styles/70-professor.css`. |
-| `notebooks.py` | Folder-free notebook library and actions dialog (rename, transcript download, delete) |
+| `notebooks.py` | Shared notebook helpers (`thread_overview`); legacy Your Notebooks dialog kept unused by the top bar |
 | `settings.py` | Preference persistence callbacks used by the profile popover |
 
 `ui.chat`, `ui.sources`, `ui.studio`, and `ui.runtime` replace themselves with
@@ -61,8 +64,9 @@ Compatibility shims at `ui/column_resize.py`, `ui/sources_scroll.py`, and
 
 | Module | Responsibility |
 |---|---|
-| `column_resize.py` | Between-column drag handles and side-panel collapse widths |
+| `column_resize.py` | Nav fixed widths, Library hide, Thinking Path rail, drag handles |
 | `sources_scroll.py` | Sources list scroll region sizing |
+| `chat_scroll.py` | Send snaps bottom; reply remount pins latest coach top unless scrolled away |
 | `composer_layout.py` | Composer footer card / textarea sizing |
 
 These modules inject small `components.html` scripts because Streamlit lacks
@@ -76,18 +80,28 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   OpenAI SDKs, or read/write the filesystem directly except through
   backend helpers already used in this package.
 - **Import shared runtime from `ui.runtime` only.** Use `store` (workspace
-  facade), `local_api_client()`, coach helpers, `rerun_app()`, and
-  `rerun_fragment()` from there — never from `streamlit_app.py`. When
+  facade), `local_api_client()`, coach helpers, `rerun_app()`,
+  `rerun_fragment()`, `coach_turn_is_streaming()`, and
+  `set_coach_turn_streaming()` from there — never from
+  `streamlit_app.py`. When
   `USE_LOCAL_API=true`, `store` routes CRUD through the typed API; otherwise it
   uses in-process `WorkspaceService`. Student turns always use the typed coach
   path (API or in-process), not `StudentChatEngine`.
 - **Rerun scope.** Use `rerun_fragment()` for panel-local updates inside an
   `@st.fragment` (Sources list, Journey preview toggles, Guidance Level,
-  response language, display-name avatar). Use `rerun_app()` when
-  application-wide state changed (notebook switch, auth, coach send/revise,
-  layout collapse, course-sync fragment remount, stage selection, **Appearance
-  theme** — `render_theme_css()` only runs on a full script). Do not keep a
-  generic `rerun()` helper.
+  response language, display-name avatar). The chat composer lives in
+  `_render_composer_submit_fragment` so a normal Send does not rebuild
+  Journey, Deep Review, Sources, or chat history before FastAPI starts.
+  After a successful persisted turn, always ``rerun_app()`` so
+  authoritative history owns the completed bubbles. Use ``rerun_app()``
+  when application-wide state changed (notebook switch,
+  auth, coach ADVANCE / pending transition / Deep Review progress, composer
+  uploads, revise, layout collapse, course-sync fragment remount, stage
+  selection, **Appearance theme** — `render_theme_css()` only runs on a
+  full script). Sources and Deep Review must not
+  call `rerun_app()` while `coach_turn_is_streaming()` is true (a remount
+  during `handle_prompt` stacks a second workspace). Do not keep a generic
+  `rerun()` helper.
 - **Preserve widget keys and dialog decorators.** Keep `@st.dialog` and
   `@st.fragment` on the functions that own them. Changing keys breaks session
   state and AppTest expectations.
@@ -137,8 +151,9 @@ streamlit_app.py
   -> render_theme_css()
   -> render_topbar()  -> model_id, reasoning_effort
   -> render_workspace(model_id, reasoning_effort)
-  -> notebook_actions_dialog() if pending
-  -> else notebooks_dialog() if reopen after actions dismiss/delete
+  -> notebooks_dialog() from the Notebooks button, or while
+     pending_notebook_actions / reopen_notebooks_dialog (inline actions;
+     no nested Notebook Actions dialog)
 ```
 
 ## Common edit paths

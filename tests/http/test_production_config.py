@@ -37,6 +37,7 @@ def _apply_valid_production_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "agentcore_runtime_arn", "")
     monkeypatch.setattr(settings, "agentcore_runtime_id", "")
     monkeypatch.setattr(settings, "agentcore_timeout_seconds", 110.0)
+    monkeypatch.setattr(settings, "deep_review_agentcore_timeout_seconds", 200.0)
     monkeypatch.setattr(settings, "agentcore_max_retries", 0)
     monkeypatch.setattr(settings, "agentcore_model_provider", "")
     monkeypatch.setattr(settings, "agentcore_model_id", "")
@@ -231,6 +232,16 @@ def test_production_shared_course_sync_requires_knowledge_base_id(monkeypatch):
         ("agentcore_runtime_arn", "", r"AGENTCORE_RUNTIME_ARN"),
         ("agentcore_timeout_seconds", 0, r"AGENTCORE_TIMEOUT_SECONDS"),
         ("agentcore_timeout_seconds", 121, r"AGENTCORE_TIMEOUT_SECONDS"),
+        (
+            "deep_review_agentcore_timeout_seconds",
+            29,
+            r"DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS",
+        ),
+        (
+            "deep_review_agentcore_timeout_seconds",
+            601,
+            r"DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS",
+        ),
         ("agentcore_max_retries", 3, r"AGENTCORE_MAX_RETRIES"),
         ("agentcore_model_provider", "", r"AGENTCORE_MODEL_PROVIDER"),
         ("agentcore_model_provider", "claude", r"AGENTCORE_MODEL_PROVIDER"),
@@ -283,8 +294,8 @@ def test_production_rejects_missing_role_model_configuration(monkeypatch):
     monkeypatch.setattr(settings, "guardrail_version", "1")
     _apply_hybrid_role_models(monkeypatch)
     monkeypatch.setattr(settings, "router_model_provider", "")
-    with pytest.raises(ValueError, match="ROUTER_MODEL_PROVIDER"):
-        validate_production_configuration()
+    monkeypatch.setattr(settings, "router_model_id", "")
+    validate_production_configuration()
     monkeypatch.setattr(settings, "router_model_provider", "bedrock")
     monkeypatch.setattr(settings, "router_model_id", "openai.gpt-5.6-luna")
     with pytest.raises(ValueError, match="Luna cannot use BedrockModel"):

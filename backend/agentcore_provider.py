@@ -1,30 +1,30 @@
 """Amazon Bedrock AgentCore Runtime adapter for one structured specialist turn.
 
-The adapter may invoke ``InvokeAgentRuntime`` more than once per student turn
-on the same runtime ARN:
+Normal student chat makes exactly one ``InvokeAgentRuntime`` call:
 
-1. Haiku router (unless the specialist is already server-owned)
-2. The selected specialist (Q&A, Coaching, or explicit Deep Review)
-3. Incremental Haiku Review after a successful Coaching turn
-4. Deep Sonnet Review on periodic or event triggers
+``phase=fast_chat`` / Claude Haiku 4.5
 
-It does not own phase progression, citations, persistence, retrieval, or IAM.
-Tests inject a fake client so automated runs never contact AWS. Planner
-output is request-local so one cached provider instance may coach two
-notebooks for the same owner without cross-notebook memory contamination.
+That call both classifies Coaching vs Q&A and generates the student reply.
+Incremental Review and the Haiku router are not on the active path.
+Deep Sonnet Review remains an explicit ``specialist=review`` operation.
 
-FastAPI remains the authority for authentication, source ownership, and DSQL
-writes. Thinking Path stages stay in DSQL; only the runtime *topic* key maps
-``deep_analysis`` to the POC ``ethics_critical`` label. Invokes are stateless
-(a fresh ``runtimeSessionId`` per invoke) so the runtime LRU cache is not a
-second transcript. Guardrail blocks are category-only failures and never
-persist refusal text.
+The published runtime still dispatches leftover ``phase`` values for any
+principal with ``bedrock-agentcore:InvokeAgentRuntime``. This adapter must
+not send those phases. FastAPI authorization does not apply to that IAM
+call. See ``docs/SECURITY_BOUNDARIES.md``.
+
+The adapter does not own phase progression, citations, persistence,
+retrieval, or IAM. Tests inject a fake client so automated runs never
+contact AWS. Planner output is request-local so one cached provider
+instance may coach two notebooks for the same owner without cross-notebook
+memory contamination.
 """
 
 from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import re
@@ -36,13 +36,25 @@ from typing import Any
 from pydantic import ValidationError
 
 from agentcore_runtime.model import HAIKU_4_5_MODEL_ID, SONNET_4_6_MODEL_ID
-from agentcore_runtime.models import ReviewTurnOutput, RouterOutput
+from agentcore_runtime.models import (
+    DeepReviewTurnOutput,
+    FastChatContractError,
+    ReviewTurnOutput,
+    RouterOutput,
+    adapt_fast_chat_turn_payload,
+    fast_chat_payload_shape_log,
+    parse_review_turn_output,
+)
 
+from .coaching.mode_policy import enforce_model_mode, policy_from_request
 from .context_planner import (
+    CONTEXT_POLICY_FAST_CHAT,
+    CONTEXT_POLICY_FULL_HISTORY,
     ContextBudget,
     ContextBudgetError,
     HistoryContextPlanner,
     ModelContextPlan,
+    estimate_tokens,
     memory_from_metadata,
 )
 from .domain import (
@@ -57,14 +69,19 @@ from .domain import (
 )
 from .prompts import compose_coach_prompt
 from .providers import ProviderUnavailableError
-from .settings import settings
+from .settings import FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN, settings
+from .turn_perf import (
+    begin_coach_turn_perf,
+    current_perf,
+    elapsed_ms,
+    emit_coach_turn_perf,
+    record_failure,
+    record_field,
+    record_success,
+)
 from .specialists.review_orchestration import (
     REVIEW_DEPTH_DEEP,
     REVIEW_DEPTH_INCREMENTAL,
-    REVIEW_TRIGGER_INCREMENTAL,
-    bound_deep_review_interval,
-    resolve_deep_review_trigger,
-    should_run_deep_review,
 )
 from .specialists.routing import (
     ALLOWED_SPECIALISTS,
@@ -83,7 +100,19 @@ _TRUNCATED_FAILURE = "AgentCore truncated the coaching turn"
 _MALFORMED_FAILURE = "The coach reply could not be completed"
 _BLOCKED_FAILURE = "AgentCore blocked this turn"
 _IMAGE_FAILURE = "AgentCore does not support this image type"
+_CDE2300_SCOPE_RESPONSE = (
+    "This companion is only for CDE2300 course content and materials relevant "
+    "to your CDE2300 design project. Please ask a CDE2300 question or attach "
+    "material connected to your project."
+)
+_ATTACHMENT_SCOPE_RESPONSE = (
+    "This file appears to be outside the scope of CDE2300 and your current "
+    "design project, so I won't use it for the coaching session. If you meant "
+    "to attach a design/project-related file, upload that instead."
+)
 _OUTPUT_CONTRACT = "coach_turn"
+_FAST_CHAT_CONTRACT = "fast_chat_turn"
+_FAST_CHAT_PHASE = "fast_chat"
 _CONTRACT_BY_SPECIALIST = {
     SPECIALIST_QA: "qa_turn",
     SPECIALIST_COACHING: "coach_turn",
@@ -246,11 +275,56 @@ def _blocked_error() -> ProviderUnavailableError:
     return ProviderUnavailableError(_BLOCKED_FAILURE, category="safety_blocked")
 
 
-def _malformed_error() -> ProviderUnavailableError:
-    """Return a category-only structured-output failure."""
-    return ProviderUnavailableError(
-        _MALFORMED_FAILURE, category="structured_output_failure"
+class _TransientStructuredOutputError(ProviderUnavailableError):
+    """Mark one runtime harness envelope as eligible for one fresh retry."""
+
+
+def _malformed_error(*, transient: bool = False) -> ProviderUnavailableError:
+    """Return a category-only structured-output failure.
+
+    Args:
+        transient: Whether the failure came from a runtime harness envelope
+            that may be recovered by one fresh stateless invoke. Strict
+            contract validation keeps the default ``False`` so deterministic
+            malformed model output is never retried.
+    """
+    error_type = (
+        _TransientStructuredOutputError if transient else ProviderUnavailableError
     )
+    return error_type(
+        _MALFORMED_FAILURE,
+        category="structured_output_failure",
+    )
+
+
+def _is_transient_structured_output_failure(
+    error: ProviderUnavailableError,
+) -> bool:
+    """Return whether *error* is eligible for one Fast Chat recovery invoke.
+
+    The transient marker is assigned only while decoding AgentCore's harness
+    envelope. Contract validation and provider/authorization failures use the
+    same student-safe category but remain non-retryable.
+    """
+    return isinstance(error, _TransientStructuredOutputError)
+
+
+def _fast_chat_retry_budget_available() -> bool:
+    """Return whether this turn has one outer AgentCore invoke slot left.
+
+    ``agentcore_call_count`` is request-local and incremented by
+    :meth:`AgentCoreCoachProvider._call_runtime`. Keeping the recovery within
+    that same two-invoke budget prevents a later application RAG fallback from
+    extending one claimed idempotency execution to a third invoke.
+    """
+    perf = current_perf()
+    if perf is None:
+        return True
+    try:
+        consumed = int(perf.fields.get("agentcore_call_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    return consumed < FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN
 
 
 def _mapping_indicates_runtime_block(obj: Any, *, depth: int = 0) -> bool:
@@ -291,7 +365,10 @@ def _raise_if_runtime_blocked(events: list[Any]) -> None:
     """
     for event in events:
         if isinstance(event, Mapping) and _mapping_indicates_runtime_block(event):
-            logger.warning("agentcore_turn_blocked")
+            logger.warning(
+                "agentcore_turn_blocked source=runtime_event %s",
+                fast_chat_payload_shape_log(event),
+            )
             raise _blocked_error()
 
 
@@ -306,6 +383,11 @@ def _raise_if_harness_error_envelope(payload: Mapping[str, Any]) -> None:
     if "response_text" in payload and "assessment" in payload:
         return
     category = str(payload.get("category") or "").strip()
+    logger.warning(
+        "agentcore_turn_blocked source=envelope category=%s %s",
+        category or "-",
+        fast_chat_payload_shape_log(payload),
+    )
     if category == "safety_blocked":
         raise _blocked_error()
     if category == "timeout":
@@ -315,7 +397,7 @@ def _raise_if_harness_error_envelope(payload: Mapping[str, Any]) -> None:
             "AgentCore is temporarily throttled", category="throttled"
         )
     if category in {"structured_output_failure", "malformed"}:
-        raise _malformed_error()
+        raise _malformed_error(transient=True)
     raise ProviderUnavailableError(_GENERIC_FAILURE, category="unavailable")
 
 
@@ -341,7 +423,9 @@ def _unwrap_runtime_object(payload: dict[str, Any]) -> dict[str, Any]:
     """Unwrap common AgentCore envelopes until a coach_turn object remains."""
     current = payload
     for _ in range(4):
-        if "response_text" in current and "assessment" in current:
+        if "response_text" in current and (
+            "assessment" in current or "mode" in current
+        ):
             return current
         nested = current.get("result")
         if nested is None:
@@ -525,7 +609,12 @@ def _runtime_context(
     review_mode: str | None = None,
     review_trigger: str | None = None,
 ) -> dict[str, Any]:
-    """Return application-owned runtime constraints for the AgentCore specialist."""
+    """Return application-owned runtime constraints for the AgentCore specialist.
+
+    Fast Chat stamps ``specialist=fast_chat`` plus an optional
+    ``expected_response_mode``. It must not claim ``specialist=coaching``
+    while asking Haiku to choose Coaching versus Q&A.
+    """
     labels = sorted(
         {
             str(chunk.label).strip()
@@ -534,22 +623,34 @@ def _runtime_context(
         }
     )
     cleaned = str(specialist or "").strip().lower()
-    if cleaned not in ALLOWED_SPECIALISTS:
-        cleaned = SPECIALIST_COACHING
-    context = {
+    context: dict[str, Any] = {
         "current_stage": request.current_stage,
         "agentcore_topic": agentcore_topic_for_stage(request.current_stage),
-        "response_detail": "quick" if request.response_detail == "short" else "strict",
+        "response_detail": "guide" if request.response_detail == "short" else "free",
         "language": request.response_language,
         "allowed_citations": labels,
         "allow_model_knowledge": bool(request.allow_model_knowledge),
         "conversation_revision": request.conversation_revision,
-        "specialist": cleaned,
     }
+    if cleaned == _FAST_CHAT_PHASE:
+        context["specialist"] = _FAST_CHAT_PHASE
+        expected = str(request.expected_response_mode or "").strip().lower()
+        if expected in {"qa", "coaching"}:
+            context["expected_response_mode"] = expected
+    elif cleaned in ALLOWED_SPECIALISTS:
+        context["specialist"] = cleaned
+    else:
+        context["specialist"] = SPECIALIST_COACHING
     if review_mode in {REVIEW_DEPTH_INCREMENTAL, REVIEW_DEPTH_DEEP}:
         context["review_mode"] = review_mode
     if review_trigger:
         context["review_trigger"] = str(review_trigger)
+    mode = str(getattr(request, "deep_review_context_mode", "") or "").strip().lower()
+    if review_mode == REVIEW_DEPTH_DEEP and mode in {
+        "full_history",
+        "checkpoint_delta",
+    }:
+        context["deep_review_context_mode"] = mode
     return context
 
 
@@ -573,6 +674,33 @@ def _citations_from_items(items: Any) -> list[CitationReference]:
             )
         )
     return citations
+
+
+def _fast_chat_assessment(
+    request: CoachRequest,
+    *,
+    mode: str,
+    recommendation: StageDecision | None,
+    recommendation_rationale: str,
+    citations: list[CitationReference] | None = None,
+    hmw_scaffold_ready: bool = False,
+) -> EducationalAssessment:
+    """Build the slim persisted assessment for one Fast Chat turn.
+
+    Facione, review lists, and research coding are omitted. Historical rows
+    may still contain those fields; new turns do not invent them. Q&A never
+    persists How Might We readiness.
+    """
+    ready = bool(hmw_scaffold_ready) if mode == "coaching" else False
+    return EducationalAssessment(
+        current_stage=request.current_stage,
+        recommendation=recommendation,
+        recommendation_rationale=str(recommendation_rationale or ""),
+        citations=citations or [],
+        response_mode=mode,
+        readiness_candidate=recommendation is StageDecision.ADVANCE,
+        hmw_scaffold_ready=ready,
+    )
 
 
 def _stay_assessment(
@@ -613,7 +741,8 @@ def _validated_result(
 
     Q&A never persists a stage transition. Coaching ADVANCE is treated as a
     readiness candidate only. Incremental Review cannot advance. Deep Review
-    may recommend stay/advance; FastAPI still executes the transition.
+    may record readiness information; FastAPI does not execute a stage
+    transition from that recommendation.
     """
     specialist = _request_specialist(request)
     if specialist == SPECIALIST_QA:
@@ -721,6 +850,248 @@ def _validated_result(
     )
 
 
+def _allowed_citation_labels(request: CoachRequest) -> set[str]:
+    """Return FastAPI-supplied [S#] labels that Haiku may cite."""
+    return {
+        str(chunk.label).strip()
+        for chunk in request.retrieved_chunks
+        if str(chunk.label or "").strip()
+    }
+
+
+def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
+    """Copy safe cache telemetry from the runtime JSON onto coach_turn_perf.
+
+    Missing keys are left unset. A cache hit is recorded only when the runtime
+    supplied a non-negative ``cache_read_input_tokens`` integer.
+    """
+    if "prompt_cache_enabled" in payload:
+        record_field("prompt_cache_enabled", bool(payload.get("prompt_cache_enabled")))
+    read_raw = payload.get("cache_read_input_tokens")
+    write_raw = payload.get("cache_write_input_tokens")
+    if not isinstance(read_raw, bool) and isinstance(read_raw, (int, float)):
+        read_tokens = int(read_raw)
+        record_field("cache_read_input_tokens", read_tokens)
+        record_field("prompt_cache_hit", read_tokens > 0)
+    if not isinstance(write_raw, bool) and isinstance(write_raw, (int, float)):
+        record_field("cache_write_input_tokens", int(write_raw))
+    cycle_raw = payload.get("event_loop_cycle_count")
+    if not isinstance(cycle_raw, bool) and isinstance(cycle_raw, int) and cycle_raw >= 0:
+        record_field("event_loop_cycle_count", cycle_raw)
+    if "structured_output_recovery_used" in payload:
+        record_field(
+            "structured_output_recovery_used",
+            bool(payload.get("structured_output_recovery_used")),
+        )
+    recovery_category = payload.get("structured_output_failure_category")
+    if isinstance(recovery_category, str) and recovery_category.strip():
+        cleaned_category = recovery_category.strip()[:80]
+        if cleaned_category.replace("_", "").isalnum():
+            record_field("structured_output_failure_category", cleaned_category)
+    first_stop = payload.get("first_cycle_stop_reason")
+    if isinstance(first_stop, str) and first_stop.strip():
+        cleaned_stop = first_stop.strip()[:40]
+        if cleaned_stop.replace("_", "").isalnum():
+            record_field("first_cycle_stop_reason", cleaned_stop)
+    if "first_cycle_tool_choice_installed" in payload:
+        record_field(
+            "first_cycle_tool_choice_installed",
+            bool(payload.get("first_cycle_tool_choice_installed")),
+        )
+    if "first_cycle_tool_choice_applied" in payload:
+        record_field(
+            "first_cycle_tool_choice_applied",
+            bool(payload.get("first_cycle_tool_choice_applied")),
+        )
+    applied_decision = payload.get("first_cycle_tool_choice_decision")
+    if isinstance(applied_decision, str) and applied_decision.strip() in {
+        "applied",
+        "existing_choice",
+        "no_tools",
+        "unexpected_tool_count",
+        "role_not_fast_chat",
+        "middleware_unavailable",
+        "apply_failed",
+    }:
+        record_field("first_cycle_tool_choice_decision", applied_decision.strip())
+    for source, dest in (
+        ("inputTokens", "model_input_tokens"),
+        ("outputTokens", "model_output_tokens"),
+        ("model_input_tokens", "model_input_tokens"),
+        ("model_output_tokens", "model_output_tokens"),
+        ("model_call_count", "model_call_count"),
+        ("time_to_first_token_ms", "agentcore_ttft_ms"),
+        ("model_first_content_ms", "model_first_content_ms"),
+        ("model_first_reply_text_ms", "model_first_reply_text_ms"),
+        ("server_request_duration_ms", "agentcore_model_duration_ms"),
+    ):
+        raw = payload.get(source)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            continue
+        record_field(dest, int(raw) if dest.endswith("tokens") or dest.endswith("count") else round(float(raw), 1))
+
+
+_RUNTIME_PROVENANCE_MAX_LEN = 80
+_RUNTIME_PROVENANCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+/=-]{0,79}$")
+_RUNTIME_PROVENANCE_FIELDS = (
+    "runtime_model_role",
+    "runtime_model_provider",
+    "runtime_model_id",
+    "runtime_model_region",
+    "runtime_strands_agents",
+)
+
+
+def _safe_runtime_identifier(value: Any) -> str | None:
+    """Return a short plain identifier, or None when the value is unsafe.
+
+    Args:
+        value: Runtime-supplied provenance candidate.
+
+    Returns:
+        The stripped identifier, or ``None`` when missing, non-string,
+        oversized, or not a short plain token.
+    """
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) > _RUNTIME_PROVENANCE_MAX_LEN:
+        return None
+    if _RUNTIME_PROVENANCE_RE.fullmatch(cleaned) is None:
+        return None
+    return cleaned
+
+
+def _record_runtime_model_provenance(payload: dict[str, Any]) -> None:
+    """Copy safe runtime-loaded model identifiers onto coach_turn_perf.
+
+    Missing, malformed, oversized, or non-string values are omitted. This
+    never falls back to the FastAPI-configured model fields.
+    """
+    for key in _RUNTIME_PROVENANCE_FIELDS:
+        identifier = _safe_runtime_identifier(payload.get(key))
+        if identifier is not None:
+            record_field(key, identifier)
+
+
+def _validated_fast_chat(
+    payload: dict[str, Any], request: CoachRequest
+) -> ProviderAssessmentResult:
+    """Validate one-call fast-chat output and fail closed on a bad contract.
+
+    Accepts the current slim ``fast_chat_turn_v1`` object. The immediately
+    previous nested ``CoachTurnOutput`` is mapped only when
+    ``assessment.recommendation`` is stay or advance. A previous Q&A object
+    (response_text, no recommendation) maps to mode=qa. Conflicting or
+    malformed shapes fail closed with a key-only log line.
+    """
+    _record_runtime_cache_metrics(payload)
+    try:
+        output = adapt_fast_chat_turn_payload(payload)
+    except FastChatContractError as error:
+        logger.warning(
+            "fast_chat_contract_mismatch reason=%s %s",
+            error.reason,
+            fast_chat_payload_shape_log(payload),
+        )
+        raise _malformed_error() from error
+    except (ValidationError, TypeError, ValueError) as error:
+        logger.warning(
+            "fast_chat_contract_mismatch reason=slim_invalid %s",
+            fast_chat_payload_shape_log(payload),
+        )
+        raise _malformed_error() from error
+    if output.out_of_scope:
+        record_field("fast_chat_out_of_scope", True)
+        record_field("mode_returned", SPECIALIST_QA)
+        record_field("hmw_scaffold_ready_model", False)
+        return ProviderAssessmentResult(
+            response_text=(
+                _ATTACHMENT_SCOPE_RESPONSE
+                if request.attachment_source_ids
+                else _CDE2300_SCOPE_RESPONSE
+            ),
+            assessment=_fast_chat_assessment(
+                request,
+                mode="qa",
+                recommendation=None,
+                recommendation_rationale="",
+                citations=[],
+                hmw_scaffold_ready=False,
+            ),
+            research_coding=None,
+            specialist=SPECIALIST_QA,
+            qualifying_coaching_turn=False,
+            deep_review_succeeded=False,
+            review_trigger=None,
+            needs_source_retrieval=False,
+        )
+    allowed = _allowed_citation_labels(request)
+    citations = [
+        item
+        for item in _citations_from_items(
+            [item.model_dump(mode="json") for item in output.citations]
+        )
+        if item.label in allowed
+    ]
+    if output.needs_source_retrieval:
+        record_field("fast_chat_needs_source_retrieval", True)
+    record_field("mode_returned", output.mode)
+    policy = policy_from_request(request)
+    enforcement = enforce_model_mode(policy.expected_mode, output.mode)
+    record_field("mode_policy_intent", policy.intent)
+    record_field("mode_policy_enforced", enforcement.overridden)
+    logger.info(
+        "mode_policy intent=%s expected=%s returned=%s enforced=%s",
+        policy.intent,
+        policy.expected_mode or "none",
+        output.mode,
+        str(enforcement.overridden).lower(),
+    )
+    if enforcement.effective_mode == SPECIALIST_QA:
+        record_field("hmw_scaffold_ready_model", False)
+        return ProviderAssessmentResult(
+            response_text=output.response_text,
+            assessment=_fast_chat_assessment(
+                request,
+                mode="qa",
+                recommendation=None,
+                recommendation_rationale="",
+                citations=citations,
+                hmw_scaffold_ready=False,
+            ),
+            research_coding=None,
+            specialist=SPECIALIST_QA,
+            qualifying_coaching_turn=False,
+            deep_review_succeeded=False,
+            review_trigger=None,
+            needs_source_retrieval=bool(output.needs_source_retrieval),
+        )
+    if output.recommendation not in {StageDecision.STAY.value, StageDecision.ADVANCE.value}:
+        raise _malformed_error()
+    record_field("hmw_scaffold_ready_model", bool(output.hmw_scaffold_ready))
+    assessment = _fast_chat_assessment(
+        request,
+        mode="coaching",
+        recommendation=StageDecision(output.recommendation),
+        recommendation_rationale=str(output.recommendation_rationale or ""),
+        citations=citations,
+        hmw_scaffold_ready=bool(output.hmw_scaffold_ready),
+    )
+    if assessment.recommendation is StageDecision.ADVANCE:
+        assessment = assessment.model_copy(update={"readiness_candidate": True})
+    return ProviderAssessmentResult(
+        response_text=output.response_text,
+        assessment=assessment,
+        research_coding=None,
+        specialist=SPECIALIST_COACHING,
+        qualifying_coaching_turn=True,
+        deep_review_succeeded=False,
+        review_trigger=None,
+        needs_source_retrieval=bool(output.needs_source_retrieval),
+    )
+
+
 def _stateless_session_id() -> str:
     """Return a unique runtime session id that is never notebook-derived.
 
@@ -728,6 +1099,77 @@ def _stateless_session_id() -> str:
     only durable transcript.
     """
     return f"stateless-{uuid.uuid4().hex}"
+
+
+_SESSION_AFFINITY_PREFIX = "codesign-"
+_SESSION_AFFINITY_ROLES = frozenset({"fast_chat", "review_deep"})
+
+
+def _collapsed_identity(value: Any) -> str:
+    """Return a stripped identity string with collapsed whitespace."""
+    return " ".join(str(value or "").split()).strip()
+
+
+def _affinity_session_id(
+    owner_id: str, notebook_id: str, role: str, generation: str
+) -> str:
+    """Return an opaque AgentCore session id for one owner, notebook, and role.
+
+    Args:
+        owner_id: Server-authoritative store identifier. Never logged.
+        notebook_id: Server-authoritative notebook/thread id. Never logged.
+        role: ``fast_chat`` or ``review_deep``.
+        generation: Operator-controlled deployment salt.
+
+    Returns:
+        ``codesign-`` plus a SHA-256 hex digest (73 characters). The digest
+        does not contain owner, notebook, email, or student text.
+    """
+    # Length-prefix each field so a separator byte inside one value cannot be
+    # re-read as a field boundary and alias a different (owner, notebook, role)
+    # tuple onto the same compute session.
+    parts = (owner_id, notebook_id, role, generation)
+    material = "\0".join(f"{len(part)}:{part}" for part in parts)
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return _SESSION_AFFINITY_PREFIX + digest
+
+
+def _runtime_session_id(request: CoachRequest, role: str) -> str:
+    """Return a compute-affinity session id or a fresh stateless id.
+
+    Affinity is optional and FastAPI-owned. Disabled, missing owner or
+    notebook identity, or an unsupported role fail open to a unique
+    ``stateless-`` id. The returned value is never logged.
+
+    Args:
+        request: Server-built coaching input with ``student_id`` and
+            ``thread_id``.
+        role: Invoke role used for session isolation.
+
+    Returns:
+        An AgentCore ``runtimeSessionId`` of at least 33 characters.
+    """
+    if not bool(getattr(settings, "agentcore_session_affinity_enabled", False)):
+        return _stateless_session_id()
+    owner_id = _collapsed_identity(request.student_id)
+    notebook_id = _collapsed_identity(request.thread_id)
+    cleaned_role = str(role or "").strip().lower()
+    if (
+        not owner_id
+        or not notebook_id
+        or cleaned_role not in _SESSION_AFFINITY_ROLES
+    ):
+        return _stateless_session_id()
+    generation = (
+        str(getattr(settings, "agentcore_session_generation", "") or "").strip()
+        or "1"
+    )
+    role_material = cleaned_role
+    if cleaned_role == "review_deep":
+        review_id = _collapsed_identity(getattr(request, "review_id", None))
+        if review_id:
+            role_material = f"{cleaned_role}:{review_id}"
+    return _affinity_session_id(owner_id, notebook_id, role_material, generation)
 
 
 def _current_turn_content(
@@ -740,17 +1182,52 @@ def _current_turn_content(
     return content
 
 
-def _planner_from_settings() -> HistoryContextPlanner:
-    """Build the production planner from configured conservative token budgets."""
+def _deep_review_planner_from_settings() -> HistoryContextPlanner:
+    """Build the broader Deep Review planner from configured token budgets."""
     return HistoryContextPlanner(
         ContextBudget(
             model_context_limit_tokens=int(settings.model_context_limit_tokens),
-            max_input_tokens=int(settings.model_max_input_tokens),
+            max_input_tokens=int(
+                getattr(
+                    settings,
+                    "deep_review_max_input_tokens",
+                    settings.model_max_input_tokens,
+                )
+            ),
             output_reserve_tokens=int(settings.model_output_reserve_tokens),
             safety_margin_tokens=int(settings.model_context_safety_margin_tokens),
-            recent_verbatim_messages=int(settings.history_recent_verbatim_messages),
-        )
+            recent_verbatim_messages=int(
+                getattr(
+                    settings,
+                    "deep_review_recent_verbatim_messages",
+                    settings.history_recent_verbatim_messages,
+                )
+            ),
+        ),
+        policy=CONTEXT_POLICY_FULL_HISTORY,
     )
+
+
+def _fast_chat_planner_from_settings() -> HistoryContextPlanner:
+    """Build the latency-oriented fast-chat planner."""
+    return HistoryContextPlanner(
+        ContextBudget(
+            model_context_limit_tokens=int(settings.model_context_limit_tokens),
+            max_input_tokens=int(settings.fast_chat_max_input_tokens),
+            output_reserve_tokens=4_000,
+            safety_margin_tokens=1_000,
+            recent_verbatim_messages=int(settings.fast_chat_recent_verbatim_messages),
+            recent_history_max_tokens=int(settings.fast_chat_recent_history_max_tokens),
+            history_message_max_tokens=int(settings.fast_chat_history_message_max_tokens),
+            soft_input_tokens=int(settings.fast_chat_soft_input_tokens),
+        ),
+        policy=CONTEXT_POLICY_FAST_CHAT,
+    )
+
+
+def _planner_from_settings() -> HistoryContextPlanner:
+    """Compatibility alias for the fast-chat planner used by injected tests."""
+    return _fast_chat_planner_from_settings()
 
 
 def _compact_text(value: Any, limit: int) -> str:
@@ -775,7 +1252,11 @@ def _compact_string_list(values: Any, *, item_limit: int, max_items: int) -> lis
 
 
 def _router_payload(request: CoachRequest) -> dict[str, Any]:
-    """Build a small Haiku router payload. Never includes RAG or pedagogy."""
+    """Build a small Haiku router payload. Never includes RAG or pedagogy.
+
+    ``assess()`` does not call this. Kept for the retired
+    :meth:`AgentCoreCoachProvider._resolve_specialist` helper.
+    """
     return {
         "phase": "router",
         "output_contract": "router_turn",
@@ -885,6 +1366,19 @@ def _overlay_review_fields(
             result.assessment.readiness_candidate or review.readiness_candidate
         ),
     }
+    stage_feedback = []
+    raw_reviews = getattr(review, "stage_reviews", None) or []
+    for item in raw_reviews:
+        if hasattr(item, "model_dump"):
+            stage_feedback.append(item.model_dump(mode="json"))
+        elif isinstance(item, dict):
+            stage_feedback.append(dict(item))
+    if stage_feedback:
+        update["review_stage_feedback"] = stage_feedback
+    if isinstance(review, DeepReviewTurnOutput):
+        # Preserve the distinction between a new explicit [] and a legacy
+        # flat Review payload that never had stage-aware arrays.
+        update["review_stage_contract"] = "v1"
     if review_depth == REVIEW_DEPTH_DEEP and synthesis:
         update["stage_assessment"] = synthesis
     if force_stay:
@@ -930,16 +1424,16 @@ def _merge_deep_review(
         list(merged.assessment.evidence_identified),
         list(review.readiness_evidence),
     )
-    recommendation = StageDecision.STAY
-    if str(review.recommendation or "").strip().lower() == "advance":
-        recommendation = StageDecision.ADVANCE
+    review_ready = bool(getattr(review, "readiness_candidate", False)) or (
+        str(review.recommendation or "").strip().lower() == "advance"
+    )
     assessment = merged.assessment.model_copy(
         update={
-            "recommendation": recommendation,
+            "recommendation": StageDecision.STAY,
             "recommendation_rationale": rationale,
             "missing_reasoning_elements": missing,
             "evidence_identified": evidence,
-            "readiness_candidate": recommendation is StageDecision.ADVANCE
+            "readiness_candidate": review_ready
             or merged.assessment.readiness_candidate,
         }
     )
@@ -960,9 +1454,11 @@ class AgentCoreCoachProvider:
         region: str = "us-west-2",
         qualifier: str = "DEFAULT",
         timeout_seconds: float = 110.0,
+        deep_review_timeout_seconds: float = 200.0,
         max_retries: int = 0,
         client: Any | None = None,
         planner: HistoryContextPlanner | None = None,
+        deep_planner: HistoryContextPlanner | None = None,
     ) -> None:
         """Create the adapter with an injected or lazily constructed client.
 
@@ -971,10 +1467,11 @@ class AgentCoreCoachProvider:
             region: AWS region for the data-plane client, typically ``us-west-2``.
             qualifier: Runtime endpoint qualifier, normally ``DEFAULT``.
             timeout_seconds: boto read timeout; retries stay application-owned.
+            deep_review_timeout_seconds: Deep Review-only boto read timeout.
             max_retries: Extra SDK attempts after the first call (0 disables).
             client: Optional injected ``bedrock-agentcore`` client for tests.
-            planner: Optional history planner. Defaults to full-history-first
-                with extractive compression only (no extra model call).
+            planner: Optional fast-chat history planner.
+            deep_planner: Optional Deep Review history planner.
 
         Raises:
             ProviderUnavailableError: When ``AGENTCORE_RUNTIME_ARN`` is empty.
@@ -986,18 +1483,27 @@ class AgentCoreCoachProvider:
         self._region = str(region or "").strip() or "us-west-2"
         self._qualifier = str(qualifier or "").strip() or "DEFAULT"
         self._timeout_seconds = float(timeout_seconds)
+        self._deep_review_timeout_seconds = float(deep_review_timeout_seconds)
         self._max_retries = int(max_retries)
+        self._injected_client = client is not None
         self._client = client
-        self._planner = planner or _planner_from_settings()
+        self._deep_review_client = client
+        self._planner = planner or _fast_chat_planner_from_settings()
+        self._deep_planner = deep_planner or _deep_review_planner_from_settings()
 
     def model_id_for(self, request: CoachRequest) -> str:
         """Return the configured AgentCore runtime ARN."""
         del request
         return self._runtime_arn
 
-    def _runtime_client(self) -> Any:
-        """Return the injected client or construct a bedrock-agentcore client."""
-        if self._client is not None:
+    def _runtime_client(self, role: str = "fast_chat") -> Any:
+        """Return the injected or cached client for the resolved invoke role."""
+        cleaned_role = str(role or "fast_chat").strip().lower()
+        if self._injected_client:
+            return self._client
+        if cleaned_role == "review_deep" and self._deep_review_client is not None:
+            return self._deep_review_client
+        if cleaned_role != "review_deep" and self._client is not None:
             return self._client
         try:
             import boto3
@@ -1005,17 +1511,29 @@ class AgentCoreCoachProvider:
         except ImportError as error:
             raise ProviderUnavailableError(_GENERIC_FAILURE) from error
         attempts = max(1, self._max_retries + 1)
-        config = Config(
-            retries={"max_attempts": attempts, "mode": "standard"},
-            read_timeout=self._timeout_seconds,
-            connect_timeout=min(10.0, self._timeout_seconds),
+        # ``total_max_attempts`` includes the initial call. The legacy
+        # ``max_attempts`` key is normalised by botocore to ``value + 1``,
+        # which would silently double the configured invoke budget.
+        timeout_seconds = (
+            self._deep_review_timeout_seconds
+            if cleaned_role == "review_deep"
+            else self._timeout_seconds
         )
-        self._client = boto3.client(
+        config = Config(
+            retries={"total_max_attempts": attempts, "mode": "standard"},
+            read_timeout=timeout_seconds,
+            connect_timeout=min(10.0, timeout_seconds),
+        )
+        client = boto3.client(
             "bedrock-agentcore",
             region_name=self._region,
             config=config,
         )
-        return self._client
+        if cleaned_role == "review_deep":
+            self._deep_review_client = client
+        else:
+            self._client = client
+        return client
 
     def _invoke_payload(
         self,
@@ -1024,39 +1542,194 @@ class AgentCoreCoachProvider:
         *,
         review_mode: str | None = None,
         review_trigger: str | None = None,
+        context_policy: str = CONTEXT_POLICY_FAST_CHAT,
+        phase: str | None = None,
+        output_contract: str | None = None,
     ) -> tuple[dict[str, Any], ModelContextPlan]:
         """Build the JSON payload and request-local context plan for one invoke.
 
-        Always sends Converse ``messages``: planner-selected DSQL history plus
-        the untrusted current-turn content. Canonical pedagogy lives in the
-        AgentCore runtime. This adapter sends application runtime rules in
-        ``trusted_instructions`` and ``runtime_context``. The untrusted brief
-        omits duplicated ``<recent_messages>``. Derived memory appears only in
-        ``<conversation_memory>`` when compression was required. A top-level
-        ``prompt`` string is never used. Token budgeting still uses the full
-        ordered ``composed_text`` so the split cannot overflow the window.
-
-        The plan is returned to the caller so two notebooks sharing this
-        provider instance cannot overwrite each other's conversation memory.
+        Fast chat sends bounded recent Converse ``messages`` plus compact
+        untrusted turn text. Deep Review may use the broader history policy.
+        Canonical pedagogy lives in the AgentCore runtime.
         """
         existing = memory_from_metadata(
             {"conversation_memory": request.conversation_memory},
             conversation_revision=int(request.conversation_revision or 0),
         )
         seed_request = request.model_copy(update={"conversation_memory": None})
+        compose_policy = (
+            "fast_chat"
+            if context_policy == CONTEXT_POLICY_FAST_CHAT
+            else "deep_review"
+        )
+        planner = (
+            self._planner
+            if context_policy == CONTEXT_POLICY_FAST_CHAT
+            else self._deep_planner
+        )
+        compose_started = time.perf_counter()
         preliminary = compose_coach_prompt(
-            seed_request, include_recent_messages=False
-        ).composed_text
+            seed_request,
+            include_recent_messages=False,
+            context_policy=compose_policy,
+        )
+        record_field("prompt_compose_ms", elapsed_ms(compose_started))
+        system_prompt_tokens = 0
+        prompt_text = preliminary.composed_text
+        if context_policy == CONTEXT_POLICY_FAST_CHAT:
+            try:
+                from agentcore_runtime.system_prompt_budget import (
+                    fast_chat_system_prompt_for_estimate,
+                )
+            except ImportError:
+                from agentcore_runtime.structured_coach import specialist_system_prompt
+
+                def fast_chat_system_prompt_for_estimate(
+                    *,
+                    topic: str,
+                    trusted_runtime_rules: str = "",
+                    runtime_context: dict[str, Any] | None = None,
+                ) -> str:
+                    payload: dict[str, Any] = {
+                        "phase": "fast_chat",
+                        "topic": topic,
+                        "output_contract": "fast_chat_turn",
+                        "trusted_instructions": trusted_runtime_rules,
+                    }
+                    if runtime_context:
+                        payload["runtime_context"] = runtime_context
+                    return specialist_system_prompt(payload)
+
+            estimate_specialist = str(specialist or "").strip().lower()
+            if (
+                estimate_specialist not in ALLOWED_SPECIALISTS
+                and estimate_specialist != _FAST_CHAT_PHASE
+            ):
+                estimate_specialist = SPECIALIST_COACHING
+            system_text = fast_chat_system_prompt_for_estimate(
+                topic=agentcore_topic_for_stage(request.current_stage),
+                trusted_runtime_rules=preliminary.runtime_instructions,
+                runtime_context=_runtime_context(
+                    request,
+                    estimate_specialist,
+                    review_mode=review_mode,
+                    review_trigger=review_trigger,
+                ),
+            )
+            system_prompt_tokens = estimate_tokens(system_text)
+            prompt_text = preliminary.untrusted_turn_text
+        plan_started = time.perf_counter()
         try:
-            plan = self._planner.plan(
+            plan = planner.plan(
                 seed_request,
-                prompt_text=preliminary,
+                prompt_text=prompt_text,
                 existing_memory=existing,
+                policy=context_policy,
+                system_prompt_tokens=system_prompt_tokens,
             )
         except ContextBudgetError as error:
             raise ProviderUnavailableError(
                 "AgentCore context exceeds the safe token budget"
             ) from error
+        deep_review_full_history = (
+            context_policy != CONTEXT_POLICY_FAST_CHAT
+            and str(specialist or "").strip().lower() == SPECIALIST_REVIEW
+            and str(getattr(request, "deep_review_context_mode", "") or "")
+            .strip()
+            .lower()
+            in {"", "full_history"}
+        )
+        if deep_review_full_history and (
+            plan.compression_used
+            or not plan.full_history_used
+            or plan.compression_failed
+        ):
+            # Deep Review must not silently replace an oversized frozen
+            # transcript with an incomplete recent window. Fail before the
+            # Sonnet invoke so the application cannot persist a review built
+            # from partial data.
+            record_field("deep_review_context_compression_failed", True)
+            raise ProviderUnavailableError(
+                "Deep Review full history exceeds the safe context budget",
+                category="context_budget",
+            )
+        record_field("context_planner_ms", elapsed_ms(plan_started))
+        record_field("estimated_input_tokens", int(plan.estimated_input_tokens))
+        record_field("estimated_system_prompt_tokens", int(plan.estimated_system_prompt_tokens))
+        record_field(
+            "estimated_dynamic_input_tokens", int(plan.estimated_dynamic_input_tokens)
+        )
+        record_field(
+            "estimated_total_model_input_tokens", int(plan.estimated_input_tokens)
+        )
+        record_field("history_tokens", int(plan.history_tokens))
+        record_field("evidence_tokens", int(plan.evidence_tokens))
+        record_field("estimated_rag_tokens", int(plan.evidence_tokens))
+        record_field("estimated_memory_tokens", int(plan.estimated_memory_tokens))
+        record_field(
+            "estimated_current_message_tokens",
+            int(plan.estimated_current_message_tokens),
+        )
+        record_field("prompt_tokens", int(plan.prompt_tokens))
+        record_field("original_message_count", int(plan.original_message_count))
+        record_field("verbatim_message_count", int(plan.verbatim_message_count))
+        if context_policy == CONTEXT_POLICY_FAST_CHAT:
+            record_field(
+                "fast_chat_recent_message_count", int(plan.verbatim_message_count)
+            )
+            record_field(
+                "estimated_recent_history_tokens",
+                int(plan.estimated_recent_history_tokens),
+            )
+            record_field(
+                "recent_history_budget_tokens", int(plan.recent_history_budget_tokens)
+            )
+            record_field(
+                "largest_historical_message_tokens",
+                int(plan.largest_historical_message_tokens),
+            )
+            record_field(
+                "historical_messages_trimmed", int(plan.historical_messages_trimmed)
+            )
+            record_field(
+                "historical_message_tokens_trimmed",
+                int(plan.historical_message_tokens_trimmed),
+            )
+            record_field(
+                "fast_chat_soft_input_tokens",
+                int(settings.fast_chat_soft_input_tokens),
+            )
+            record_field(
+                "fast_chat_hard_input_tokens",
+                int(settings.fast_chat_max_input_tokens),
+            )
+        is_review = str(specialist or "").strip().lower() == SPECIALIST_REVIEW
+        record_field("deep_review_invoked", is_review)
+        if is_review:
+            record_field("deep_review_model_role", "review_deep")
+            metrics = getattr(request, "deep_review_context_metrics", None) or {}
+            if isinstance(metrics, dict):
+                for key, value in metrics.items():
+                    record_field(str(key), value)
+            mode = str(getattr(request, "deep_review_context_mode", "") or "").strip()
+            if mode:
+                record_field("deep_review_context_mode", mode)
+        record_field("compressed_message_count", int(plan.compressed_message_count))
+        record_field("compression_used", bool(plan.compression_used))
+        record_field("context_policy", context_policy)
+        soft_ceiling = int(getattr(settings, "fast_chat_soft_input_tokens", 12_000))
+        if (
+            context_policy == CONTEXT_POLICY_FAST_CHAT
+            and int(plan.estimated_input_tokens) > soft_ceiling
+        ):
+            record_field("input_over_soft_budget", True)
+            logger.info(
+                "fast_chat_input_over_soft_budget estimated_input_tokens=%s "
+                "soft_ceiling=%s verbatim_messages=%s",
+                int(plan.estimated_input_tokens),
+                soft_ceiling,
+                int(plan.verbatim_message_count),
+            )
         planned_request = request
         if plan.compressed_memory is not None:
             planned_request = request.model_copy(
@@ -1065,7 +1738,9 @@ class AgentCoreCoachProvider:
                 }
             )
         prepared = compose_coach_prompt(
-            planned_request, include_recent_messages=False
+            planned_request,
+            include_recent_messages=False,
+            context_policy=compose_policy,
         )
         messages = list(plan.messages)
         messages.append(
@@ -1077,17 +1752,21 @@ class AgentCoreCoachProvider:
             }
         )
         specialist = str(specialist or "").strip().lower()
-        if specialist not in ALLOWED_SPECIALISTS:
+        if specialist not in ALLOWED_SPECIALISTS and specialist != _FAST_CHAT_PHASE:
             specialist = SPECIALIST_COACHING
+        resolved_phase = str(phase or specialist).strip().lower()
+        resolved_contract = str(
+            output_contract
+            or _CONTRACT_BY_SPECIALIST.get(specialist, _OUTPUT_CONTRACT)
+        ).strip()
+        runtime_specialist = specialist
         payload: dict[str, Any] = {
-            "phase": specialist,
+            "phase": resolved_phase,
             "topic": agentcore_topic_for_stage(request.current_stage),
-            "output_contract": _CONTRACT_BY_SPECIALIST.get(
-                specialist, _OUTPUT_CONTRACT
-            ),
+            "output_contract": resolved_contract,
             "runtime_context": _runtime_context(
                 request,
-                specialist,
+                runtime_specialist,
                 review_mode=review_mode,
                 review_trigger=review_trigger,
             ),
@@ -1101,11 +1780,23 @@ class AgentCoreCoachProvider:
             payload["student_id"] = student_id[:128]
         return payload, plan
 
-    def _call_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _call_runtime(
+        self,
+        payload: dict[str, Any],
+        *,
+        request: CoachRequest,
+        role: str,
+        fresh_stateless_session: bool = False,
+    ) -> dict[str, Any]:
         """Invoke AgentCore once and return the parsed JSON object.
 
         Args:
             payload: Companion InvokeAgentRuntime JSON.
+            request: Server-built coaching input used only for optional
+                session affinity. Identity values are never logged.
+            role: ``fast_chat`` or ``review_deep`` for affinity isolation.
+            fresh_stateless_session: Use a new non-affinity session for a
+                narrowly scoped recovery invoke.
 
         Returns:
             Unwrapped runtime JSON. Harness error envelopes raise.
@@ -1114,18 +1805,42 @@ class AgentCoreCoachProvider:
             ProviderUnavailableError: When the runtime is blocked, malformed,
                 timed out, or otherwise unavailable.
         """
+        configured_timeout = (
+            self._deep_review_timeout_seconds
+            if str(role or "").strip().lower() == "review_deep"
+            else self._timeout_seconds
+        )
+        record_field(
+            "agentcore_configured_timeout_seconds",
+            round(float(configured_timeout), 1),
+        )
         encoded = json.dumps(payload).encode("utf-8")
-        response = self._runtime_client().invoke_agent_runtime(
+        runtime_session_id = (
+            _stateless_session_id()
+            if fresh_stateless_session
+            else _runtime_session_id(request, role)
+        )
+        response = self._runtime_client(role).invoke_agent_runtime(
             agentRuntimeArn=self._runtime_arn,
             qualifier=self._qualifier,
-            runtimeSessionId=_stateless_session_id(),
+            runtimeSessionId=runtime_session_id,
             payload=encoded,
             contentType="application/json",
             accept="application/json",
         )
+        perf = current_perf()
+        if perf is not None:
+            current = int(perf.fields.get("agentcore_call_count") or 0)
+            perf.set("agentcore_call_count", current + 1)
         if not isinstance(response, Mapping):
             raise _malformed_error()
-        return _payload_from_runtime_response(response)
+        parsed = _payload_from_runtime_response(response)
+        _record_runtime_model_provenance(parsed)
+        # Recorded here so Deep Review reports cycle/cache telemetry too; the
+        # Fast Chat validator repeats it with the same payload, which is a
+        # no-op rewrite of identical values.
+        _record_runtime_cache_metrics(parsed)
+        return parsed
 
     def _role_provider_model(self, role: str) -> tuple[str, str]:
         """Return configured provider/model ids for one role without secrets."""
@@ -1133,6 +1848,10 @@ class AgentCoreCoachProvider:
             "router": (settings.router_model_provider, settings.router_model_id),
             "qa": (settings.qa_model_provider, settings.qa_model_id),
             "coaching": (
+                settings.coaching_model_provider,
+                settings.coaching_model_id,
+            ),
+            "fast_chat": (
                 settings.coaching_model_provider,
                 settings.coaching_model_id,
             ),
@@ -1180,13 +1899,15 @@ class AgentCoreCoachProvider:
         )
 
     def _resolve_specialist(self, request: CoachRequest) -> str:
-        """Return the server-owned specialist, using Haiku only for free text.
+        """Return a non-review specialist for the retired Haiku router path.
 
-        Explicit ``request.specialist`` is treated as already validated by
-        application code or tests. HTTP overwrites browser hints to ``None``
-        before this adapter runs.
+        ``assess()`` does not call this. If it is reattached, ``review`` is
+        never honored here so a browser or router hint cannot select Sonnet.
+        Explicit Deep Review uses ``_assess_explicit_review``.
         """
         requested = str(request.specialist or "").strip().lower()
+        if requested == SPECIALIST_REVIEW:
+            requested = SPECIALIST_COACHING
         if requested in ALLOWED_SPECIALISTS:
             logger.info(
                 "agentcore_invoke role=router router_fallback=false "
@@ -1197,13 +1918,17 @@ class AgentCoreCoachProvider:
         started = time.monotonic()
         min_confidence = bound_router_min_confidence(settings.router_min_confidence)
         try:
-            parsed = self._call_runtime(_router_payload(request))
+            parsed = self._call_runtime(
+                _router_payload(request), request=request, role="router"
+            )
             routed = RouterOutput.model_validate(parsed)
             specialist = apply_semantic_route(
                 routed.specialist,
                 routed.confidence,
                 min_confidence=min_confidence,
             )
+            if specialist == SPECIALIST_REVIEW:
+                specialist = SPECIALIST_COACHING
             fallback = (
                 routed.confidence < min_confidence
                 or specialist != routed.specialist
@@ -1268,153 +1993,9 @@ class AgentCoreCoachProvider:
 
     def _parse_review_turn(self, parsed: dict[str, Any]) -> ReviewTurnOutput:
         """Validate Review structured output or raise."""
-        return ReviewTurnOutput.model_validate(parsed)
-
-    def _apply_incremental_review(
-        self, request: CoachRequest, result: ProviderAssessmentResult
-    ) -> ProviderAssessmentResult:
-        """Keep the Review projection current after Coaching. Cannot advance."""
-        started = time.monotonic()
-        model_id = self._role_provider_model("review_incremental")[1]
-        payload, _plan = self._invoke_payload(
-            request,
-            SPECIALIST_REVIEW,
-            review_mode=REVIEW_DEPTH_INCREMENTAL,
-            review_trigger=REVIEW_TRIGGER_INCREMENTAL,
-        )
-        try:
-            parsed = self._call_runtime(payload)
-            review = self._parse_review_turn(parsed)
-            merged = _overlay_review_fields(
-                result,
-                review,
-                review_depth=REVIEW_DEPTH_INCREMENTAL,
-                review_model=model_id or HAIKU_4_5_MODEL_ID,
-                review_trigger=REVIEW_TRIGGER_INCREMENTAL,
-                force_stay=True,
-            )
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=True,
-                extra=(
-                    " review_depth=incremental review_trigger=incremental"
-                ),
-                model_role="review_incremental",
-            )
-            return merged
-        except ProviderUnavailableError as error:
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category=error.category,
-                extra=" review_depth=incremental",
-                model_role="review_incremental",
-            )
-            raise
-        except (ValidationError, TypeError, ValueError) as error:
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category="structured_output_failure",
-                extra=" review_depth=incremental",
-                model_role="review_incremental",
-            )
-            raise _malformed_error() from error
-        except Exception as error:
-            translated = _translate_agentcore_error(error)
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category=translated.category,
-                extra=" review_depth=incremental",
-                model_role="review_incremental",
-            )
-            raise translated from error
-
-    def _apply_deep_review(
-        self,
-        request: CoachRequest,
-        result: ProviderAssessmentResult,
-        *,
-        review_trigger: str,
-        replace_response_text: bool,
-    ) -> tuple[ProviderAssessmentResult, bool]:
-        """Run Sonnet Deep Review. Fail closed to STAY without resetting state."""
-        started = time.monotonic()
-        model_id = self._role_provider_model("review_deep")[1]
-        payload, _plan = self._invoke_payload(
-            request,
-            SPECIALIST_REVIEW,
-            review_mode=REVIEW_DEPTH_DEEP,
-            review_trigger=review_trigger,
-        )
-        extra = (
-            f" review_depth=deep review_trigger={review_trigger}"
-            f" coaching_turns_since_deep_review="
-            f"{int(request.coaching_turns_since_deep_review)}"
-            f" deep_review_interval="
-            f"{bound_deep_review_interval(request.deep_review_interval_turns)}"
-            " deep_review_triggered=true"
-        )
-        try:
-            parsed = self._call_runtime(payload)
-            review = self._parse_review_turn(parsed)
-            merged, succeeded = _merge_deep_review(
-                request,
-                result,
-                review,
-                review_model=model_id or SONNET_4_6_MODEL_ID,
-                review_trigger=review_trigger,
-            )
-            if replace_response_text:
-                text = str(review.response_text or "").strip()
-                if text:
-                    merged = merged.model_copy(update={"response_text": text})
-            failure_category = "" if succeeded else "wrong_stage"
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=succeeded,
-                failure_category=failure_category,
-                extra=extra,
-                model_role="review_deep",
-            )
-            return merged, succeeded
-        except ProviderUnavailableError as error:
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category=error.category,
-                extra=extra,
-                model_role="review_deep",
-            )
-            return _stay_after_deep_review_failure(result), False
-        except (ValidationError, TypeError, ValueError):
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category="structured_output_failure",
-                extra=extra,
-                model_role="review_deep",
-            )
-            return _stay_after_deep_review_failure(result), False
-        except Exception as error:
-            translated = _translate_agentcore_error(error)
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category=translated.category,
-                extra=extra,
-                model_role="review_deep",
-            )
-            return _stay_after_deep_review_failure(result), False
+        # The app boundary may still consume v24 Deep Review payloads that
+        # predate stage-aware arrays. The new runtime path remains strict.
+        return parse_review_turn_output(parsed, allow_legacy=True)
 
     def _with_memory(
         self,
@@ -1431,6 +2012,10 @@ class AgentCoreCoachProvider:
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Request one structured coaching turn from AgentCore Runtime.
 
+        Normal chat is one Haiku ``fast_chat`` invoke. Explicit Review remains
+        a separate Deep Review operation. The Haiku router and Incremental
+        Review are not invoked on this path.
+
         Args:
             request: Server-built coaching input, including the persisted phase.
 
@@ -1442,140 +2027,316 @@ class AgentCoreCoachProvider:
         """
         for image in request.image_inputs:
             _payload_image_block(image)
-        specialist = self._resolve_specialist(request)
-        routed = request.model_copy(update={"specialist": specialist})
-        interval = bound_deep_review_interval(request.deep_review_interval_turns)
-        if specialist == SPECIALIST_QA:
-            result, plan = self._invoke_specialist(routed, SPECIALIST_QA)
-            return self._with_memory(
-                request,
-                result.model_copy(
-                    update={
-                        "specialist": SPECIALIST_QA,
-                        "qualifying_coaching_turn": False,
-                        "deep_review_succeeded": False,
-                        "review_trigger": None,
-                    }
-                ),
-                plan,
-            )
-        if specialist == SPECIALIST_REVIEW:
-            started = time.monotonic()
+        requested = str(request.specialist or "").strip().lower()
+        if requested == SPECIALIST_REVIEW:
+            return self._assess_explicit_review(request)
+        return self._assess_fast_chat(request)
+
+    def _assess_fast_chat(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Run one Haiku fast-chat invoke and validate Coaching or Q&A output."""
+        owns_perf = current_perf() is None
+        if owns_perf:
+            begin_coach_turn_perf()
+        record_field("model_role", "fast_chat")
+        record_field("model_id", self._role_provider_model("fast_chat")[1] or HAIKU_4_5_MODEL_ID)
+        payload, plan = self._invoke_payload(
+            request,
+            _FAST_CHAT_PHASE,
+            context_policy=CONTEXT_POLICY_FAST_CHAT,
+            phase=_FAST_CHAT_PHASE,
+            output_contract=_FAST_CHAT_CONTRACT,
+        )
+        started = time.monotonic()
+        recovery_attempted = False
+        try:
             try:
-                payload, plan = self._invoke_payload(
-                    routed,
-                    SPECIALIST_REVIEW,
-                    review_mode=REVIEW_DEPTH_DEEP,
-                    review_trigger="explicit",
-                )
-                parsed = self._call_runtime(payload)
-                result = _validated_result(parsed, routed)
-                self._log_role_precise(
-                    role="review",
-                    started=started,
-                    success=True,
-                    extra=" review_depth=deep review_trigger=explicit",
-                    model_role="review_deep",
+                parsed = self._call_runtime(
+                    payload, request=request, role="fast_chat"
                 )
             except ProviderUnavailableError as error:
-                self._log_role_precise(
-                    role="review",
-                    started=started,
-                    success=False,
-                    failure_category=error.category,
-                    extra=" review_depth=deep review_trigger=explicit",
-                    model_role="review_deep",
+                if not _is_transient_structured_output_failure(error):
+                    raise
+                if not _fast_chat_retry_budget_available():
+                    record_field(
+                        "agentcore_structured_output_retry_skipped_budget", True
+                    )
+                    logger.warning(
+                        "agentcore_structured_output_retry role=fast_chat "
+                        "outcome=skipped reason=turn_invoke_budget_exhausted"
+                    )
+                    raise
+                recovery_attempted = True
+                record_field("agentcore_structured_output_retry_attempted", True)
+                logger.warning(
+                    "agentcore_structured_output_retry role=fast_chat "
+                    "reason=transient_runtime_shape session=stateless"
                 )
-                raise
-            except Exception as error:
-                translated = _translate_agentcore_error(error)
-                self._log_role_precise(
-                    role="review",
-                    started=started,
-                    success=False,
-                    failure_category=translated.category,
-                    extra=" review_depth=deep review_trigger=explicit",
-                    model_role="review_deep",
+                parsed = self._call_runtime(
+                    payload,
+                    request=request,
+                    role="fast_chat",
+                    fresh_stateless_session=True,
                 )
-                raise translated from error
-            review = self._parse_review_turn(parsed)
-            model_id = self._role_provider_model("review_deep")[1]
-            merged, succeeded = _merge_deep_review(
-                routed,
-                result,
-                review,
-                review_model=model_id or SONNET_4_6_MODEL_ID,
-                review_trigger="explicit",
+            result = _validated_fast_chat(parsed, request)
+            if recovery_attempted:
+                record_field("agentcore_structured_output_retry_succeeded", True)
+                logger.info(
+                    "agentcore_structured_output_retry role=fast_chat outcome=success"
+                )
+            self._log_role_precise(
+                role="fast_chat",
+                started=started,
+                success=True,
+                model_role="fast_chat",
             )
-            if not succeeded:
-                merged = _stay_after_deep_review_failure(merged)
-            text = str(review.response_text or "").strip()
-            if text:
-                merged = merged.model_copy(update={"response_text": text})
-            return self._with_memory(
-                request,
-                merged.model_copy(
-                    update={
-                        "specialist": SPECIALIST_REVIEW,
-                        "qualifying_coaching_turn": False,
-                        "deep_review_succeeded": succeeded,
-                        "review_trigger": "explicit",
-                    }
-                ),
-                plan,
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_success()
+            return self._with_memory(request, result, plan)
+        except ProviderUnavailableError as error:
+            if recovery_attempted:
+                record_field("agentcore_structured_output_retry_succeeded", False)
+                logger.warning(
+                    "agentcore_structured_output_retry role=fast_chat outcome=failed"
+                )
+            self._log_role_precise(
+                role="fast_chat",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                model_role="fast_chat",
             )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_failure(error.category)
+            raise
+        except Exception as error:
+            if recovery_attempted:
+                record_field("agentcore_structured_output_retry_succeeded", False)
+                logger.warning(
+                    "agentcore_structured_output_retry role=fast_chat outcome=failed"
+                )
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role="fast_chat",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                model_role="fast_chat",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_failure(translated.category)
+            raise translated from error
+        finally:
+            if owns_perf:
+                emit_coach_turn_perf()
 
-        result, plan = self._invoke_specialist(routed, SPECIALIST_COACHING)
-        result, readiness = _coaching_without_advancement(result)
-        result = self._apply_incremental_review(routed, result)
-        readiness = bool(result.assessment.readiness_candidate)
-        trigger = resolve_deep_review_trigger(
-            specialist=SPECIALIST_COACHING,
-            current_stage=routed.current_stage,
-            readiness_candidate=readiness,
-            coaching_turns_since_deep_review=int(
-                routed.coaching_turns_since_deep_review
-            ),
-            interval=interval,
-            qualifying_coaching_turn=True,
-        )
-        logger.info(
-            "agentcore_invoke role=review review_depth=incremental "
-            "review_trigger=incremental coaching_turns_since_deep_review=%s "
-            "deep_review_interval=%s deep_review_triggered=%s",
-            int(routed.coaching_turns_since_deep_review),
-            interval,
-            "true" if should_run_deep_review(trigger) else "false",
-        )
-        deep_succeeded = False
-        if should_run_deep_review(trigger):
-            result, deep_succeeded = self._apply_deep_review(
+    def assess_stage_checkpoint(
+        self, request: CoachRequest
+    ) -> ProviderAssessmentResult:
+        """Run one Haiku incremental checkpoint for a completed Journey stage.
+
+        Separate from explicit Deep Review (Sonnet). Failures raise and are
+        handled by the stage-review job executor without affecting coaching.
+        """
+        owns_perf = current_perf() is None
+        if owns_perf:
+            begin_coach_turn_perf()
+        routed = request.model_copy(update={"specialist": SPECIALIST_REVIEW})
+        started = time.monotonic()
+        try:
+            payload, plan = self._invoke_payload(
                 routed,
-                result,
-                review_trigger=str(trigger),
-                replace_response_text=False,
+                SPECIALIST_REVIEW,
+                review_mode=REVIEW_DEPTH_INCREMENTAL,
+                review_trigger="stage_checkpoint",
             )
-        return self._with_memory(
+            parsed = self._call_runtime(
+                payload, request=routed, role="review_incremental"
+            )
+            result = _validated_result(parsed, routed)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=True,
+                extra=" review_depth=incremental review_trigger=stage_checkpoint",
+                model_role="review_incremental",
+            )
+            record_field(
+                "agentcore_invoke_ms",
+                max(0, int((time.monotonic() - started) * 1000)),
+            )
+        except ProviderUnavailableError as error:
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                extra=" review_depth=incremental review_trigger=stage_checkpoint",
+                model_role="review_incremental",
+            )
+            record_field(
+                "agentcore_invoke_ms",
+                max(0, int((time.monotonic() - started) * 1000)),
+            )
+            record_failure(error.category)
+            raise
+        except Exception as error:
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                extra=" review_depth=incremental review_trigger=stage_checkpoint",
+                model_role="review_incremental",
+            )
+            record_field(
+                "agentcore_invoke_ms",
+                max(0, int((time.monotonic() - started) * 1000)),
+            )
+            record_failure(translated.category)
+            raise translated from error
+        review = self._parse_review_turn(parsed)
+        model_id = self._role_provider_model("review_incremental")[1]
+        strengths = list(getattr(review, "strengths", None) or [])
+        areas = list(getattr(review, "areas_to_develop", None) or [])
+        synthesis = str(getattr(review, "synthesis", "") or "").strip()
+        working = str(getattr(review, "working_conclusion", "") or "").strip()
+        text = str(getattr(review, "response_text", "") or "").strip()
+        assessment = result.assessment.model_copy(
+            update={
+                "recommendation": StageDecision.STAY,
+                "learning_summary": synthesis
+                or text
+                or result.assessment.learning_summary,
+                "understanding_change": working
+                or result.assessment.understanding_change,
+                "review_strengths": strengths
+                or list(result.assessment.review_strengths or []),
+                "review_improvements": areas
+                or list(result.assessment.review_improvements or []),
+                "review_depth": REVIEW_DEPTH_INCREMENTAL,
+                "review_model": model_id or "",
+                "review_trigger": "stage_checkpoint",
+            }
+        )
+        merged = self._with_memory(
             request,
             result.model_copy(
                 update={
-                    "specialist": SPECIALIST_COACHING,
-                    "qualifying_coaching_turn": True,
-                    "deep_review_succeeded": deep_succeeded,
-                    "review_trigger": trigger,
+                    "assessment": assessment,
+                    "specialist": SPECIALIST_REVIEW,
+                    "qualifying_coaching_turn": False,
+                    "deep_review_succeeded": False,
+                    "review_trigger": "stage_checkpoint",
                 }
             ),
             plan,
         )
+        if owns_perf:
+            record_success()
+            emit_coach_turn_perf()
+        return merged
+
+    def _assess_explicit_review(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Run one explicit Deep Review invoke. Never used for normal chat."""
+        owns_perf = current_perf() is None
+        if owns_perf:
+            begin_coach_turn_perf()
+        routed = request.model_copy(update={"specialist": SPECIALIST_REVIEW})
+        started = time.monotonic()
+        try:
+            payload, plan = self._invoke_payload(
+                routed,
+                SPECIALIST_REVIEW,
+                review_mode=REVIEW_DEPTH_DEEP,
+                review_trigger="explicit",
+                context_policy=CONTEXT_POLICY_FULL_HISTORY,
+            )
+            parsed = self._call_runtime(
+                payload, request=routed, role="review_deep"
+            )
+            result = _validated_result(parsed, routed)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=True,
+                extra=" review_depth=deep review_trigger=explicit",
+                model_role="review_deep",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+        except ProviderUnavailableError as error:
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                extra=" review_depth=deep review_trigger=explicit",
+                model_role="review_deep",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_failure(error.category)
+            raise
+        except Exception as error:
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                extra=" review_depth=deep review_trigger=explicit",
+                model_role="review_deep",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_failure(translated.category)
+            raise translated from error
+        review = self._parse_review_turn(parsed)
+        model_id = self._role_provider_model("review_deep")[1]
+        merged, succeeded = _merge_deep_review(
+            routed,
+            result,
+            review,
+            review_model=model_id or SONNET_4_6_MODEL_ID,
+            review_trigger="explicit",
+        )
+        if not succeeded:
+            merged = _stay_after_deep_review_failure(merged)
+        text = str(review.response_text or "").strip()
+        if text:
+            merged = merged.model_copy(update={"response_text": text})
+        merged_result = self._with_memory(
+            request,
+            merged.model_copy(
+                update={
+                    "specialist": SPECIALIST_REVIEW,
+                    "qualifying_coaching_turn": False,
+                    "deep_review_succeeded": succeeded,
+                    "review_trigger": "explicit",
+                }
+            ),
+            plan,
+        )
+        if owns_perf:
+            record_success()
+            emit_coach_turn_perf()
+        return merged_result
 
     def _invoke_specialist(
         self, request: CoachRequest, specialist: str
     ) -> tuple[ProviderAssessmentResult, ModelContextPlan]:
-        """Invoke one Q&A or Coaching specialist and validate the result."""
+        """Invoke one Q&A or Coaching specialist and validate the result.
+
+        ``assess()`` does not call this. Normal chat uses ``_assess_fast_chat``;
+        explicit Deep Review uses ``_assess_explicit_review``.
+        """
         payload, plan = self._invoke_payload(request, specialist)
         started = time.monotonic()
         try:
-            parsed = self._call_runtime(payload)
+            affinity_role = (
+                "review_deep" if specialist == SPECIALIST_REVIEW else specialist
+            )
+            parsed = self._call_runtime(
+                payload, request=request, role=affinity_role
+            )
             result = _validated_result(parsed, request)
             self._log_role_precise(role=specialist, started=started, success=True)
             return result, plan

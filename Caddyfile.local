@@ -1,0 +1,46 @@
+http://127.0.0.1:8080 {
+	# Local browser auth routes are exact-match only. The rest of FastAPI is not
+	# reachable through this browser-facing proxy.
+	handle /api/v1/auth/guest/start {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/guest/probe {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/guest/renew {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/guest/claim/preview {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/guest/claim/confirm {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/guest/claim/cancel {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/login {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/callback {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/me {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/refresh {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/auth/logout {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/v1/health {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /api/* {
+		respond "Not Found" 404
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8501
+	}
+}

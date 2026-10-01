@@ -34,6 +34,28 @@ def _client_for_store(store: StudentStore, *, auto_advance: bool) -> LocalApiCli
     return LocalApiClient("http://testserver", session=TestClient(app))
 
 
+def test_professor_attachment_filename_decodes_rfc5987_value():
+    """Attachment downloads expose a browser-friendly decoded filename."""
+    class Response:
+        content = b"attachment"
+        headers = {
+            "content-type": "text/plain",
+            "content-disposition": "inline; filename*=UTF-8''site-analysis%20%C3%A9.pdf",
+        }
+
+        def raise_for_status(self):
+            return None
+
+    class Session:
+        def get(self, _url, **_kwargs):
+            return Response()
+
+    client = LocalApiClient("http://127.0.0.1:8000", session=Session())
+    content = client.professor_conversation_attachment("student", "notebook", "attachment")
+    assert content.filename == "site-analysis é.pdf"
+    assert content.data == b"attachment"
+
+
 def test_api_client_health_and_confirmation_round_trip(tmp_path):
     store = StudentStore(tmp_path / "client.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
@@ -56,7 +78,8 @@ def test_api_client_health_and_confirmation_round_trip(tmp_path):
             CoachRequest(
                 thread_id=thread_id,
                 student_message=(
-                    "Which crossing design gives older pedestrians enough time?"
+                    "How might we improve road crossings for older pedestrians so that "
+                    "they can cross safely without rushing?"
                 ),
                 current_stage="problem_identification",
                 response_detail="short",
@@ -94,7 +117,8 @@ def test_api_client_auto_advance_mode(tmp_path):
             CoachRequest(
                 thread_id=thread_id,
                 student_message=(
-                    "Which crossing design gives older pedestrians enough time?"
+                    "How might we improve road crossings for older pedestrians so that "
+                    "they can cross safely without rushing?"
                 ),
                 current_stage="problem_identification",
                 response_detail="short",
@@ -112,7 +136,8 @@ def test_api_client_raises_for_missing_notebook(tmp_path):
     store = StudentStore(tmp_path / "client-missing.sqlite3")
     client = _client_for_store(store, auto_advance=False)
     try:
-        with pytest.raises(httpx.HTTPStatusError):
+        # Starlette may use httpx2 while LocalApiClient also supports httpx.
+        with pytest.raises(Exception) as raised:
             client.coach_turn(
                 CoachRequest(
                     thread_id="missing-thread",
@@ -121,6 +146,8 @@ def test_api_client_raises_for_missing_notebook(tmp_path):
                     response_detail="short",
                 )
             )
+        assert type(raised.value).__name__ == "HTTPStatusError"
+        assert raised.value.response.status_code == 404
     finally:
         client.close()
 
@@ -149,7 +176,10 @@ def test_api_client_ready_stream_and_graph(tmp_path):
         assert kinds[0] == "started"
         assert kinds[1] == "status"
         assert events[1].get("phase") == "thinking"
-        assert "token" in kinds
+        assert "token" not in kinds
+        assert "saving" in [
+            event.get("phase") for event in events if event.get("event") == "status"
+        ]
         assert "done" in kinds
         done = next(event for event in events if event.get("event") == "done")
         assert done["turn"]["response_text"]
@@ -225,6 +255,24 @@ def test_api_client_auth_me_returns_user_or_none(tmp_path, monkeypatch):
         assert profile["email"] == "client@example.edu"
         assert "access_token" not in profile
         assert id_token not in str(profile)
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize(
+    "body", [{"authenticated": False}, {"authenticated": True}, {"authenticated": True, "user": []}]
+)
+def test_api_client_auth_me_rejects_malformed_success(body):
+    """Only a real 401 represents sign-out; invalid 200s require retry."""
+    session = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json=body)
+        )
+    )
+    client = LocalApiClient("http://testserver", session=session)
+    try:
+        with pytest.raises(ValueError, match="Invalid /auth/me"):
+            client.auth_me("opaque-id")
     finally:
         client.close()
 

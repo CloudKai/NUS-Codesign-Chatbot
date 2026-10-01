@@ -7,8 +7,8 @@ python-dotenv==1.2.2
 fastapi==0.139.2
 uvicorn==0.35.0
 httpx==0.28.1
-langgraph==1.0.9
-pypdf==6.14.2
+langgraph==1.0.10
+pypdf==6.15.0
 pymupdf==1.28.0
 Pillow==12.3.0
 python-docx==1.2.0
@@ -22,5 +22,5 @@ boto3==1.43.35
 botocore[crt]==1.43.35
 psycopg[binary]==3.2.9
 
-# Tests
-pytest==9.0.2
+# This file is the production image install surface (see Dockerfile). Test and
+# lint tooling belongs in requirements-dev.txt so it is not shipped to EC2.

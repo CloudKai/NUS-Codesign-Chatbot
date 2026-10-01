@@ -24,6 +24,7 @@ DEFAULT_COACHING_TOPIC = "problem_identification"
 _PROMPTS_ROOT = Path(__file__).resolve().parent
 _SHARED_PATH = _PROMPTS_ROOT / "shared_coaching.md"
 _QA_PATH = _PROMPTS_ROOT / "qa.md"
+_FAST_CHAT_PATH = _PROMPTS_ROOT / "fast_chat.md"
 _REVIEW_PATH = _PROMPTS_ROOT / "review.md"
 _REVIEW_INCREMENTAL_PATH = _PROMPTS_ROOT / "review_incremental.md"
 _REVIEW_DEEP_PATH = _PROMPTS_ROOT / "review_deep.md"
@@ -83,6 +84,12 @@ def load_shared_coaching() -> str:
 def load_qa_prompt() -> str:
     """Return the canonical Q&A specialist prompt."""
     return _read_utf8(_QA_PATH)
+
+
+@lru_cache(maxsize=1)
+def load_fast_chat_prompt() -> str:
+    """Return the canonical one-call fast-chat prompt."""
+    return _read_utf8(_FAST_CHAT_PATH)
 
 
 @lru_cache(maxsize=1)

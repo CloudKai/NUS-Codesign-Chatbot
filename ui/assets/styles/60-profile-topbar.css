@@ -1,13 +1,26 @@
     [data-testid="stPopoverBody"][aria-label="Settings"],
+    [data-testid="stPopoverBody"][aria-label=":material/settings:"],
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) {
         width:min(19.5rem,calc(100vw - 1.5rem)) !important;
         max-width:min(19.5rem,calc(100vw - 1.5rem)) !important;
         padding:.5rem 1rem .85rem !important;
         border:1px solid var(--cd-border) !important;
         border-radius:.72rem !important;
-        background:var(--cd-surface) !important;
+        /* Match the nav rail the menu opens from (not darker --cd-surface). */
+        background:var(--cd-nav) !important;
         box-shadow:var(--cd-shadow) !important;
         overflow:visible !important;
+    }
+
+    [data-testid="stPopoverBody"][aria-label=":material/settings:"]
+    > [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    > [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_menu_root,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_menu_root > [data-testid="stVerticalBlock"] {
+        background:transparent !important;
     }
 
     /* Marker-only markdown must not add top gap above Display name. */
@@ -61,7 +74,7 @@
         line-height:1.25 !important;
     }
 
-    /* Segmented controls stretch their label row; keep help icon tight like Language. */
+    /* Segmented controls stretch their label row; keep help icon tight to the label. */
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
     [data-testid="stWidgetLabel"],
@@ -153,7 +166,16 @@
     }
 
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-logout-link {
+    .st-key-profile-logout div[data-testid="stButton"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout [data-testid="stBaseButton-secondary"] {
+        width:100% !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout button,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout [data-testid="stBaseButton-secondary"] {
         display:flex !important;
         align-items:center !important;
         justify-content:center !important;
@@ -163,22 +185,23 @@
         padding:.55rem .9rem !important;
         border-radius:.55rem !important;
         border:1px solid var(--cd-border) !important;
-        /* Use real theme tokens (--cd-surface-2 does not exist; light fallbacks
-           left dark-mode text on a pale background). */
         background:var(--cd-subtle) !important;
         color:var(--cd-text) !important;
         -webkit-text-fill-color:var(--cd-text) !important;
         font-size:.9rem !important;
         font-weight:600 !important;
         line-height:1.2 !important;
-        text-decoration:none !important;
         cursor:pointer !important;
     }
 
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-logout-link:hover,
+    .st-key-profile-logout button:hover,
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-logout-link:focus-visible {
+    .st-key-profile-logout button:focus-visible,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout [data-testid="stBaseButton-secondary"]:hover,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout [data-testid="stBaseButton-secondary"]:focus-visible {
         background:var(--cd-panel) !important;
         border-color:var(--cd-accent) !important;
         color:var(--cd-text) !important;
@@ -200,214 +223,6 @@
         font-size:.8rem !important;
     }
 
-    /* Language: select-only popover trigger (no text input / caret). */
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language {
-        margin:0 !important;
-        padding:0 !important;
-        width:100% !important;
-        max-width:100% !important;
-        align-self:stretch !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language > [data-testid="stLayoutWrapper"],
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language > [data-testid="stVerticalBlock"],
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language [data-testid="stElementContainer"],
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language [data-testid="stPopover"],
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language [data-testid="stPopover"] > div {
-        width:100% !important;
-        max-width:100% !important;
-        display:block !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-language-head {
-        display:flex !important;
-        align-items:center !important;
-        gap:.2rem !important;
-        margin:0 0 .45rem !important;
-        color:var(--cd-muted) !important;
-        font-size:.78rem !important;
-        font-weight:600 !important;
-        line-height:1.2 !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language [data-testid="stElementContainer"]:has(.cd-profile-language-head) {
-        margin:0 0 .35rem !important;
-        padding:0 !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-language-help {
-        position:relative !important;
-        display:inline-flex !important;
-        align-items:center !important;
-        justify-content:center !important;
-        width:.95rem !important;
-        height:.95rem !important;
-        border-radius:999px !important;
-        border:1px solid var(--cd-border) !important;
-        color:var(--cd-muted) !important;
-        font-size:.68rem !important;
-        font-weight:700 !important;
-        line-height:1 !important;
-        cursor:help !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-language-tooltip {
-        position:absolute !important;
-        left:50% !important;
-        bottom:calc(100% + .35rem) !important;
-        transform:translateX(-50%) !important;
-        z-index:10000 !important;
-        width:max-content !important;
-        max-width:14rem !important;
-        padding:.4rem .55rem !important;
-        border:1px solid var(--cd-border) !important;
-        border-radius:.45rem !important;
-        background:var(--cd-surface-muted) !important;
-        color:var(--cd-text) !important;
-        box-shadow:var(--cd-shadow) !important;
-        font-size:.68rem !important;
-        font-weight:500 !important;
-        line-height:1.35 !important;
-        white-space:normal !important;
-        text-align:left !important;
-        opacity:0 !important;
-        visibility:hidden !important;
-        pointer-events:none !important;
-        transition:opacity .12s ease, visibility .12s ease !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-language-help:hover .cd-profile-language-tooltip,
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-language-help:focus .cd-profile-language-tooltip,
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-language-help:focus-visible .cd-profile-language-tooltip {
-        opacity:1 !important;
-        visibility:visible !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language div[data-testid="stPopover"] button {
-        width:100% !important;
-        min-width:100% !important;
-        max-width:100% !important;
-        min-height:2rem !important;
-        height:2rem !important;
-        display:flex !important;
-        align-items:center !important;
-        justify-content:stretch !important;
-        text-align:left !important;
-        padding:.25rem .55rem .25rem .65rem !important;
-        border:1px solid var(--cd-border) !important;
-        border-radius:.5rem !important;
-        background:var(--cd-surface) !important;
-        color:var(--cd-text) !important;
-        font-size:.8rem !important;
-        font-weight:500 !important;
-        box-shadow:none !important;
-    }
-
-    /* Label left, chevron pinned to the far right of the full-width trigger. */
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language div[data-testid="stPopover"] button > div {
-        width:100% !important;
-        max-width:100% !important;
-        display:flex !important;
-        align-items:center !important;
-        justify-content:space-between !important;
-        gap:.5rem !important;
-        flex:1 1 auto !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language div[data-testid="stPopover"] button > div > div:first-child,
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language div[data-testid="stPopover"] button > div > div:first-child > span {
-        display:flex !important;
-        flex:1 1 auto !important;
-        align-items:center !important;
-        justify-content:flex-start !important;
-        min-width:0 !important;
-        width:auto !important;
-        text-align:left !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language div[data-testid="stPopover"] button
-    [data-testid="stMarkdownContainer"],
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language div[data-testid="stPopover"] button
-    [data-testid="stMarkdownContainer"] p {
-        margin:0 !important;
-        width:auto !important;
-        max-width:100% !important;
-        flex:0 1 auto !important;
-        text-align:left !important;
-        justify-content:flex-start !important;
-        overflow:hidden !important;
-        text-overflow:ellipsis !important;
-        white-space:nowrap !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language div[data-testid="stPopover"] button
-    [data-testid="stIconMaterial"] {
-        display:inline-flex !important;
-        flex:0 0 auto !important;
-        margin-left:0 !important;
-        font-size:1.05rem !important;
-        color:var(--cd-muted) !important;
-    }
-
-    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .st-key-profile_language div[data-testid="stPopover"] button
-    [aria-hidden="true"] {
-        display:inline-flex !important;
-        flex:0 0 auto !important;
-        margin-left:0 !important;
-        align-items:center !important;
-    }
-
-    [data-testid="stPopoverBody"]:has([class*="st-key-profile-language-"]) {
-        border:0 !important;
-        outline:none !important;
-        box-shadow:var(--cd-shadow) !important;
-        background:var(--cd-surface) !important;
-        border-radius:.72rem !important;
-        padding:.2rem !important;
-        min-width:8.5rem !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-profile-language-"]
-    div[data-testid="stButton"] button {
-        min-height:1.85rem !important;
-        height:1.85rem !important;
-        margin:0 !important;
-        padding:0 .55rem !important;
-        border:0 !important;
-        border-radius:.45rem !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        box-shadow:none !important;
-        justify-content:flex-start !important;
-        text-align:left !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-profile-language-"]
-    div[data-testid="stButton"] button:hover {
-        background:var(--cd-subtle) !important;
-    }
-
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stButtonGroup"] {
         gap:.2rem !important;
@@ -420,40 +235,190 @@
         font-size:.72rem !important;
     }
 
-    /* Coaching style: selected Strict (or Quick) is the filled accent chip. */
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"] button,
-    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] {
-        font-weight:600 !important;
+    /* Coaching style: vertical cards; selected uses the same soft accent fill
+       as Appearance (not the bright dark-mode --cd-accent solid). */
+    .st-key-profile_coaching_style [data-testid="stRadio"],
+    .st-key-profile_coaching_style [data-testid="stRadioGroup"],
+    .st-key-profile_coaching_style [role="radiogroup"] {
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        box-sizing:border-box !important;
     }
 
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[aria-checked="true"],
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[aria-pressed="true"],
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[kind="primary"],
+    .st-key-profile_coaching_style [data-testid="stRadioGroup"],
+    .st-key-profile_coaching_style [role="radiogroup"] {
+        display:flex !important;
+        flex-direction:column !important;
+        gap:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.62rem !important;
+        background:var(--cd-nav) !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"],
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"],
+    .st-key-profile_coaching_style [role="radiogroup"] > label {
+        display:block !important;
+        align-items:stretch !important;
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        min-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        border-right:0 !important;
+        border-radius:0 !important;
+        border-bottom:1px solid var(--cd-border) !important;
+        background:var(--cd-nav) !important;
+        color:var(--cd-text) !important;
+        cursor:pointer !important;
+        white-space:normal !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:last-child,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"]:last-child,
+    .st-key-profile_coaching_style [role="radiogroup"] > label:last-child {
+        border-bottom:0 !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"] > div,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] > div {
+        width:100% !important;
+        min-width:0 !important;
+        padding:.7rem .78rem .72rem !important;
+        box-sizing:border-box !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"] > div > div:first-child {
+        display:flex !important;
+        align-items:flex-start !important;
+        gap:0 !important;
+        min-width:0 !important;
+    }
+
+    /* Keep the native radio for keyboard/AT, but let the whole block be the face. */
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]
+    > div > div:first-child > div:first-child {
+        position:absolute !important;
+        width:1px !important;
+        height:1px !important;
+        margin:-1px !important;
+        padding:0 !important;
+        overflow:hidden !important;
+        clip:rect(0,0,0,0) !important;
+        border:0 !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"] label,
+    .st-key-profile_coaching_style [role="radiogroup"] > label,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] {
+        white-space:normal !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"] label p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"] p,
+    .st-key-profile_coaching_style [role="radiogroup"] > label p,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] p {
+        margin:0 !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        font-size:.82rem !important;
+        font-weight:700 !important;
+        line-height:1.25 !important;
+        white-space:normal !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"]
+    [data-testid="stCaptionContainer"],
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]
+    [data-testid="stCaptionContainer"],
+    .st-key-profile_coaching_style [role="radiogroup"]
+    [data-testid="stCaptionContainer"] {
+        margin:.04rem 0 0 !important;
+        padding-left:0 !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        overflow:visible !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"]
+    [data-testid="stCaptionContainer"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]
+    [data-testid="stCaptionContainer"] p,
+    .st-key-profile_coaching_style [role="radiogroup"]
+    [data-testid="stCaptionContainer"] p {
+        margin:0 !important;
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        font-size:.68rem !important;
+        font-weight:450 !important;
+        line-height:1.35 !important;
+        white-space:normal !important;
+        overflow-wrap:anywhere !important;
+        word-break:break-word !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:hover,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"]:hover {
+        background:var(--cd-subtle) !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected],
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-checked="true"],
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-pressed="true"],
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked),
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]:hover,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked):hover,
+    .st-key-profile_coaching_style [role="radiogroup"] > label[data-selected],
+    .st-key-profile_coaching_style [role="radiogroup"] > label:has(input:checked),
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-checked="true"],
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-pressed="true"] {
-        background:var(--cd-accent) !important;
-        border-color:var(--cd-accent) !important;
-        color:#fff !important;
-        -webkit-text-fill-color:#fff !important;
-        font-weight:700 !important;
-        box-shadow:0 0 0 1px var(--cd-accent) !important;
+        /* Soft selected fill on nav chrome — avoid a solid teal slab. */
+        background:color-mix(in srgb,var(--cd-accent) 14%,var(--cd-nav)) !important;
+        border-color:var(--cd-border) !important;
+        box-shadow:inset 3px 0 0 var(--cd-accent) !important;
+        color:var(--cd-accent) !important;
     }
 
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-checked="true"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-pressed="true"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked) p,
+    .st-key-profile_coaching_style [role="radiogroup"] > label[data-selected] p,
+    .st-key-profile_coaching_style [role="radiogroup"] > label:has(input:checked) p,
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-checked="true"] p,
     .st-key-profile_coaching_style [role="radiogroup"]
-    > [role="radio"][aria-pressed="true"] p,
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[aria-checked="true"] p,
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[kind="primary"] p {
-        color:#fff !important;
-        -webkit-text-fill-color:#fff !important;
+    > [role="radio"][aria-pressed="true"] p {
+        color:var(--cd-accent) !important;
+        -webkit-text-fill-color:var(--cd-accent) !important;
+        font-weight:700 !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
+    [data-testid="stCaptionContainer"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
+    [data-testid="stCaptionContainer"] p {
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        font-weight:450 !important;
+        opacity:.92 !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:focus-visible,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"]:focus-visible {
+        box-shadow:inset 0 0 0 2px var(--cd-accent) !important;
+        outline:none !important;
+        z-index:1 !important;
     }
 
     [data-testid="stPopoverBody"][aria-label="Setting"] {
@@ -1007,6 +972,267 @@
         height:100% !important;
     }
 
+    /* Profile now lives at the bottom of the Gemini-style navigation rail. */
+    .st-key-sidebar_profile {
+        flex:0 0 auto !important;
+        margin-top:auto !important;
+        padding:.65rem .05rem 0;
+        border-top:1px solid color-mix(in srgb,var(--cd-border) 74%,transparent);
+    }
+
+    .st-key-sidebar_profile > [data-testid="stVerticalBlock"],
+    .st-key-sidebar_profile > [data-testid="stLayoutWrapper"],
+    .st-key-sidebar_profile [data-testid="stHorizontalBlock"] {
+        align-items:center !important;
+        gap:0 !important;
+        width:100% !important;
+        min-height:2.35rem !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stColumn"],
+    .st-key-sidebar_profile [data-testid="stColumn"]
+    > [data-testid="stVerticalBlock"],
+    .st-key-sidebar_profile [data-testid="stColumn"]
+    > [data-testid="stLayoutWrapper"] {
+        display:flex !important;
+        flex-direction:column !important;
+        justify-content:center !important;
+        align-items:stretch !important;
+        min-height:2.35rem !important;
+        height:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+        gap:0 !important;
+    }
+
+    .st-key-sidebar_profile
+    [data-testid="stElementContainer"]:has(.cd-sidebar-profile-identity),
+    .st-key-sidebar_profile
+    [data-testid="stElementContainer"]:has(.cd-sidebar-profile-identity)
+    > div,
+    .st-key-sidebar_profile
+    [data-testid="stMarkdownContainer"]:has(.cd-sidebar-profile-identity) {
+        display:flex !important;
+        align-items:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+    }
+
+    .cd-sidebar-profile-identity {
+        display:flex;
+        align-items:center;
+        gap:10px;
+        min-width:0;
+        width:100%;
+        height:2.35rem;
+        min-height:2.35rem;
+        margin:0;
+        padding:0 .15rem 0 0;
+        pointer-events:none;
+        user-select:none;
+    }
+
+    .cd-sidebar-profile-avatar {
+        flex:0 0 auto;
+        width:1.9rem;
+        height:1.9rem;
+        display:grid;
+        place-items:center;
+        border-radius:999px;
+        color:#fff;
+        background:var(--cd-accent);
+        font-family:"IBM Plex Sans",ui-sans-serif,sans-serif;
+        font-size:.72rem;
+        font-weight:700;
+        letter-spacing:.01em;
+        line-height:1;
+    }
+
+    .cd-sidebar-profile-name {
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        color:var(--cd-text);
+        font-size:.86rem;
+        font-weight:500;
+        line-height:1.2;
+    }
+
+    .st-key-sidebar_profile_settings,
+    .st-key-sidebar_profile_settings > [data-testid="stVerticalBlock"],
+    .st-key-sidebar_profile_settings > [data-testid="stLayoutWrapper"] {
+        display:flex !important;
+        justify-content:flex-end !important;
+        align-items:center !important;
+        width:100% !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"],
+    .st-key-sidebar_profile [data-testid="stPopover"] > div {
+        width:auto !important;
+        height:2.35rem !important;
+        margin:0 0 0 auto !important;
+        display:flex !important;
+        align-items:center !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button,
+    .st-key-sidebar_profile [data-testid="stPopover"] [data-testid="stPopoverButton"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:2.35rem !important;
+        min-width:2.35rem !important;
+        max-width:2.35rem !important;
+        height:2.35rem !important;
+        min-height:2.35rem !important;
+        gap:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        border-radius:.75rem !important;
+        color:var(--cd-muted) !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button:hover {
+        color:var(--cd-text) !important;
+        background:color-mix(in srgb,var(--cd-text) 7%,transparent) !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button > div {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        width:100% !important;
+        height:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    span[data-has-shortcut],
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"],
+    .st-key-sidebar_profile [data-testid="stPopover"] button p {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:100% !important;
+        height:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        color:inherit !important;
+        font-size:inherit !important;
+    }
+
+    /* Settings glyph is a Material Symbols span inside markdown, not stIconMaterial. */
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    span[role="img"],
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [aria-label="settings icon"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        font-size:16px !important;
+        line-height:1 !important;
+        vertical-align:middle !important;
+        color:inherit !important;
+        opacity:1 !important;
+        visibility:visible !important;
+    }
+
+    /* Hide Streamlit's trailing expand_more control only. */
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    > div > div[aria-hidden="true"],
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [data-testid="stIconMaterial"] {
+        display:none !important;
+        width:0 !important;
+        height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+    }
+
+    /* Keep the settings column from collapsing beside a wide identity label. */
+    .st-key-sidebar_profile [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:last-child {
+        flex:0 0 2.35rem !important;
+        width:2.35rem !important;
+        min-width:2.35rem !important;
+        max-width:2.35rem !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:first-child {
+        flex:1 1 0 !important;
+        min-width:0 !important;
+        width:auto !important;
+    }
+
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions) .st-key-sidebar_profile {
+        width:100%;
+        padding:.65rem 0 0;
+        display:flex;
+        justify-content:center;
+    }
+
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"],
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] > div {
+        margin:0 auto !important;
+        width:2.75rem !important;
+        display:flex !important;
+        justify-content:center !important;
+    }
+
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] button {
+        width:2.75rem !important;
+        min-width:2.75rem !important;
+        height:2.75rem !important;
+        min-height:2.75rem !important;
+        border-radius:1rem !important;
+        color:var(--cd-text) !important;
+        background:transparent !important;
+        gap:0 !important;
+    }
+
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] button:hover {
+        color:var(--cd-text) !important;
+        background:color-mix(in srgb,var(--cd-text) 7%,transparent) !important;
+    }
+
+    /* Match collapsed nav Material icon size/weight (not the larger markdown glyph). */
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    span[role="img"],
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [aria-label="settings icon"] {
+        font-size:16px !important;
+        font-weight:400 !important;
+        font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 20 !important;
+        line-height:1 !important;
+        color:inherit !important;
+        -webkit-text-fill-color:inherit !important;
+    }
+
     .st-key-topbar_actions,
     .st-key-topbar_actions > [data-testid="stVerticalBlock"],
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"],
@@ -1059,4 +1285,3 @@
     .st-key-topbar_mode {
         width:max-content !important;
     }
-

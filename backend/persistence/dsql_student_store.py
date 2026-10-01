@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 # only after a successful DB commit (never inside the OCC retry callback).
 _OCC_WRITE_METHODS = (
     "upsert_cognito_user",
+    "create_guest_session",
+    "renew_guest_session",
+    "revoke_guest_session",
+    "create_guest_claim_preview",
+    "begin_guest_claim",
+    "release_guest_claim",
+    "guest_claim_transfer",
     "save_oauth_login_state",
     "consume_oauth_login_state",
     "update_user_preferences",
@@ -48,6 +55,17 @@ _OCC_WRITE_METHODS = (
     "revise_user_message",
     "revise_conversation_from_user_message",
     "select_learning_stage",
+    "start_or_get_deep_review_job",
+    "mark_deep_review_job_running",
+    "complete_deep_review_job",
+    "fail_deep_review_job",
+    "start_or_get_stage_review_job",
+    "mark_stage_review_running",
+    "complete_stage_review_job",
+    "fail_stage_review_job",
+    "requeue_stage_review_job",
+    "flush_stage_review_revisit",
+    "mark_journey_stage_reviews_read",
     "create_phase_transition",
     "resolve_phase_transition",
     "apply_phase_transition_decision",
@@ -246,8 +264,11 @@ class DsqlStudentStore(StudentStore):
         """
         from backend.persistence.factory import get_file_storage
         from backend.persistence.object_keys import notebook_prefix
+        from backend.sources.chunk_cache import invalidate_cached_chunks_for_prefix
 
+        prefix = notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
         storage = get_file_storage()
-        storage.delete_prefix(
-            notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
-        )
+        try:
+            storage.delete_prefix(prefix)
+        finally:
+            invalidate_cached_chunks_for_prefix(prefix)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import mimetypes
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +95,37 @@ def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
     }
 
 
+def image_inputs_for_sources(
+    sources: Iterable[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    """Build coach image payloads from already-authorized source dictionaries.
+
+    Does not look up metadata. Callers must pass source dicts from an
+    owner-scoped authorized listing. Order is preserved. Sources that are
+    not readable images are skipped the same way as :func:`source_image_input`.
+
+    Args:
+        sources: Already-authorized notebook source dictionaries.
+
+    Returns:
+        Coach image input dicts with ``source_id``, ``mime``, and ``data_url``.
+    """
+    resolved: list[dict[str, str]] = []
+    for source in sources:
+        payload = dict(source)
+        image_part = source_image_input(payload)
+        if not image_part:
+            continue
+        resolved.append(
+            {
+                "source_id": str(payload["id"]),
+                "mime": str(payload.get("mime") or "image/png"),
+                "data_url": image_part["image_url"],
+            }
+        )
+    return resolved
+
+
 def image_inputs_for_source_ids(
     store: StudentStore,
     thread_id: str,
@@ -102,10 +133,13 @@ def image_inputs_for_source_ids(
 ) -> list[dict[str, str]]:
     """Resolve selected notebook images into coach-ready image payloads.
 
-    Resolution stays in the source/infrastructure layer so providers and future
-    AWS adapters can swap storage backends without changing the workflow.
+    Looks up each id through the owner-scoped store (and visible catalog)
+    then delegates to :func:`image_inputs_for_sources`. Kept for existing
+    callers and tests. Resolution stays in the source/infrastructure layer
+    so providers and future AWS adapters can swap storage backends without
+    changing the workflow.
     """
-    resolved: list[dict[str, str]] = []
+    authorized: list[dict[str, Any]] = []
     for source_id in source_ids:
         source = store.get_source(thread_id, str(source_id))
         if not source:
@@ -114,14 +148,5 @@ def image_inputs_for_source_ids(
             source = get_visible_source(store, thread_id, str(source_id))
         if not source:
             continue
-        image_part = source_image_input(source)
-        if not image_part:
-            continue
-        resolved.append(
-            {
-                "source_id": str(source["id"]),
-                "mime": str(source.get("mime") or "image/png"),
-                "data_url": image_part["image_url"],
-            }
-        )
-    return resolved
+        authorized.append(source)
+    return image_inputs_for_sources(authorized)

@@ -1,7 +1,9 @@
-"""Signed-out shell and Cognito cookie-session login gate for Streamlit.
+"""Guest entry and Cognito cookie-session authentication for Streamlit.
 
-Unauthenticated visitors see a static layout preview plus a non-dismissible
-login dialog. Protected notebook/source data must never be loaded on this path.
+With guest access enabled, a new visitor receives a browser guest cookie and
+then enters the workspace. The signed-out login gate remains the fallback when
+guest access is disabled. Protected notebook/source data is loaded only after
+FastAPI verifies the active owner.
 
 Authentication authority is FastAPI ``/api/v1/auth/me``. Streamlit receives
 only the short-lived HttpOnly Cognito ID-token cookie; the refresh cookie is
@@ -31,6 +33,10 @@ _SIGNIN_COOLDOWN_QUERY_PARAM = "signin_cooldown_until"
 _SIGNIN_COOLDOWN_RESTORE_GRACE_SECONDS = 30.0
 
 
+class AuthServiceUnavailable(RuntimeError):
+    """Signal that session verification failed without proving sign-out."""
+
+
 def _is_allowed_http_origin(parsed: ParseResult) -> bool:
     """Return whether *parsed* is https or loopback http with a host."""
     if not parsed.netloc:
@@ -52,6 +58,8 @@ def authenticated_user() -> dict[str, Any] | None:
     Always revalidates against FastAPI on each Streamlit rerun. Cookie values
     are read from the browser context and never stored in ``st.session_state``.
     FastAPI remains the authentication authority for expiry and refresh.
+    Raises ``AuthServiceUnavailable`` when a present cookie cannot be verified
+    due to a transport/server error or malformed success response.
     """
     id_token = _cookie_value(
         str(getattr(settings, "cognito_id_token_cookie_name", "co_design_id"))
@@ -62,10 +70,12 @@ def authenticated_user() -> dict[str, Any] | None:
         from ui.runtime import local_api_client
 
         user = local_api_client().auth_me(id_token)
-    except Exception:
+    except Exception as exc:
+        raise AuthServiceUnavailable("Session verification is unavailable") from exc
+    if user is None:
         return None
-    if not user or not str(user.get("cognito_sub") or "").strip():
-        return None
+    if not isinstance(user, dict) or not str(user.get("cognito_sub") or "").strip():
+        raise AuthServiceUnavailable("Session verification returned an invalid profile")
     st.session_state.pop("_auth_refresh_attempted", None)
     _clear_signin_pending_state()
     return user
@@ -74,6 +84,45 @@ def authenticated_user() -> dict[str, Any] | None:
 def is_logged_in() -> bool:
     """Return whether FastAPI validates the Cognito auth cookies."""
     return authenticated_user() is not None
+
+
+def authenticated_guest() -> dict[str, Any] | None:
+    """Return the verified guest owner from FastAPI, without creating a session."""
+    if not bool(getattr(settings, "guest_access_enabled", False)) or not bool(
+        getattr(settings, "use_local_api", False)
+    ):
+        return None
+    try:
+        from ui.runtime import local_api_client
+
+        result = local_api_client().guest_session_probe()
+    except Exception:
+        return None
+    guest_id = str((result or {}).get("guest_id") or "").strip()
+    if not result or not result.get("authenticated") or not guest_id:
+        return None
+    return {"guest_id": guest_id}
+
+
+def guest_access_available() -> bool:
+    """Return whether browser guest entry can use the API-backed workspace."""
+    return bool(getattr(settings, "guest_access_enabled", False)) and bool(
+        getattr(settings, "use_local_api", False)
+    )
+
+
+def _guest_cookie_present() -> bool:
+    """Detect an existing browser guest credential without retaining its value."""
+    return bool(
+        _cookie_value(
+            str(getattr(settings, "guest_session_cookie_name", "co_design_guest"))
+        )
+    )
+
+
+def clear_identity_session_state() -> None:
+    """Discard the previous owner's Streamlit state before binding a new owner."""
+    st.session_state.clear()
 
 
 def current_user_claims(user: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -452,6 +501,62 @@ def _render_signin_button(*, disabled: bool) -> bool:
         )
 
 
+def _start_guest_in_browser() -> None:
+    """Issue the browser's guest cookie without showing an interim entry page."""
+    st.html(
+        """
+<script>
+(() => {
+  if (window.__coDesignGuestStartPending) return;
+  window.__coDesignGuestStartPending = true;
+  fetch('/api/v1/auth/guest/start', {
+    method: 'POST',
+    credentials: 'same-origin'
+  }).then((response) => {
+    if (response.ok) window.location.replace('/');
+    else window.location.replace('/?guest_start_error=1');
+  }).catch(() => window.location.replace('/?guest_start_error=1'));
+})();
+</script>
+""",
+        unsafe_allow_javascript=True,
+    )
+
+
+def render_guest_entry() -> None:
+    """Open a new guest workspace automatically without replacing an old cookie.
+
+    A failed probe for an existing guest may be temporary, so creating a new
+    credential requires an explicit choice in that recovery state.
+    """
+    if _guest_cookie_present():
+        st.error(
+            "We couldn't reopen this browser's guest workspace. Try again before "
+            "starting a new one so your earlier chats stay available."
+        )
+        if st.button("Retry opening guest workspace", key="guest-entry-retry"):
+            rerun_app()
+        if st.button("Start a new guest workspace", key="guest-entry-new"):
+            _start_guest_in_browser()
+        return
+
+    try:
+        start_failed = st.query_params.get("guest_start_error") == "1"
+    except Exception:
+        start_failed = False
+    if start_failed:
+        st.error("A guest workspace could not be started. Please try again.")
+        if st.button("Try again", key="guest-entry-retry"):
+            try:
+                del st.query_params["guest_start_error"]
+            except Exception:
+                pass
+            _start_guest_in_browser()
+        return
+
+    _start_guest_in_browser()
+
+
 @st.fragment(run_every=0.5)
 def _render_signin_cooldown_fragment() -> None:
     """Rerender only the disabled sign-in button until its server deadline.
@@ -661,7 +766,7 @@ def render_signed_out_shell() -> None:
   <div class="cd-auth-shell-workspace">
     <aside class="cd-auth-shell-panel cd-auth-shell-studio">
       <div class="cd-auth-shell-pane-title">Thinking Path</div>
-      <div class="cd-auth-shell-tabs"><span class="is-active">Journey</span><span>Review</span></div>
+      <div class="cd-auth-shell-tabs"><span class="is-active">Progression</span><span>Review</span></div>
       <div class="cd-auth-shell-muted">Your critical-thinking journey</div>
       <div class="cd-auth-shell-stage is-active">Problem identification</div>
       <div class="cd-auth-shell-stage">Concept generation</div>
@@ -711,6 +816,40 @@ def app_logout_url() -> str | None:
 def logout_user() -> None:
     """Send the browser to FastAPI logout; never use Streamlit native logout."""
     _clear_signin_pending_state()
+    guest_is_active = st.session_state.get("_auth_bound_kind") == "guest"
+    guest_cookie_present = bool(
+        _cookie_value(
+            str(getattr(settings, "guest_session_cookie_name", "co_design_guest"))
+        )
+    )
+    cognito_cookie_present = bool(
+        _cookie_value(
+            str(getattr(settings, "cognito_id_token_cookie_name", "co_design_id"))
+        )
+        or _cookie_value(
+            str(
+                getattr(
+                    settings,
+                    "cognito_refresh_cookie_name",
+                    "co_design_refresh",
+                )
+            )
+        )
+    )
+    if guest_is_active and guest_cookie_present and not cognito_cookie_present:
+        st.html(
+            """
+<script>
+fetch('/api/v1/auth/logout', {
+  method: 'POST',
+  credentials: 'same-origin'
+}).finally(() => window.location.replace('/?signed_out=1'));
+</script>
+""",
+            unsafe_allow_javascript=True,
+        )
+        st.stop()
+        return
     url = app_logout_url()
     if not url:
         st.session_state["_auth_config_error"] = (
@@ -734,5 +873,4 @@ def logout_user() -> None:
 """,
         unsafe_allow_javascript=True,
     )
-    st.link_button("Continue sign-out", url, type="primary")
     st.stop()

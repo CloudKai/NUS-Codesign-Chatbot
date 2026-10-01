@@ -1,71 +1,1529 @@
-/* Professor analytics: dense, academic, and deliberately free of dashboard gloss. */
-.st-key-professor_header { padding:1.25rem 1.5rem .9rem; border-bottom:1px solid var(--cd-border); background:var(--cd-surface); }
-.professor-course-heading h1 { margin:.12rem 0 .22rem; color:var(--cd-text); font-size:1.35rem; letter-spacing:-.02em; }
-.professor-course-heading p { margin:0; color:var(--cd-muted); font-size:.86rem; }
-.professor-course-heading .professor-eyebrow { font-size:.72rem; font-weight:700; color:var(--cd-accent); }
-.st-key-professor_header [data-testid="stRadio"] { justify-content:flex-end; margin-top:.55rem; }
-.st-key-professor_header [data-testid="stRadio"] > div { flex-wrap:nowrap; gap:.12rem; padding:.22rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface-muted); }
-.st-key-professor_header label { margin:0 !important; padding:.35rem .48rem; border-radius:.45rem; color:var(--cd-muted); font-size:.78rem; white-space:nowrap; }
-.st-key-professor_header label p { white-space:nowrap; }
-.st-key-professor_header label:has(input:checked) { color:var(--cd-text); background:var(--cd-surface); box-shadow:0 1px 2px rgba(21,32,43,.08); }
-.professor-metric { min-height:5.2rem; padding:.75rem .8rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
-.professor-metric p,.professor-metric span { display:block; margin:0; color:var(--cd-muted); font-size:.72rem; line-height:1.25; }
-.professor-metric strong { display:block; margin:.26rem 0; color:var(--cd-text); font-size:1.12rem; letter-spacing:-.02em; }
-.professor-summary { margin:1rem 0; padding:.72rem .86rem; border-left:3px solid var(--cd-accent); color:var(--cd-text); background:var(--cd-accent-soft); font-size:.9rem; line-height:1.5; }
-.professor-bar-row { display:grid; grid-template-columns:minmax(7.5rem,1fr) minmax(5rem,2.25fr) 5.8rem; gap:.55rem; align-items:center; min-height:2rem; color:var(--cd-muted); font-size:.82rem; }
-.professor-bar { height:.4rem; overflow:hidden; border-radius:999px; background:var(--cd-subtle); }
-.professor-bar i { display:block; height:100%; border-radius:inherit; background:var(--cd-accent); }
-.professor-bar-row b { color:var(--cd-text); text-align:right; font-size:.78rem; font-weight:600; }
-.professor-progress { color:var(--cd-text); line-height:1.8; font-size:.85rem; }
-.professor-account { display:flex; justify-content:flex-end; gap:.65rem; margin-top:.45rem; color:var(--cd-muted); font-size:.75rem; }
-.professor-account a { color:var(--cd-accent); font-weight:600; text-decoration:none; }
-.professor-account a:hover { text-decoration:underline; }
-@media (max-width:800px) { .st-key-professor_header { padding:1rem .75rem .8rem; } .st-key-professor_header [data-testid="stRadio"] { justify-content:flex-start; max-width:100%; overflow-x:auto; } .st-key-professor_header [role="radiogroup"] { min-width:max-content; } .st-key-professor_header label { white-space:nowrap; } .professor-account { justify-content:flex-start; } .professor-bar-row { grid-template-columns:minmax(6.4rem,1fr) minmax(4rem,1.4fr) minmax(6.8rem,auto); } }
+/*
+ * Lecturer dashboard
+ *
+ * The lecturer view is a calm analytics workspace rather than a second
+ * student-studio viewport. All selectors are scoped to professor markup so
+ * the student experience and its persisted layout are unaffected.
+ */
 
-/* Research review is intentionally workbench-like: queue, transcript, validation. */
-.st-key-research_mobile_step { display:none; }
-.st-key-research_workspace {
-    margin-top:.8rem;
-    padding:.75rem;
+/* Streamlit's student shell is intentionally viewport-locked. Lecturer pages
+   include long rosters, research queues, and charts, so this route owns the
+   document scroll instead. */
+html:has(.st-key-professor_shell),
+html:has(.st-key-professor_shell) body,
+.stApp:has(.st-key-professor_shell),
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell),
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell) > .main,
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell) [data-testid="stMain"],
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell) .stMain,
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell) > .main {
+    min-height:100vh !important;
+    height:auto !important;
+    max-height:none !important;
+    overflow-x:hidden !important;
+    overflow-y:visible !important;
+}
+
+.block-container:has(.st-key-professor_shell),
+.block-container:has(.st-key-professor_shell).stMainBlockContainer {
+    width:100% !important;
+    max-width:1440px !important;
+    min-height:100vh !important;
+    height:auto !important;
+    max-height:none !important;
+    margin:0 auto !important;
+    padding:1.1rem 1.25rem 2.5rem !important;
+    overflow:visible !important;
+}
+
+.block-container:has(.st-key-professor_shell) > [data-testid="stVerticalBlock"] {
+    height:auto !important;
+    min-height:100vh !important;
+    flex:0 0 auto !important;
+    overflow:visible !important;
+}
+
+.st-key-professor_shell {
+    width:100%;
+    min-width:0;
+    color:var(--cd-text);
+}
+
+.st-key-professor_shell [data-testid="stHorizontalBlock"] {
+    min-width:0;
+}
+
+.st-key-professor_shell [data-testid="stColumn"] {
+    min-width:0;
+}
+
+/* Persistent desktop rail. The outer row remains a two-column shell; only
+   its first column becomes the navigation rail. */
+@media (min-width:801px) {
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header) {
+        align-items:stretch !important;
+        gap:1.35rem !important;
+        flex-wrap:nowrap !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header)
+    > [data-testid="stColumn"]:first-child {
+        flex:0 0 13.5rem !important;
+        width:13.5rem !important;
+        max-width:13.5rem !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header)
+    > [data-testid="stColumn"]:last-child {
+        flex:1 1 0 !important;
+        width:0 !important;
+        max-width:none !important;
+    }
+
+    .st-key-professor_header {
+        position:sticky;
+        top:1rem;
+        display:flex;
+        flex-direction:column;
+        min-height:calc(100vh - 2rem);
+        box-sizing:border-box;
+        padding:.35rem .9rem .9rem 0;
+        border-right:1px solid var(--cd-border);
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] {
+        margin-top:1.35rem;
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] > div {
+        display:flex;
+        flex-direction:column;
+        align-items:stretch;
+        gap:.18rem;
+        padding:0;
+        border:0;
+        background:transparent;
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] label {
+        display:block;
+        box-sizing:border-box;
+        width:100%;
+        margin:0 !important;
+        padding:.62rem .72rem;
+        border-radius:.55rem;
+        color:var(--cd-muted);
+        font-size:.84rem;
+        font-weight:600;
+        line-height:1.2;
+        white-space:normal;
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] label:hover,
+    .st-key-professor_header [data-testid="stRadio"] label:has(input:focus-visible) {
+        background:var(--cd-surface-muted);
+        color:var(--cd-text);
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] label:has(input:checked) {
+        background:var(--cd-accent-soft);
+        color:var(--cd-text);
+    }
+
+    .st-key-professor_mobile_header {
+        display:none !important;
+    }
+
+    /* The mobile surface is rendered alongside the desktop workbench so the
+       same session state can switch views without another rerun. Keep it out
+       of the desktop layout; the narrow-screen rule below enables it. */
+    [class*="st-key-professor_mobile_workbench_"] {
+        display:none !important;
+    }
+}
+
+.professor-sidebar-brand h1 {
+    margin:.12rem 0 .24rem;
+    color:var(--cd-text);
+    font-family:"Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size:1.35rem;
+    letter-spacing:-.025em;
+}
+
+.professor-sidebar-brand p {
+    margin:0;
+    color:var(--cd-muted);
+    font-size:.8rem;
+    line-height:1.4;
+}
+
+.professor-sidebar-brand .professor-eyebrow {
+    color:var(--cd-accent);
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+}
+
+.professor-sidebar-nav-label {
+    margin:1.25rem 0 .25rem;
+    color:var(--cd-muted);
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+}
+
+.professor-sidebar-account {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:.55rem;
+    margin-top:auto;
+    padding-top:.85rem;
+    border-top:1px solid var(--cd-border);
+    color:var(--cd-muted);
+    font-size:.75rem;
+    line-height:1.3;
+}
+
+.professor-sidebar-account span {
+    display:flex;
+    min-width:0;
+    flex-direction:column;
+}
+
+.professor-sidebar-account small {
+    color:var(--cd-muted);
+    font-size:.68rem;
+}
+
+.professor-sidebar-account a,
+.professor-mobile-account a {
+    color:var(--cd-accent);
+    font-weight:700;
+    text-decoration:none;
+    white-space:nowrap;
+}
+
+.professor-sidebar-account a:hover,
+.professor-mobile-account a:hover {
+    text-decoration:underline;
+}
+
+/* Compact mobile-only controls. Desktop section navigation stays in the rail. */
+.st-key-professor_mobile_header {
+    margin:0 0 .9rem;
+    padding:.7rem 0 .75rem;
+    border-bottom:1px solid var(--cd-border);
+}
+
+.professor-mobile-brand {
+    display:flex;
+    min-width:0;
+    flex-direction:column;
+    gap:.08rem;
+}
+
+.professor-mobile-brand strong {
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.9rem;
+    line-height:1.25;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-mobile-brand > span:last-child {
+    color:var(--cd-muted);
+    font-size:.7rem;
+}
+
+.professor-mobile-eyebrow {
+    overflow:hidden;
+    color:var(--cd-accent) !important;
+    font-size:.62rem !important;
+    font-weight:750;
+    letter-spacing:.04em;
+    text-overflow:ellipsis;
+    text-transform:uppercase;
+    white-space:nowrap;
+}
+
+.professor-mobile-account {
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    min-height:2.5rem;
+    font-size:.72rem;
+}
+
+.st-key-professor_mobile_header [data-testid="stHorizontalBlock"] {
+    align-items:center;
+    gap:.4rem;
+}
+
+.st-key-professor_mobile_header [data-testid="stHorizontalBlock"]
+> [data-testid="stColumn"] {
+    min-width:0 !important;
+}
+
+.st-key-professor_mobile_header [data-baseweb="select"] > div {
+    min-height:2.45rem !important;
+    box-sizing:border-box !important;
+    border-radius:.55rem !important;
+    background:var(--cd-surface-muted) !important;
+}
+
+.st-key-professor_mobile_header [data-baseweb="select"] * {
+    font-size:.72rem !important;
+}
+
+.st-key-professor_mobile_header .st-key-professor_mobile_back_notebooks,
+.st-key-professor_mobile_header [class*="st-key-professor_mobile_back_notebooks_"] {
+    margin-top:.55rem;
+}
+
+.st-key-professor_mobile_header [class*="st-key-professor_mobile_back_notebooks_"] button,
+.st-key-professor_mobile_header [class*="st-key-professor_mobile_workbench_refresh_"] button {
+    min-height:2.4rem !important;
+    padding:.4rem .55rem !important;
+    font-size:.76rem !important;
+}
+
+.st-key-professor_mobile_header [class*="st-key-professor_mobile_view_switcher_"] {
+    margin-top:.5rem;
+}
+
+/* Page hierarchy */
+.professor-page-header {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:1rem;
+    margin:0 0 1.25rem;
+    padding:.15rem 0 .95rem;
+    border-bottom:1px solid var(--cd-border);
+}
+
+.professor-page-heading {
+    min-width:0;
+}
+
+.professor-page-eyebrow,
+.professor-workspace-eyebrow,
+.professor-workbench-eyebrow {
+    margin:0;
+    color:var(--cd-accent);
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.055em;
+    text-transform:uppercase;
+}
+
+.professor-page-heading h2 {
+    margin:.13rem 0 .28rem;
+    color:var(--cd-text);
+    font-family:"Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size:1.65rem;
+    line-height:1.15;
+    letter-spacing:-.03em;
+}
+
+.professor-page-heading > p:last-child {
+    max-width:62ch;
+    margin:0;
+    color:var(--cd-muted);
+    font-size:.83rem;
+    line-height:1.45;
+}
+
+.professor-section-heading {
+    margin:.15rem 0 .65rem;
+}
+
+.professor-section-heading h3 {
+    margin:0;
+    color:var(--cd-text);
+    font-size:1rem;
+    line-height:1.25;
+}
+
+.professor-section-description {
+    margin:.2rem 0 0;
+    color:var(--cd-muted);
+    font-size:.76rem;
+    line-height:1.4;
+}
+
+.professor-updated {
+    display:flex;
+    justify-content:space-between;
+    gap:.8rem;
+    margin:0 0 .4rem;
+    color:var(--cd-muted);
+    font-size:.7rem;
+}
+
+.professor-updated span {
+    color:var(--cd-text);
+    font-weight:750;
+}
+
+.professor-summary {
+    margin:.65rem 0 1.1rem;
+    padding:.8rem .9rem;
+    border-left:3px solid var(--cd-accent);
+    border-radius:0 .55rem .55rem 0;
+    background:var(--cd-accent-soft);
+    color:var(--cd-text);
+    font-size:.86rem;
+    line-height:1.5;
+}
+
+/* Overview metrics and chart primitives */
+.professor-metric {
+    min-height:5.5rem;
+    padding:.72rem .8rem;
     border:1px solid var(--cd-border);
-    border-radius:.8rem;
+    border-radius:.7rem;
+    background:var(--cd-surface);
+    box-shadow:0 2px 8px rgba(21,32,43,.035);
+}
+
+.professor-metric-label,
+.professor-metric-detail {
+    display:block;
+    margin:0;
+    color:var(--cd-muted);
+    font-size:.7rem;
+    line-height:1.3;
+}
+
+.professor-metric-value {
+    display:block;
+    margin:.3rem 0 .15rem;
+    color:var(--cd-text);
+    font-size:1.28rem;
+    font-weight:750;
+    letter-spacing:-.025em;
+}
+
+.professor-bar-row {
+    display:grid;
+    grid-template-columns:minmax(7.5rem,1fr) minmax(5rem,2.2fr) 5.8rem;
+    align-items:center;
+    gap:.6rem;
+    min-height:2.05rem;
+    color:var(--cd-muted);
+    font-size:.78rem;
+}
+
+.professor-bar {
+    height:.4rem;
+    overflow:hidden;
+    border-radius:999px;
+    background:var(--cd-subtle);
+}
+
+.professor-bar i {
+    display:block;
+    height:100%;
+    border-radius:inherit;
+    background:var(--cd-accent);
+}
+
+.professor-bar-row b {
+    color:var(--cd-text);
+    font-size:.75rem;
+    font-weight:700;
+    text-align:right;
+}
+
+/* Follow-up rows are an operational queue, not a decorative table. */
+.professor-followup-table {
+    width:100%;
+    overflow:hidden;
+    border:1px solid var(--cd-border);
+    border-radius:.7rem;
+    background:var(--cd-surface);
+}
+
+.professor-followup-header {
+    display:grid;
+    grid-template-columns:1.05fr 1.7fr 1.1fr .75fr 1fr .7fr;
+    gap:.55rem;
+    padding:.58rem .7rem;
+    border-bottom:1px solid var(--cd-border);
+    background:var(--cd-surface-muted);
+    color:var(--cd-muted);
+    font-size:.65rem;
+    font-weight:750;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+}
+
+[class*="st-key-professor_followup_row_"],
+[class*="st-key-professor_inactive_row_"] {
+    padding:.2rem .7rem;
+    border-bottom:1px solid var(--cd-border);
+}
+
+[class*="st-key-professor_followup_row_"]:last-child,
+[class*="st-key-professor_inactive_row_"]:last-child {
+    border-bottom:0;
+}
+
+[class*="st-key-professor_followup_row_"] [data-testid="stHorizontalBlock"],
+[class*="st-key-professor_inactive_row_"] [data-testid="stHorizontalBlock"] {
+    align-items:center;
+}
+
+.professor-followup-cell {
+    display:block;
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.76rem;
+    line-height:1.35;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-followup-label {
+    display:none;
+}
+
+.professor-followup-cell[data-label="Reason"],
+.professor-followup-cell[data-label="Last active"] {
+    color:var(--cd-muted);
+}
+
+[class*="st-key-professor_followup_"] button,
+[class*="st-key-professor_inactive_"] button {
+    min-height:2.25rem !important;
+    padding:.35rem .55rem !important;
+    font-size:.74rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
+}
+
+/* Student roster and notebook list */
+.professor-result-count,
+.professor-workbench-count {
+    margin:.35rem 0 .5rem;
+    color:var(--cd-muted);
+    font-size:.74rem;
+}
+
+.st-key-professor_students_roster [data-testid="stTextInput"] input,
+.st-key-professor_students_roster [data-baseweb="select"] > div,
+[class*="st-key-professor_workbench_roster_"] [data-testid="stTextInput"] input,
+[class*="st-key-professor_workbench_roster_"] [data-baseweb="select"] > div {
+    min-height:2.7rem !important;
+    box-sizing:border-box !important;
+    border-radius:.6rem !important;
+    background:var(--cd-surface-muted) !important;
+}
+
+.professor-student-row,
+.professor-workbench-student-row {
+    display:flex;
+    min-width:0;
+    align-items:center;
+    gap:.65rem;
+}
+
+.professor-student-avatar {
+    display:inline-flex;
+    width:2.35rem;
+    height:2.35rem;
+    flex:0 0 2.35rem;
+    align-items:center;
+    justify-content:center;
+    border-radius:.65rem;
+    background:var(--cd-accent-soft);
+    color:var(--cd-accent-hover);
+    font-size:.72rem;
+    font-weight:800;
+}
+
+.professor-student-copy {
+    display:flex;
+    min-width:0;
+    flex:1 1 auto;
+    flex-direction:column;
+    gap:.08rem;
+}
+
+.professor-student-copy strong {
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.9rem;
+    line-height:1.25;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-student-copy span,
+.professor-student-copy small {
+    overflow:hidden;
+    color:var(--cd-muted);
+    font-size:.73rem;
+    line-height:1.35;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.st-key-professor_students_roster [class*="st-key-professor_student_card_"] {
+    margin:.35rem 0 !important;
+    padding:.62rem .7rem !important;
+    border:1px solid var(--cd-border) !important;
+    border-radius:.7rem !important;
+    background:var(--cd-surface) !important;
+}
+
+.st-key-professor_students_roster [class*="st-key-professor_open_student_"] button,
+[class*="st-key-professor_workbench_select_student_"] button {
+    min-height:2.4rem !important;
+    padding:.3rem .45rem !important;
+    color:var(--cd-accent-hover) !important;
+    font-size:.74rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
+}
+
+.professor-notebook-row {
+    display:flex;
+    flex-direction:column;
+    gap:.12rem;
+    min-width:0;
+    padding:.25rem 0;
+}
+
+.professor-notebook-row strong {
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.88rem;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-notebook-row span,
+.professor-notebook-row small {
+    color:var(--cd-muted);
+    font-size:.74rem;
+    line-height:1.35;
+}
+
+/* Each notebook is a separate record. Keep the outline quiet in the resting
+   state, then use the teal accent only when the row is being explored so the
+   list stays scannable without turning back into a wall of heavy cards. */
+[class*="st-key-professor_notebook_card_"] {
+    min-width:0 !important;
+    margin:.45rem 0 !important;
+    padding:.45rem .65rem !important;
+    border:1px solid var(--cd-border) !important;
+    border-radius:.7rem !important;
+    background:var(--cd-surface-muted) !important;
+    box-shadow:none !important;
+    transition:border-color var(--cd-transition), background var(--cd-transition);
+}
+
+[class*="st-key-professor_notebook_card_"]:hover,
+[class*="st-key-professor_notebook_card_"]:focus-within {
+    border-color:var(--cd-accent) !important;
+}
+
+[class*="st-key-professor_open_notebook_btn_"] button {
+    min-height:2.5rem !important;
+    padding:.35rem .45rem !important;
+    color:var(--cd-accent-hover) !important;
+    font-size:.74rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
+}
+
+.st-key-professor_student_list_scroll {
+    min-width:0;
+    overflow:visible;
+}
+
+/* Selected notebook workbench. Keep the document as the escape hatch for
+   zoomed/short viewports. The panes get a bounded height of their own so a
+   wheel or trackpad gesture over a pane still scrolls that pane, while a
+   gesture over the surrounding page can always reach the header and footer. */
+.st-key-professor_shell [data-testid="stColumn"]:has([class*="st-key-professor_selected_workbench_"]) {
+    display:flex !important;
+    min-height:0 !important;
+    height:auto !important;
+    flex-direction:column !important;
+    overflow:visible !important;
+}
+
+[class*="st-key-professor_workbench_context_"] {
+    flex:0 0 auto !important;
+    min-height:0 !important;
+    margin-bottom:.4rem;
+    padding:.15rem 0 .65rem;
+    border-bottom:1px solid var(--cd-border);
+}
+
+.professor-workbench-context-copy h2 {
+    max-width:100%;
+    margin:.12rem 0 .18rem;
+    color:var(--cd-text);
+    font-family:"Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size:1.32rem;
+    line-height:1.2;
+    letter-spacing:-.025em;
+    overflow-wrap:anywhere;
+    word-break:normal;
+}
+
+.professor-workbench-context-copy p:last-child {
+    margin:0;
+    color:var(--cd-muted);
+    font-size:.74rem;
+}
+
+.professor-readonly-badge {
+    display:inline-flex;
+    width:max-content;
+    margin-top:.35rem;
+    padding:.22rem .45rem;
+    border-radius:999px;
+    background:var(--cd-surface-muted);
+    color:var(--cd-muted);
+    font-size:.65rem;
+    font-weight:700;
+}
+
+[class*="st-key-professor_selected_workbench_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:auto !important;
+    flex:0 0 auto !important;
+    flex-direction:column !important;
+    overflow:visible !important;
+}
+
+[class*="st-key-professor_desktop_workbench_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:clamp(30rem, calc(100dvh - 10rem), 52rem) !important;
+    max-height:calc(100dvh - 7rem) !important;
+    flex:0 0 auto !important;
+    flex-direction:column !important;
+    overflow:visible !important;
+}
+
+/* Streamlit inserts a neutral wrapper between a keyed vertical block and its
+   horizontal row. Give that wrapper the same flex contract; otherwise the row
+   collapses to its intrinsic content height and the lower half of the
+   workbench becomes an unreachable blank gap. */
+[class*="st-key-professor_desktop_workbench_"] > div:has(> [data-testid="stHorizontalBlock"]) {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex:1 1 auto !important;
+}
+
+[class*="st-key-professor_desktop_workbench_"] [data-testid="stHorizontalBlock"] {
+    min-height:0 !important;
+    height:100% !important;
+    align-items:stretch !important;
+}
+
+[class*="st-key-professor_desktop_workbench_"] [data-testid="stColumn"] {
+    min-width:0 !important;
+    min-height:0 !important;
+    height:100% !important;
+    overflow:visible !important;
+}
+
+/* Streamlit nests each column's content in a vertical block and a layout
+   wrapper. Stretch both wrappers so every keyed pane receives the full
+   workbench height and its own transcript/path scrollport can do the rest. */
+[class*="st-key-professor_desktop_workbench_"] [data-testid="stColumn"]
+> [data-testid="stVerticalBlock"],
+[class*="st-key-professor_desktop_workbench_"] [data-testid="stColumn"]
+> [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex:1 1 auto !important;
+}
+
+/* The final layout wrapper in each pane contains its scrollport. Stretch only
+   those wrappers; headings and filters above them should keep their natural
+   height. */
+[class*="st-key-professor_workbench_roster_"] > [data-testid="stLayoutWrapper"]:has([class*="st-key-professor_workbench_roster_scroll_"]),
+[class*="st-key-professor_workspace_pane_"] > [data-testid="stLayoutWrapper"]:has([class*="st-key-professor_transcript_scroll"]),
+[class*="st-key-professor_path_rail_"] > [data-testid="stLayoutWrapper"]:has([class*="st-key-professor_path_content_"]) {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex:1 1 auto !important;
+}
+
+[class*="st-key-professor_workbench_roster_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex-direction:column !important;
+    padding:.65rem .65rem .35rem;
+    border-top:0;
+    border-right:1px solid var(--cd-border);
+    border-bottom:0;
+    border-left:0;
+    border-radius:0;
+    background:transparent;
+}
+
+[class*="st-key-professor_workbench_roster_scroll_"] {
+    min-height:0 !important;
+    flex:1 1 auto !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    overscroll-behavior:contain;
+    scrollbar-gutter:stable;
+    scrollbar-width:thin;
+    padding-right:.25rem;
+}
+
+[class*="st-key-professor_workbench_student_card_"] {
+    margin:.28rem 0 !important;
+    padding:.5rem .52rem !important;
+    border:1px solid var(--cd-border) !important;
+    border-radius:.6rem !important;
+    background:var(--cd-surface) !important;
+}
+
+.professor-workbench-student-row .professor-student-copy span {
+    font-size:.7rem;
+}
+
+.professor-workbench-student-row .professor-student-copy small {
+    color:var(--cd-muted);
+    font-size:.68rem;
+}
+
+.professor-workbench-student-status {
+    flex:0 0 1rem;
+    color:var(--cd-accent);
+    font-size:.7rem;
+    text-align:center;
+}
+
+[class*="st-key-professor_workspace_pane_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex-direction:column !important;
+    padding:.7rem .85rem .4rem;
+    border:0;
+    border-radius:0;
+    background:transparent;
+}
+
+[class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] > div,
+[class*="st-key-professor_path_rail_"] [data-testid="stHorizontalBlock"] {
+    gap:.35rem;
+}
+
+[class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] label {
+    min-height:2.3rem;
+    padding:.38rem .65rem;
+    border-radius:.5rem;
+    color:var(--cd-muted);
+    font-size:.77rem;
+    font-weight:700;
+}
+
+[class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] label:has(input:checked) {
+    background:var(--cd-accent-soft);
+    color:var(--cd-text);
+}
+
+[class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] label:hover {
     background:var(--cd-surface-muted);
 }
-.st-key-research_workspace > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] { align-items:stretch; }
-.st-key-research_workspace > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+
+/* Center-only transcript/sources, with the path projection kept in the rail. */
+[class*="st-key-professor_transcript_scroll"] {
+    min-height:0 !important;
+    flex:1 1 auto !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    overscroll-behavior:contain;
+    scrollbar-gutter:stable;
+    scrollbar-width:thin;
+    padding-right:.35rem;
+}
+
+.professor-chat-meta {
+    display:flex;
+    justify-content:space-between;
+    gap:.65rem;
+    margin-bottom:.15rem;
+    color:var(--cd-muted);
+    font-size:.72rem;
+}
+
+.professor-chat-meta strong {
+    color:var(--cd-text);
+    font-size:.78rem;
+}
+
+[class*="st-key-professor_message_"] {
+    margin:.35rem 0 !important;
+    padding:.55rem .65rem !important;
+    border:1px solid var(--cd-border) !important;
+    border-radius:.6rem !important;
+    background:var(--cd-surface-muted) !important;
+}
+
+[class*="st-key-professor_message_"]:has(.professor-chat-student) {
+    border-left:3px solid var(--cd-accent) !important;
+}
+
+/* Transcript messages are evidence, not separate dashboard cards. A flat
+   divider preserves grouping while avoiding the repeated dark-on-dark boxes
+   that make long conversations feel visually noisy. */
+[class*="st-key-professor_desktop_workbench_"] [class*="st-key-professor_message_"] {
+    margin:.15rem 0 !important;
+    padding:.72rem .15rem !important;
+    border-top:0 !important;
+    border-right:0 !important;
+    border-bottom:1px solid var(--cd-border) !important;
+    border-left:0 !important;
+    border-radius:0 !important;
+    background:transparent !important;
+}
+
+[class*="st-key-professor_desktop_workbench_"] [class*="st-key-professor_message_"]:has(.professor-chat-student) {
+    border-left:3px solid var(--cd-accent) !important;
+    padding-left:.65rem !important;
+}
+
+.professor-file-row {
     min-width:0;
-    padding:.75rem;
+    padding:.42rem 0;
+}
+
+.professor-file-row-title {
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.8rem;
+    font-weight:700;
+    line-height:1.35;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-file-row-meta {
+    margin-top:.12rem;
+    color:var(--cd-muted);
+    font-size:.7rem;
+}
+
+[class*="st-key-professor_attachment_"] button,
+[class*="st-key-professor_citation_"] button,
+[class*="st-key-professor_source_"] button {
+    min-height:2.25rem !important;
+    padding:.3rem .45rem !important;
+    font-size:.72rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
+}
+
+/* Thinking Path owns the right-rail projections on desktop and the fourth
+   mobile surface when explicitly selected. */
+[class*="st-key-professor_path_rail_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex-direction:column !important;
+    padding:.7rem .7rem .4rem;
+    border-top:0;
+    border-right:0;
+    border-bottom:0;
+    border-left:1px solid var(--cd-border);
+    border-radius:0;
+    background:transparent;
+}
+
+.professor-path-heading h3 {
+    margin:0 0 .55rem;
+    color:var(--cd-text);
+    font-size:1rem;
+}
+
+[class*="st-key-professor_path_rail_"] [data-testid="stButton"] button {
+    min-height:2.3rem !important;
+    padding:.35rem .45rem !important;
+    font-size:.72rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
+}
+
+[class*="st-key-professor_path_content_"] {
+    min-height:0 !important;
+    flex:1 1 auto !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    scrollbar-gutter:stable;
+    scrollbar-width:thin;
+    padding-right:.2rem;
+}
+
+[class*="st-key-professor_workbench_roster_scroll_"]::-webkit-scrollbar,
+[class*="st-key-professor_transcript_scroll"]::-webkit-scrollbar,
+[class*="st-key-professor_path_content_"]::-webkit-scrollbar {
+    width:.62rem;
+}
+
+[class*="st-key-professor_workbench_roster_scroll_"]::-webkit-scrollbar-track,
+[class*="st-key-professor_transcript_scroll"]::-webkit-scrollbar-track,
+[class*="st-key-professor_path_content_"]::-webkit-scrollbar-track {
+    background:transparent;
+}
+
+[class*="st-key-professor_workbench_roster_scroll_"]::-webkit-scrollbar-thumb,
+[class*="st-key-professor_transcript_scroll"]::-webkit-scrollbar-thumb,
+[class*="st-key-professor_path_content_"]::-webkit-scrollbar-thumb {
+    border:.16rem solid transparent;
+    border-radius:999px;
+    background:var(--cd-border);
+    background-clip:padding-box;
+}
+
+.professor-timeline-step {
+    display:flex;
+    align-items:flex-start;
+    gap:.55rem;
+    margin:.2rem 0;
+    padding:.55rem .5rem;
+    border-left:2px solid var(--cd-border);
+}
+
+.professor-timeline-node {
+    flex:0 0 1.1rem;
+    color:var(--cd-muted);
+    font-size:.82rem;
+    text-align:center;
+}
+
+.professor-step-completed .professor-timeline-node,
+.professor-step-current .professor-timeline-node {
+    color:var(--cd-accent);
+}
+
+.professor-timeline-copy {
+    display:flex;
+    min-width:0;
+    flex-direction:column;
+    gap:.08rem;
+}
+
+.professor-timeline-copy strong {
+    color:var(--cd-text);
+    font-size:.78rem;
+}
+
+.professor-timeline-copy small {
+    color:var(--cd-muted);
+    font-size:.68rem;
+}
+
+.professor-path-fallback-card {
+    display:flex;
+    flex-direction:column;
+    gap:.12rem;
+    margin:.35rem 0;
+    padding:.58rem .62rem;
+    border:1px solid var(--cd-border);
+    border-radius:.55rem;
+    background:var(--cd-surface);
+}
+
+.professor-path-fallback-card strong {
+    color:var(--cd-text);
+    font-size:.76rem;
+}
+
+.professor-path-fallback-card span {
+    color:var(--cd-muted);
+    font-size:.7rem;
+    line-height:1.35;
+}
+
+/* Student detail and research review */
+.professor-progress {
+    display:flex;
+    flex-wrap:wrap;
+    gap:.4rem .6rem;
+    padding:.65rem .75rem;
     border:1px solid var(--cd-border);
     border-radius:.65rem;
     background:var(--cd-surface);
 }
-.research-pane-marker { display:none; }
+
+.professor-step {
+    display:inline-flex;
+    align-items:center;
+    gap:.25rem;
+    padding:.2rem .4rem;
+    border-radius:.4rem;
+    color:var(--cd-muted);
+    font-size:.76rem;
+}
+
+.professor-step-completed {
+    background:var(--cd-accent-soft);
+    color:var(--cd-text);
+}
+
+.professor-step-current {
+    background:var(--cd-accent);
+    color:#fff;
+    font-weight:750;
+}
+
+.st-key-research_workspace {
+    margin-top:.8rem;
+    padding:.75rem;
+    border:1px solid var(--cd-border);
+    border-radius:.75rem;
+    background:var(--cd-surface-muted);
+}
+
+.st-key-research_workspace [data-testid="stColumn"] {
+    min-width:0;
+    padding:.65rem;
+    border:1px solid var(--cd-border);
+    border-radius:.6rem;
+    background:var(--cd-surface);
+}
+
 .research-coding-card {
     margin:.35rem 0 .75rem;
-    padding:.72rem;
+    padding:.7rem;
     border-left:3px solid var(--cd-accent);
     background:var(--cd-accent-soft);
 }
+
 .research-coding-card h4,
-.research-coding-card p { margin:.18rem 0 .55rem; color:var(--cd-text); }
-.research-coding-card .research-coding-meta {
-    color:var(--cd-muted);
-    font-size:.72rem;
-    font-weight:700;
-    letter-spacing:.035em;
+.research-coding-card p {
+    margin:.18rem 0 .5rem;
+    color:var(--cd-text);
+}
+
+.research-coding-meta {
+    color:var(--cd-muted) !important;
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.04em;
     text-transform:uppercase;
 }
+
 .st-key-research_transcript_scroll {
     max-height:58vh;
-    overflow-y:auto;
-    padding-right:.4rem;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    padding-right:.3rem;
 }
+
 .st-key-research_transcript_scroll [data-testid="stMarkdownContainer"] {
-    margin:0 0 .55rem;
-    padding:.65rem .7rem;
+    margin:0 0 .5rem;
+    padding:.58rem .65rem;
     border:1px solid var(--cd-border);
-    border-radius:.6rem;
+    border-radius:.55rem;
     background:var(--cd-surface-muted);
+}
+
+/* Consistent target sizes and focus treatment. */
+.st-key-professor_shell button,
+.st-key-professor_shell [role="button"] {
+    transition:background var(--cd-transition), border-color var(--cd-transition), color var(--cd-transition);
+}
+
+.st-key-professor_shell button:focus-visible,
+.st-key-professor_shell input:focus-visible,
+.st-key-professor_shell textarea:focus-visible,
+.st-key-professor_shell [role="radio"]:focus-visible {
+    outline:2px solid var(--cd-accent) !important;
+    outline-offset:2px;
+}
+
+/* At compact desktop widths the overview's follow-up queue is still a
+   two-column teaching-priority panel. Give each row a readable evidence stack
+   instead of squeezing six labels into a few hundred pixels. */
+@media (max-width:1199px) and (min-width:801px) {
+    /* At tablet-sized desktop widths, give the roster and evidence rail a
+       readable minimum instead of allowing Streamlit's percentage columns to
+       squeeze names into one-letter wraps. The center remains the largest
+       track and continues to own its transcript scroll. */
+    [class*="st-key-professor_desktop_workbench_"] [data-testid="stHorizontalBlock"]:has(
+        [class*="st-key-professor_workbench_roster_"]
+    ) {
+        display:grid !important;
+        grid-template-columns:minmax(13rem,31fr) minmax(0,42fr) minmax(12rem,27fr) !important;
+        gap:.75rem !important;
+    }
+
+    [class*="st-key-professor_desktop_workbench_"] [data-testid="stHorizontalBlock"]:has(
+        [class*="st-key-professor_workbench_roster_"]
+    ) > [data-testid="stColumn"] {
+        width:auto !important;
+        max-width:none !important;
+        flex:none !important;
+    }
+
+    /* Keep the selected student's identity recoverable when the three-pane
+       workbench gets compact. Names may wrap; they must never collapse to an
+       ellipsis that hides which record is open. */
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-copy strong,
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-copy span,
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-copy small {
+        overflow:visible !important;
+        overflow-wrap:break-word;
+        word-break:normal;
+        text-overflow:clip !important;
+        white-space:normal !important;
+    }
+
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-avatar {
+        width:2rem;
+        height:2rem;
+        flex-basis:2rem;
+        font-size:.65rem;
+    }
+
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-copy strong {
+        font-size:.8rem;
+    }
+
+    [class*="st-key-professor_path_rail_"] [data-testid="stButton"] button {
+        padding:.3rem .32rem !important;
+        font-size:.68rem !important;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stHorizontalBlock"] {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) minmax(5.2rem,auto) !important;
+        gap:.22rem .55rem !important;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stColumn"] {
+        width:auto !important;
+        max-width:none !important;
+        min-width:0 !important;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stColumn"]:nth-child(n+3) {
+        grid-column:1 / -1;
+    }
+
+    .professor-followup-header {
+        display:none;
+    }
+
+    .professor-followup-cell {
+        white-space:normal;
+        overflow-wrap:anywhere;
+    }
+
+    .professor-followup-cell::before {
+        content:attr(data-label) ": ";
+        color:var(--cd-muted);
+        font-size:.65rem;
+        font-weight:750;
+        letter-spacing:.02em;
+    }
+}
+
+/* On narrow screens, the app has one document scroll. Never create a second
+   roster/transcript/path viewport inside it. */
+@media (max-width:800px) {
+    html:has(.st-key-professor_shell),
+    html:has(.st-key-professor_shell) body,
+    .stApp:has(.st-key-professor_shell),
+    [data-testid="stAppViewContainer"]:has(.st-key-professor_shell),
+    [data-testid="stAppViewContainer"]:has(.st-key-professor_shell) > .main,
+    [data-testid="stAppViewContainer"]:has(.st-key-professor_shell) [data-testid="stMain"] {
+        height:auto !important;
+        min-height:100vh !important;
+        max-height:none !important;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+    }
+
+    .block-container:has(.st-key-professor_shell) {
+        padding:.7rem .8rem 2rem !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header) {
+        display:block !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header)
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+    }
+
+    .st-key-professor_shell [data-testid="stColumn"]:has([class*="st-key-professor_selected_workbench_"]) {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        overflow:visible !important;
+    }
+
+    .st-key-professor_header {
+        display:none !important;
+    }
+
+    .st-key-professor_mobile_header {
+        display:block !important;
+    }
+
+    .st-key-professor_mobile_header [data-testid="stHorizontalBlock"] {
+        display:flex !important;
+        flex-wrap:wrap !important;
+        align-items:center !important;
+    }
+
+    .st-key-professor_mobile_header [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"] {
+        width:auto !important;
+        max-width:none !important;
+    }
+
+    .st-key-professor_mobile_header [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:first-child {
+        flex:1 1 9rem !important;
+    }
+
+    .st-key-professor_mobile_header [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:not(:first-child) {
+        flex:0 1 5.5rem !important;
+    }
+
+    .st-key-professor_mobile_header .professor-mobile-account {
+        min-width:3.8rem;
+    }
+
+    .professor-page-header {
+        display:block;
+        margin-bottom:1rem;
+    }
+
+    .professor-page-heading h2 {
+        font-size:1.42rem;
+    }
+
+    /* Overview is a reading flow on a phone. Streamlit columns otherwise keep
+       the two teaching-priority panels side by side, leaving the follow-up
+       evidence only a few characters wide. Stack those panels and let each
+       follow-up row apply its own compact grid below. */
+    .st-key-professor_overview_breakdown [data-testid="stHorizontalBlock"] {
+        display:block !important;
+    }
+
+    .st-key-professor_overview_breakdown [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+        margin:0 0 1.1rem;
+    }
+
+    /* Student detail headers and notebook rows keep their action columns
+       usable at phone widths. A fixed action track prevents labels such as
+       Refresh/Open from wrapping into unreadable single letters. */
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_refresh_student_"]) {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) 6.2rem !important;
+        gap:.65rem !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_refresh_student_"])
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+        min-width:0 !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_open_notebook_btn_"]) {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) 5.6rem !important;
+        gap:.55rem !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_open_notebook_btn_"])
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+        min-width:0 !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.professor-metric) {
+        display:block !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.professor-metric)
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+        margin:0 0 .55rem;
+    }
+
+    .professor-updated {
+        align-items:flex-start;
+        flex-direction:column;
+        gap:.12rem;
+    }
+
+    .professor-bar-row {
+        grid-template-columns:minmax(6.2rem,1fr) minmax(4rem,1.3fr) minmax(5.5rem,auto);
+        gap:.42rem;
+        font-size:.73rem;
+    }
+
+    [class*="st-key-professor_selected_workbench_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        overflow:visible !important;
+    }
+
+    [class*="st-key-professor_workbench_context_"] {
+        display:none !important;
+    }
+
+    [class*="st-key-professor_desktop_workbench_"] {
+        display:none !important;
+    }
+
+    [class*="st-key-professor_mobile_workbench_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        overflow:visible !important;
+    }
+
+    [class*="st-key-professor_mobile_surface_"] {
+        height:auto !important;
+        min-height:0 !important;
+        overflow:visible !important;
+    }
+
+    [class*="st-key-professor_workbench_roster_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        padding:.7rem 0 .2rem;
+        border:0;
+        background:transparent;
+    }
+
+    [class*="st-key-professor_workbench_roster_scroll_"] {
+        max-height:none !important;
+        overflow:visible !important;
+        padding:0;
+    }
+
+    [class*="st-key-professor_workspace_pane_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        padding:.2rem 0;
+        border:0;
+        background:transparent;
+    }
+
+    [class*="st-key-professor_path_rail_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        padding:.2rem 0;
+        border:0;
+        background:transparent;
+    }
+
+    [class*="st-key-professor_path_content_"] {
+        max-height:none !important;
+        overflow:visible !important;
+        padding:0;
+    }
+
+    [class*="st-key-professor_transcript_scroll"] {
+        max-height:none !important;
+        overflow:visible !important;
+        padding:0;
+    }
+
+    /* The desktop pane contract targets the same keyed blocks inside the
+       mobile workbench. Return their neutral layout wrappers to normal flow so
+       mobile keeps one document scroll rather than inheriting a 100% flex
+       viewport from the desktop rule. */
+    [class*="st-key-professor_mobile_workbench_"] [class*="st-key-professor_workbench_roster_"] > [data-testid="stLayoutWrapper"],
+    [class*="st-key-professor_mobile_workbench_"] [class*="st-key-professor_workspace_pane_"] > [data-testid="stLayoutWrapper"],
+    [class*="st-key-professor_mobile_workbench_"] [class*="st-key-professor_path_rail_"] > [data-testid="stLayoutWrapper"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        flex:none !important;
+    }
+
+    .st-key-research_transcript_scroll {
+        max-height:none !important;
+        overflow:visible !important;
+        padding:0;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stHorizontalBlock"],
+    [class*="st-key-professor_inactive_row_"] [data-testid="stHorizontalBlock"] {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) minmax(4.2rem,auto) !important;
+        gap:.2rem .5rem !important;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stColumn"],
+    [class*="st-key-professor_inactive_row_"] [data-testid="stColumn"] {
+        width:auto !important;
+        max-width:none !important;
+    }
+
+    .professor-followup-header {
+        display:none;
+    }
+
+    .professor-followup-cell {
+        white-space:normal;
+    }
+
+    .professor-followup-cell::before {
+        content:attr(data-label) ": ";
+        color:var(--cd-muted);
+        font-size:.65rem;
+        font-weight:750;
+        letter-spacing:.02em;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stColumn"]:nth-child(n+3),
+    [class*="st-key-professor_inactive_row_"] [data-testid="stColumn"]:nth-child(n+3) {
+        grid-column:1 / -1;
+    }
+
+    .st-key-research_workspace {
+        padding:.25rem 0;
+        border:0;
+        background:transparent;
+    }
+
+    .st-key-research_workspace [data-testid="stColumn"] {
+        margin:.35rem 0;
+        padding:.5rem;
+    }
 }

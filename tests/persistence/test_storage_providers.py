@@ -403,6 +403,7 @@ def test_dsql_readiness_checks_all_runtime_tables_and_contract_marker():
         "system_metadata",
     ):
         assert f"select * from {table} limit 0" in joined
+    assert "select * from guest_sessions limit 0" not in joined
     assert "select value_text from system_metadata where key" in joined
 
 

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import json
 from typing import Any, Callable, Iterator, Mapping, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
 from .domain import (
     CoachRequest,
     CoachTurn,
+    DeepReviewJob,
     MessageCreateRequest,
+    MessagePage,
     NotebookCreateRequest,
     NotebookUpdateRequest,
     PendingPhaseTransition,
@@ -19,7 +21,15 @@ from .domain import (
     SourceSelectAllRequest,
     SourceUpdateRequest,
 )
-from .workspace_service import SourceContent, TranscriptExport
+from .workspace_service import (
+    DeepAnalysisPdfExport,
+    SourceContent,
+    TranscriptExport,
+)
+
+
+class GuestClaimConflictError(RuntimeError):
+    """Safe server message for a guest claim that needs a new action."""
 
 
 class _HttpSession(Protocol):
@@ -93,6 +103,10 @@ class LocalApiClient:
                     cookies[str(key)] = cleaned
         return cookies
 
+    def auth_cookies_snapshot(self) -> dict[str, str]:
+        """Capture the current request's ID-cookie for a background upload."""
+        return self._auth_cookies()
+
     def _request_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         """Attach auth cookies without dropping caller-supplied cookie maps."""
         merged = self._auth_cookies(kwargs.pop("cookies", None))
@@ -130,9 +144,11 @@ class LocalApiClient:
         self,
         id_token: str | None = None,
     ) -> dict[str, Any] | None:
-        """Return the authenticated user for Cognito auth cookies, or ``None``.
+        """Return the Cognito user, or ``None`` only for an HTTP 401.
 
-        Uses the internal FastAPI base URL. A 401 means unauthenticated.
+        Malformed success responses and transport/server failures raise so the
+        UI can retry without treating an unknown session as signed out. Uses
+        the internal FastAPI base URL. A 401 means unauthenticated.
         Only the short-lived ID-token cookie is forwarded. The refresh token is
         scoped to the browser-facing auth path and never reaches Streamlit.
         """
@@ -150,10 +166,72 @@ class LocalApiClient:
             return None
         response.raise_for_status()
         payload = response.json()
-        if not isinstance(payload, dict) or not payload.get("authenticated"):
-            return None
+        if not isinstance(payload, dict) or payload.get("authenticated") is not True:
+            raise ValueError("Invalid /auth/me success response")
         user = payload.get("user")
-        return user if isinstance(user, dict) else None
+        if not isinstance(user, dict):
+            raise ValueError("Invalid /auth/me user profile")
+        return user
+
+    def guest_session_probe(self) -> dict[str, Any] | None:
+        """Verify the current browser guest cookie without creating a session."""
+        from backend.settings import settings
+
+        response = self._http.post(
+            f"{self._base_url}/api/v1/auth/guest/probe",
+            headers={"Origin": str(settings.public_api_base_url)},
+            **self._request_kwargs(),
+        )
+        if response.status_code in {401, 404}:
+            return None
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else None
+
+    def guest_claim_preview(self) -> dict[str, Any]:
+        """Preview claimable guest data while forwarding current browser cookies."""
+        from backend.settings import settings
+
+        response = self._http.post(
+            f"{self._base_url}/api/v1/auth/guest/claim/preview",
+            headers={"Origin": str(settings.public_api_base_url)},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    def confirm_guest_claim(self, operation_id: str) -> dict[str, Any]:
+        """Confirm transfer of the current guest workspace into Cognito owner."""
+        from backend.settings import settings
+
+        response = self._http.post(
+            f"{self._base_url}/api/v1/auth/guest/claim/confirm",
+            json={"confirmed": True, "operation_id": operation_id},
+            headers={"Origin": str(settings.public_api_base_url)},
+            **self._request_kwargs(),
+        )
+        if response.status_code == 409:
+            payload = response.json()
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            raise GuestClaimConflictError(str(detail or "Guest claim needs attention."))
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    def cancel_guest_claim(self, operation_id: str) -> dict[str, Any]:
+        """Release this account's pending claim fence after explicit cancellation."""
+        from backend.settings import settings
+
+        response = self._http.post(
+            f"{self._base_url}/api/v1/auth/guest/claim/cancel",
+            json={"operation_id": operation_id},
+            headers={"Origin": str(settings.public_api_base_url)},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
 
     def graph_state(self, thread_id: str) -> dict[str, Any]:
         """Return the latest inspectable coach-graph summary."""
@@ -201,6 +279,113 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def professor_conversation_attachment(
+        self, student_id: str, notebook_id: str, attachment_id: str
+    ) -> SourceContent:
+        """Fetch one authorized transcript attachment on explicit user action."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/attachments/{attachment_id}",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        mime = response.headers.get("content-type", "application/octet-stream")
+        filename = "attachment.bin"
+        disposition = response.headers.get("content-disposition") or ""
+        if "filename*=" in disposition:
+            filename = unquote(
+                disposition.split("filename*=UTF-8''", 1)[-1].strip()
+            )
+        return SourceContent(data=response.content, mime=mime, filename=filename)
+
+    def professor_notebook_workspace(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return one authorised read-only notebook workspace for lecturers."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/workspace",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_messages(
+        self,
+        student_id: str,
+        notebook_id: str,
+        *,
+        limit: int = 30,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one paginated active-branch transcript page for lecturers."""
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/messages",
+            params=params,
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_sources(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return allow-listed library sources for one owned notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/sources",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_journey(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return persisted journey state for one owned notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/journey",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_review(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return persisted review projection for one owned notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/review",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_source(
+        self, student_id: str, notebook_id: str, source_id: str
+    ) -> SourceContent:
+        """Fetch one authorised library source on explicit lecturer action."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/sources/{source_id}",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        mime = response.headers.get("content-type", "application/octet-stream")
+        filename = "source.bin"
+        disposition = response.headers.get("content-disposition") or ""
+        if "filename*=" in disposition:
+            filename = unquote(
+                disposition.split("filename*=UTF-8''", 1)[-1].strip()
+            )
+        return SourceContent(data=response.content, mime=mime, filename=filename)
 
     def professor_critical_thinking(self) -> dict[str, Any]:
         """Return professor-authorised Facione analytics."""
@@ -378,6 +563,67 @@ class LocalApiClient:
         response.raise_for_status()
         return response.json()
 
+    def has_messages(self, thread_id: str) -> bool:
+        """Return the owner-scoped visible-message existence projection."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/messages/exists",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, bool):
+            return payload
+        if isinstance(payload, dict):
+            return bool(payload.get("has_messages"))
+        return False
+
+    def get_message_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 6,
+        cursor: str | None = None,
+    ) -> MessagePage:
+        """Return one bounded, newest-first keyset page of chat history.
+
+        The cursor is opaque and is only sent back to the API that issued it.
+        The full-history ``get_messages`` method remains available for explicit
+        transcript, review, and model-context operations.
+        """
+        params: dict[str, Any] = {"limit": int(limit)}
+        if cursor:
+            params["cursor"] = cursor
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/messages/page",
+            params=params,
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return MessagePage.model_validate(response.json())
+
+    def get_messages_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 6,
+        cursor: str | None = None,
+    ) -> MessagePage:
+        """Compatibility alias for :meth:`get_message_page`."""
+        return self.get_message_page(thread_id, limit=limit, cursor=cursor)
+
+    def get_oldest_user_messages(
+        self, thread_id: str, *, limit: int = 2
+    ) -> list[str]:
+        """Return a bounded title-migration projection, not the transcript."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/messages/title-context",
+            params={"limit": int(limit)},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return [str(value) for value in payload] if isinstance(payload, list) else []
+
     def download_transcript(self, thread_id: str) -> TranscriptExport:
         """Download the persisted notebook transcript as UTF-8 ``.txt``."""
         response = self._http.get(
@@ -391,6 +637,24 @@ class LocalApiClient:
         if "filename*=" in disposition:
             filename = disposition.split("filename*=UTF-8''", 1)[-1].strip()
         return TranscriptExport(
+            data=bytes(response.content),
+            filename=filename,
+            mime=mime,
+        )
+
+    def download_deep_analysis_pdf(self, thread_id: str) -> DeepAnalysisPdfExport:
+        """Download the Sonnet Deep Analysis PDF for one owned notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/deep-analysis.pdf",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        mime = response.headers.get("content-type", "application/pdf")
+        filename = "deep-analysis.pdf"
+        disposition = response.headers.get("content-disposition") or ""
+        if "filename*=" in disposition:
+            filename = disposition.split("filename*=UTF-8''", 1)[-1].strip()
+        return DeepAnalysisPdfExport(
             data=bytes(response.content),
             filename=filename,
             mime=mime,
@@ -433,6 +697,8 @@ class LocalApiClient:
         self,
         thread_id: str,
         uploads: list[tuple[str, bytes, str | None]],
+        *,
+        auth_cookies: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Upload files into the source library."""
         files = [
@@ -442,10 +708,33 @@ class LocalApiClient:
         response = self._http.post(
             f"{self._base_url}/api/v1/threads/{thread_id}/sources",
             files=files,
-            **self._request_kwargs(),
+            **(
+                self._request_kwargs()
+                if auth_cookies is None
+                else {"cookies": self._auth_cookies(auth_cookies)}
+            ),
         )
         response.raise_for_status()
         return response.json()
+
+    def upload_attachments(
+        self,
+        thread_id: str,
+        uploads: list[tuple[str, bytes, str | None]],
+    ) -> list[dict[str, Any]]:
+        """Upload private attachments for exactly one coaching turn."""
+        files = [
+            ("files", (name, data, mime or "application/octet-stream"))
+            for name, data, mime in uploads
+        ]
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{thread_id}/attachments",
+            files=files,
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, list) else []
 
     def update_source(
         self, thread_id: str, source_id: str, request: SourceUpdateRequest
@@ -606,13 +895,20 @@ class LocalApiClient:
         response.raise_for_status()
         return PendingPhaseTransition.model_validate(response.json())
 
-    def _idempotency_request_kwargs(self, request: CoachRequest) -> dict[str, Any]:
-        """Attach auth cookies and the optional Idempotency-Key header."""
-        headers = (
-            {"Idempotency-Key": request.idempotency_key}
-            if request.idempotency_key
-            else None
-        )
+    def _idempotency_request_kwargs(
+        self,
+        request: CoachRequest,
+        extra_headers: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Attach auth cookies and optional Idempotency-Key / correlation headers."""
+        headers: dict[str, str] = {}
+        if request.idempotency_key:
+            headers["Idempotency-Key"] = request.idempotency_key
+        if extra_headers:
+            for key, value in extra_headers.items():
+                cleaned = str(value or "").strip()
+                if cleaned:
+                    headers[str(key)] = cleaned
         return self._request_kwargs(**({"headers": headers} if headers else {}))
 
     def coach_turn(self, request: CoachRequest) -> CoachTurn:
@@ -624,6 +920,55 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return CoachTurn.model_validate(response.json())
+
+    def start_deep_review(
+        self,
+        thread_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> DeepReviewJob:
+        """Enqueue a server-owned explicit Deep Review for one owned notebook."""
+        payload: dict[str, Any] = {}
+        if idempotency_key:
+            payload["idempotency_key"] = idempotency_key
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        kwargs = self._request_kwargs(**({"headers": headers} if headers else {}))
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/deep-review",
+            json=payload,
+            **kwargs,
+        )
+        response.raise_for_status()
+        return DeepReviewJob.model_validate(response.json())
+
+    def get_deep_review(self, thread_id: str) -> DeepReviewJob:
+        """Return the owner-scoped Deep Review job for one notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/deep-review",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return DeepReviewJob.model_validate(response.json())
+
+    def get_journey_stage_reviews(self, thread_id: str) -> dict[str, Any]:
+        """Return Journey stage-completion review checkpoints for one notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/journey-stage-reviews",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    def mark_journey_stage_reviews_read(self, thread_id: str) -> dict[str, Any]:
+        """Clear the Journey unread notification for one notebook."""
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/journey-stage-reviews/read",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
 
     @staticmethod
     def coaching_error_category(payload: Mapping[str, Any] | None) -> str:
@@ -649,13 +994,22 @@ class LocalApiClient:
             return str(detail.get("category") or "").strip()
         return ""
 
-    def stream_coach_turn(self, request: CoachRequest) -> Iterator[dict[str, Any]]:
+    def stream_coach_turn(
+        self,
+        request: CoachRequest,
+        *,
+        request_id: str | None = None,
+    ) -> Iterator[dict[str, Any]]:
         """Yield NDJSON events from the streaming coaching endpoint."""
+        extra: dict[str, str] = {}
+        cleaned_id = str(request_id or "").strip()
+        if cleaned_id:
+            extra["X-Request-ID"] = cleaned_id
         with self._http.stream(
             "POST",
             f"{self._base_url}/api/v1/coach/turn/stream",
             json=request.model_dump(mode="json"),
-            **self._idempotency_request_kwargs(request),
+            **self._idempotency_request_kwargs(request, extra or None),
         ) as response:
             response.raise_for_status()
             for line in response.iter_lines():

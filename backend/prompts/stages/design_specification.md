@@ -18,3 +18,12 @@ success criteria are explicit enough for Ethics & Critical Thinking.
 
 STAY when the design remains an aspiration, key behavior is ambiguous, or
 there is no basis for evaluating success.
+
+FREE MODE — CHECK THE IDEA, THEN NEXT
+When Guidance mode is Free, the student is checking a design draft they already
+have. Do not require a complete requirement list, full constraints, or polished
+success criteria before recommending ADVANCE. If they shared a usable
+specification idea or draft for this stage, recommendation MUST be advance.
+Brief optional feedback is allowed; do not make completeness a STAY gate. Use
+STAY only for empty/off-topic messages, an unusable contradiction, or a serious
+safety/ethics issue.

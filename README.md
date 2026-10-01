@@ -69,14 +69,19 @@ Prefer `pip` from the active venv (same as `pip3` inside `.venv`):
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 ```
 
 Equivalent if the venv is already active:
 
 ```bash
-pip3 install -r requirements.txt
+pip3 install -r requirements-dev.txt
 ```
+
+`requirements-dev.txt` pulls in `requirements.txt` and adds pytest and Ruff, so
+use it for any checkout where you run the test suite or `scripts/build.sh`.
+`requirements.txt` on its own is the production image surface and deliberately
+ships no test tooling.
 
 ### 3. Create a local env file
 
@@ -238,10 +243,11 @@ Default: `AUTO_ADVANCE_STAGES=false`. After the coach recommends the next stage:
 2. Read the warning that confirming early can make the process less critical.
 3. Press **Next** again in the dialog to confirm (or Cancel).
 
-New notebooks default to Strict coaching. Quick uses the practical evidence
-threshold; Strict requires clearer, more consistently demonstrated reasoning
-before recommending advancement. The profiles retain separate cumulative Review
-evidence. To restore silent auto-advance:
+New notebooks default to Guide coaching. Guide uses the practical evidence
+threshold so students can progress once thinking is workable. Free lets a
+student check an idea they already have on the current stage, then press Next,
+without a structure-building ladder. The profiles retain separate cumulative
+Review evidence. To restore silent auto-advance:
 
 ```bash
 AUTO_ADVANCE_STAGES=true
@@ -326,12 +332,13 @@ ui/  → presentation only
 backend/ → domain, workflow, providers, SQLite, sources
 ```
 
-Prefer the API coaching path for all new behaviour. The legacy
-`StudentChatEngine` path exists only as a fallback when `USE_LOCAL_API` is off;
-do not add new behavior there. Production requires `USE_LOCAL_API=true`:
-Streamlit calls FastAPI, which verifies the Cognito session and applies the
-authenticated-owner boundary before accessing student data. The in-process
-fallback is limited to local development and deterministic tests.
+Prefer the FastAPI coaching path for all new behaviour. When `USE_LOCAL_API`
+is off, the in-process fallback is `CoachApplicationService`; the legacy
+`StudentChatEngine` is compatibility-only. Production requires
+`USE_LOCAL_API=true`: Streamlit calls FastAPI, which verifies the Cognito
+session and applies the authenticated-owner boundary before accessing student
+data. The in-process fallback is limited to local development and deterministic
+tests.
 
 ---
 
@@ -490,4 +497,4 @@ commit those artifacts.
 | Provider / OpenAI errors on first run | `.env` set to `openai` without a key | Set `MODEL_PROVIDER=mock` |
 | Bedrock access denied / model unavailable | Model access, IAM, or `BEDROCK_MODEL_ID` | Enable the model in Bedrock, grant invoke on that ID, match `AWS_REGION` |
 | Port already in use | Another process on 8000 or 8501 | Stop the other process, then restart `start.sh` |
-| Imports missing | Wrong Python / no venv packages | `source .venv/bin/activate` then `python -m pip install -r requirements.txt` |
+| Imports missing | Wrong Python / no venv packages | `source .venv/bin/activate` then `python -m pip install -r requirements-dev.txt` |

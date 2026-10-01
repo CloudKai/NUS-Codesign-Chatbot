@@ -1,13 +1,5166 @@
 # Implementation status
 
-## Current phase — Request-local AgentCore state, revise lease, exact limiter release
+## CURRENT STATUS
+
+### Hidden Guest startup interstitial (2026-09-27)
+
+- **Expected / actual:** On first visit or after sign-out, the browser still
+  obtains a Guest cookie before private notebook data loads. The intermediate
+  "Starting a private guest workspace" status line is no longer rendered; the
+  browser proceeds automatically to the normal chat after the cookie is set.
+  If an existing Guest cookie cannot be verified or startup fails, the
+  existing retry/recovery choices remain visible to protect prior history.
+- **Files:** `ui/auth_gate.py`, `tests/ui/test_auth_gate.py`. Production app
+  image `cde2300-chatbot:bdba9d8` was built for linux/arm64 from commit
+  `bdba9d8753dbe2b48cd8869e78c406286a0d61ec` with matching image label
+  and `APP_GIT_SHA`, then deployed by recreating only the app container.
+- **Validation:** 58 focused auth UI tests passed, full local mock pytest
+  passed, compileall and `git diff --check` passed, and GitHub Mock CI passed
+  both jobs. Production app readiness and public home/health returned 200;
+  Docker reported healthy, session generation remained 11, and the running
+  `ui/auth_gate.py` has no setup-status text. The fresh-visitor AppTest asserts
+  that guest startup remains automatic and the interim text is absent. A
+  separate clean production browser check was unavailable because automatic
+  computer-use approval rejected opening Chrome; the existing in-app browser
+  has a Guest cookie, so it cannot represent a first visit without altering
+  that workspace.
+- **Compatibility / rollback:** No schema or saved-data change, no paid model
+  turn, and no AgentCore republish. Previous host image
+  `cde2300-chatbot:0e43fe6` and a copy of its `.env` remain available for
+  rollback. First visit still needs one cookie request and redirect; a brief
+  blank transition may occur on a slow connection.
+- **Next exact action:** On a new browser profile, open the production URL and
+  confirm it reaches Chat as Guest without visible setup copy, then sign out
+  and confirm the same. Preserve any existing Guest cookie during this check.
+
+### Production AgentCore v35 and generation 11 (2026-09-27)
+
+- **Expected / actual:** Publish the committed Fast Chat first-text callback
+  runtime on the existing ARN, move DEFAULT only after READY, bump the app's
+  session generation, and verify a Guest turn. DEFAULT is READY on v35 and
+  serves the reviewed source artifact from commit `0e43fe6bebb9f7464a98b0b893aa26efef3017a0`.
+  The host app was recreated with generation 11; internal readiness returned
+  200 and Docker reported healthy. One short Guest coaching turn succeeded,
+  and its user message and reply survived a public-page reload.
+- **Files:** `compose.prod.yaml` and its two deployment-config assertions now
+  track generation 11; the release checklist and this status entry record the
+  cutover. The AgentCore artifact contains the committed `main.py` plus six
+  changed coaching prompt files overlaid onto v34's vendored package. All 33
+  runtime source files in the running app container matched the local release
+  tree before packaging; the new ZIP passed CRC and byte-for-byte source
+  verification.
+- **Validation:** GitHub release CI for `0e43fe6` passed `mock-suite` and
+  `agentcore-runtime-compatibility`. DEFAULT v35 READY, runtime cache enabled,
+  Guardrail v4, Deep Review read timeout 180s. The live turn recorded
+  `model_first_content_ms=6149`, `model_first_reply_text_ms=6150`,
+  `api_to_reply_ready_ms=15147`, and UI stream completion at 15281ms. This is
+  one sample, not a latency-improvement estimate. Two of the approved four
+  short production turns have been used across the earlier pre-cutover and
+  this post-cutover check; exact billed cost was unavailable.
+- **Compatibility / rollback:** No schema or student-data migration. v34's
+  artifact remains available. Rollback requires repointing DEFAULT to a
+  previously READY runtime and using another fresh session generation with an
+  app-container recreation. The host has a copy of the pre-v35 Compose file.
+  The current app image tag is `cde2300-chatbot:0e43fe6`, but its revision
+  label and `APP_GIT_SHA` both say `unknown`; the build-provenance gate remains
+  open even though its source markers and runtime digest were checked. Only
+  Problem Identification was exercised live after v35; the other four stage
+  prompt paths rely on the passing deterministic tests.
+- **Next exact action:** Rebuild the next app image with
+  `--build-arg GIT_SHA=<full commit SHA>` and verify the image label and
+  `APP_GIT_SHA` at deploy. Any further live turns must stay within the
+  remaining approved four-turn/US$0.10 cap or have a fresh cap. First model
+  text still precedes the validated preview by several seconds because raw
+  structured fragments are intentionally not shown.
+
+### Validated reply preview and first-text timing (2026-09-27)
+
+- **Expected / actual:** The coach reply now appears as one validated preview
+  after the coaching workflow finishes and before the database save completes.
+  The saved turn replaces the preview on success; a failed save clears it. This
+  shortens the visible wait by the persistence interval but does not stream
+  individual model tokens. Raw Strands structured-output fragments remain
+  hidden because schema, citation, and output-guardrail checks are incomplete
+  while those fragments arrive.
+- **Files:** `backend/coaching/progress.py`, `backend/coaching/execution.py`,
+  `backend/http/app.py`, `ui/services/runtime.py`, `ui/panels/chat.py`,
+  `agentcore_runtime/main.py`, `backend/agentcore_provider.py`, and
+  `backend/turn_perf.py`; focused domain, API, and UI tests.
+- **Timing:** Fast Chat now records privacy-safe `model_first_content_ms` and
+  `model_first_reply_text_ms` from real Strands callback events. The latter
+  waits for a character inside the structured `response_text` field, rather
+  than counting the opening JSON key or a failed prose recovery cycle. The
+  runtime returns these numbers with its final payload; the adapter copies
+  them into per-turn performance telemetry. The pinned Strands 1.52.0 fake
+  model produced both metrics without AWS or student content.
+- **Validation:** Focused progress/API/UI/telemetry tests passed. Full local
+  mock pytest passed after the implementation; an added failed-save preview
+  test passed separately. Ruff, compileall, and `git diff --check` passed.
+  The first GitHub Mock CI run stopped at repository-wide Ruff on eight
+  pre-existing unused-variable/import/string findings outside this feature;
+  those eight findings were removed without changing behavior and local
+  `ruff check .` now passes. The second CI run passed Ruff and configuration
+  but found one existing test coupled to `httpx.HTTPStatusError` while CI's
+  Starlette raised the equivalent `httpx2.HTTPStatusError` for the expected
+  404. That test now asserts the error name and 404 status across both client
+  versions; the next CI run remains the release gate.
+  The local browser opened the normal Guest chatbot layout. No production
+  image/runtime was published and no paid coach turn was made, so live latency
+  improvement is not yet measured. The approved limit for a future production
+  check is up to four short turns and US$0.10 total.
+- **Compatibility / rollback:** No database migration or persisted-format
+  change. Existing `started`/`status`/`done`/`error` NDJSON events remain;
+  `reply_ready` is additive. Older runtimes simply omit the new timing fields.
+  Reverting the preview callback restores the old wait behavior while leaving
+  saved turns intact. Production Compose is prepared with session generation
+  10 (up from live generation 9). A new AgentCore runtime version and app image
+  are needed to see both timing metrics and the preview in production.
+- **Next exact action:** Release the tested tree under the ordered production
+  checklist (commit/push, READY AgentCore publish, fresh session generation,
+  matching app image), then use the approved bounded smoke to compare first
+  content, first reply character, preview arrival, and final saved-turn time.
+  Real token-by-token text would require a separately reviewed stream-time
+  output-safety and schema policy; do not forward raw structured JSON.
+
+### Fast Chat prompt caching rollout (2026-09-27)
+
+- **Expected behavior:** Repeated Fast Chat requests in an eligible stage reuse
+  the static coach instruction prefix through a Bedrock system `cachePoint`.
+  The current conservative 4,096-token estimate qualifies Problem
+  Identification; shorter stage prefixes remain uncached. Student text,
+  runtime context, and retrieved evidence remain after the cache point.
+- **Actual so far:** The existing production AgentCore v33 package's
+  `prompt_cache.py`, `structured_coach.py`, and `main.py` match the local source
+  byte for byte. Published v34 using the same code artifact and all existing
+  runtime configuration, adding only `FAST_CHAT_PROMPT_CACHE_ENABLED=true`.
+  AWS automatically moved DEFAULT to v34 once it became READY. The EC2 host
+  Compose was then updated to cache true and session generation 9, with a
+  pre-cache copy saved, and only the app container was recreated. DEFAULT is
+  READY on v34; app health and internal readiness are 200, and public
+  CloudFront health is 200.
+- **Files:** `compose.prod.yaml` prepares cache true and session generation 9;
+  `tests/domain/test_prompt_cache.py` verifies the real Fast Chat prompt's
+  cache boundary and byte-identical text; `tests/test_deployment_config.py`
+  tracks production configuration; `docs/PRODUCTION_RELEASE_CHECKLIST.md`
+  records the runtime flag and telemetry gate.
+- **Validation:** Focused cache/deployment tests passed (29 tests). Full mock
+  pytest passed. `compileall` and `git diff --check` passed. The first host
+  readiness probe ran immediately after container recreation and got a
+  connection-refused startup response; the follow-up probe passed with a
+  healthy container. The user approved two short paid turns with a US$0.05
+  total cap. Two synthetic Problem Identification AgentCore turns succeeded
+  without creating a student notebook. Turn 1: one model cycle, cache enabled,
+  6,331 cache-write tokens, zero cache-read tokens, 20,827 ms invoke. Turn 2:
+  one cycle, 6,331 cache-read tokens, zero cache-write tokens, 18,924 ms
+  invoke. The first probe's reporting code exited after the successful model
+  turn because it requested a nonexistent response field; the corrected
+  second probe exited cleanly. Different messages and two samples do not
+  establish a stable latency improvement. Exact AWS billed cost was not
+  available in per-request telemetry; no further paid requests were made.
+- **Compatibility and rollback:** No database or student-data migration and
+  no model/pedagogy code change. Rollback requires pointing DEFAULT at READY
+  v33, assigning a fresh session generation, restoring the saved pre-cache
+  Compose flag, and recreating only the app container. Cache write cost and
+  miss behavior still need bounded live measurement.
+- **Next exact action:** Profile time to first model text and output-token
+  generation on real Fast Chat turns, then implement genuine text streaming
+  through AgentCore, FastAPI, and Streamlit if the structured-output contract
+  can be preserved. Measure perceived first-text latency and total duration
+  separately. For click latency, profile Streamlit rerun/API calls on New Chat
+  and saved-chat open; cache or eliminate only verified redundant reads.
+
+### Production guest rollout (2026-09-27)
+
+- **Expected / actual:** Open the CloudFront chatbot directly as Guest, keep
+  notebook history across reloads, allow source-grounded coaching, and retain
+  optional Cognito sign-in. The live browser now does all of these except the
+  final guest-to-account transfer, which needs a real account sign-in. The first
+  live attempt failed because production Caddy omitted the browser-facing
+  `/api/v1/auth/guest/start` allowlist route; adding that exact route resolved
+  the 404. The prior sign-in gate was caused by production Compose explicitly
+  setting `GUEST_ACCESS_ENABLED=false`, not by CloudFront caching.
+- **Files:** `compose.prod.yaml`, `Caddyfile`,
+  `tests/test_deployment_config.py`, `docs/GUEST_ACCESS_PHASE_HANDOFF.md`, and
+  this entry. The EC2 host copies of Compose and Caddy were updated to match
+  the reviewed local files; only the app container was recreated and Caddy was
+  validated/reloaded.
+- **Migration:** AWS Backup completed a full DSQL recovery point before the
+  additive `--guest-sessions-only` migration. The migration created
+  `guest_sessions`, awaited its two async indexes, and granted the runtime role
+  SELECT/INSERT/UPDATE/DELETE. Existing notebook/user data was not rewritten.
+  The post-migration dry run no longer proposes table/column creation; it
+  always lists the idempotent index/grant statements by design. The backup has
+  30-day retention and restores to a new cluster if needed.
+- **Validation:** The focused guest/auth/persistence/DSQL/deployment block and
+  full local mock suite passed after the final Caddy test assertion; compileall
+  and `git diff --check` passed. Caddy validated. The production app reported
+  healthy and internal readiness 200. CloudFront health returned 200 while
+  public notebook and readiness API paths remained 404. In a live Guest browser,
+  a coach turn completed, the notebook and both messages survived reload, and
+  a synthetic text upload produced a grounded reply with an `[S1]` citation.
+  The optional sign-in button reached Cognito Managed Login. Narrow-layout
+  navigation showed the Guest identity and sign-in button.
+- **Rollback / risks:** The EC2 host retains pre-guest copies of Compose and
+  Caddy. Restoring those files, recreating only the app, and reloading Caddy
+  disables new guest entry; retain the additive DSQL table and existing guest
+  rows. A real Cognito guest-to-account transfer and signed-in source-object
+  copy were not executed. The in-app browser emitted the previously observed
+  Streamlit iframe `MutationObserver` errors on reload without interrupting
+  the flow. The live test notebook and synthetic source remain in the browser's
+  guest workspace; no student data was deleted.
+- **Next exact action:** Have the user sign in from the live Guest workspace
+  with their account and verify its active notebook and source history append
+  after redirect/reload. If that fails, inspect the OAuth callback and guest
+  claim logs before changing data; the immediate safety switch is the saved
+  production Compose guest flag.
+
+### Guest sign-in opens the transferred active notebook (2026-09-27)
+
+- **Behavior:** Successful guest-to-account transfer now sets only the account's
+  `active_thread_id` to the guest notebook that was open before sign-in, if it
+  belongs to that transfer. Streamlit's existing owner switch then restores
+  that notebook. Other account notebooks and preferences remain intact; a
+  missing or stale guest selection leaves the prior account selection intact.
+- **Files:** `backend/student_store.py`, `tests/http/test_app_sessions.py`,
+  `docs/GUEST_ACCESS_PHASE_HANDOFF.md`, and this entry.
+- **Validation:** Targeted callback, stale-selection, and persistence/retry
+  tests passed. The full deterministic mock suite, compileall, and
+  `git diff --check` passed. No live Cognito sign-in was used for testing.
+- **Compatibility/rollback:** No schema or data migration and no live model
+  calls. Rolling back the preference update restores the previous account
+  selection behavior; notebook transfer and existing data remain untouched.
+- **Next exact action:** On the local guest-enabled app, open a saved guest
+  notebook, sign into an account that already has a different active notebook,
+  and verify the guest notebook opens after redirect and again after reload.
+- **Local follow-up:** The first manual attempt still used the API process that
+  predated this change, so transfer succeeded but the old account selection
+  reopened. The user's already-transferred `Try` notebook was selected in the
+  browser and remained active after reload. The local stack was restarted at
+  `127.0.0.1:8080` with guest access and the mock provider; the browser loaded
+  `Try` from the restarted app. A fresh guest-to-Cognito browser sign-in has not
+  been performed; the isolated callback regression covers that transition.
+
+### Unsaved New chat drafts (2026-09-27)
+
+- **Behavior:** Opening New chat shows the normal Coach welcome and composer
+  without creating an `Untitled notebook` or adding a Recent. The first
+  nonempty submitted message saves the notebook, seeds the welcome, and follows
+  the existing coach path. Library and Thinking Path explain that a message is
+  needed while the draft is unsaved. Existing notebooks and their history are
+  untouched.
+- **Files:** `ui/session.py`, `ui/panels/chat.py`, `ui/workspace.py`,
+  `ui/panels/nav.py`, `ui/notebooks.py`, `ui/topbar.py`, `ui/settings.py`,
+  `ui/profile.py`; related UI tests and `tests/saved_ui_workspace.py`.
+- **Validation:** Focused Streamlit tests and the full deterministic mock suite
+  passed; compileall and `git diff --check` passed. In the local browser,
+  desktop New chat kept the Recent count unchanged and showed the welcome;
+  390 px mobile showed the same draft with an enabled composer. The browser
+  still reports the previously documented iframe MutationObserver errors.
+- **Compatibility/rollback:** No schema or data migration, no deletion of old
+  empty notebooks, and no paid model call. Reverting these UI changes restores
+  eager creation without changing existing persisted data.
+- **Next exact action:** In the local guest and signed-in app, open New chat,
+  send one test message, then reload and confirm the new chat appears once in
+  Recents with its full transcript. The isolated AppTest covers that persistence
+  path without writing to the user's live database.
+
+### Baseline failure repair — Sol High implementation / Astra High review (2026-09-27)
+
+**Expected vs actual.** Repair the 11 known failures with small, evidence-based
+changes and execute the dependency-gated Strands tests. Two application bugs
+were fixed: course-catalog citations retain their validated labels from the full
+retrieval source list (including sparse `S5`/`S17`), and the unavailable-course
+evidence check reads `CoachRequest.source_context` so it can return the existing
+grounding-gap response without calling the model. Source ownership and label
+validation still precede citation resolution. The other failures were stale
+expectations for Reflection completion in place, Guide/Free readiness, mandatory
+prompt size, production stage selection, current UI copy/tab state, and effective
+responsive CSS. Tests now exercise those current contracts. No pedagogical
+policy was changed to satisfy a test.
+
+**Files changed.** `backend/coaching/execution.py`,
+`backend/coaching/mode_policy.py`, `tests/domain/test_citation_resolution.py`,
+`tests/domain/test_mode_classification.py`,
+`tests/domain/test_prompt_architecture.py`,
+`tests/domain/test_thinking_path_journey.py`, `tests/http/test_api.py`,
+`tests/test_deployment_config.py`, `tests/ui/test_deep_review_control.py`,
+`tests/ui/test_streamlit_ui.py`, `tests/ui/test_theme_styles.py`,
+`tests/domain/test_strands_first_cycle_middleware.py`,
+`scripts/diagnostics/check_agentcore_runtime_dependencies.py`,
+`backend/student_store.py`, `tests/persistence/test_coach_idempotency.py`,
+`docs/LOCAL_DEMO_IMPLEMENTATION.md`, and this entry. The architecture document
+now describes the existing production stage-selection settings, superseding its
+stale Month-1 auto-advance paragraph. Existing guest/reload work was preserved.
+
+**Validation.** Sol's focused domain/API block passed **311 tests**, its UI and
+deployment block passed **74**, and Astra independently passed **53** grounding,
+citation, source-security, and prompt tests with no blocking review findings.
+The full build after the application fixes passed compilation and recorded
+**2,214 passed, zero failures, one dependency-gated module skipped** in
+`/private/tmp/codesign-baseline-build.xml`. This includes streaming/graph,
+confirmed transitions, restart recovery, guest ownership, and persistence
+coverage. An isolated mock API/Streamlit/Caddy startup using temporary data
+returned API health `ok`, readiness `ready`, and Streamlit health `ok`; that
+temporary stack was stopped after verification.
+
+**Runtime follow-up.** The one skip represents 14 Strands middleware
+cases. The existing dedicated CI job installs `agentcore_runtime/requirements.txt`
+and executes them separately. A temporary environment at
+`/private/tmp/codesign-baseline-runtime-venv` uses those same pins, leaving the
+companion app and EC2 requirements unchanged. Executing the module exposed a
+schema fixture missing two required boolean fields; the compatibility diagnostic
+also matched an obsolete literal code format despite the correct runtime retry
+setting. Fixtures now include both required booleans and retain null-rejection
+checks. The diagnostic captures constructed Botocore configuration through a
+mocked BedrockModel and checks one total attempt plus the Deep Review timeout.
+All **35 runtime tests passed**, including all 14 previously skipped cases; the
+network-free dependency diagnostic passed. Sol and Astra independently verified
+these results and found no blocking issue. Production schema/retry behavior and
+dependency files are unchanged. The companion build retains its intentional
+module skip; the separate runtime suite has **zero skips**.
+
+**Compatibility and rollback.** No schema or data migration, production
+dependency change, deployment, or live model call. Previous notebook and guest
+data remain untouched. Phase-only before copies are under
+`/private/tmp/codesign-baseline-before`; rollback must preserve the earlier
+uncommitted work. The separate iframe MutationObserver issue and real EC2
+performance measurements remain outside this repair phase.
+
+**Final rerun follow-up.** After runtime validation edits, a second
+full build exposed an intermittent concurrent same-key replay failure in
+`test_api_same_key_waiters_converge_under_active_limit`: the replayed assessment
+lost fields although both requests returned 200. Investigation found that the
+lookup path ignored an exact turn already persisted on a still-pending marker
+and replaced it with a slim reconstruction. The lookup now returns that exact
+persisted turn while leaving status promotion to the existing claim/complete
+path, so it adds no DSQL write contention. A deterministic regression exercises
+the persist-before-complete window and checks full response equality plus one
+provider invocation. Sol and Astra independently passed the idempotency and
+rate-limit block (**42 tests**) and approved the read-only fix.
+
+The final full build passed compilation and recorded **2,215 passed, zero
+failures, one dependency-gated module skipped** (2,216 collected) in
+`/private/tmp/codesign-baseline-build-replay.xml`. The separate pinned runtime
+suite passed **35 tests with zero skips**, so every previously skipped Strands
+case was executed successfully. `git diff --check` passed.
+
+**Next exact action.** User acceptance of this repair phase. For future
+verification, run
+`sh scripts/build.sh` in the companion environment and the existing
+`agentcore-runtime-compatibility` CI job (or its diagnostic/test commands in an
+environment with `agentcore_runtime/requirements.txt`) for the separate runtime.
+
+### Reload performance — Sol High implementation / Astra High review (2026-09-26)
+
+**Expected vs actual.** Reduce unnecessary reload work while preserving
+authentication, notebook history, guest transfer, sources, streaming, and
+Thinking Path. A failed session probe (transport/5xx/malformed success) now
+stops at a Retry screen before any refresh redirect, guest fallback, or
+protected workspace read. A genuine 401 or absent ID cookie retains the
+existing refresh-hint flow; authentication decisions and tokens are not cached.
+Restoring the saved notebook checks it before listing alternatives and skips
+rewriting the same active-notebook preference. Titles of 40 characters or less
+skip the legacy message lookup. A successful legacy attachment scan runs once
+per notebook per Streamlit session; relevant local upload/source/revision
+mutations invalidate it, failed scans retry, and a new browser session scans
+again. Chat already precedes secondary panels and Library mounts Sources only
+when selected, so no additional panel deferral was added.
+
+**Measured work reduction.** The same signed-in notebook reload through the
+local API made **12 requests before and 10 after**: the preference PATCH and
+short-title history GET are gone. A fresh valid-cookie reload went directly
+to the notebook. The existing expired-cookie path still refreshed Cognito and
+returned to the chat. Deterministic in-process facade counts were **13 → 11**
+after Send and **7 → 6** for an explicit rerun; cold creation remained 13.
+These are request-count results, not an EC2 latency benchmark.
+
+**Files changed.** `backend/api_client.py`, `ui/auth_gate.py`,
+`streamlit_app.py`, `ui/session.py`, `ui/topbar.py`,
+`ui/services/runtime.py`, `tests/http/test_api_client.py`,
+`tests/ui/test_auth_gate.py`, `tests/ui/test_probe_facade_counts.py`,
+`tests/ui/test_streamlit_ui.py`, and this entry. Existing guest-access changes
+were preserved. Sol High implemented and tested; Astra High reviewed the
+phase-only delta against before-edit copies and reported no blocking issues.
+
+**Validation.** Sol's focused block passed **78 tests**. Root ran
+`sh scripts/build.sh` with a JUnit report: compilation passed; pytest recorded
+**2,202 passed, 1 skipped, 11 failed** (2,214 total). Build therefore exits 1,
+with the same 11 documented unrelated failures listed in earlier entries.
+Passing cases include selected-source retrieval/citations, source upload and
+content, streaming/graph inspection, rejected/stale transitions, restart
+recovery, and automatic guest append. `git diff --check` passed. The isolated
+mock API/Streamlit/Caddy stack used temporary SQLite/files at
+`/private/tmp/codesign-reload-smoke-data`. Browser checks confirmed automatic
+Guest entry, mock chat response, transcript retention after reload, desktop
+rendering, and Guest/sign-in controls at 390 px. The usual signed-in browser
+restored Kai Ming's prior notebook/messages after reload. The temporary test
+tab and stack were stopped; the usual app remains available at port 8080.
+
+**Remaining limits.** Browser console recorded MutationObserver target errors
+during iframe mount/reload; the source is unconfirmed and the tested flows
+worked. This phase did not change layout JavaScript or installed dependencies.
+Historical legacy attachment metadata inserted from another tab/external tool
+requires a reload to rescan; modern attachment handling is unchanged. Real
+EC2/DSQL/S3 performance is unmeasured, and genuine expired-session refresh still
+incurs Cognito latency. No paid model calls or production deployment occurred.
+
+**Compatibility and rollback.** No schema, dependency, infrastructure, or data
+migration. Rollback is limited to the changes above (before-edit copies are
+under `/private/tmp/codesign-reload-before`), preserving all earlier guest work.
+Production guest settings remain unchanged. No developer notebook content was
+used for mock chat writes.
+
+**Next exact action.** User acceptance of this local performance phase, then
+measure the same notebook reload on the existing EC2 deployment before any
+instance-size or architecture change. Enter at `ui/session.py`,
+`ui/auth_gate.py`, and the existing `http_request`/`UI TIMING` logs; investigate
+the separate iframe console error only with a source stack or reproduction.
+
+### Automatic browser guest append on sign-in (2026-09-26)
+
+**Expected vs actual.** A verified Cognito sign-in should append notebooks from
+the same browser's valid guest cookie to the signed-in account without a human
+preview or confirmation. The callback now uses the existing fenced, idempotent
+copy/verify/atomic ownership transfer for any verified Cognito account. Existing
+account notebooks remain intact. It clears the guest cookie only after commit;
+copy or commit errors leave the guest cookie and ownership available and allow
+sign-in to complete with a neutral warning. Missing, invalid, expired, or
+unrelated guest cookies do not move data. The settings UI no longer offers
+manual review/confirmation, and its guest copy describes automatic append.
+
+**Files changed for this phase.** `backend/guest_claims.py`,
+`backend/auth_routes.py`, `backend/http/app.py`, `ui/profile.py`,
+`streamlit_app.py`, `tests/http/test_app_sessions.py`,
+`tests/http/test_guest_access.py`, `tests/ui/test_auth_gate.py`, this status
+entry, and `docs/GUEST_ACCESS_PHASE_HANDOFF.md`. The prior Phase 1–7 working
+tree was preserved.
+
+**Validation.** The focused auth, guest, guest persistence, and lecturer block
+passed after the final callback change. Tests include append into an existing
+student and lecturer account, preserved messages, referenced raw/extracted
+source-object remapping, guest-cookie revocation after commit, absent/invalid
+guest cookie, OAuth state mismatch, and copy failure recovery. Compileall and
+`git diff --check` passed. The full deterministic mock suite before the final
+two test additions and lecturer guard removal had **2,184 passed, 11 failed**;
+all 11 failures match the documented unrelated Phase 1 baseline. The two new
+cases and changed callback passed in the focused rerun; the full suite was not
+rerun after those narrowly scoped changes. The local mock stack was restarted
+against the usual database, API and Caddy readiness passed, and the browser
+showed Kai Ming's existing chat and signed-in settings with no manual transfer
+control. No real Cognito callback, paid provider, or production service ran.
+
+**Compatibility, rollback, and risks.** This phase adds no schema migration and
+does not rewrite the usual live database during tests. The legacy preview and
+confirm API routes remain compatible. Production guest access remains off;
+turning it off also disables automatic append. Large object copies run during
+the OAuth callback and may delay its redirect. If the browser times out,
+guest work is either still guest-owned and retryable or already committed to
+the account; signing in again with the same browser cookie replays the
+idempotent claim where available. A guest workspace in the separate temporary
+trial database cannot be found or appended from the usual database by this
+flow. That data remains separate and needs a reviewed migration if requested.
+
+**Next exact action.** With a valid guest cookie and Cognito account in the
+same database, perform a user-observed real sign-in acceptance check on a
+backed-up local copy before considering production enablement. Enter at
+`backend/auth_routes.py` and `tests/http/test_app_sessions.py` if that check
+finds a callback issue. Keep `GUEST_ACCESS_ENABLED=false` in production until
+the environment-specific handoff in `docs/GUEST_ACCESS_PHASE_HANDOFF.md` is
+accepted.
+
+### Local runtime restored to usual history (2026-09-26)
+
+The guest trial had been launched against isolated temporary SQLite storage,
+so signing into the same Kai Ming Cognito account showed only its one notebook
+there. The usual `data/co_design.sqlite3` still contained eight Kai Ming
+notebooks and 125 messages. Both databases passed SQLite `quick_check`; online
+backups were saved under `data/backups/` with the
+`before-reset-20260925T175700Z` suffix. The temporary guest-trial directory
+was retained. The local mock stack was restarted against the usual database
+with guest access enabled. API and Caddy readiness passed, and the browser
+showed all eight notebooks and loaded messages from an older conversation.
+No account data was merged or deleted. The guest-trial work remains separate;
+the production feature flag remains off. Next action, if desired: review an
+explicit transfer of guest-trial notebooks into the usual database, with a
+backup and rollback plan before writing either data set.
+
+### Hybrid guest access — post-Phase-7 local validation (2026-09-26)
+
+**Expected vs actual.** The guest chatbot should open without a welcome gate;
+Guest and a sign-in button should appear in the sidebar; chat history should
+survive reload and API restart. These paths worked in an isolated Playwright
+browser against the running mock stack at `http://127.0.0.1:8080/`: a first
+visit opened chat, a sent message received a mock coach reply, the
+conversation survived reload, and New chat plus recent-chat selection recovered
+it. The sign-in button reached Cognito Managed Login. At 390 px the menu showed
+Guest and the sign-in button. Fresh browser checks showed zero console errors;
+18 Chromium/Streamlit feature and iframe warnings remained. Real Cognito sign-in
+and the signed-in given-name switch were covered by AppTest, not a live login.
+
+An isolated mock API on port 8765 used a new SQLite database under
+`/private/tmp`. It created a guest and notebook, stopped and restarted the API,
+then confirmed the same cookie resolved the same owner and notebook, reused
+the guest, and renewed the HttpOnly cookie. The running local Caddy returned
+200 for health, 401 for guest renewal without a cookie, and 404 for the
+browser-blocked general notebook API path. Both Caddyfiles validated.
+
+**Validation.** Independent Sol High review ran the full deterministic suite:
+**2,183 passed, 12 failed** out of 2,195 collected. Eleven failures match the
+remaining Phase 1 baseline listed below; the former research-persistence
+failure and corrected coaching-style assertion now pass. The only additional
+failure was `tests/http/test_rate_limit.py::test_api_same_key_waiters_converge_under_active_limit`,
+whose two successful responses differed under full-suite concurrency; it passed
+alone. The focused guest/auth/claim/professor/persistence/deployment block passed
+**231/231** with the known unrelated Compose assertion deselected. Compileall,
+`sh -n scripts/start.sh`, `git diff --check`, and both Caddy validations passed.
+Production guest access remains false in `.env.example` and `compose.prod.yaml`.
+
+**Impact and next action.** No live database, AWS service, or paid provider was
+used; the existing local app remains running and the restart check used only
+temporary data. Local mock guest acceptance now includes browser and process
+restart evidence. Real Cognito login/claim, DSQL/S3 permissions, and production
+deployment remain unverified. Before enabling guests in production, enter at
+`docs/GUEST_ACCESS_PHASE_HANDOFF.md` and complete those environment-specific
+checks; retain the handoff file until the user accepts the phases.
+
+### Hybrid guest access — Phase 7 integration and release handoff (2026-09-26)
+
+**Expected.** Close the mock guest acceptance gaps, verify the additive SQLite
+upgrade from a pre-Phase-5 `guest_sessions` table with an online backup and
+restore, exercise flag-off/on retention, and record local startup and rollback
+evidence. Keep production guests disabled and stop before deployment or live
+infrastructure.
+
+**Actual.** Added focused regressions for Guest A denial when fetching Guest B's
+notebook, source, and a real message attachment; a copy failure and an
+ownership-commit failure each leave the guest credential, owner, and source
+references usable and permit retry; a post-commit old-prefix cleanup failure
+keeps account access and is retried by same-account recovery; explicit guest
+start after cookie loss creates a distinct owner; and a pre-Phase-5 guest
+session database survives SQLite online backup, additive claim-column startup
+migration, restore to a second path, and a second migration. The flag on → off
+→ on case confirms disabled guest routes return 404 without guest-owner lookup,
+then the unexpired original workspace resolves again after re-enable. Existing
+claim tests continue to cover account ownership and guest revocation.
+
+**Files changed for Phase 7.** `tests/http/test_guest_access.py`,
+`tests/persistence/test_guest_sessions.py`,
+`tests/ui/test_streamlit_ui.py` (one brittle source assertion narrowed to the
+two functions it covers), this status section, and the Phase 7 section in
+`docs/GUEST_ACCESS_PHASE_HANDOFF.md`. All Phase 1–6 and other working-tree
+changes were preserved.
+
+**Validation.** The requested pre-addition acceptance block passed with exit 0:
+
+```sh
+.venv/bin/python -m pytest -q tests/http/test_guest_access.py tests/persistence/test_guest_sessions.py tests/http/test_professor_analytics.py tests/http/test_professor_research.py tests/persistence/test_research_persistence.py tests/http/test_app_sessions.py tests/ui/test_auth_gate.py tests/ui/test_runtime_cache_safety.py tests/persistence/test_storage_providers.py tests/scripts/test_init_dsql.py tests/scripts/test_guest_local_proxy.py tests/test_architecture_contracts.py tests/test_deployment_config.py -k 'not test_production_compose_is_stateless_and_uses_prebuilt_image'
+```
+
+The post-addition guest route/persistence rerun passed **28 tests**. Eleven
+selected compatibility tests passed for source retrieval/citations, streaming,
+health/readiness, graph inspection, confirmation mode, and stage behavior; the
+exact command is in the Phase 7 handoff below. Sol reran the final guest
+acceptance block after Luna's additions and it passed. Sol then ran the full
+mock suite once: 12 tests failed, consisting of 11 Phase 1 baseline failures
+and one source-text assertion that swept unrelated guest-claim profile UI into
+the coaching-style check. The baseline research-persistence failure now passes.
+The new test issue was corrected by limiting the assertion to
+`_select_coaching_style` and `_persist_coaching_style`; its isolated rerun passed
+1 test. The full suite was not rerun after this test-only correction. Sol's
+compileall, `sh -n scripts/start.sh`, and `git diff --check` passed; a final
+`git diff --check` also passed. No paid provider, live DSQL/AWS/Cognito/S3, or
+deployment was used.
+
+The mock FastAPI and Streamlit processes started with SQLite, files, workspaces,
+and lecture notes redirected under `/private/tmp/phase7-guest-smoke`; FastAPI
+`/api/v1/health` and `/api/v1/ready` both returned 200, with readiness reporting
+development/mock/SQLite/local. The UI process reported its loopback URL and was
+stopped. The loopback guest create/restart persistence check was interrupted
+before producing a result, so restart through a running server remains
+unverified. Initial sandbox binds failed with `PermissionError: [Errno 1]
+operation not permitted`; escalation allowed the health/readiness startup.
+`command -v caddy` returned no path, so the local Caddy browser flow and
+desktop/390 px guest browser checks were not performed. The flag remains
+`false` in `.env.example` and `compose.prod.yaml`.
+
+**Migration, compatibility, and rollback.** The migration test used only
+temporary databases: it backed up a legacy five-column guest table online,
+verified current `StudentStore` added claim columns without changing the valid
+guest session, user, notebook, or message, restored the pre-migration backup to
+a second temporary path, and verified startup upgraded and resolved the same
+unexpired workspace there. No developer database or DSQL schema was changed.
+Flag-off keeps guest rows and workspaces; re-enabling resolves the same valid
+cookie. Rollback is to keep `GUEST_ACCESS_ENABLED=false` or revert Phase 7 test
+and documentation changes. Retain additive guest columns and rows; do not drop
+them. Production flag remains false.
+
+**Known risks/blockers.** Loopback restart persistence, Caddy route behavior,
+real Cognito, DSQL/S3 permissions, and desktop/mobile guest browser behavior
+remain unverified. Sol's single full-suite run found 11 Phase 1 baseline
+failures plus one brittle UI source assertion; the latter was narrowed and its
+focused test passed, but the full suite was not rerun after that test-only fix.
+
+**Next exact action.** Review the Phase 7 evidence and accept the documented
+gaps or arrange Caddy plus a completed loopback restart check. Keep the
+production flag off and the guest handoff file until all phases are accepted.
+
+### Hybrid guest access — Phase 6 lecturer identity projection (2026-09-25)
+
+**Expected behavior.** Lecturer roster, overview/attention, student detail,
+transcript/workspace tabs, and Research queue/detail/CSV use a stable public
+guest pseudonym and never expose internal guest owner IDs, `guest:` identifiers,
+guest credentials/digests, or hidden claims. Signed-in names/emails and existing
+analytics remain unchanged. Claimed notebooks/evidence appear once under the
+Cognito owner. Research observations, reviews, adjudications, and historical
+audit IDs stay unchanged; new identifiable reads audit the real internal owner.
+Lecturer routes remain staff-authenticated, and no migration or
+`guest_sessions` runtime dependency is introduced.
+
+**Actual behavior.** Added a provider-neutral identity projection using
+domain-separated SHA-256 over the persisted random guest owner ID. Public IDs
+use a 20-hex digest, and names use the last 10 hex characters. Guest status is
+derived from the persisted `guest:` identifier plus the absence of a Cognito
+sub; guest email is null. Signed-in fields pass through unchanged. Class
+populations omit only guest users with no currently owned notebooks, removing
+the source guest row after claim while preserving guests who still own a
+notebook. A single repository resolver maps public IDs to current internal
+owners before existing detail/ownership checks and audit targets; raw guest
+IDs are rejected as public aliases. It uses only `users` and `notebooks`, with
+no global cache or schema change. Typed research observations carry an
+internal, serialization-excluded guest classification; queue, detail, and CSV
+project the same pseudonym and remove internal owner fields. Nested review and
+adjudication actor IDs are pseudonymized when they belong to a persisted guest;
+signed-in actor IDs remain unchanged. After claim, research joins the
+notebook's current Cognito owner. Historical review, adjudication, and
+access-audit rows are not rewritten.
+
+**Files changed for Phase 6.** `backend/professor_analytics/guest_identity.py`,
+`backend/professor_analytics/repository.py`,
+`backend/professor_analytics/service.py`,
+`backend/professor_analytics/research.py`, `backend/research/models.py`,
+`backend/http/app.py`, `backend/student_store.py`,
+`tests/http/test_professor_analytics.py`, and
+`tests/http/test_guest_access.py`. Phase 1–5 work, `docs/CODEBASE_STRUCTURE.md`,
+and `docs/learning/` were preserved.
+
+**Validation.** `.venv/bin/python -m pytest -q tests/http/test_guest_access.py
+tests/http/test_professor_analytics.py tests/http/test_professor_research.py
+tests/persistence/test_research_persistence.py` → **61 passed**. Coverage
+includes two distinct guests; stable identity after store recreation; raw
+owner/identifier, bearer, and digest absence in lecturer outputs; signed-in
+name/email; detail, transcript, journey, source drill-down and cross-guest
+denial; raw-ID alias rejection; guest credential denial with the feature flag
+off; research queue/detail/CSV; staff authentication; and a real Phase 5 claim
+commit. The claim regression verifies roster/overview contain one Cognito
+account, Research follows the current owner, nested guest actor IDs are
+pseudonymized, and evidence remains visible. Persisted observation, review,
+adjudication, and historical audit rows remain byte-for-byte unchanged. The
+research-detail audit targets the real internal owner. Existing professor and
+research auth/audit failure tests also pass. Full suite was not run per the
+phase instruction and because the recorded suite has unrelated baseline
+failures. Sol High's independent review found the nested historical actor-ID
+leak; the projection fix passed re-review with no remaining blocker. Sol's
+four-suite rerun passed 61 tests, and the strengthened claim regression passed
+again independently. Backend compileall and `git diff --check` passed. No
+DSQL/AWS access, paid call, or deployment was used.
+
+**Migration, compatibility, and rollback.** No schema, migration, persisted
+data, or UI layout changes. The query is independent of `guest_sessions`, so
+flag-off production and clusters without that table remain compatible. Rollback
+is a code revert; existing guest rows, claimed notebook ownership, and research
+records remain intact.
+
+**Known risks/blockers.** The full integration/release matrix remains
+outstanding. This phase did not run live DSQL, real Cognito, S3, restart, or
+desktop/mobile browser checks. Pseudonyms are stable but intentionally
+pseudonymous rather than anonymous; the internal owner remains in storage and
+is available only to the authenticated server-side resolver/audit path.
+
+**Next exact action.** Phase 7 starts from
+[`GUEST_ACCESS_PHASE_HANDOFF.md`](GUEST_ACCESS_PHASE_HANDOFF.md): run the
+remaining end-to-end compatibility/security and restart acceptance matrix,
+record actual results and rollback handoff, and keep the production guest flag
+off. Start with the mocked claim/renewal and lecturer acceptance tests, then
+plan live infrastructure checks only under their existing approvals.
+
+### Hybrid guest access — Phase 5 explicit account claim (2026-09-25)
+
+**Expected behavior.** Keep account claim explicit and default-off. A signed-in
+Cognito student with the valid guest cookie must first see an account-bound,
+time-limited preview of notebook titles and uploaded file names/counts, then
+confirm. Bind confirmation to a server-issued operation ID and inventory
+fingerprint; reject stale previews before fencing. Copy and byte-verify
+owner-prefixed raw/derived private objects before atomically moving notebook
+ownership and source references. Preserve IDs, transcript/revisions/citations,
+learning state, stable local upload paths, and the existing Cognito profile,
+role, and preferences. Fence new guest requests during the copy, keep guest
+access usable on failure, revoke only at the ownership commit, and support
+same-account retries and restart recovery. Keep production guest access off;
+do not call live DSQL/AWS.
+
+**Actual behavior.** Added preview/confirm routes guarded by the default-off
+feature flag, strict configured-origin/request-host checks, verified Cognito
+identity, and the original guest cookie. Same-origin validation requires the
+Origin to equal the configured public origin; the request Host may match that
+public origin or the exact configured internal API host used by Streamlit's
+server-side `LocalApiClient`. The preview operation is stored with
+its Cognito owner, ten-minute expiry, and SHA-256 inventory fingerprint. A
+changed or expired preview is rejected before claim fencing; the UI asks the
+student to refresh it. Confirmation sets a persisted guest-session fence so
+new guest owner resolution fails while storage copies run. Storage objects
+under the guest notebook prefixes are copied to account prefixes and read back
+byte-for-byte; existing destination bytes must match and are never overwritten.
+The commit rechecks notebook/source inventory, updates source object/extracted
+keys and notebook owners in one database transaction, and sets the revoked
+credential plus same-owner retry tombstone in that transaction. Local legacy
+paths at `files_dir/threads/<notebook>/uploads` and `metadata.local_path` are
+preserved because they are stable by notebook ID rather than guest owner.
+Old object prefixes are deleted after commit; an idempotent same-account
+recovery retries cleanup. A restarted same-account session can resume an
+in-progress fenced operation, or retrieve the completed tombstone after a lost
+response. The profile shows account and guest inventory in plain text and
+requires a separate Confirm transfer button. Cancel calls an account-, guest-,
+and operation-bound endpoint to release an interrupted pending fence. An
+ambiguous confirm error asks the student to retry or review status and does not
+claim that guest data is still available. Login alone does not transfer.
+
+**Files changed for Phase 5.** `backend/http/app.py`, `backend/api_client.py`,
+`backend/guest_claims.py`, `backend/student_store.py`,
+`backend/persistence/store/sqlite_schema.py`,
+`backend/persistence/store/migrations.py`,
+`backend/persistence/dsql_schema.py`,
+`backend/persistence/dsql_student_store.py`, `scripts/dsql/cli.py`,
+`Caddyfile`, `Caddyfile.local`, `ui/profile.py`,
+`tests/http/test_guest_access.py`, `tests/persistence/test_guest_sessions.py`,
+`tests/scripts/test_init_dsql.py`, `tests/scripts/test_guest_local_proxy.py`,
+`tests/test_architecture_contracts.py`, `tests/test_deployment_config.py`,
+and `tests/ui/test_auth_gate.py`. Pre-existing Phase 1–4 edits,
+`docs/CODEBASE_STRUCTURE.md`, and untracked `docs/learning/` were preserved.
+
+**Validation.** The focused deterministic command covering guest API and
+persistence, DSQL admin migration planning, auth/profile state, cookie cache
+safety, storage providers, local Caddy routes, architecture contracts, and
+deployment route contracts passed (known production Compose
+baseline test was excluded). It exercises preview-without-transfer, explicit
+confirmation, stale-preview rejection, local-path preservation, verified raw
+and extracted-object copying, ownership/key changes, profile/preferences
+preservation, guest fence/revocation, same-account operation replay and
+recovery after store recreation, and refusal by a different account. The
+correction pass also verifies distinct public/internal hosts, owner-bound
+cancellation after store restart, fresh DSQL schema fields, and neutral UI
+error copy.
+Compileall over `backend ui streamlit_app.py tests scripts`, `sh -n
+scripts/start.sh`, and `git diff --check` passed. Sol independently reran the
+focused command and confirmed 157 tests passed. No full suite, live DSQL/AWS,
+or paid model call was run. A prior broad target attempt surfaced one known
+unrelated baseline failure in `test_production_compose_is_stateless_and_uses_prebuilt_image`;
+it was excluded from the final targeted pass and not changed.
+
+**Migration, compatibility, and rollback.** SQLite startup adds the eight
+nullable preview/tombstone columns to `guest_sessions` without rewriting
+existing rows. Fresh DSQL schema includes them. Existing DSQL clusters need the
+additive admin migration before any guest claim route is enabled; the existing
+`--guest-sessions-only --dry-run` / `--guest-sessions-only` flow now plans the
+missing columns as well as indexes/grants. No live DSQL migration was run.
+Before a future SQLite rollout, use an online backup. Rollback is keeping
+`GUEST_ACCESS_ENABLED=false` or reverting application code while retaining the
+additive columns and rows. A claim that already committed is a data ownership
+change and is not reversed by app rollback; transferred notebooks remain
+account-owned and guest credentials remain revoked.
+
+**Known risks/blockers.** Real S3 copy permissions and Caddy routing were not
+exercised against deployment infrastructure. Partial copies can leave
+unreferenced account-prefix objects after failure; retry reuses them only if
+bytes match. Failed old-prefix deletion leaves inaccessible guest-prefix
+orphans; the same-account claim recovery route retries cleanup while the
+tombstone is retained until the session expiry captured at claim. Existing
+guest claims require the explicit DSQL additive migration before DSQL runtime
+use. Expired account-bound tombstone fields remain physically stored after
+replay expiry, although replay is denied; cleanup is deferred. The production
+flag remains off. If Cancel races with a committed confirmation, it may return
+`released: false`; reopening the preview recovers the completed result.
+
+**Next exact action.** Completed by the Phase 6 lecturer identity projection
+recorded above. Production guest access stays disabled.
+
+### Hybrid guest access — Phase 4 guest workspace UI (2026-09-25)
+
+**Expected behavior.** Add explicit browser-driven guest start/reuse and safe
+probe endpoints, both default-off and protected by origin/host validation;
+keep Cognito authoritative. Show Continue as guest beside optional Cognito
+sign-in, verify a guest in FastAPI before workspace initialization, and forward
+the current HttpOnly guest cookie through the per-request Streamlit API client
+without persisting response cookies in the shared jar. Renew by browser fetch
+after a successful workspace render, clear identity-dependent state on owner
+switch, and preserve the lecturer gate. Add an exact-route optional local
+same-origin Caddy proxy while preserving regular local startup if Caddy is
+missing. Keep production disabled and account claim out of scope.
+
+**Actual behavior.** Added explicit `POST /api/v1/auth/guest/start` to create
+or reuse a persisted guest and set the 400-day secret only as an HttpOnly
+cookie, plus `POST /api/v1/auth/guest/probe` to return only the safe opaque
+guest owner identifier. Both are 404 when disabled; same-origin/host checks
+guard start, probe, and existing renewal. A valid Cognito session blocks guest
+start; invalid Cognito credentials do not fall through. The signed-out gate
+offers a browser-driven Continue as guest action; its same-origin fetch never
+relays the cookie into Streamlit. Streamlit probes before workspace setup and
+uses the owner-scoped identifier. Its per-request cookie provider forwards
+both Cognito ID and guest cookies while the shared httpx jar remains
+nonpersistent. After workspace render, the browser posts to the relative
+renewal route with `credentials: 'same-origin'`; no timer is used. Guest logout
+uses same-origin POST only when guest is the active identity and Cognito
+cookies are absent. Cognito logout uses the existing redirect/GET path; the API
+also preserves guest credentials on a same-origin POST whenever Cognito ID or
+refresh cookies are present. Guest profile offers “Sign in to account” without
+modifying its guest cookie, so a student can return to the unclaimed guest
+workspace after Cognito sign-out. An expired Cognito ID session with a refresh
+hint enters the browser refresh bridge before guest probing. Short cookie-loss
+and Phase 5 account-linking notices appear at guest entry and in the guest
+profile. Identity changes clear session state before binding the new owner.
+The local launcher uses
+`Caddyfile.local` only when guest access is enabled and Caddy is installed;
+otherwise it preserves ports 8000/8501 and disables guest access for that run
+with a clear notice. Production config remains false.
+
+**Files changed for Phase 4.** `backend/http/app.py`, `backend/auth_routes.py`,
+`backend/api_client.py`, `ui/auth_gate.py`, `ui/profile.py`,
+`ui/services/runtime.py`, `streamlit_app.py`, `Caddyfile.local`,
+`scripts/start.sh`, `tests/http/test_guest_access.py`,
+`tests/ui/test_auth_gate.py`, `tests/ui/test_runtime_cache_safety.py`, and
+`tests/scripts/test_guest_local_proxy.py`. Updated this entry and the Phase 4
+handoff below. Existing Phase 1–3 changes, `docs/CODEBASE_STRUCTURE.md`, and
+`docs/learning/` were preserved.
+
+**Validation.** Sol independently ran
+`.venv/bin/python -m pytest -q tests/http/test_guest_access.py tests/http/test_app_sessions.py tests/ui/test_auth_gate.py tests/ui/test_runtime_cache_safety.py tests/scripts/test_guest_local_proxy.py`;
+all 87 tests passed. Regressions cover combined Cognito/guest cookies, Cognito
+refresh priority, guest-to-Cognito entry, cookie preservation, and the short
+retention copy. Shell syntax (`sh -n scripts/start.sh`), compileall over
+`backend ui streamlit_app.py tests scripts`, and `git diff --check` passed.
+The known Phase 1 baseline of 12 full-suite failures is unchanged and was not
+re-run for Phase 4. An independent headed Playwright check inspected the guest
+entry at 1280 px and 390 px with no app console errors; only standard Streamlit
+warnings appeared. Caddy is not installed here, so local proxy behavior remains
+unverified. No live DSQL/AWS or paid calls were made.
+
+**Compatibility, migration, and rollback.** No schema, workspace, or ownership
+data migration was made. `GUEST_ACCESS_ENABLED` remains false by default and
+in production. Setting it false hides the entry and makes the guest routes
+404; existing additive guest rows remain intact. When local Caddy is missing,
+the launcher explicitly disables guest mode only for that run and starts the
+existing direct local UI/API ports. Rollback is setting the flag false or
+reverting Phase 4 UI/API/proxy/launcher changes; retain Phase 2 guest rows.
+
+**Known risks/blockers.** The real port 8080 Caddy route, browser cookie
+issuance, and end-to-end same-origin login/logout flow need a check once Caddy is
+available. The signed-out guest entry received a desktop/390 px browser check.
+Any DSQL guest use still requires the Phase 2 admin migration. Guest claim
+transfer remains out of scope.
+
+**Next exact action.** Phase 5 starts at `backend/student_store.py` and
+`backend/http/app.py`: design and implement an explicit guest-to-Cognito claim
+preview and confirmation contract, including transaction-safe notebook/file
+ownership transfer and retry/rollback semantics. Keep production access off.
+
+### Hybrid guest access — Phase 3 API ownership (2026-09-25)
+
+**Expected behavior.** Add a default-off guest-access flag, resolve each valid
+guest cookie to its isolated persisted owner on every API request, keep verified
+Cognito `sub` authoritative, and fail closed on invalid Cognito or guest
+credentials, including missing guest credentials after guest mode is enabled.
+Add a same-origin browser renewal POST that validates the guest cookie, slides
+server expiry, and returns a 400-day HttpOnly cookie. Guest logout revokes and
+expires the credential only through a same-origin POST. Allow only
+that exact renewal route through Caddy before the general API deny rule. Keep
+professor endpoints Cognito-only and production access disabled. No guest UI,
+creation route, account claim, lecturer pseudonym, live DSQL work, or deploy.
+
+**Actual behavior.** Added `GUEST_ACCESS_ENABLED=false` and
+`GUEST_SESSION_COOKIE_NAME=co_design_guest`; FastAPI now resolves the guest
+cookie only when the flag is enabled. Missing, invalid, expired, or revoked
+guest credentials get 401 when guest mode is enabled. A present Cognito token
+is always verified first, and verification failure
+gets 401 even if a valid guest cookie is also present. Guest owner services are
+cached under the opaque persisted guest identifier, with data access scoped to
+the persisted owner UUID. The renewal route checks the configured same origin,
+validates and renews the credential, and sets the original secret only in an
+HttpOnly, SameSite=Lax cookie with `Max-Age=34560000`; Secure is set in
+production and on non-loopback hosts. Professor handlers still require a
+Cognito cookie and persisted protected role. Guest logout revokes and expires
+the cookie only for a same-origin POST. GET and cross-origin POST preserve the
+guest cookie, so a cross-site top-level navigation cannot discard the guest's
+only recovery credential. When the flag is off, same-origin POST expires the
+browser cookie without querying guest storage. Caddy has an exact allowlist
+entry before `/api/*`, and both production Compose and `.env.example`
+explicitly keep guest access off. No guest creation or claim route was added.
+
+**Files changed for Phase 3.** `backend/settings.py`,
+`backend/owner_context.py`, `backend/http/app.py`, `backend/auth_routes.py`, `Caddyfile`,
+`compose.prod.yaml`, `.env.example`, `tests/http/test_guest_access.py`,
+`tests/test_deployment_config.py`, and `tests/test_architecture_contracts.py`.
+Updated this status entry and the Phase 3 handoff section in
+`docs/GUEST_ACCESS_PHASE_HANDOFF.md`. Pre-existing Phase 2 persistence edits,
+`docs/CODEBASE_STRUCTURE.md`, and untracked `docs/learning/` were preserved.
+
+**Validation.** Sol High independently ran the focused guest/auth/Caddy/route
+contract suite and passed 56 tests (excluding the known production Compose
+baseline failure). After fixing Sol's guest-logout finding, the final focused
+`tests/http/test_guest_access.py tests/http/test_app_sessions.py` run passed 24
+tests; the phase suite was then checked again with the full suite below.
+Compileall and `git diff --check` passed. The final
+`.venv/bin/python -m pytest -q --tb=line` run completed with exactly the same
+12 baseline failures recorded in Phase 1 and no Phase 3 failures. Their node
+IDs are:
+
+- `tests/domain/test_citation_resolution.py::test_citation_resolution_is_bounded_and_keeps_selected_list_labels`
+- `tests/domain/test_mode_classification.py::test_reflection_completion_request_skips_retrieval_and_suppresses_advance`
+- `tests/domain/test_prompt_architecture.py::test_composer_trims_dynamic_context_before_mandatory_sections`
+- `tests/domain/test_retrieval.py::test_application_virtual_course_gap_is_not_placeholder_evidence`
+- `tests/domain/test_thinking_path_journey.py::test_complete_thinking_path_two_turns_per_stage`
+- `tests/http/test_api.py::test_strict_guidance_is_stricter_before_recommending_advance`
+- `tests/persistence/test_research_persistence.py::test_atomic_observation_is_attributed_offset_only_and_revision_aware`
+- `tests/test_deployment_config.py::test_production_compose_is_stateless_and_uses_prebuilt_image`
+- `tests/ui/test_deep_review_control.py::test_locked_view_before_reflection_complete`
+- `tests/ui/test_streamlit_ui.py::test_streamlit_notebook_workspace_smoke`
+- `tests/ui/test_streamlit_ui.py::test_learning_studio_and_notebook_history_controls`
+- `tests/ui/test_theme_styles.py::test_assembled_stylesheet_wraps_all_component_markers`
+
+The two Streamlit failures report that a source assertion finds `truncate` in
+a docstring/comment, and that rendered output no longer contains `Stage
+Progression`, respectively. No cause is recorded for the other failures. Sol
+identified that a cross-site GET could revoke a guest credential; guest logout
+now requires same-origin POST, with regression coverage for cross-site GET,
+cross-origin POST, and valid same-origin POST. No live DSQL/AWS or paid model
+calls were made.
+
+**Compatibility, migration, and rollback.** The feature flag is false by
+default and explicitly false in production Compose. With the flag off, owner
+resolution does not query `guest_sessions`, preserving compatibility with
+existing DSQL clusters before the Phase 2 admin migration. Existing additive
+guest rows remain dormant. No schema or data migration was run. Rollback is to
+set `GUEST_ACCESS_ENABLED=false` (already the production value) or revert the
+Phase 3 application/config/Caddy changes; retain the additive guest table and
+rows.
+
+**Known risks/blockers.** No live DSQL migration or production request was
+performed. Enabling guest resolution against DSQL requires the approved
+Phase 2 admin migration first. With guest mode disabled, same-origin POST
+logout expires the cookie but skips table access; the server credential remains
+stored and dormant. The renewal route is ready, but no browser UI calls it yet;
+this phase does not create guest credentials. The local launcher uses separate
+Streamlit (8501) and FastAPI (8000) origins, so Phase 4 must add a single-origin
+browser route/proxy for renewal. Full-suite baseline failures remain as listed.
+
+**Next exact action.** Phase 4 begins at `ui/auth_gate.py` and the auth cookie
+bridge: add the signed-out guest entry and guest state handling, then call
+`POST /api/v1/auth/guest/renew` from the browser with same-origin credentials
+after successful guest activity. Keep account claim and production enablement
+out of scope.
+
+### Hybrid guest access — Phase 2 persistence (2026-09-24)
+
+**Behavior.** Added persistent guest credential lifecycle for future phases.
+The server generates a 256-bit URL-safe secret and an opaque `guest:<uuid>`
+owner identifier, stores only the SHA-256 token digest, and returns the raw
+secret only at creation. SQLite and DSQL stores support create, validate,
+renew, and revoke; validation rejects invalid, expired, and revoked secrets,
+and renewal slides active expiry by 400 days. Each guest receives a distinct
+student user row, leaving existing Cognito/local owners and notebooks intact.
+This phase adds no auth/API/UI route, guest feature flag, claim transfer, or
+production access.
+
+**Files.** Added `backend/persistence/guest_sessions.py` and
+`tests/persistence/test_guest_sessions.py`. Updated
+`backend/student_store.py`, `backend/persistence/store/sqlite_schema.py`,
+`backend/persistence/dsql_schema.py`,
+`backend/persistence/dsql_student_store.py`, `scripts/dsql/cli.py`,
+`tests/persistence/test_storage_providers.py`,
+`tests/scripts/test_init_dsql.py`, and
+`tests/test_architecture_contracts.py`. Updated this status entry and the
+Phase 2 section of `docs/GUEST_ACCESS_PHASE_HANDOFF.md`. Pre-existing changes
+to `docs/CODEBASE_STRUCTURE.md` and untracked `docs/learning/` were preserved.
+
+**Validation.** Luna's combined focused guest-session, storage-provider,
+DSQL-admin, and persistence-contract command passed: 56 tests. Sol independently
+ran a broader focused command and passed 64 tests: 6 guest-session, 31 storage
+provider, 18 DSQL-init, and 9 architecture-contract tests. Both runs cover two
+isolated guests, digest-only storage,
+invalid/expired/revoked credentials, 400-day monotonic renewal including
+out-of-order requests, persistence after store restart, pre-Phase-2 SQLite
+user/notebook preservation, and DSQL lifecycle through an isolated
+SQLite-backed DSQL adapter. Fake-admin tests verify catalog inspection,
+no-write dry run, table/index/grant apply ordering with async waits, safe rerun,
+and CLI dispatch without AWS calls. Compileall and `git diff --check` passed.
+The earlier phase-boundary `.venv/bin/python -m pytest -q` run completed
+with the same 12 failures as the Phase 1 Luna baseline:
+`test_citation_resolution_is_bounded_and_keeps_selected_list_labels`,
+`test_reflection_completion_request_skips_retrieval_and_suppresses_advance`,
+`test_composer_trims_dynamic_context_before_mandatory_sections`,
+`test_application_virtual_course_gap_is_not_placeholder_evidence`,
+`test_complete_thinking_path_two_turns_per_stage`,
+`test_strict_guidance_is_stricter_before_recommending_advance`,
+`test_atomic_observation_is_attributed_offset_only_and_revision_aware`,
+`test_production_compose_is_stateless_and_uses_prebuilt_image`,
+`test_locked_view_before_reflection_complete`, both existing tests in
+`tests/ui/test_streamlit_ui.py`, and
+`test_assembled_stylesheet_wraps_all_component_markers`. The initial run had
+one additional architecture inventory failure caused by the four intentional
+public persistence methods; the contract inventory was updated and the final
+full run returned to the 12-test baseline. The full suite was not rerun after
+the focused review fixes. Sol's recorded Phase 1 run had 13 failures because it
+additionally hit a suite-sensitive idempotency test that passed alone. No live
+DSQL/AWS or paid model calls were made.
+
+**Compatibility, migration, and rollback.** SQLite startup adds only the
+guest table and indexes with `IF NOT EXISTS`; pre-existing user/notebook rows
+are retained. Take a SQLite online backup before opening an existing database
+with this version. DSQL runtime performs no DDL and readiness does not probe
+the new table, so existing clusters remain compatible while guest access is
+dormant. Before a live DSQL guest route or production guest enablement, take an
+approved snapshot/export, inspect with
+`scripts/init_dsql.py --guest-sessions-only --dry-run`, then apply with
+`scripts/init_dsql.py --guest-sessions-only` as an admin. The migration adds
+the table/indexes and grants runtime access one statement per transaction;
+async indexes are awaited. Rollback is an application revert with the
+additive schema/grant retained. Do not drop a table containing guest rows.
+
+**Known risks/blockers.** No live DSQL migration was applied. Existing DSQL
+guest methods will only work after the explicit migration. Cookie issuance,
+owner resolution, API fail-closed behavior, UI renewal, account claim, lecturer
+pseudonyms, and end-to-end guest release checks remain unimplemented by design
+and belong to later phases. `GUEST_ACCESS_ENABLED` remains absent/off.
+
+**Next exact action.** Phase 3 starts at `backend/owner_context.py` and
+`backend/http/app.py`: implement flag-off guest owner resolution and the
+browser-facing renewal route, with local/mock tests. Keep production guest
+access disabled; do not touch live DSQL until the later deployment prerequisite
+is reviewed and approved.
+
+### Hybrid guest access — Phase 1 contracts and baseline (2026-09-24)
+
+**Behavior.** Documentation-only phase. Defined optional Cognito for students
+and required Cognito for staff, guest pseudonyms in lecturer views/analytics,
+the 400-day rolling browser `Set-Cookie` plus server-expiry contract through a
+same-origin, Caddy-allowlisted browser renewal route (Streamlit `httpx` cannot
+relay cookies), and browser-retention caveat; explicit claim preview and
+confirmation including uploaded files, ownership transfer, rollback flag,
+seven-phase plan, and acceptance matrix in
+[`GUEST_ACCESS_PHASE_HANDOFF.md`](GUEST_ACCESS_PHASE_HANDOFF.md). Phase 6 now
+covers lecturer compatibility/analytics; Phase 7 is the full integration and
+release handoff, with production flag off and no deployment. Expected and
+actual result: no runtime, schema, or data behavior changed, and none was
+changed.
+
+**Files.** Added `docs/GUEST_ACCESS_PHASE_HANDOFF.md` and this status entry.
+The pre-existing modified `docs/CODEBASE_STRUCTURE.md`, existing status
+content, and untracked `docs/learning/` content were preserved. No runtime code
+was edited.
+
+**Validation.** Luna's pre-edit baseline: `.venv/bin/python -m pytest -q`
+completed with 12 failures; `.venv/bin/python -m compileall -q backend ui
+streamlit_app.py tests scripts` passed. Those failures are in
+`test_citation_resolution_is_bounded_and_keeps_selected_list_labels`,
+`test_reflection_completion_request_skips_retrieval_and_suppresses_advance`,
+`test_composer_trims_dynamic_context_before_mandatory_sections`,
+`test_application_virtual_course_gap_is_not_placeholder_evidence`,
+`test_complete_thinking_path_two_turns_per_stage`,
+`test_strict_guidance_is_stricter_before_recommending_advance`,
+`test_atomic_observation_is_attributed_offset_only_and_revision_aware`,
+`test_production_compose_is_stateless_and_uses_prebuilt_image`,
+`test_locked_view_before_reflection_complete`, two tests in
+`tests/ui/test_streamlit_ui.py`, and
+`test_assembled_stylesheet_wraps_all_component_markers`. They span coaching,
+retrieval, persistence, deployment, and UI. Sol's independent run reported 13
+failures, including the additional
+`tests/persistence/test_coach_idempotency.py::test_independent_dsql_stores_converge_on_one_provider_turn`;
+that test passed when run alone, so the additional result is suite-sensitive.
+Only Luna's 12 are recorded as the pre-edit baseline. This phase's diff is
+documentation-only, so no runtime edit caused the additional failure; its
+suite-level origin remains unresolved. No paid calls or live service were used.
+
+**Compatibility, migration, and rollback.** No migration or data changes.
+Rollback is removal of the new handoff and this Phase 1 entry; the existing
+user-authored documentation changes remain untouched. The feature flag is
+specified as `GUEST_ACCESS_ENABLED=false` and remains unimplemented/off.
+
+**Known risks/blockers.** Baseline suite is not green, and no guest contract has
+yet been exercised at runtime. Guest cookie loss/browser retention and claim
+atomicity are requirements for later phases, not validated behavior today.
+
+**Next exact action.** Start Phase 2 with the additive guest credential design
+at `backend/persistence/store/sqlite_schema.py`,
+`backend/persistence/dsql_schema.py`, and `backend/student_store.py`; define and
+review migration backup/rollback and repository methods before runtime edits.
+
+### Learning handbook PDF export (2026-09-07)
+
+**Behavior.** Exported the eight learning chapters and
+`CODEBASE_STRUCTURE.md` as one 45-page A4 handbook with a cover, running
+header/footer, readable headings, tables, lists, and code examples. Mermaid
+content is retained as labelled diagram source so the PDF remains fully local
+and does not depend on a diagram-rendering service.
+
+**Files.** `docs/learning/build_handbook_pdf.py` and the generated
+`output/pdf/co-design-chatbot-learning-handbook.pdf`. Source Markdown and
+application code are unchanged by the export.
+
+**Validation.** ReportLab generated the PDF successfully (140,907 source-text
+characters; 145,867-byte output). `pdfinfo` confirms an A4, 45-page document.
+Poppler rendered and visually checked representative cover, narrative,
+table-heavy, scaling, and final-appendix pages (1, 10, 22, 31, 45); text,
+tables, page breaks, and headers/footers are legible without clipping.
+
+**Compatibility, migration, and rollback.** No runtime, schema, provider,
+configuration, or student-data change. Rollback removes the generated PDF and
+its local export script only; temporary rendered inspection images are not
+part of the deliverable.
+
+**Known risks/blockers.** The renderer intentionally covers the Markdown
+constructs used in this handbook rather than being a general-purpose Markdown
+engine. If the chapters gain complex HTML, nested lists, or rendered diagrams,
+extend the export script and re-run visual QA.
+
+**Next exact action.** Open the generated PDF and use the numbered chapters
+for the guided walkthrough; rerun
+`python docs/learning/build_handbook_pdf.py` after material handbook changes.
+
+### Project learning handbook and static reference (2026-09-07)
+
+**Behavior.** Added a teaching companion at
+[`learning/README.md`](learning/README.md) with eight detailed chapters covering
+services, frontend/API execution, RAG/context, all ten database tables,
+idempotency/revisions, AgentCore/Strands, educational and review workflows,
+non-AWS/LangGraph options, scaling, operations, and interview preparation.
+The handbook distinguishes implemented, historical, inferred, and proposed
+behavior. It explicitly documents older-description drift: course-catalog
+versus personal selection, ten versus five tables, in-memory graph checkpoints,
+slim Fast Chat fields, distinct review-job recovery/idempotency semantics, and
+the explicit Compose generation value overriding the host variable.
+
+**Files.** `docs/learning/README.md`, eight numbered Markdown chapters,
+`docs/learning/REFERENCE.md`, its static-source generator
+`docs/learning/build_reference.py`, the navigation link in
+`docs/CODEBASE_STRUCTURE.md`, and this handoff. Existing architecture documents
+remain the specification; the handbook is a learning companion.
+
+**Validation.** Generated the reference without importing application modules
+or settings: 64 literal HTTP route registrations, input-model annotations,
+both ten-table SQL schema constants, 165 Python module entries, and dependency
+manifests. Checked all 349 local links inside the handbook/reference, balanced
+code fences, heading separation, JSON/NDJSON example syntax, generator AST
+syntax, and byte-identical reference regeneration. The Markdown bundle contains
+approximately 25,400 words. No application test suite or live service smoke was
+run for this documentation-only phase; historical application results are
+labeled as such rather than presented as new validation.
+
+**Compatibility, migration, and rollback.** No application/runtime, schema,
+identity, student data, configuration, or deployment changes. No paid model
+calls. Rollback removes the new learning companion/generator and navigation
+and handoff entries; application data is unaffected.
+
+**Risks.** The source baseline is `85f79cc` on `Bedrock-v3`, not a live AWS
+inventory. Generated module descriptions inherit source docstrings, which can
+be stale; the narrative calls out important discrepancies. External LangGraph
+documentation is conceptual guidance, not proof that newer examples work with
+the pinned runtime. Proposed adapters, scaling changes, and migrations are not
+implemented by this phase.
+
+**Next exact action.** Start reading at `docs/learning/README.md`; use the
+numbered chapters for the walkthrough and `REFERENCE.md` for source lookup.
+After relevant code changes, regenerate with
+`.venv/bin/python docs/learning/build_reference.py` and review affected narrative
+chapters before treating the handbook as current.
+
+### Lecturer Review checkpoint projection (2026-09-06)
+
+**Behavior.** Lecturer Review now reads the existing
+``notebooks.settings_text.journey_stage_reviews`` checkpoint source through a
+single read-only projection shared by the dedicated ``/review`` endpoint and
+the legacy ``/workspace`` response. Checkpoint Facione scores, summaries,
+stage strengths, and areas to revisit are merged with the existing learning
+review while a meaningful persisted coaching summary remains authoritative
+over checkpoint fallback copy. The API exposes typed per-stage evidence only;
+worker leases, queue identifiers, frozen message ids, and conversation
+revision metadata stay private. The lecturer rail renders that evidence in
+one group per Thinking Path stage and keeps the existing summary, score,
+section, and conclusion fields for compatibility.
+
+**Files.** ``backend/professor_analytics/models.py``,
+``backend/professor_analytics/service.py``, ``ui/professor.py``,
+``tests/http/test_professor_analytics.py``, ``tests/ui/test_professor_ui.py``,
+and this handoff. No provider, auth, persistence-write, schema, migration, or
+student-data changes were made.
+
+**Validation.** The focused professor analytics (36), research HTTP (3),
+Review-domain (25), and lecturer Streamlit AppTest (21) suites pass (85 tests
+total). The run includes negative queued/running/failed/missing-job cases,
+summary-precedence coverage, legacy workspace-key compatibility, and merged
+section rendering. Project ``compileall`` and ``git diff --check`` pass.
+
+**Compatibility, migration, and rollback.** Existing ``/workspace`` and
+dedicated ``/review`` routes, notebook ownership/audit checks, lazy tab fetches,
+and read-only boundaries remain in place. This is code-only with no data
+migration or rewrite; rollback is by reverting the listed backend/UI/test
+changes and this status entry.
+
+**Browser evidence.** Sol xHigh reviewed the shared diff and the deterministic
+lecturer flow at 1440×1000, 1024×768, and 390×844. The Review rail showed
+checkpoint Working conclusion, Reasoning progress, checkpoint/Deep/incremental
+feedback, and Facione values without horizontal overflow; mobile retained one
+scroll owner. The browser console had zero application errors (only the nine
+existing Streamlit/browser capability warnings).
+
+**Known risks/blockers.** No P0–P2 findings remain. A production-authenticated
+smoke pass with a large roster and long checkpoint copy remains a sensible
+release check, but it is not required for this code-only projection change.
+
+**Next exact action.** Hand off the working tree for the normal release review;
+no database migration, data rewrite, or additional implementation step is
+required.
+
+### Lecturer notebook list outlines (2026-09-06)
+
+**Behavior.** Each notebook in a student's detail view now has its own quiet
+outlined surface, making adjacent notebooks distinguishable without restoring
+the dense card-wall treatment. The outline uses the existing theme border in
+Light/Dark/System modes and switches to the teal accent on hover or keyboard
+focus so the currently explored row is easy to locate.
+
+**Files.** `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`, and this handoff. No backend, auth,
+persistence, schema, provider, or student-data contracts changed.
+
+**Validation.** The focused professor UI plus professor analytics/research HTTP
+suites pass (54 tests); project `compileall` and `git diff --check` pass. A
+deterministic browser preview was checked at desktop and 390px widths in the
+existing theme modes; notebook outlines remain visible and do not introduce
+horizontal overflow or new scroll traps.
+
+**Compatibility, migration, and rollback.** This is a CSS/test-only change with
+no migration. Existing notebook keys, actions, lazy loading, and read-only
+behavior are unchanged. Rollback is code-only by reverting the listed files
+and this status entry.
+
+**Known risks/blockers.** The preview fixture has a small notebook list; a
+production-shaped roster should receive the same visual check before release.
+
+**Next exact action.** Sign in as a lecturer, open a student's detail view,
+and confirm each notebook outline remains legible in Light, Dark, and System
+themes at 200% zoom.
+
+### Lecturer workbench zoom/scroll and visual hierarchy follow-up (2026-09-06)
+
+**Behavior.** The selected-notebook workbench no longer locks its content
+column to `100dvh` with `overflow:hidden`. The outer lecturer document remains
+scrollable when the context header plus workbench exceed a short or zoomed
+viewport, while the roster, transcript, and Thinking Path panes retain bounded
+independent scroll regions. Streamlit's intermediate layout wrappers now
+stretch with the three-pane row, so pane bottoms are reachable instead of
+collapsing to intrinsic content height. Desktop workbench surfaces use thin
+dividers and flat evidence rows rather than nested dark card walls; long
+notebook titles wrap safely, compact desktop columns preserve readable roster
+and path labels, and path actions remain single-line.
+
+**Files.** `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`, and this handoff. No backend, auth,
+persistence, schema, provider, or student-data contracts changed.
+
+**Validation.** The focused professor UI plus professor analytics/research HTTP
+suites pass (54 tests); project `compileall` and `git diff --check` pass.
+Playwright preview reported zero application errors in the browser console at
+1440×900 and 1024×768 (only existing Streamlit/browser framework warnings):
+the three pane scrollports fill the workbench, the app container scrolls the
+context/workbench as one document when needed, and the compact 1024 layout
+keeps `Progression` on one line. At 390×844 and 800×900 the
+desktop pane is hidden, exactly one mobile surface is rendered, and the page
+has no horizontal overflow; the 720×450 proxy (representative of a zoomed,
+short viewport) keeps the same mobile flow. The existing theme stylesheet
+test remains a baseline failure unrelated to this CSS change, as do the
+previously recorded full-suite failures.
+
+**Compatibility, migration, and rollback.** Existing widget/cache keys,
+read-only API calls, staff-authentication boundary, and lazy notebook loading
+remain unchanged. This is a CSS/test-only change with no migration; rollback is
+code-only by reverting the two listed files and this status entry.
+
+**Known risks/blockers.** The browser fixture still has one student and a short
+transcript, so a final authenticated smoke pass should exercise a full roster,
+long transcript, and real long notebook titles at 200% zoom before release.
+
+**Next exact action.** Sign in as the promoted lecturer, open a real notebook,
+then verify 1440/1024/800/390 widths in Light, Dark, and System modes while
+scrolling each pane and the page at 200% zoom; capture any production-shaped
+overflow before release.
+
+### Professional lecturer dashboard redesign (2026-09-05)
+
+**Behavior.** The lecturer shell now presents one persistent desktop navigation
+rail with the display labels Overview, Students, Critical thinking,
+Participation, and Research review while retaining the existing internal page
+tokens and API/cache keys. Overview leads with three class-health metrics,
+stage distribution, an actionable follow-up queue, and a localized empty
+activity state. Students is a compact, searchable roster with truthful
+`Has activity` filtering, readable long identities, and short `Open` actions. A
+selected notebook has one desktop roster + Chat/Sources center +
+Progression/Review evidence rail; at 800px and below, a compact header and one
+View selector show exactly one surface at a time. Panel fetches have local
+loading/error/retry states, and trend charts clean invalid rows, use a UTC
+temporal scale with an explicit padded domain, and constrain ticks to readable
+day labels without Vega extent warnings. Appearance persistence failures stay
+visible as recoverable session-local notices.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`streamlit_app.py`, `tests/ui/test_professor_ui.py`, and this handoff. No
+backend, auth, persistence, schema, or student-data contracts changed.
+
+**Validation.** The focused professor UI plus professor analytics/research HTTP
+suites pass (54 tests). Project `compileall` and `git diff --check` pass. The
+full suite was run and reports 13 failures in domain/UI/deployment coverage
+outside this redesign; the focused affected suites remain green. Sol xHigh's
+independent final review is **APPROVE** with no remaining P0–P2 findings.
+Browser evidence from the deterministic lecturer preview covers 1440px,
+1024px, 800px, and 390px layouts, Light/Dark/System controls, keyboard-visible
+navigation, lazy notebook surfaces, readable follow-up labels, and a clean
+fresh-tab console. At 1440px the trend axis shows one readable label per day
+(01–08 Aug); at 390px the workbench has one outer scroll flow and no horizontal
+overflow.
+
+**Compatibility, migration, and rollback.** Existing page/cache/widget keys
+remain stable where feasible, including the center workspace key and refresh
+key. The staff-authentication-before-student-initialization boundary, read-only
+FastAPI behavior, and lazy Chat-only notebook opening are unchanged. The
+desktop workbench uses a flex column shell with a flex-none context header and
+flex workbench; mobile overrides remove nested roster/transcript/path
+scrollports. Rollback is code only by reverting the listed UI/test/status files;
+no migration is needed.
+
+**Known risks/blockers.** Browser validation uses deterministic local fixtures,
+so the authenticated production-shaped roster should receive a final smoke
+pass before release. The full-suite failures listed above are unrelated to the
+lecturer redesign and should be triaged separately. Streamlit emits an
+existing server-side `st.components.v1.html` deprecation notice; it is not a
+browser console warning from this UI.
+
+**Next exact action.** Run the authenticated lecturer smoke test from
+`streamlit_app.py` at 1440px and 390px, switch each rail section and appearance
+mode, open a real notebook, and confirm the same lazy/read-only behavior before
+release.
+
+### Lecturer dashboard global top-bar outline (2026-09-05)
+
+**Behavior.** The same review-style top bar now appears on Overview, Students,
+Learning, Engagement, and Research, not only after a notebook is opened. Its
+Section dropdown routes through the existing dashboard page state, Appearance
+uses the persisted System/Light/Dark preference, and the lecturer sign-out
+action remains available after the vertical rail is hidden. The selected
+notebook bar now includes Section and Sign out as well as its existing Screen,
+Appearance, refresh, and Notebooks controls.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`, and this handoff. No backend, API, schema,
+AWS, authentication, or persisted student-data changes were made.
+
+**Validation.** Fifteen focused professor UI tests and the professor
+analytics/research HTTP tests passed (48 tests total); project `compileall`
+and `git diff --check` passed. AppTest verified the
+Overview Section dropdown routes to Students and the Appearance dropdown
+persists Light while the existing radio state stays synchronized.
+
+**Compatibility, migration, and rollback.** The existing sidebar radio,
+segmented appearance control, and widget keys remain rendered as hidden
+state/keyboard compatibility seams. The change is code-only and can be
+rolled back by reverting the listed UI/test/status files; no data migration is
+needed.
+
+**Known risk.** A live authenticated visual smoke test is still required to
+confirm the CSS rail collapse and top-bar wrapping in the deployed Streamlit
+session, especially at 390 px.
+
+**Next exact action.** Run the local authenticated lecturer smoke test at
+desktop and 390 px widths, use Section to visit each dashboard page, switch
+Appearance, and verify the selected-notebook bar still exposes Screen, Review,
+refresh, back, and sign-out.
+
+### Lecturer review-workbench top-bar outline (2026-09-05)
+
+**Behavior.** The selected lecturer notebook now uses a compact review-style
+top bar for notebook context, Screen selection (Chat, Sources, Progression, or
+Review), appearance selection (System, Light, or Dark), refresh, and return to
+Notebooks. The lower workbench retains the existing roster, read-only
+transcript, source actions, Review/Progression projections, and independent
+desktop scroll regions. Mobile controls stack into one outer scroll flow.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`, and this handoff. No backend, API, schema,
+AWS, authentication, or persisted student-data changes were made.
+
+**Validation.** Fourteen focused professor UI tests passed, including top-bar
+Screen and appearance behavior; desktop and 390 px deterministic browser
+previews were checked; project `compileall` and `git diff --check` passed.
+
+**Compatibility, migration, and rollback.** Existing workspace radio and
+sidebar widgets remain rendered as compatibility/state seams while the new
+top bar is the visible control surface for an open notebook. Reverting the
+listed UI/test/status changes restores the previous outline.
+
+**Known risk.** Browser checks use deterministic local fixtures; the real
+authenticated lecturer flow should still be smoke-tested in both appearance
+modes before release.
+
+**Next exact action.** Run the controlled authenticated lecturer smoke test at
+desktop and 390 px widths, verify Screen/Appearance changes and Review loading,
+then release if no console or remount errors appear.
+
+### Lecturer workbench cache, viewport, and appearance follow-up (2026-09-05)
+
+**Behavior.** The selected-notebook workbench now keeps independent
+notebook-scoped selections for the center workspace and Thinking Path rail. The
+rail can fetch and render Review or Progression while the center remains on
+Chat; the two surfaces share only their per-notebook Review/Progression payload
+caches, so a projection is not requested twice. Opening a notebook stays
+Chat-only. The lecturer branch restores the authenticated appearance preference
+and syncs the appearance widget before injecting theme CSS, without running
+student session initialization. Desktop workbench panes keep independent
+scrollports inside a box-sized single viewport; mobile returns to one normal
+outer scroll flow.
+
+**Files.** `ui/professor.py`, `streamlit_app.py`,
+`ui/assets/styles/70-professor.css`, `tests/ui/test_professor_ui.py`, and this
+handoff. No backend, API, schema, AWS, or persisted data changes were made.
+
+**Validation.** Professor UI plus analytics/research HTTP tests passed (46
+tests), project `compileall` passed, and `git diff --check` passed. The new
+AppTests cover preference restoration/persistence, lazy Chat-only notebook
+opening, and shared center/rail Review/Progression cache state.
+
+**Compatibility, migration, and rollback.** Existing widget keys, read-only
+professor API calls, student notebook data, and lazy endpoint boundaries remain
+unchanged. Rollback is code-only: revert the listed UI/test/status changes.
+
+**Known risk.** Browser checks use deterministic local fixtures; the real
+lecturer session should still be smoke-tested at desktop and 390 px widths in
+both appearance modes before deployment.
+
+**Next exact action.** Sol High's final review is complete and approved. Run
+the controlled authenticated lecturer smoke test at desktop and 390 px widths
+in both appearance modes, then release only after the Review rail, independent
+scrolling, and appearance persistence pass.
+
+### Students roster reference alignment (2026-09-05)
+
+**Behavior.** The top-level Students view now follows the supplied roster
+reference more closely: airy Student work/Students heading and module context,
+roomier search and Stage/Attention filters, a clear result count, full-width
+student cards with rounded-square initials, stronger name/stage/activity
+hierarchy, and right-aligned Open actions. The existing Course Analytics rail
+remains available, and the roster continues to use real filtered professor
+records rather than prototype data.
+
+The final scoped roster contract consolidates card geometry at the Streamlit
+wrapper boundary: filters are approximately 50 px tall, desktop cards have an
+86 px minimum with 6 px vertical breathing room, and avatar/copy/action content
+is vertically centered. At phone widths the card keeps a 70/30 copy/action
+split, wraps long names safely, and does not introduce horizontal overflow.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`, and this
+handoff. The visual change uses existing Streamlit/chatbot design tokens and
+assets; no React runtime or new service was introduced.
+
+**Validation.** Luna Max implemented the roster pass and Sol High reviewed it
+with an **APPROVE** verdict and no P0–P2 findings. Professor UI plus analytics/
+research API tests passed (44 tests), project `compileall` passed, and
+`git diff --check` passed. Deterministic browser checks at 1280 px and 390 px
+confirmed the enlarged cards, readable mobile arrangement, no horizontal
+overflow, and no browser-console errors.
+
+**Compatibility, migration, and rollback.** The roster still performs only the
+existing filtered `professor_students()` read; student detail, notebook tabs,
+attachments, and source bytes remain lazy. No authentication, authorization,
+HTTP contract, backend, schema, AWS resource, or persisted data changed.
+Rollback is code-only: revert the roster additions in `ui/professor.py` and
+`ui/assets/styles/70-professor.css` (and this status entry if desired).
+
+**Known risk.** Browser validation used deterministic local fixtures rather
+than the authenticated lecturer's production-shaped roster. Long names and
+large classes should be smoke-tested before release.
+
+**Next exact action.** Sign in as the promoted lecturer, open Course Analytics
+→ Students, and compare the real roster at desktop and 390 px before deploying
+the branch.
+
+### Selected-student lecturer workbench (2026-09-05)
+
+**Behavior.** The Students drill-down now has a read-only three-pane workbench
+matching the supplied reference: an All students context rail, the existing
+chatbot-style notebook transcript with breadcrumb and Chat/Sources/Progression/
+Review tabs, and a Thinking Path rail. Review is the initial visual state and
+uses the already-loaded student profile until its detailed projection is
+explicitly requested. Chat messages reuse the student surface's Material
+avatars and message bubbles; attachment/source bytes remain explicit,
+lazy-open actions. The desktop rail stays beside the transcript, while the
+inner panes stack at 390 px without horizontal overflow. Roster context,
+student switching, and current notebook tab behavior remain available.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`, and this
+handoff. The existing React dashboard archive remains a visual reference only;
+no React runtime, AWS/Lambda resource, backend, schema, auth, or persistence
+code was added.
+
+**Validation.** Luna Max implemented the workbench and the follow-up visual and
+mobile fixes. Sol High independently reviewed the final diff and browser
+evidence with an **APPROVE** verdict and no P0–P2 findings. The focused
+professor UI plus analytics/research API suites passed (44 tests), project
+`compileall` passed, and `git diff --check` passed. A deterministic local
+preview was checked at 1280 px and 390 px: the three-pane desktop layout uses
+the existing chatbot message chrome, the inner panes stack at mobile width,
+`scrollWidth` equals the 390 px viewport, and browser error logs were empty.
+
+**Compatibility, migration, and rollback.** This is presentation-only. Opening
+a notebook still fetches only its Chat projection; Sources, Progression,
+Review, attachments, and source bytes remain lazy and use the existing
+authorised FastAPI client. No authentication/authorization boundary, HTTP
+contract, read-only restriction, student record, notebook, message, source,
+or AWS resource changed. Rollback is code-only: revert the workbench changes
+in `ui/professor.py` and `ui/assets/styles/70-professor.css` (and this status
+entry if desired).
+
+**Known risk.** Browser validation used deterministic local fixtures rather
+than the user's authenticated production session and production-shaped roster
+data. Real student names, long transcripts, and lecturer permissions should be
+smoke-tested before release.
+
+**Next exact action.** Sign in as the promoted lecturer in the local or
+controlled deployment, open Course Analytics → Students, open a real notebook,
+and smoke Chat/Sources/Progression/Review at desktop and 390 px while checking
+the browser console and lazy endpoint behavior before deployment approval.
+
+### Professor dashboard reference alignment (2026-09-05)
+
+**Behavior.** The existing EC2-hosted Streamlit lecturer dashboard now follows
+the supplied Course Analytics reference more closely: a narrow 210 px desktop
+navigation rail, compact radio-dot navigation, restrained dark surfaces,
+reference-style roster and notebook cards, read-only workspace framing,
+compact notebook tabs, stage/review accordions, and a denser Facione card.
+The content column stays beside the rail on desktop and stacks without
+horizontal overflow at 390 px. The duplicate Streamlit navigation label is
+hidden while the visible mono rail label remains. The existing roster → student
+→ notebook drill-down and all real professor API calls remain unchanged.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`, and this
+handoff. The React ZIP remains a visual reference only; no prototype records,
+React runtime, Lambda, AWS resource, backend, schema, or persistence code was
+added.
+
+**Validation.** Luna Max implemented the focused alignment pass and Sol High
+reviewed the final diff with an **APPROVE** verdict and no P0–P2 findings.
+Professor UI plus professor analytics/research tests passed (44 tests), UI and
+project compile checks passed, and `git diff --check` passed. A controlled
+deterministic preview was checked at 1280 px and 390 px: the desktop rail and
+content stayed side-by-side, mobile navigation/content stacked without
+horizontal overflow, and no new browser-console errors appeared. The broader
+UI command still has the two documented branch-baseline failures in unchanged
+student chat expectations; the theme command still has its documented single
+failure in unchanged `90-responsive.css`.
+
+**Compatibility, migration, and rollback.** This is presentation-only. No
+authentication, authorization, FastAPI contract, read-only boundary, lazy
+attachment/source access, analytics/research write path, or persisted data was
+changed. No migration or AWS action is required. Rollback is code-only: revert
+the changes to `ui/professor.py` and `ui/assets/styles/70-professor.css` (and
+this status entry if desired).
+
+**Known risk.** The visual browser check used a local deterministic lecturer
+preview rather than the user's authenticated production session. The real
+lecturer account should still be smoke-tested after the next local restart or
+deployment to confirm auth gating and data-specific wrapping.
+
+**Next exact action.** Sign in as the promoted lecturer account in the local or
+controlled deployment, open Course Analytics, and smoke Overview, Students,
+one notebook's Chat/Sources/Progression/Review, Learning, Engagement, and
+Research at desktop and 390 px before releasing the dashboard URL.
+
+### Local lecturer role promotion (2026-09-04)
+
+**Behavior.** Promoted the single local SQLite user matching
+`nus.ai.education99@gmail.com` from `student` to `lecturer`. The application
+still requires a fresh authenticated `/auth/me` lookup before entering the
+lecturer dashboard; Cognito claims alone are not used to elevate roles.
+
+**Evidence.** The transaction reported exactly one changed row. The resulting
+role counts are one `lecturer` and four `student` users. The pre-change backup is
+at `/private/tmp/co-design-lecturer-backup.Nms7W5/co_design.sqlite3`.
+Notebook, message, source, notebook-source, thread, folder, step,
+phase-transition, model-turn, and research table counts match the backup
+(12 notebooks, 131 messages, and 61 sources among the populated tables).
+The local API readiness endpoint and Streamlit endpoint both returned 200 after
+the stack restart. The visible browser tab belongs to another student account,
+so it intentionally remains in the student workspace; the promoted account
+must sign out and sign in again to refresh its session role.
+
+**Compatibility, migration, and rollback.** This is a local-only application
+role update. No AWS, EC2, Cognito, deployed service, notebook, message, source,
+or other user was changed. Rollback is recoverable by restoring the backup or
+updating this one row back to `student` after stopping the local services.
+
+**Known risk.** The target account's browser session was not available to this
+browser automation session, so its authenticated `/auth/me` response and
+dashboard paint still require the user to sign out/in locally.
+
+**Next exact action.** In the local browser, sign out, sign in with
+`nus.ai.education99@gmail.com`, and confirm the Course Analytics dashboard
+appears. If it does not, capture the local API `/auth/me` status and Streamlit
+log line for that fresh sign-in.
+
+### Streamlit lecturer dashboard visual refresh (2026-09-04)
+
+**Behavior.** The supplied React dashboard was used only as a visual reference.
+The existing lecturer dashboard remains inside the EC2-hosted Streamlit app and
+continues to use the authenticated FastAPI professor APIs. Its five existing
+views now have a calmer shared page header, compact section hierarchy, clearer
+metrics, roster/notebook rows, read-only notebook framing, responsive follow-up
+tables, and contextual source/attachment actions. Student utterances are
+labelled as `Student`, and every open action has a target-specific accessible
+name. Lecturer branding uses the same shared product constants as the student
+surface.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`, and this
+handoff. No React application, Lambda, backend, AWS, schema, or prototype data
+was added.
+
+**Validation.** Luna Max's implementation pass and Sol High's final review both
+completed; Sol approved with no P0-P2 findings. The professor UI suite passed
+(11 tests), professor analytics/research API suites passed (33 tests), UI
+compileall and `git diff --check` passed. The broader student UI check passed 38
+tests with two existing unrelated failures. The combined theme run retains one
+existing failure in unchanged `90-responsive.css`; its worktree blob matches
+`HEAD`. A temporary local preview server started successfully, but the in-app
+browser blocked the localhost page after an earlier connection failure, so
+desktop/390 px visual wrapping was not claimed as verified.
+
+**Compatibility, migration, and rollback.** Authentication, persisted
+lecturer/admin authorization, audited reads, pagination, lazy source access,
+research review/adjudication, CSV export, and student initialization boundaries
+are unchanged. No data or infrastructure migration is required. Rollback is
+code-only: revert the two presentation files.
+
+**Known risk.** Real-browser desktop and 390 px checks remain a release gate;
+AppTest cannot prove final wrapping, focus order, or scroll behavior. The live
+EC2/CloudFront deployment has not been changed.
+
+**Next exact action.** Open a permitted local or controlled deployed lecturer
+URL and smoke Overview, Students, notebook Chat/Sources/Progression/Review,
+Learning, Engagement, and Research at desktop and 390 px in light and dark
+themes before deployment approval.
+
+### Sources delete / polling remount guard (2026-09-04)
+
+**Behavior.** Personal-source deletion remains a fragment-local
+`store.delete_source` followed by `rerun_fragment()`. A thread-scoped one-shot
+marker now defers only the immediate course-sync polling→stable full-app
+handoff when deletion races with sync completion; the next polling tick keeps
+the original stable-fragment transition. Stable mode clears any leftover
+marker, and coach-stream, upload, and New-chat sync guards are unchanged.
+
+**Files.** `ui/panels/sources.py`, `tests/ui/test_sources_ui.py`, and this
+handoff.
+
+**Validation.** Sources-delete, polling-race, stable-cleanup, rerun-scope, and
+navigation tests passed (37 tests in the combined focused command). Full
+compileall and `git diff --check` passed. A non-destructive local browser check
+settled Library course content and observed exactly one workspace and one
+Sources panel; no source was deleted and no AWS or paid-model call was made.
+The broader UI suite retains the two unrelated branch-baseline assertions
+already documented above.
+
+**Compatibility, migration, and rollback.** No backend, API, schema, AWS, or
+student-data migration is involved. Source deletion and cache invalidation
+remain unchanged. Rollback is code-only: revert the marker/helper and its
+tests.
+
+**Known risk.** The exact destructive browser click was not exercised against
+real data; the race is covered with isolated deterministic seams. Existing
+unrelated `MutationObserver` console errors remain outside this change.
+
+**Next exact action.** Deploy/restart the controlled environment, then run a
+non-production source-delete smoke with a temporary personal source while
+watching for duplicate workspace shells during course-material sync.
+
+### Notebook-action remount stabilization (2026-09-04)
+
+**Behavior.** New chat and the Recents/mobile ⋯ menus remain single-render
+workspace interactions. The legacy Your Notebooks dialog now changes its
+Actions/Back view through dialog-local callbacks instead of escalating to a
+full application rerun; stale dismiss/reopen flags are cleared consistently.
+Active-notebook deletion still uses an application rerun because the active
+workspace must be reconciled. The client-only Recents popover was deliberately
+left without a rerun callback.
+
+**Files.** `ui/notebooks.py`, `ui/session.py`,
+`tests/ui/test_rerun_scope.py`, `tests/ui/test_streamlit_ui.py`, and this
+handoff.
+
+**Validation.** Focused notebook-action, rerun-scope, navigation, and related
+Streamlit tests passed. Mock-browser checks at 1280 px and 390 px reproduced
+New chat → notebook actions with exactly one workspace, one chat feed, one
+mobile shell, and one actions dialog. No prompt, notebook deletion, AWS call,
+or paid-model call was made. The broader UI run retains two unrelated existing
+branch-baseline failures: the stale `truncate` assertion and a Stage
+Progression expectation after New chat.
+
+**Compatibility, migration, and rollback.** No backend, API, schema, AWS,
+identity, or persisted student-data changes are involved. Existing notebook
+actions, rename, download, and delete behavior remain available. Rollback is
+code-only: revert the notebook/session callback changes and their tests.
+
+**Known risk.** The browser still reports pre-existing
+`MutationObserver.observe(...): parameter 1 is not of type 'Node'` errors from
+other layout helpers; the notebook-action path does not add these observers.
+The deployed CloudFront instance has not been changed.
+
+**Next exact action.** Deploy or restart the controlled environment with this
+branch, then repeat New chat → Recents ⋯ and legacy Your Notebooks Actions/Back
+at desktop and mobile widths while checking the browser console.
+
+### Scroll-to-bottom control restoration (2026-09-04)
+
+**Behavior.** The body-hosted `Scroll to bottom` control now rehydrates its
+parent-window listeners on every helper invocation, force-rebinds the current
+`.st-key-chat_feed`, and coalesces scroll work through one animation frame.
+Replaced feeds are detected by identity, duplicate controls are removed, and
+the surviving button is kept on `document.body`. Visibility uses a 16 px
+control threshold instead of the 120 px follow threshold, with synchronized
+`aria-hidden`, `tabIndex`, and state attributes. The control remains fixed
+above the composer, includes mobile safe-area spacing, and is layered above
+chat content. Clicking it snaps to the true feed bottom and hides the control.
+Search and Library remounts explicitly settle the control as hidden while no
+chat surface is mounted. A monotonic helper token forces Streamlit to re-run
+the parent controller when an otherwise identical component iframe would be
+reused.
+
+**Files.** `ui/layout/chat_scroll.py`, `ui/assets/styles/30-chat.css`,
+`ui/workspace.py`, `tests/ui/test_chat_scroll.py`, and this handoff.
+
+**Validation.** The focused chat-scroll, rerun-scope, and HTML-embed set
+passed (43 tests); UI compile checks and `git diff --check` passed. Browser
+checks passed at an explicit 1024 px desktop view and an explicit 390 px
+mobile view:
+wheel scroll revealed the control, it stayed 8 px above the composer, click
+snapped the feed to the bottom, and the control hid with `aria-hidden=true`
+and `tabIndex=-1`. Search, Library, notebook switching, Review/Progression,
+and mobile Thinking Path open/close remounts retained exactly one control and
+the expected hidden/visible state. No prompt was sent, no notebook was
+created, and no AWS or paid-model call was made. The broader `tests/ui` run
+retains four unrelated branch-baseline failures in deep-review copy, stale
+`truncate`/Stage Progression AppTest expectations, and a responsive CSS
+assertion.
+
+**Compatibility, migration, and rollback.** No backend, API, schema,
+student-data, AWS, or persistence changes are required. Existing transcripts
+and the five-phase workflow are untouched. Rollback is code-only: revert the
+four implementation/test files; no data cleanup or migration is needed.
+
+**Known risk.** The local browser still reports the pre-existing
+`MutationObserver.observe(...): parameter 1 is not of type 'Node'` errors from
+other layout helpers (the scroll helper adds no observer or matching error).
+The live CloudFront deployment has not been changed; release still requires
+the normal controlled deployment and browser smoke.
+
+**Next exact action.** Deploy the reviewed UI change to the controlled
+environment, then repeat the desktop/mobile scroll and remount smoke against
+the deployed URL before release.
+
+### Latest-first six-message notebook history (2026-09-04)
+
+**Behavior.** Notebook opening now loads only the newest six visible persisted
+messages and schedules an exact bottom snap. A deliberate upward wheel, touch,
+pointer, keyboard, or accessible fallback action requests one opaque keyset
+page at a time; loaded rows accumulate and are deduplicated by message id.
+Prepending restores the live scroll position from a stable message marker (with
+the captured-top height-delta fallback), including remounts that reset the feed
+scrollTop. Explicit notebook switches reset to the newest page, while Search,
+Library, Review/Progression, and panel remounts preserve the active window.
+Paging is locked during Send, awaiting-reply recovery, and revision. Stale
+revision cursors refresh the newest page and consume a distinct
+fragment-local stale-open flag so the student returns to the exact bottom;
+ordinary notebook-open state remains available to the outer workspace sync.
+Source ids,
+attachments, citations, and HMW visibility are projected alongside each page;
+the full-history endpoint remains unchanged for coaching, Review, export, and
+model context.
+
+**Files.** `backend/domain.py`, `backend/student_store.py`,
+`backend/workspace_service.py`, `backend/api_client.py`,
+`backend/http/app.py`, `backend/repositories.py`,
+`backend/sources/library.py`, `ui/services/runtime.py`, `ui/session.py`,
+`ui/panels/chat.py`, `ui/panels/studio.py`, `ui/topbar.py`,
+`ui/coach_welcome.py`, `ui/workspace.py`, `ui/layout/chat_scroll.py`,
+`ui/assets/styles/30-chat.css`, the pagination/HMW/chat-scroll tests, and
+this handoff.
+
+**Validation.** The final pagination persistence/API, HMW projection,
+facade-read instrumentation, chat-scroll, navigation/remount, Streamlit API,
+and architecture-contract set passed (84 tests). Repository `compileall` and
+`git diff --check` passed. The complete
+deterministic run reached 100% with 12 unrelated branch-baseline failures in
+citation resolution, reflection/stage behavior, prompt/retrieval expectations,
+research persistence, deployment-config expectations, deep-review/UI copy,
+and responsive CSS assertions; none are in the pagination acceptance set.
+Sol High's final review approved the live-anchor/fallback math, stale-cursor
+open handling, pagination boundaries, and updated contract inventories.
+The requested local browser smoke could not be completed because the in-app
+browser rejected the localhost reload under its URL policy; no workaround or
+paid call was used.
+
+**Compatibility, migration, and rollback.** No schema migration, AWS,
+AgentCore, DSQL, S3, identity, or student-data change is required. The legacy
+full-history route and server-side complete-history consumers remain intact.
+Rollback is code-only: revert the pagination/UI files and retain all persisted
+messages because no stored data format changed.
+
+**Known risks.** Real browser coverage of 6 → 12 → 18 paging, exact-bottom
+opening, touch/keyboard intent, and console cleanliness remains pending due to
+the localhost browser policy. The Streamlit 1.60 bidirectional component is
+wrapped with a visible fallback, but should be exercised in the controlled
+environment before release.
+
+**Next exact action.** Run the desktop and 390 px browser smoke against a
+permitted local/deployed URL, including notebook switching, Send/revision,
+Search, Library, Review, panel resize, and three upward page loads; then record
+the screenshots/console result before deployment.
+
+### AgentCore transient structured-output recovery (2026-09-04)
+
+**Behavior.** Fast Chat now performs one bounded recovery invoke when AgentCore
+returns its category-only structured-output harness envelope. The recovery uses
+a fresh stateless runtime session, while normal calls keep owner/notebook
+affinity. Strict Fast Chat validation, safety blocks, authentication failures,
+empty/native-malformed payloads, and idempotency behavior are unchanged. The
+request-local outer-call budget remains two invokes: a recovery consumes the
+available slot, and application RAG fallback is skipped when that budget is
+already exhausted. A successful recovery is persisted once; a failed pair
+leaves no partial turn.
+
+**Diagnosis/evidence.** The deployed CDE2300 logs showed the screenshot's
+failure category as `structured_output_failure` returning in about 168 ms,
+with adjacent Fast Chat calls succeeding in roughly 4.2–9.7 s. The category
+and latency do not match an EC2 cold-start timeout, OOM, lease conflict, or
+safety block. This patch targets the transient AgentCore harness/warm-session
+case without weakening the response contract.
+
+**Files.** `backend/agentcore_provider.py`, `backend/coaching/execution.py`,
+`backend/turn_perf.py`, focused AgentCore/RAG tests, and this handoff.
+
+**Validation.** Focused provider, Fast Chat, session-affinity, performance,
+RAG-fallback, atomic-persistence, and lease-alignment tests passed (141 tests
+in the final focused run). Backend `compileall` and `git diff --check` passed.
+Terra High independently reviewed the revised diff and approved the retry
+classification, fresh-session behavior, two-call lease bound, telemetry
+privacy, and exactly-once persistence coverage. No paid model call or
+deployment was made.
+
+**Compatibility, migration, and rollback.** No database/schema or student-data
+migration is required. Recovery is in-process and adds at most one model
+invoke only after a marked transient harness envelope; the existing two-call
+execution/270-second lease derivation remains valid. Rollback is code-only by
+removing the recovery change; existing persisted turns remain readable.
+
+**Known risk.** This handles transient runtime structured-output envelopes,
+not a genuinely stale published AgentCore schema or a browser/proxy NDJSON
+EOF after `started`; those still require runtime publish/version verification
+or separate stream diagnostics. The live endpoint has not been retried after
+this change because deployment and paid-call approval were not requested.
+
+**Next exact action.** Deploy the reviewed app/runtime change through the
+approved release path, bump the AgentCore affinity generation if the runtime
+artifact changes, and run a cost-capped smoke for a normal prompt plus a
+controlled transient-failure check before releasing the URL.
+
+### Cross-panel remount and stacking QA (2026-09-03)
+
+**Behavior.** The stage-review attention poller now scopes its baseline to the
+active notebook. Switching notebooks, opening Search/Library, creating a new
+notebook, changing Review/Progression, moving to another Thinking Path stage,
+or collapsing/expanding either side panel cannot reinterpret the previous
+notebook's review state as a new job and request a second workspace remount.
+Same-notebook review attention transitions still refresh when required. All
+bare `components.html` helpers now receive one shared open HTML document shell,
+and the body-wide composer tooltip observer was removed; upload tips are
+cleared on bounded apply/hover paths so panel remounts do not accumulate a
+document observer.
+
+**QA.** The deployed CDE2300 URL was exercised through both side-panel
+collapse/expand controls, Search, Library, New notebook, Review, a notebook
+switch, and a stage move. Each settled state contained one workspace mount,
+one relevant center/studio panel, and one scroll control; no persistent
+duplicate shell was observed. A deliberately submitted smoke prompt was
+blocked by the live safety check and was not retried. The test created one
+additional Untitled notebook and moved the selected Elderly Road Safety
+notebook to Design specification; these are persisted test-data changes.
+
+**Files.** `ui/panels/studio.py`, `tests/ui/test_rerun_scope.py`,
+`ui/html_embed.py`, `tests/ui/test_html_embed.py`, the layout/theme/profile/
+notebook/source/toast helper modules, `tests/ui/test_streamlit_ui.py`, and
+this handoff.
+
+**Validation.** Focused UI, HTML-embed, rerun-scope, chat-scroll, navigation,
+and toast tests passed; repository `compileall` and `git diff --check` passed.
+The broader `tests/ui/test_streamlit_ui.py` run retains two unrelated branch
+baseline failures (a stale `truncate` source assertion and a post-New-chat
+Stage Progression expectation). A cache-fresh local browser smoke covered
+side-panel collapse/expand, Search, Library, New notebook, Review, and
+remounts: every settled state had exactly one workspace and one relevant
+panel. EC2 remained healthy during the live smoke: the app used about 421 MiB
+of its 1.79 GiB container limit, the host had about 896 MiB available, and both
+containers reported zero restarts/OOM kills. No deployment or paid model call
+was made.
+
+**Known risk.** The deployed build and the local Streamlit 1.60 browser still
+log three `MutationObserver.observe(...): parameter 1 is not of type 'Node'`
+errors on clean loads and some remounts. The message persists with the app
+observers guarded and the shared component shell in place, so it is attributed
+to Streamlit/React runtime lifecycle code rather than a duplicate workspace
+trigger. It is not fixed by this repository change; upgrading or patching the
+runtime needs a separate decision and validation. The local watcher/helper
+fixes are not deployed to CloudFront.
+
+**Next exact action.** Deploy the reviewed local UI changes to a controlled
+environment, repeat the same cross-panel smoke, and then decide whether to
+upgrade/patch the Streamlit component runtime for a clean browser console.
+
+### Revisited-stage checkpoint refresh on actual exit (2026-09-03)
+
+**Behavior.** A completed Thinking Path stage can now be revisited without
+running the Haiku/Facione checkpoint after every student message. Successful
+substantive turns on that completed stage only update one coalesced durable
+dirty marker. The application freezes and queues one replacement checkpoint
+when focus actually leaves the stage through direct Journey selection, an
+exact typed move, accepted confirmation, or auto-advance. Initial stage
+completion remains a one-shot checkpoint. Durable job ids, worker leases,
+frozen message scope, stale-worker fencing, retry/restart recovery, and
+append-only revision pruning prevent duplicate or stale checkpoint writes.
+A failed older checkpoint also preserves and queues newer revisit work after
+exit. Ordinary stay/revisit turns retain the two-notebook-read baseline.
+
+Internal job ids, dirty tokens, lease data, and frozen transcript ids are
+removed from every student-facing notebook, learning-state, stage-selection,
+and dedicated Journey-review response. Deep Analysis behavior is unchanged.
+
+**Files.** `backend/coaching/execution.py`,
+`backend/coaching/stage_review_jobs.py`, `backend/http/app.py`,
+`backend/learning_service.py`, `backend/persistence/dsql_student_store.py`,
+`backend/specialists/__init__.py`,
+`backend/specialists/review_orchestration.py`, `backend/student_store.py`,
+`backend/workspace_service.py`, focused domain/HTTP/persistence/architecture
+tests, and this handoff.
+
+**Validation.** The affected deterministic regression set passed (175 tests),
+including multi-message revisit coalescing, actual-exit enqueue, provider
+failure after exit, frozen history, public API minimization, ordinary-turn read
+count, SQLite atomicity, and DSQL OCC coverage. `compileall` over `backend`,
+`ui`, `streamlit_app.py`, `tests`, and `scripts` passed, as did `git diff
+--check`. The final independent Sol-high review approved the change with no
+remaining correctness, security, or data-safety findings. The repository-wide
+suite retains 13 documented branch-baseline failures in citation/retrieval and
+prompt expectations, Free/Reflection progression expectations, stale
+architecture/route and deployment contracts, and unrelated UI/CSS assertions;
+none touches the changed revisit-refresh behavior. No paid model or AWS call
+was made.
+
+**Compatibility, migration, and rollback.** No SQL schema or existing message,
+notebook, source, or learning-data migration is required. New queue state is
+additive inside the existing `journey_stage_reviews` metadata blob, and the
+parser retains legacy job compatibility. SQLite and DSQL use the same
+transactional store methods; DSQL retry coverage includes every new write.
+Rollback is code-only: existing reviews remain readable, while additive
+internal keys are ignored by the previous parser.
+
+**Known risk.** Background review execution is process-local; after an abrupt
+restart, durable queued work resumes when the existing Journey-review read seam
+is reached, and expired running leases are reclaimed. Live AgentCore/DSQL
+behavior has not been exercised because that would require explicit paid-call
+approval and a cost cap.
+
+**Next exact action.** Run a local mock UI smoke: revisit a completed stage,
+send several messages, verify the checkpoint stays unchanged while remaining
+there, then move to another stage and verify exactly one refreshed Facione
+checkpoint appears. After that, run an explicitly cost-capped live AgentCore
+smoke before deployment.
+
+### Free mode: no artifact required to proceed (2026-08-30)
+
+**Behavior.** Free (`response_detail=long`) no longer requires a How Might We,
+two concepts, a full spec, or other stage artifacts before Next. The PI HMW
+application guard is skipped; Free coaching STAY is promoted to ADVANCE for a
+non-empty idea (meta/status/Q&A/Deep Review still stay). The HMW construction
+card is never projected in Free. Stage prompts for CG/DS/Ethics/Reflection add
+matching Free “check the idea, then Next” blocks. Guide is unchanged.
+
+**Files.** `backend/workflow.py`, `backend/learning/hmw.py`, stage prompts under
+`backend/prompts/stages/` and `agentcore_runtime/prompts/stages/`, call-site
+`response_detail` wiring in chat/API/execution/professor analytics,
+`backend/coaching/__init__.py` (lazy export to break import cycle), tests, and
+prompt baseline hashes.
+
+**Validation.** Focused mock tests for workflow Free ADVANCE, HMW scaffold gate,
+prompt baseline, pedagogical fixtures, and UI HMW scaffold passed. `compileall`
+passed. No paid model call.
+
+**Compatibility.** No schema change. Existing Strict notebooks remain Free
+(`long`). Live Haiku copy still needs AgentCore publish for prompt text; the
+application coerce unlocks Next without waiting for that.
+
+**Next exact action.** Local smoke in Free: share a non-HMW idea on PI and
+confirm Next appears without the HMW card; optionally deploy + AgentCore
+publish for live prose.
+
+### Guide and Free coaching styles (2026-08-30)
+
+**Behavior.** Profile Coaching style is now **Guide** and **Free**. Guide is
+the former Quick path: lighter Thinking Path coaching and progress once thinking
+is workable. Free is not the old Strict bar. A student who already has an idea
+can check it on the current stage, get a brief reply, and press Next (or jump
+with Work on this stage). The coach does not keep prompting them to improve
+HMW/structure. Stage changes stay recommended and student-confirmed. Persistence
+is still `response_detail=short|long`; existing Strict notebooks open as Free.
+New notebooks stay Guide (`short`). Internal `coaching_profile` tokens remain
+`quick`/`strict` for research compatibility. AgentCore `runtime_context`
+sends `guide`/`free`.
+
+**Files.** `ui/profile.py`, `ui/session.py`, `backend/prompts/composer.py`,
+`backend/prompts/stages/problem_identification.md`,
+`agentcore_runtime/prompts/stages/problem_identification.md`,
+`backend/mock_provider.py`, `backend/agentcore_provider.py`,
+`backend/learning/journey.py`, tests, README, AGENTS, prompt baseline hash,
+and this handoff.
+
+**Validation.** Targeted mock tests passed: composer Guide/Free runtime,
+HMW Guide/Free contracts, workflow Guide/Free mock ADVANCE, Bedrock prompt
+parity, AgentCore `response_detail=guide`, prompt hash lock, and Streamlit
+AppTest labels (Guide/Free persist `short`/`long`, new chat resets to Guide).
+`compileall` over `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+passed. No paid model call was made.
+
+**Compatibility and rollback.** No schema change. `short`/`long` storage is
+unchanged. Rollback is code-only. Live AgentCore Haiku sees the PI Free/Guide
+stage file only after a runtime publish and `AGENTCORE_SESSION_GENERATION`
+bump; FastAPI `trusted_instructions` apply on the next app deploy.
+
+**Next exact action.** Deploy the app, then publish AgentCore with the updated
+PI stage file if production should pick up Free/Guide pedagogy in Haiku.
+Student-facing check: Settings → Coaching style shows Guide/Free; Free lets
+Next after the first usable idea.
+
+### Streamlit anti-flash and instant-response UI (2026-08-30)
+
+**Behavior.** Ordinary controls no longer fade or clear the notebook workspace
+while Streamlit reconciles. The stale-frame override is strictly scoped to the
+mobile header and workspace; it does not conceal errors, status, or
+authentication. One capture-phase browser listener gives Navigation, Thinking
+Path, desktop rail collapse/expand, close/backdrop, and routing controls
+immediate optical feedback while the existing Streamlit callback remains
+authoritative. Mobile drawers retain their 220 ms motion; desktop panel sizing
+gets a restrained 180 ms transition, both disabled for reduced-motion users.
+Latest-message Edit uses the existing chat fragment callback; earlier-message
+Edit deliberately remains the existing confirmation-dialog/full-rerun path.
+There is no timer-based delay, loading screen, or session-state contract.
+
+**Files.** `ui/layout/column_resize.py`, `ui/panels/chat.py`,
+`ui/assets/styles/00-foundations.css`,
+`ui/assets/styles/10-workspace.css`,
+`ui/assets/styles/90-responsive.css`, focused UI/AppTest/CSS-contract files,
+`design-qa.md`, and this handoff. The phase also retains compatible existing
+chat scroll/edit-layout test coverage.
+
+**Validation.** Focused anti-flash coverage passed (77 tests); the complete
+deterministic `tests/ui` suite passed (223 tests). `compileall` over `backend`,
+`ui`, `streamlit_app.py`, `tests`, and `scripts` passed, as did `git diff
+--check`; no paid model call was made. In-app browser QA passed at 390 x 844
+and 1440 x 790: both drawers, backdrop/close, Search/Library routing, active
+Library return-to-Chat, latest Edit/Cancel, Navigation and Thinking Path rail
+states, Light/Dark/System appearance restoration, profile settings, and
+workspace opacity/stale-element checks. Findings and visual evidence are
+recorded in `design-qa.md`.
+
+**Compatibility and rollback.** Backend, API, database, provider, retrieval,
+coaching, persistence, source-selection, dialog, polling, widget-key, and
+local-storage width contracts are unchanged. Existing `mobile_panel="Studio"`
+normalization and desktop/mobile routing remain intact. Rollback is code-only;
+there is no data or preference migration.
+
+**Known risk.** The in-app browser retains pre-existing, unattributed
+component-iframe `MutationObserver.observe` errors dated 2026-08-29; none was
+created by this phase or affected the tested controls. A P3-only refinement is
+available for a browser-dependent desktop flex micro-snap before a 72 px rail
+settles; no persisted state or functionality is affected.
+
+**Next exact action.** Have a student rapidly alternate the 390 px Navigation
+and Thinking Path controls and desktop rail controls on their target browser.
+If the P3 flex micro-motion is perceptible, replace the desktop width
+transition with a fixed-width transform strategy without changing the current
+authoritative callbacks.
+
+### Gemini-inspired mobile drawer refresh (2026-08-29)
+
+**Behavior.** Widths at or below 1050 px now use one fixed, non-wrapping
+mobile row with hamburger, ellipsized current chat title, dedicated Material
+Analytics / **Analyse / Thinking Path**, New chat, and chat actions. Navigation
+and Thinking Path reuse the existing panels as mutually exclusive full-height
+drawers: Navigation enters from the left and Thinking Path from the right at
+`min(20.5rem, 88vw)`, with a shared dismissible backdrop, close controls,
+220 ms eased transitions, and reduced-motion support. Search, Library, Chat,
+composer state, and scrolling remain mounted beneath the overlay. Thinking Path
+review attention now badges Analytics; the chat actions menu remains limited to
+rename, transcript download, and delete. Desktop three-region resize/collapse
+behavior is unchanged.
+
+**Files.** `ui/workspace.py`, `ui/session.py`, `ui/panels/nav.py`,
+`ui/rename.py`, `ui/layout/column_resize.py`,
+`ui/assets/styles/15-nav.css`, `ui/assets/styles/90-responsive.css`,
+`tests/ui/test_mobile_drawers.py`, related UI contract/AppTest updates,
+`DESIGN.md`, `design-qa.md`, and this status handoff.
+
+**Validation.** All 14 dedicated mobile-drawer AppTest/CSS-contract tests
+passed. The complete `tests/ui` suite passed (219 tests). The previously
+failing authoritative stage-selection/chat AppTest and rename tests pass after
+stabilizing rename widget identity across automatic title changes. `compileall`
+and `git diff --check` passed. In-app browser QA passed at 390 × 844 in Dark
+and Light across closed Chat, both drawers, backdrop/close dismissal, Library
+state restoration, profile/settings, and chat actions; desktop regression QA
+passed at 1440 × 790. Reference and implementation captures were compared in
+combined inputs and all P0–P2 findings were resolved in `design-qa.md`. No paid
+model call was made. The repository-wide deterministic run completed with the
+same 15 documented non-UI failures in prompt budgets/baselines, retrieval and
+workflow expectations, architecture inventories, atomic persistence, and
+production stage-policy assertions; none of those failing areas changed in
+this mobile UI phase.
+
+**Compatibility and rollback.** No backend, API, database, provider,
+retrieval, coaching, source-selection, fragment, dialog, or persistence
+contract changed. Existing widget keys and desktop column state remain
+compatible. Legacy `mobile_panel="Studio"` and
+`pending_mobile_panel="Studio"` requests now open the right drawer while
+preserving the current Chat/Search/Library center view. Rollback is code-only;
+there is no data or schema migration.
+
+**Known risk.** The in-app browser still records the previously documented,
+unattributed Streamlit component iframe `MutationObserver.observe` lifecycle
+message with no observed layout or interaction impact. A P3-only visual option
+is to left-align more drawer navigation labels after student testing; the
+current centered treatment intentionally preserves the existing CDE2300 panel
+components.
+
+**Next exact action.** Have a student exercise the 390 px preview on a real
+touch device—open both drawers, switch Search/Library/Recent, rename and
+download one chat, and send one prompt—then record any tap-target or drawer-
+density feedback before deployment.
+
+### Gemini-inspired CDE2300 shell refresh (2026-08-29)
+
+**Behavior.** Removed the visual desktop top bar and moved CDE2300 identity,
+primary navigation, Recents, and profile/settings into a calm 284 px left
+sidebar with a matching 72 px collapsed rail. Search and Library are now center
+destinations; Library replaces Chat instead of opening a fourth Sources column,
+and selecting the active Library item returns to Chat. Thinking Path now
+collapses symmetrically to a 72 px Material Analytics / Analyse rail while the
+open center-to-panel resize behavior remains. Mobile keeps Chats, Chat, Library,
+and Journey as four exclusive destinations and anchors profile/settings to the
+bottom of Chats. Light and Dark themes use neutral Gemini-inspired surfaces and
+CDE2300 teal only for meaningful active states.
+
+**Files.** `streamlit_app.py`, `ui/topbar.py`, `ui/workspace.py`,
+`ui/panels/nav.py`, `ui/panels/sources.py`, `ui/profile.py`, `ui/session.py`,
+`ui/theme.py`, `ui/layout/column_resize.py`,
+`ui/layout/sources_scroll.py`, `ui/assets/styles/00-foundations.css`,
+`ui/assets/styles/10-workspace.css`, `ui/assets/styles/15-nav.css`,
+`ui/assets/styles/40-sources.css`, `ui/assets/styles/60-profile-topbar.css`,
+`ui/assets/styles/90-responsive.css`, UI tests, `DESIGN.md`, and
+`design-qa.md`.
+
+**Validation.** Focused navigation/theme/Streamlit/rerun/read-count coverage
+passed (61 tests). The complete `tests/ui` suite passed (204 tests).
+`compileall` and `git diff --check` passed. In-app browser QA passed at
+1440 × 790 and 390 × 844 in Light and Dark modes across Chat, Search, Library,
+Journey, both sidebar states, both Thinking Path states, profile, Recent menus,
+and Library controls. No paid model call was made. The repository-wide
+deterministic run completed with 15 existing non-UI failures in prompt budgets,
+retrieval/workflow expectations, stale architecture inventories, and production
+stage-policy assertions; none of those failing modules or contracts changed in
+this UI phase.
+
+**Compatibility and rollback.** Backend, API, persistence, provider,
+retrieval, coaching, source-selection, and database contracts are unchanged.
+Legacy title normalization and model preference application continue through
+the nonvisual `prepare_workspace_context()` helper. Existing widget keys,
+dialogs, polling, fragment boundaries, stored chats, notebooks, sources, and
+profile preferences remain compatible. Rollback is code-only; no data or schema
+migration is required.
+
+**Known risk.** The in-app browser records an unattributed Streamlit component
+iframe `MutationObserver.observe` lifecycle message on clean loads. It has no
+source URL or observed interaction impact and is tracked in `design-qa.md` as
+framework/tooling noise. Retired top-bar CSS selectors remain inert for
+compatibility and can be removed in a later cleanup after another complete
+responsive regression pass.
+
+**Next exact action.** Have a CDE2300 student complete one real local session
+through Chat → Library → Journey at desktop and mobile widths, then record any
+density or terminology feedback before removing the inert legacy top-bar CSS.
+
+### Course library is UI-only; Chat routing local/prod parity (2026-08-28)
+
+**Change.** Lecture Notes / Readings are a view-only course library. They never
+enter personal selected Chat context (``list_visible_sources(...,
+selected_only=True)`` excludes locked course rows; shared virtual items project
+``selected=False``; local folder sync creates course rows unselected). Course
+Q&A uses Bedrock KB Retrieve over the official catalog when intent cues fire,
+without requiring Sources checkboxes. My Sources stay selectable. Current-turn
+attachments stay turn-scoped; phrases like “source material I just added” do
+not pull course KB. Visible course material no longer implies model context.
+
+**Invariant.**
+
+- Course Library = UI view/open only
+- My Sources = selectable Chat context
+- Attachments = turn-scoped context
+- Course Q&A = Bedrock KB over the catalog
+
+**Files.** ``backend/sources/library.py``,
+``backend/persistence/store/operations/sources.py``,
+``backend/coaching/turn_snapshot.py``, ``backend/coaching/execution.py``,
+``backend/coaching/mode_policy.py``, ``backend/turn_perf.py``,
+``ui/panels/sources.py``, ``tests/domain/test_course_library_chat_context.py``,
+``tests/domain/test_source_library.py``, ``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused domain source/routing tests pass. App rebuild/redeploy
+required; no AgentCore publish, generation bump, KB resync, or DSQL migration.
+
+**Next exact action.** Rebuild immutable ``APP_IMAGE`` from this SHA and refresh
+EC2 Compose so CloudFront matches local routing.
+
+### Production stage policy matches local selection mode (2026-08-28)
+
+**Change.** ``compose.prod.yaml`` now sets ``STUDENT_STAGE_SELECTION=true`` and
+``AUTO_ADVANCE_STAGES=false`` so CloudFront/EC2 matches the local demo Journey
+Ready / ``Move to`` / Work on this stage behavior. Release checklist and
+``docs/deploy/AWS_STATELESS_EC2.md`` smoke steps updated. Code parity still
+requires merging ``Integrate-Bedrock-v2`` into ``main`` and rebuilding the EC2
+app image.
+
+**Files.** ``compose.prod.yaml``, ``docs/PRODUCTION_RELEASE_CHECKLIST.md``,
+``docs/deploy/AWS_STATELESS_EC2.md``, ``docs/IMPLEMENTATION_STATUS.md``.
+
+**Next exact action.** Merge/push this branch to the deploy SHA, build a new
+immutable ``APP_IMAGE``, run ``sh scripts/deploy_ecr.sh`` (or the documented
+EC2 recreate), then smoke Ready + Move to on CloudFront.
+
+### Generate Deep Analysis PDF (2026-08-28)
+
+**Change.** Renamed student-facing **Start Deep Review** / Journey **Generate
+Deep Review** to **Generate Deep Analysis PDF**. Unlock remains Reflection-
+complete (all Thinking Path stages in ``completed_stages``). Press still
+enqueues the existing Sonnet Deep Review job; when it completes, Review shows
+**Download Deep Analysis PDF** built from the snapshot via PyMuPDF
+(``GET /api/v1/threads/{id}/deep-analysis.pdf``). Internal route/job keys stay
+``deep-review`` for compatibility.
+
+**Files.** ``backend/learning/deep_analysis_pdf.py``,
+``backend/workspace_service.py``, ``backend/api_client.py``,
+``backend/http/app.py``, ``ui/panels/studio.py``, ``ui/services/runtime.py``,
+``tests/domain/test_deep_analysis_pdf.py``, UI Deep Review tests,
+``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused pytest for PDF builder + Deep Review control/chat
+progress; ``compileall`` on touched Python.
+
+**Next exact action.** Hard-refresh Streamlit; complete Reflection; press
+Generate Deep Analysis PDF (mock/Sonnet as configured); download the PDF when
+ready.
+
+### Stage-move coach briefing (2026-08-28)
+
+**Change.** After Journey **Work on this stage** / **Revisit** or a Streamlit-
+intercepted typed ``Move to [Stage]``, the coach persists one assistant-only
+chat bubble: ``Moved to Stage: [Stage].`` plus deterministic enter/revisit
+commands (no extra LLM call). Enter uses stage purpose + personalized
+how-questions tied to working conclusion / prior notes / last student message.
+Revisit uses Areas to improve + Working conclusion and revise-how commands.
+Successful moves and already-on-stage taps no longer show the composer notice
+above the textbox; locked jumps still do.
+
+**Files.** ``backend/learning/stage_briefing.py``, ``backend/student_journey.py``,
+``backend/learning_service.py``, ``backend/coaching/execution.py``,
+``ui/session.py``, ``ui/panels/studio.py``,
+``tests/domain/test_stage_move_briefing.py``, domain/UI assertion updates,
+``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused pytest: ``tests/domain/test_stage_move_briefing.py``,
+manual-stage / phase2 assertions in ``test_mode_classification.py``,
+``test_agentcore_session_affinity.py``, ``test_atomic_coach_turn.py``,
+``test_journey_linear_accordion_and_ctas_follow_unlocked_frontier``,
+``test_streamlit_stage_selection_refreshes_authoritative_stage_and_status``,
+``test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey``.
+``compileall`` on touched Python. One pre-existing HEAD failure remains
+(``test_reflection_completion_request_skips_retrieval_and_suppresses_advance``).
+
+**Next exact action.** Hard-refresh Streamlit; move via Journey CTA and typed
+``Move to``; confirm the chat bubble (not the composer notice) and that
+Revisit shows improve/how copy when Areas exist.
+
+### Progression-effect boundary (2026-08-28)
+
+**Change.** Separated application-owned ``progression_effect``
+(``none`` | ``evaluate`` | ``execute``) from ``response_mode`` / coaching
+semantics. Ordinary Coaching can still answer meta, status+guidance, and
+prior-stage review questions, but those turns cannot open Ready, write
+``validated_completion_stage``, or auto-advance — even when the mock/model
+returns ADVANCE. Classification lives in
+``backend/coaching/workflow_navigation.py`` (no extra LLM call). Fail-safe
+``apply_progression_effect`` runs after HMW guard/promote and before
+``PendingPhaseTransition`` in both ``CoachWorkflow._run_sequential`` and the
+LangGraph ``recommend`` node, with a second drop in
+``CoachApplicationService._submit_once``.
+
+- Compound status+guidance (e.g. “what stage am I in and how do I continue”)
+  → ``none``; Fast Chat may still guide; response prepends the authoritative
+  stage label when missing.
+- Meta-guidance and prior-stage quality review → ``none`` on all five stages.
+- Explicit readiness / move-next / named move → ``evaluate`` / ``execute``;
+  Phase 1 confirm and Phase 2 linear ``Move to`` preserved.
+- Substantive current-stage work and Reflection complete-in-place / terminal
+  path completion remain ``evaluate``.
+- Meta/status/prior-review/workflow turns skip Retrieve; genuine Week/lecture
+  source Q&A still retrieves.
+
+**Not done (documented debt).** Ready / Journey nodes / stage-review enqueue /
+Deep Review unlock still key off ``completed_stages``. This task does **not**
+decouple Ready from ``completed_stages``.
+
+**Files.** ``backend/coaching/workflow_navigation.py``,
+``backend/workflow.py``, ``backend/coaching/execution.py``,
+``backend/coaching/mode_policy.py``, ``backend/prompts/composer.py`` (optional
+non-progression sentence only), ``tests/domain/test_progression_effect.py``,
+``docs/IMPLEMENTATION_STATUS.md``. No AgentCore prompt publish / generation
+bump.
+
+**Validation.** Focused pytest:
+``tests/domain/test_mode_classification.py``,
+``tests/domain/test_progression_effect.py``,
+``tests/domain/test_hmw_stage_completion.py``,
+``tests/domain/test_workflow.py``,
+``tests/domain/test_retrieval_gate.py``,
+``tests/http/test_api.py``. New progression suite passes. Three failures match
+untouched HEAD debt (``test_reflection_completion_request_skips_retrieval_and_suppresses_advance``,
+``test_workflow_keeps_stage_without_creating_a_pending_transition``,
+``test_reflection_normalizes_advance_to_stay_without_transition``) — not
+regressions from this change. Ruff, compileall, and ``git diff --check`` on
+touched Python files.
+
+**Next exact action.** Hard-refresh Streamlit; on each stage ask compound
+status+guidance and a prior-stage quality question with sources selected —
+confirm helpful prose, no Ready, no completion, no evidence-gap. Then ask an
+explicit readiness question and confirm Ready/confirm still works.
+
+### Selection-mode readiness + Fast Chat intent hardening (2026-08-27)
+
+**Change.** With ``STUDENT_STAGE_SELECTION=true``, a coach ADVANCE now rewrites
+Chat to ``**[from] -> [to] is Ready.**`` plus how to move (enter
+``Move to <stage>`` or use Journey → **Work on this stage**) and explicitly
+offers the option to stay with one bounded refinement focus. Focus and the
+pending recommendation stay until the student moves. Whole-message
+``Move to <stage>`` remains a manual selection command. A repeated progression
+request reuses the server-owned Ready reminder without another model call;
+ordinary coaching and Q&A now continue normally while the original pending
+recommendation remains open.
+
+Fast Chat now stamps every ordinary message with a deterministic Q&A or
+Coaching expectation. Generic project uses of ``evidence`` and a one-word
+overlap with a selected filename/title no longer activate Retrieve or the
+course evidence-gap response. Explicit source requests (including “what does
+the evidence say?”), two-term source-title references, named course material,
+and implicit summaries of selected sources still retrieve. Mixed project/source
+language defaults to Coaching unless it explicitly asks to use a source.
+Confirmation-mode ``confirm`` / Next behavior is unchanged when selection is
+off.
+
+**Files.** ``backend/learning/journey.py``, ``backend/coaching/execution.py``,
+``backend/coaching/mode_policy.py``, ``backend/prompts/composer.py``,
+``backend/retrieval_gate.py``, ``tests/domain/test_mode_classification.py``,
+``tests/domain/test_retrieval.py``, ``tests/domain/test_retrieval_gate.py``,
+``tests/domain/test_student_journey.py``,
+``tests/domain/test_prompt_architecture.py``, ``tests/http/test_api.py``, and
+``docs/IMPLEMENTATION_STATUS.md``. Local ``.env`` remains untracked and was not
+changed.
+
+**Validation.** Focused pytest covers mode classification, retrieval recall,
+selected-source grounding, Q&A evidence gaps, pending-readiness follow-ups,
+student journey Ready formatting, API behavior, session affinity, and composer
+selection copy. Ruff, compileall, and ``git diff --check`` pass. The complete
+suite has 17 failures, all present in an untouched HEAD comparison (which has
+18); the difference is one corrected stale selected-source API expectation.
+The known Reflection-completion mismatch and other existing prompt, workflow,
+architecture-contract, and Deep Review UI test debt remain outside this narrow
+change.
+
+**Next exact action.** Hard-refresh Streamlit; with selection mode, trigger an
+ADVANCE and confirm Chat shows Ready + the move choices + optional stay guidance.
+Then verify a refinement follow-up still receives Coach feedback, an explicit
+course/source question still gets grounded Q&A, and generic project evidence
+language does not show the course evidence-gap response.
+
+### Composer typing lag: contain + drop body tooltip observer (2026-08-26)
+
+**Change.** Finish the long-chat typing responsiveness leftovers: add
+``contain: layout style`` on ``chat_feed`` / ``chat_log`` / ``chat_composer``,
+and remove the body-wide upload-tooltip ``MutationObserver``. Native upload
+tips are still cleared from ``apply()`` and attach hover/focus scans.
+
+**Files.** ``ui/assets/styles/10-workspace.css``, ``ui/assets/styles/30-chat.css``,
+``ui/layout/composer_layout.py``, ``tests/ui/test_streamlit_ui.py``,
+``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused ``tests/ui/test_streamlit_ui.py`` composer assertions.
+Hard-refresh Streamlit and smoke-test typing on a long notebook, Send/Stop,
+scroll-to-bottom, and attach hover (custom tip only).
+
+**Next exact action.** Visual smoke check in the running local app (desktop +
+390px). No AgentCore republish required.
+
+### Stage-completion reviews, Reflection DONE, Deep Review unlock (2026-08-26)
+
+**Change.** Reflection ADVANCE now completes in place (no sixth stage): prompts
+recommend ADVANCE when Reflection purpose is met; workflow no longer rewrites
+that ADVANCE to STAY or raises; ``mark_stage_completed("reflection")`` and
+persist accept terminal completion without a next-stage pending. Each newly
+completed stage (including Reflection) enqueues one background Haiku Journey
+checkpoint (``journey_stage_reviews``); failures are fail-open. Journey shows
+checkpoints, a red ``!`` unread badge (cleared when the Journey tab is viewed),
+and progress nodes derived from ``completed_stages`` + frontier (not viewed
+``current_stage``). Deep Review unlock **replaces** the 3-turn gate: eligible
+only when all five Thinking Path stages including Reflection are in
+``completed_stages``. Explicit click still required. Sonnet context prefers
+Journey stage checkpoints (+ important message ids) when prior Deep Review
+checkpoint_delta is unavailable.
+
+**Production note.** Live Coach uses AgentCore copies of ``reflection.md``.
+FastAPI persist alone cannot mark Reflection complete until the AgentCore
+runtime prompt is republished. App image rebuild is also required for FastAPI
+and Streamlit changes.
+
+**Files.** ``backend/learning/journey.py``, ``backend/workflow.py``,
+``backend/student_store.py``, ``backend/coaching/execution.py``,
+``backend/coaching/stage_review_jobs.py``, ``backend/coaching/deep_review_context.py``,
+``backend/specialists/review_orchestration.py``, ``backend/mock_provider.py``,
+``backend/agentcore_provider.py``, ``backend/prompts/stages/reflection.md``,
+``agentcore_runtime/prompts/stages/reflection.md``, ``backend/http/app.py``,
+``backend/api_client.py``, ``ui/panels/studio.py``, ``ui/panels/chat.py``,
+``ui/workspace.py``, ``ui/components.py``, ``ui/layout/journey_tab_unread.py``,
+``ui/services/runtime.py``, ``ui/assets/styles/00-foundations.css``,
+``tests/domain/test_stage_reviews_and_reflection.py``,
+``tests/http/test_deep_review.py``, ``tests/domain/test_deep_review_execution.py``,
+``tests/ui/test_deep_review_control.py``, ``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused pytest:
+``test_stage_reviews_and_reflection``, ``test_deep_review`` (HTTP),
+``test_deep_review_execution``, ``test_deep_review_control``, journey/theme
+filters. ``compileall`` on touched packages. Mock providers only; no paid
+Bedrock/OpenAI.
+
+**Next exact action.** Rebuild/recreate the EC2 app image **and** republish
+AgentCore so production Reflection ADVANCE and Haiku stage reviews take effect.
+
+### Natural-language Thinking Path navigation hardening (2026-08-26)
+
+**Change.** Deterministic workflow matching now tolerates conversational
+prefixes, punctuation, casing, embedded readiness asks, approved stage
+aliases, and **bounded** stage-name typos — only after strong navigation
+intent is established. Pure navigation and current-stage status requests
+force ``retrieve=false`` and never author the Course Q&A evidence-gap reply.
+Named destinations feed the existing Phase 2 ``validate_learning_stage_selection``
+path (same linear unlock rules as Journey buttons). Phase 1 still uses the
+readiness / pending-confirm path and does not mutate stage from the parser.
+Explicit ``confirm`` accepts harmless casing/punctuation; ``yes`` / ``okay``
+do not. No extra model call, AgentCore prompt change, or generation bump.
+
+**Files.** ``backend/coaching/workflow_navigation.py`` (new),
+``backend/coaching/mode_policy.py``,
+``backend/coaching/execution.py``,
+``tests/domain/test_mode_classification.py``,
+``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused ``test_mode_classification`` suite passes. No AWS
+calls or deployment performed.
+
+**Next exact action.** Rebuild/recreate the EC2 app image so production picks
+up the parser; AgentCore republish is **not** required.
+
+### Authoritative stage after PI→CG (2026-08-26)
+
+**Change.** After the application advances to Concept Generation, coaching
+runtime instructions now name the live stage as authoritative, and the
+Concept Generation stage prompts explicitly forbid continuing Problem
+Identification gatekeeping ("Before we move…", evidence/HMW readiness
+probing) unless the student asks to revisit. Display cleanup also strips
+"Before we move to …" boilerplate from transition responses. History is
+kept; it is continuity only.
+
+**Files.** ``backend/prompts/composer.py``,
+``backend/prompts/stages/concept_generation.md``,
+``backend/prompts/shared/coaching.md``,
+``agentcore_runtime/prompts/stages/concept_generation.md``,
+``agentcore_runtime/prompts/shared_coaching.md``,
+``backend/learning/journey.py``,
+``tests/domain/test_prompt_architecture.py``,
+``tests/domain/test_student_journey.py``,
+``tests/fixtures/coaching_prompt_baseline.json``.
+
+**Validation.** Focused prompt-architecture, journey, baseline, and
+coaching-behavior tests pass. No AWS calls or deployment performed.
+
+**Next exact action.** Rebuild/recreate the EC2 app image (and republish
+AgentCore if production loads runtime prompt files from the published
+artifact) so live coaching picks up the Concept Generation guard.
+
+### Application-owned lenient PI HMW advancement (2026-08-26)
+
+**Change.** FastAPI now promotes Problem Identification to Concept Generation
+when the active student message is a structural How Might We
+(``how might we`` + ``for`` + ``so that``) even if the model keeps
+``recommendation=stay`` and ``hmw_scaffold_ready=true``. The promotion hides
+the scaffold card, replaces stay-probe coach text with a short acknowledgement
+headed **[Problem identification] -> [Concept generation] Ready**
+(and the same ``[prev] -> [next] Ready`` pattern for other auto-advances),
+and uses the
+existing pending/auto-advance machinery. The existing reject-without-candidate
+guard is unchanged.
+
+**Files.** ``backend/learning/hmw.py`` (``student_workable_hmw_present``),
+``backend/workflow.py``,
+``tests/domain/{test_hmw_stage_completion,test_hmw_scaffold_gate}.py``,
+``docs/PROMPT_ARCHITECTURE.md``.
+
+**Validation.** Focused HMW completion and scaffold-gate tests pass. No AWS
+calls or deployment performed.
+
+**Next exact action.** Rebuild/recreate the EC2 app image so production picks
+up the application guard; AgentCore republish remains optional for wording but
+is no longer required for progression on structural HMWs.
+
+### Problem Identification workable-HMW transition rule (2026-08-26)
+
+**Change.** Mirrored Problem Identification stage prompts now encode
+good-enough-to-progress language: stop PI probing after a workable
+student-authored HMW, honor explicit move-on requests and repeated HMW
+resubmissions, and keep root-cause/evidence as pre-completion coaching goals
+only. Progression still uses ``recommendation=advance`` and
+``hmw_scaffold_ready=false``; FastAPI remains stage authority. No new
+``stage_complete`` schema, guard, or production env change.
+
+**Files.** ``backend/prompts/stages/problem_identification.md``,
+``agentcore_runtime/prompts/stages/problem_identification.md``,
+``tests/domain/{test_hmw_stage_completion,test_coaching_behavior_contracts}.py``,
+``tests/fixtures/coaching_prompt_baseline.json``.
+
+**Validation.** Focused HMW completion, coaching behavior contracts, and prompt
+baseline tests pass. No AWS calls or deployment performed.
+
+**Next exact action.** Republish AgentCore with the updated stage prompt, then
+rebuild/recreate the EC2 app image before production picks up the behaviour.
+
+### Journey CTA mobile-safe placement when expanded (2026-08-26)
+
+**Change.** Thinking Path non-current stages now render title + chevron first,
+expanded stage detail second when preview-open, and the **Work on this stage** /
+**Revisit** CTA last so the button no longer sits between the title and dropdown
+body on narrow panels. Collapsed wide layouts still show the CTA right-aligned on
+the same row as the title via copy-column flex CSS; expanded or narrow stages
+stack vertically in document order.
+
+**Files.** ``ui/panels/studio.py``,
+``ui/assets/styles/{20-studio,90-responsive}.css``,
+``tests/ui/test_rerun_scope.py``.
+
+**Validation.** Focused journey, rerun-scope, theme-styles, and Streamlit UI
+tests pass. No coaching logic or ``STUDENT_STAGE_SELECTION`` default change.
+
+**Next exact action.** Manual check at desktop collapsed, ~390 px collapsed, and
+expanded on both widths; then rebuild/recreate the EC2 app image when approved.
+
+### Phase 2 linear Journey selection (2026-08-25)
+
+**Change.** Student stage selection now uses one canonical unlocked frontier:
+fresh Problem Identification exposes only itself. A validated Coaching ADVANCE
+after the existing student-authored HMW guard records Problem Identification as
+completed while keeping focus there and retaining the auditable pending choice;
+Concept then becomes the only immediate next unlock until the student selects
+it. Later stages require the same contiguous validated-completion prefix, while
+revisits preserve earlier access and corrupt gaps fail closed. The shared
+transactional store seam rejects locked API and exact chat commands before
+pending-transition/message writes; valid selections remain atomic and preserve
+completed history. Journey renders one scalar preview accordion, a single
+immediate frontier CTA, neutral revisits/previews, subdued locked future
+stages, a copy-column layout that keeps the collapsed-wide CTA beside the title
+and stacks title → detail → CTA when preview-open or narrow, and no bottom Next
+control when
+``STUDENT_STAGE_SELECTION=true``. Phase 1 selection-disabled behavior remains
+unchanged. Explicit bounded navigation variants route through Coaching with no
+retrieval; they never authorize a stage mutation. No AgentCore publication or
+provider, retrieval, prompt, guardrail, schema, or deployment change was made.
+
+**Files.** ``backend/learning/journey.py``, ``backend/student_journey.py``,
+``backend/student_store.py``, ``backend/learning_service.py``,
+``backend/coaching/mode_policy.py``,
+``ui/panels/studio.py``, ``ui/assets/styles/{20-studio,90-responsive}.css``,
+affected deterministic domain, persistence, and UI tests.
+
+**Validation.** Focused learning, mode-classification, atomic persistence,
+journey, theme, rerun-scope, Streamlit UI, and API-mode UI tests pass. The full
+deterministic suite passes; Ruff on touched Python, compileall, and
+``git diff --check`` also pass.
+
+**Visual review.** Sol verified the real Journey at 390 px and 1440 px. The
+stage icon/title pair remains horizontal, the current stage is visually
+distinct, the list stays compact, and neither viewport has horizontal
+overflow.
+
+**Next exact action.** Review the uncommitted diff, then rebuild/recreate the
+application when approved. No AgentCore publication or affinity-generation
+change is required.
+
+### Production validation blocker cleanup (2026-08-25)
+
+**Change.** Restored the documented Month-1 production Compose policy
+(`AUTO_ADVANCE_STAGES=true`, `STUDENT_STAGE_SELECTION=false`), updated deployment
+tests to the active affinity generation 8, and repaired three malformed
+indentation sites in the mock-only `scripts/load_probe.py`.
+
+**Validation.** `tests/test_deployment_config.py` and
+`tests/scripts/test_load_probe.py`: 32 passed. The full deterministic suite:
+**1,755 passed**. Ruff, compileall, and `git diff --check` passed. No runtime,
+AgentCore, AWS, database, or user data changes were made.
+
+**Next exact action.** Run the broader deterministic suite; then rebuild the
+EC2 application from this reviewed commit if the remaining unrelated tests are
+green.
+
+### Deep Review timeout boundaries (2026-08-25)
+
+**Change.** Confirmed the production timeout failure was an inner Bedrock
+read-timeout boundary, not a second model call. Deep Review now has an
+independent 180-second runtime Bedrock read timeout, a 200-second FastAPI
+AgentCore client timeout, and a 240-second stale/acceptance deadline. Fast
+Chat remains 110 seconds. Botocore remains pinned to one total attempt and
+the existing Strands retry policy, prompts, models, Guardrail, RAG, DSQL, and
+UI are unchanged.
+
+**Files.** `agentcore_runtime/model.py`, `backend/{settings,providers,agentcore_provider}.py`,
+`.env.example`, `compose.prod.yaml`, runtime/provider and release-checklist
+documentation, and focused timeout/config/telemetry tests.
+
+**Validation.** Sol independently reviewed all changed lines. Focused
+timeout/runtime/provider/lifecycle suites passed. The broad suite excluding
+the pre-existing `scripts/load_probe.py` collection error reached only the two
+unrelated existing UI failures: the stale duplicate-bubble count in
+`tests/ui/test_chat_progress.py` and the legacy `textarea:disabled` marker
+expectation in `tests/ui/test_theme_styles.py`. Exact full pytest, Ruff, and
+compileall including `scripts/` remain blocked by the pre-existing
+`scripts/load_probe.py` syntax/indentation errors. Ruff on touched files,
+compileall excluding `scripts/`, and `git diff --check` passed.
+
+**AWS publication.** The existing runtime ARN ending `6ncEO79sD7` was
+published successfully: previous `DEFAULT` version `v31` was `READY`, new
+version `v32` is `READY`, and `DEFAULT` now points to `v32` (`READY`). The
+artifact key is
+`agentcore-patches/chatbot_harnessAgent-deep-review-timeout-20260825T165943Z.zip`.
+The published runtime has
+`DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS=180`, Guardrail v4, and lifecycle
+settings `idleRuntimeSessionTimeout=1800` / `maxLifetime=28800`. Version `v31`
+is retained `READY` for rollback.
+
+**Compatibility / deployment.** No EC2 application deployment or paid live
+Deep Review was performed. The local `.env` shows affinity generation `8`,
+while tracked `compose.prod.yaml` remains at generation `7`; align and
+redeploy the application before app rollout. The runtime 180-second setting
+is runtime-only; the 200/240 settings belong in the application environment.
+
+**Next action.** Align the application generation and obtain deployment
+approval before EC2 rollout; run one bounded live Deep Review only after
+explicit approval. The known unrelated failures remain separate
+release-checklist items.
+
+### Journey stage cards: closed header + open filled card (2026-08-24)
+
+**Change.** Thinking Path non-current stages now use a compact header row:
+title, chevron, and a tertiary handwritten **Work on this stage** CTA on the
+right when ``STUDENT_STAGE_SELECTION=true``. Preview-open stages share the
+current-stage filled card via a hidden ``journey-state open`` marker. Current
+stage keeps description + Suggested questions and no CTA.
+
+**Files.** ``ui/panels/studio.py``, ``ui/assets/styles/{00-foundations,20-studio,90-responsive}.css``,
+``tests/ui/{test_rerun_scope,test_theme_styles}.py``.
+
+**Validation.** Focused UI rerun-scope, theme-styles, and streamlit UI tests;
+``compileall`` on ``ui``. No coaching logic, ``STUDENT_STAGE_SELECTION``
+default, or deploy changes.
+
+### Local chat-driven authoritative stage selection (2026-08-24)
+
+**Change.** With ``STUDENT_STAGE_SELECTION=true``, an exact full-message
+``move me to <canonical stage label or id>`` command now persists the user
+message, fixed server reply, authoritative Journey stage, and legacy
+``thinking_stage`` together in the existing coach-turn transaction. The
+command accepts case/spacing/trailing punctuation plus ``and`` for the Ethics
+``&`` label, but performs no fuzzy matching. It rejects any active pending
+transition in that same transaction, preserves completed stages, and performs
+zero retrieval or model work. Revisions cannot use this path. With the flag
+disabled, the same text remains workflow intent and follows the existing
+immediate-next-stage readiness and exact-confirm flow; it cannot jump stages.
+The next normal Fast Chat turn keeps the same affinity session while carrying
+the newly persisted stage and corresponding stage prompt.
+
+**Files.** ``backend/coaching/{execution,mode_policy}.py``,
+``backend/student_store.py``,
+``tests/domain/{test_mode_classification,test_agentcore_session_affinity}.py``,
+``tests/persistence/{test_atomic_coach_turn,test_conversation_revision}.py``, and
+``tests/ui/test_streamlit_api_mode.py``.
+
+**Validation.** The focused parser/application/atomic-persistence/affinity/UI
+set passed with 145 tests. The expanded API, ownership, idempotency, revision,
+learning, provider, and architecture set passed with 293 tests. Ruff passed on
+all touched Python; compileall and ``git diff --check`` passed.
+
+**Compatibility / deployment.** No schema migration or data rewrite is
+required. The DSQL inherited OCC transaction path is covered by a deterministic
+SQLite-backed adapter test. Rollback is the application diff only. Rebuild the
+application when this local-only capability is wanted; do not publish
+AgentCore, change session generation, Guardrails, or AWS. Production remains
+unchanged while ``STUDENT_STAGE_SELECTION=false``.
+
+**Next action.** Keep arbitrary stage jumps local/testing-only. Production
+students should continue using the ordinary readiness and confirmation flow.
+
+### Authoritative per-stage AgentCore prompt verification (2026-08-24)
+
+**Change.** Added deterministic regression coverage proving that each persisted
+Thinking Path stage maps to the expected AgentCore topic and runtime stage
+prompt. Added an affinity-path regression proving an authoritative stage change
+reuses the same owner/notebook Fast Chat session while sending the new stage
+and prompt on the next invoke.
+
+**Files.** `tests/domain/test_agentcore_provider.py`,
+`tests/domain/test_agentcore_session_affinity.py`.
+
+**Validation.** The affected provider and affinity files passed with 70 tests;
+the requested cross-layer prompt/provider/affinity/learning/UI suite passed
+with 142 tests. Ruff, compileall, and `git diff --check` passed. No AgentCore
+runtime, schema, AWS, or deployment change is required.
+
+**Next action.** Keep stage selection/progression server-authoritative; publish
+AgentCore only if runtime prompt files themselves change.
+
+### Native Stop button and clean in-flight cancellation (2026-08-24)
+
+**Change.** The composer now observes Streamlit's in-place Send/Stop
+``data-testid`` swap and textarea ``disabled`` state, so Stop is laid out on
+the next animation frame without requiring a viewport resize. A capture-phase
+handler marks only the temporary in-flight prompt and status as stopped when
+the native Stop control is clicked; Streamlit still owns cancellation and
+resets its own trigger widget. A later Send also schedules the existing
+coalesced layout pass directly, so a Stop → Send → Stop sequence does not rely
+on a previous fragment's mutation observer remaining alive. The previous
+custom busy-state collapse was removed: it could hide the native Stop control
+itself, while Streamlit's normal disabled composer keeps that control visible.
+
+**Compatibility / deployment.** The client does not destructively cancel an
+already-persisted backend turn. If that rare race completes atomically, the
+authoritative turn appears on a later normal render. Application rebuild only;
+no AgentCore, session-generation, Guardrail, or AWS change is required.
+
+### Heavy-notebook composer typing responsiveness (2026-08-24)
+
+**Evidence.** An unsent browser comparison on the same authenticated session
+showed the 61-character deterministic typing sequence reaching the automation
+deadline after only six characters in a long, attachment-heavy notebook; an
+otherwise light notebook reached the same deadline only after typing all but
+the final character. No coaching turn, retrieval, model call, or persistence
+write occurred during the comparison. The compositor helper previously routed
+every ordinary input through a full layout routine plus nested animation-frame
+passes and broad mutation observers.
+
+**Change.** Ordinary composer input now passes its mounted textarea into one
+coalesced textarea-only animation-frame measurement, without document or
+transcript lookup. A composer-local, contained measurement mirror keeps
+auto-grow and deletion shrink correct without resetting the live textarea on
+every keypress. Full composer layout and model placement are reserved for
+structural input changes, busy controls, remounts, viewport changes, attachment
+overlay, and model controls; textarea-width observation never schedules full
+layout for a self-induced height change. Text paste stays on the lightweight
+path and attachment DOM changes remain structural. Textarea size writes occur
+only when visible size/overflow actually changes. Development-only browser
+counters are opt-in through
+``CO_DESIGN_COMPOSER_PROFILE=true`` and are hard-disabled when
+``APP_ENV=production``; they record no student text or request data.
+
+**Follow-up (2026-08-26).** Long-chat typing still lagged because composer
+auto-grow reflowed the transcript flex column. Kept the lightweight typing
+path (textarea-only resize, no full layout on each key), restored one-to-five-row
+auto-grow with internal scroll at the cap, added ``contain: layout style`` on
+``chat_feed`` / ``chat_log`` / ``chat_composer``, and removed the body-wide
+upload-tooltip ``MutationObserver`` in favour of apply/attach-hover scans.
+
+**Files.** `ui/layout/composer_layout.py`,
+`ui/assets/styles/{10-workspace,30-chat}.css`,
+`tests/ui/test_streamlit_ui.py`.
+
+**Validation.** `tests/ui/test_streamlit_ui.py`, `tests/ui/test_chat_scroll.py`,
+and `tests/ui/test_ui_perf_logging.py`: 43 passed. The injected JavaScript
+passed `node --check`; Ruff passed on changed files; `compileall` passed for
+`ui`, `tests/ui`, and `streamlit_app.py`; `git diff --check` passed.
+
+**Deployment.** Rebuild/recreate the application only. No AgentCore publication,
+session-generation increment, Guardrail change, or AWS change is required.
+
+**Next action.** On a local development build, set
+``CO_DESIGN_COMPOSER_PROFILE=true`` before startup and compare the counters
+from ``window.__cdComposerProfile`` for a light and heavy notebook; then run a
+desktop and 390px visual check for typing, paste, attachment controls, model
+placement, and the five-row textarea cap.
+
+### Attachment scope and confirmation-gated navigation (2026-08-23)
+
+**Change.** Authoritative selected-source validation now remains separate from
+the effective per-turn evidence scope: direct private attachment questions send
+only their current attachment IDs to retrieval/provider grounding, while
+explicit course comparisons retain their combined scope. A narrow server-side
+stage-navigation matcher forces explicit move-on requests into coaching and
+skips retrieval even if a selected source title names the target stage. A ready
+navigation recommendation opts out of the existing auto-advance branch only
+for that explicit request, remains pending, receives a server-owned destination
+and exact ``confirm`` instruction, and a literal chat ``confirm`` resolves an
+existing pending transition through the existing atomic learning service without
+model or retrieval work. Organic/HMW auto-advance remains unchanged.
+
+**Files.** `backend/coaching/{execution,mode_policy}.py`,
+`backend/prompts/composer.py`, `tests/domain/{test_mode_classification,
+test_rag_fallback,test_prompt_architecture}.py`.
+
+**Validation.** A focused cross-cutting selection (mode/prompt/RAG/retrieval/
+Q&A/provider/HMW/workflow/API/deployment) passed: 273 tests. Ruff passed on
+touched Python files; compileall passed for `backend`, `ui`,
+`streamlit_app.py`, `tests`, and `agentcore_runtime`. Unfiltered full pytest
+collection remains blocked by the untouched pre-existing
+`scripts/load_probe.py:663` indentation error. A broad run ignoring only that
+file collected 1,675 tests: 1,674 passed and
+`tests/ui/test_chat_progress.py::test_submitted_prompt_does_not_share_widget_with_previous_assistant`
+failed (expected assistant reply count 2, got 1); its isolated rerun also
+fails. No UI files changed in this task, so this remains a pre-existing/stale
+UI-test blocker.
+
+**Compatibility / deployment.** No schema, Compose, AWS, or AgentCore runtime
+artifact changes. Rebuild the app image only; no runtime publication or
+session-generation bump is needed because the trusted navigation instruction
+is sent in the application-owned trusted-instructions payload.
+
+**Next action.** Resolve or separately handle the pre-existing
+`scripts/load_probe.py` syntax error and stale `test_chat_progress` failure,
+then rerun the full deterministic mock suite and perform a mock/API smoke of
+attachment-only image/PDF Q&A and typed confirmation.
+
+### Default coaching style is Quick (2026-08-23)
+
+**Change.** New notebooks and empty progress blobs now default to Quick
+coaching (`response_detail=short`). Quick/Strict mapping and coaching logic
+are unchanged. Notebooks that already persisted Strict stay Strict.
+
+**Files.** `backend/learning/journey.py`, `backend/prompts/composer.py`,
+`backend/student_store.py`, `ui/session.py`, plus default-assertion tests and
+docs that named the previous Strict default.
+
+**Validation.** Focused journey, store, workspace API, and Streamlit profile tests.
+
+**Next action.** Existing saved Strict notebooks are untouched. Rebuild the
+EC2 app image if this default should apply in production. Do not republish
+AgentCore.
+
+### Lecturer student-detail DSQL ORDER BY (2026-08-23)
+
+**Change.** Opening one student 503'd on DSQL because notebook-summary SQL used
+``ORDER BY COALESCE(last_active, ...)``; PostgreSQL treats that alias as an
+input column. Order by the ``MAX(...)`` expression instead, reuse the proven
+roster SQL for the single-student profile, and keep the Students back control
+when one record fetch fails.
+
+**Files.** `backend/professor_analytics/repository.py`, `ui/professor.py`,
+`tests/http/test_professor_analytics.py`.
+
+**Validation.** Focused professor HTTP tests.
+
+**Next action.** Rebuild the EC2 app image so production student detail works.
+Do not republish AgentCore.
+
+### Lecturer dashboard UX + progressive tab fetch (2026-08-23)
+
+**Change.** Lecturer shell now uses a persistent left sidebar (Overview / Students /
+Learning / Engagement / Research) with full-width drill-down for Students → student
+→ notebook workspace. Students UI fetches tab-scoped endpoints only (messages,
+sources, journey, review) with session caches and per-tab Refresh; workspace
+all-in-one remains for compatibility. Student detail uses bounded SQL snapshots
+(no transcript bodies). New paginated messages endpoint uses keyset cursors
+(newest page first, load-earlier for older active-branch turns).
+
+**Files.** `backend/professor_analytics/{models,repository,service}.py`,
+`backend/http/app.py`, `backend/api_client.py`, `ui/professor.py`,
+`ui/assets/styles/70-professor.css`, `tests/http/test_professor_analytics.py`,
+`tests/ui/test_professor_ui.py`, `tests/test_architecture_contracts.py`.
+
+**Validation.** Focused professor HTTP/UI tests, architecture route inventory,
+`ruff check` on touched files, `compileall` on `backend` / `ui` / `tests`.
+
+**Migration.** None. Existing `/workspace`, full transcript, source/attachment
+bytes routes unchanged.
+
+**Risks.** Staging visual pass still required at 1440px and 390px. Dedicated
+DSQL SELECT-only professor DB role is optional defense-in-depth (new pool) and
+remains out of scope.
+
+**Next action.** Staging visual check of sidebar shell and Students drill-down;
+do not republish AgentCore.
+
+### Lecturer Course Analytics scroll (2026-08-23)
+
+**Change.** The student studio viewport lock (`html`/`body`/`.stApp`/
+`.block-container` at `100vh` + `overflow:hidden`) clipped the Students
+roster and notebook chat with no scrollbar. Course Analytics now opts out of
+that lock when `.st-key-professor_header` is present, and the student list
+plus chat/research transcripts are real inner scrollports.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`.
+
+**Validation.** Focused professor UI tests plus compileall on `ui`.
+
+**Next action.** Rebuild the EC2 app image so production Students can scroll.
+Do not republish AgentCore.
+
+### Lecturer Students roster DSQL fix (2026-08-23)
+
+**Change.** ``load_student_roster()`` compared INTEGER ``is_error`` with
+``NOT column``, which SQLite accepts and PostgreSQL/DSQL rejects
+(``argument of NOT must be type boolean, not type integer``). The Students
+page therefore returned 503 in production while Overview (``load_class_rows``)
+still worked. Predicates now use ``COALESCE(is_error, 0) = 0``.
+
+**Files.** `backend/professor_analytics/repository.py`,
+`backend/http/app.py`, `tests/http/test_professor_analytics.py`.
+
+**Validation.** Focused professor HTTP tests plus compileall.
+
+**Next action.** Rebuild the EC2 app image so production Students uses the
+portable roster SQL. Do not republish AgentCore.
+
+### Lecturer workspace production fix + UX polish (2026-08-22)
+
+**Change.** Professor read paths now preserve the configured database provider
+when opening student-scoped stores (no ``Path(None)`` / forced SQLite on DSQL)
+and use ``ensure_owner=False`` with ``owner_id`` taken from the verified user
+row so lecturer reads never call ``_ensure_user``.
+Citation authorization resolves against the same visible-source universe as the
+workspace Sources tab, including shared virtual Lecture Notes/Readings. UI:
+Markdown chat rendering, clickable citations, compact attachment/source rows,
+notebooks moved above analytics, explicit Refresh for session caches, simplified
+mobile drill-down CSS.
+
+**Files.** `backend/professor_analytics/{repository,service}.py`,
+`ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/http/test_professor_analytics.py`, `tests/ui/test_professor_ui.py`.
+
+**Validation.** Focused professor HTTP/UI tests, architecture contracts,
+`compileall`, `ruff check` on touched files.
+
+**Next action.** Visual acceptance at 1440px and 390px on staging EC2 image.
+
+### Lecturer dashboard revamp (2026-08-22)
+
+**Change.** Professor Students now loads a compact per-student SQL roster
+(`load_student_roster`) instead of materialising one Python row per active
+message. Student detail and notebook workspace are fetched only after explicit
+UI clicks, with session-local caches in `ui/professor.py`. Workspace API
+responses use nested `notebook`, `transcript.messages`, allow-listed
+`ProfessorSourceSummary`, and `learning.{journey,hmw_scaffold,review}`; messages
+load once per workspace request. Mobile drill-down hides the roster column below
+700px once a student is selected.
+
+**Files.** `backend/professor_analytics/{repository,models,service}.py`,
+`ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/http/test_professor_analytics.py`, `tests/ui/test_professor_ui.py`.
+
+**Validation.** Focused pytest on professor HTTP/UI modules and `compileall`
+on `backend` and `ui`.
+
+**Next action.** Visual check at 1440 px and 390 px if layout regressions are
+reported.
+
+### Lecturer notebook workspace (2026-08-22)
+
+**Change.** Lecturers can open a student's notebook into a read-only workspace with
+**Chat | Sources | Journey | Review** tabs. New professor routes:
+`GET .../conversations/{notebook_id}/workspace` and
+`GET .../sources/{source_id}` (library sources only; chat attachments stay on
+the existing attachment route). Sources metadata uses `professor_public_source`
+(no extracted text, paths, or bytes in the list). Learning payload includes
+`normalize_journey`, `hmw_scaffold_projection`, and `learning_review`.
+Audits: `professor.workspace`, `professor.source`.
+
+**Files.** `backend/professor_analytics/{models,repository,service}.py`,
+`backend/http/app.py`, `backend/api_client.py`, `backend/workspace_service.py`,
+`ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/http/test_professor_analytics.py`, `tests/ui/test_professor_ui.py`,
+`tests/test_architecture_contracts.py`.
+
+**Validation.** `tests/http/test_professor_analytics.py`,
+`tests/ui/test_professor_ui.py`, `compileall` on `backend` and `ui`.
+
+**Next action.** None for this slice unless a visual check at 1440 px / 390 px
+surfaces layout issues.
+
+### Current authority / release state (2026-08-22)
+
+**Source code HEAD:** `1799a5b` (release-hardening, attachment relevance, professor
+access audit, and Fast Chat wire strictness are committed on
+`Integrate-Bedrock-v2`).
+**EC2 application image:** `cde2300-chatbot:ddfc3f4` (source/image status is
+unchanged; no EC2 rebuild or deployment was performed here).
+**AgentCore runtime:** live mapping re-read 2026-08-22 12:03 UTC:
+DEFAULT → **v31 READY**. Artifact
+`agentcore-patches/chatbot_harnessAgent-fastchat-contract-20260822T115716Z.zip`.
+Byte-for-byte match against local `agentcore_runtime/` source (33 `.py`/`.md`
+files, excluding README/`requirements.txt`/`__init__.py`). No new version
+published; overlay would have been a no-op.
+**Guardrail:** live runtime env is `GUARDRAIL_ID=o8aipba8m129` /
+`GUARDRAIL_VERSION=4`.
+**Affinity generation:** tracked Compose generation `7`; this check does not bump it.
+
+These are distinct authorities: source HEAD identifies application code, the
+EC2 image identifies the deployed FastAPI/Streamlit artifact, AgentCore
+runtime identifies the generation-only model service, Guardrail identifies its
+runtime safety configuration, and affinity generation identifies the
+application/runtime session compatibility value. Historical entries below
+retain their original release observations.
+
+### AgentCore prompt overlay check (2026-08-22)
+
+**Change.** Did not create a new runtime ARN and did not upload prompt files
+onto EC2. Live DEFAULT was already **v31 READY** on
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`, updated 2026-08-22
+11:58 UTC. Local `agentcore_runtime/` at `1799a5b` matches that zip, so a
+second overlay was skipped.
+
+**Validation.** `get-agent-runtime` and DEFAULT endpoint both READY at
+liveVersion 31. Guardrail env remains v4. Identity was account
+`355604674280` / `us-west-2`. No model invoke. No EC2 rebuild.
+
+**Compatibility / risk.** Warm EC2 affinity sessions at generation `7` can
+still keep pre-v31 microVM assets. The student “test” toast is
+`structured_output_failure` / `malformed`, not a missing prompt file on the
+EC2 disk.
+
+**Next exact action.** If existing production notebooks must leave older
+warm runtimes, bump host `AGENTCORE_SESSION_GENERATION` to `8` and recreate
+the FastAPI container. Do not SCP prompts onto EC2.
+
+### Lecturer dashboard progressive disclosure (2026-08-22)
+
+**Change.** Professor Students now follows a roster → selected student →
+selected notebook transcript flow. `student_detail()` uses a student-scoped
+active-row query plus a compact body-free class assessment benchmark instead
+of rebuilding every student’s detailed rows. Notebook summaries remain
+transcript-free; transcript responses contain only the selected active branch,
+safe message attachment descriptors, and citation references. An authorized
+professor attachment endpoint verifies student, notebook, active message
+association, and attachment origin before streaming bytes. Top-level tabs are
+Overview, Students, Learning Progress, Engagement, and Research Review.
+
+The release pass moved attachment opening to a lazy authenticated API-client
+fetch inside a lecturer-owned preview/download dialog; no browser-facing URL
+is constructed from the API base URL. Citation refs now normalize current dict
+records and legacy ids, then filter to notebook-owned sources. Source origin is
+checked exactly after projection. Overview, Learning Progress, Research Review,
+responsive Students master-detail, transcript stage metadata, and keyed message
+cards now match the lecturer UX brief.
+
+**Validation.** The focused lecturer-dashboard acceptance run passes 87 tests,
+including scoped detail, attachment metadata separation, active transcript
+projection, lecturer authorization, and authorized attachment access. Sol
+completed local visual verification at 1440 px and 390 px: Students stacks
+without horizontal overflow; Research Review uses two desktop columns and a
+stacked mobile layout. Ruff, backend/UI compileall, and `git diff --check` pass.
+The broader repository suite still has unrelated failures in the existing dirty
+Fast Chat/idempotency and architecture-contract changes.
+
+**Compatibility / risk.** No schema or persisted-data migration. Existing
+Sources remain separate from chat attachments, and no model/AWS/deployment
+change was made. FastAPI/EC2 rebuild is required for the new route; AgentCore
+republish and generation bump are not required.
+
+**Next exact action.** Rebuild/deploy the FastAPI/Streamlit app in staging/EC2
+and smoke-test lecturer auth, one selected student/notebook, and one
+attachment. No AgentCore publish or generation bump is required for this
+dashboard change.
+
+### Release hardening pass (2026-08-22)
+
+**Change.** Fixed idempotency replay to prefer the durable marker ``turn`` dict
+over slim message reconstruction in ``claim_coach_request``, and to stamp that
+exact turn onto the pending marker in the same ``persist_coach_turn``
+transaction so same-key waiters cannot observe a slim reconstruction in the
+persist-before-complete window. Fast Chat wire adaptation now requires
+``citations``, ``hmw_scaffold_ready``, ``needs_source_retrieval``, and
+``out_of_scope`` on slim ``mode`` payloads that do not carry a nested
+``assessment``; legacy synthesis paths still fill those keys explicitly.
+Internal ``FastChatTurnOutput`` constructors keep Python defaults. Stale tests
+updated for Q&A retrieval evidence-gap success, compatibility-façade
+``selected`` signature, and revise persist-before-complete durable-field replay.
+
+**Validation.** The previously failing idempotency/concurrency/rate-limit/
+critical-path tests pass individually and 5/5 under repeated concurrent
+reruns. Focused modules, Ruff, compileall, and ``git diff --check`` pass.
+The supported deterministic full suite is green: 1644 passed, 0 failed.
+Type checking is not configured. Lecturer analytics SQL was not changed.
+
+**Compatibility / risk.** No schema migration, AWS mutation, AgentCore publish,
+``AGENTCORE_SESSION_GENERATION`` bump, or compose generation/guardrail change.
+Source HEAD is ``1799a5b``; compose.prod generation ``7`` / Guardrail v4
+unchanged. FastAPI/EC2 rebuild is required to pick up the application-side
+idempotency and wire-parse fixes; AgentCore republish is not required because
+the runtime JSON Schema already required those fields.
+
+**Next exact action.** Rebuild/deploy the FastAPI/Streamlit app in staging/EC2
+and run the manual mobile/browser smoke checklist. No AgentCore publish or
+generation bump is required for this hardening pass.
+
+### Private attachment relevance, scroll, and edit rendering (2026-08-22)
+
+**Change.** Current-turn attachment questions now scope deterministic retrieval
+to the private attachment when the request is informational and does not name
+course material. Explicit course comparisons retain combined attachment plus
+course retrieval, while the existing single Fast Chat `out_of_scope` decision
+still owns the semantic scope boundary. Attachment edit rows and pending
+revisions preserve the authoritative attachment descriptor exactly once; the
+obsolete suffix remains hidden. The existing bounded `chat_feed` remains the
+only transcript scrollport.
+
+**Validation.** Added deterministic retrieval-scope, composite Knowledge Base
+exclusion, attachment boundary-copy, and edit-attachment render assertions.
+Focused attachment/retrieval/provider/schema/UI regressions, Ruff, compileall,
+and `git diff --check` pass. No AWS, paid model calls, persistence migration,
+or AgentCore changes were made.
+
+**Compatibility / risk.** Private attachments remain hidden from reusable
+Sources and continue through the existing authorization and one-call provider
+path. Project evidence is not rejected merely because it is not official
+course material. FastAPI/Streamlit must be rebuilt for this change; AgentCore
+republish and affinity generation bump are not required.
+
+**Next exact action.** Run the bounded staging/EC2 smoke: ARP/DHCP attachment
+question (no course KB retrieval), relevant project PDF/image, explicit
+attachment-plus-Lecture comparison, long attachment chat scroll, and attached
+message edit success/failure.
+
+### Direct image source attribution (2026-08-22)
+
+**Change.** Citation resolution now keeps the existing retrieved-chunk rule for
+text sources and additionally admits an image only when its authoritative
+selected source was successfully resolved into the current turn's
+`image_inputs`. Image labels use the same full selected-source `S#` order as
+text retrieval, and the prompt now gives the model that trusted label.
+
+**Validation.** Added deterministic coverage for direct image citations and
+selected-but-unresolved images. Citation, retrieval, prompt-composition,
+AgentCore-provider, and one-call tests pass except the pre-existing synthetic
+6k context-budget regression. No RAG routing, retrieval, latency, model,
+Guardrail, HMW, or Deep Review behavior changed; no AWS calls or deployment
+was performed.
+
+**Next exact action.** Rebuild the FastAPI application for the changed backend
+resolver/prompt composer. AgentCore republishing is not required unless the
+runtime prompt artifact itself is separately changed.
+
+### Immediate reusable Sources uploads and private chat attachments (2026-08-22)
+
+**Change.** Sources-panel uploads now enter a process-local background worker
+and show an immediate non-authoritative Uploading card; Chat remains usable
+while extraction/storage completes. Chat-composer files instead use the new
+authenticated attachments route and are stored as hidden, unselected
+`chat_attachment` source records. They are resolved only for the submitted
+turn, persisted as sanitized message descriptors for display/retry/edit, and
+are excluded from Sources, subsequent turns, and Deep Review snapshots.
+
+**Validation.** Deterministic source-library, workspace API, chat progress,
+chat-scroll, Sources UI, rerun-scope, and API-client tests pass. Ruff,
+compileall, and `git diff --check` pass. No model calls, AWS calls, schema
+migration, or deployment was performed.
+
+**Compatibility / risk.** Existing reusable Sources and historical messages
+remain unchanged. Pending Sources cards are process-local and disappear after a
+Streamlit process restart; successfully stored sources are authoritative. The
+next exact action is desktop/mobile visual verification with a deliberately
+slow upload, followed by the ordinary application deployment.
+
+### AgentCore Guardrail v4 release (2026-08-22)
+
+**Change.** Published immutable AgentCore runtime **v29** on the existing
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` runtime. `DEFAULT` is
+READY and points to v29. The runtime keeps the existing Python 3.14 artifact
+layout, IAM role, PUBLIC network, MMDSv2 requirement, gateway/memory settings,
+30-minute idle timeout, and 8-hour maximum lifetime. Its environment now uses
+`GUARDRAIL_ID=o8aipba8m129` with `GUARDRAIL_VERSION=4`.
+
+Artifact:
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-guardrail-v4-ccb388-20260822T-release.zip`
+
+**FastAPI cutover.** Tracked Compose/example configuration uses
+`GUARDRAIL_VERSION=4` and `AGENTCORE_SESSION_GENERATION=7`. Update the private
+local/EC2 `.env` and recreate the production container with those values before
+existing affinity sessions can no longer reuse the previous runtime assets.
+DSQL remains the canonical transcript/state store.
+
+**Validation.** Guardrail v4 is `READY`; AgentCore v29 is `READY`; `DEFAULT`
+routes to v29; runtime tests/config tests, Ruff, compileall, and
+`git diff --check` pass. No model inference or application database changes
+were made.
+
+**Next exact action.** Update the production host `.env` to Guardrail v4 and
+generation 6, recreate the FastAPI container, then run one text-only and one
+image-upload smoke test. Roll back by restoring the previous host generation
+and pointing `DEFAULT` to a prior READY runtime if needed.
+
+### AgentCore image upload decoding (2026-08-22)
+
+**Change.** The AgentCore companion runtime now strictly decodes JSON-safe
+base64 values in `image.source.bytes` into raw SDK bytes before Strands/Bedrock
+invocation. Text blocks, ordering, prior history, source authorization,
+image limits, Guardrails, and structured-output contracts are unchanged.
+Malformed, empty, or unsupported image byte shapes fail through the existing
+student-safe `structured_output_failure` envelope before model invocation.
+
+**Validation.** AgentCore runtime image/provider tests passed; the full runtime
+test module passed (**45 passed**). Ruff, compileall, and `git diff --check`
+passed. No AWS calls or application/API changes were made. The updated
+`agentcore_runtime` package must be republished as a new READY AgentCore
+version before production image coaching uses this fix.
+
+**Next exact action.** Publish the current runtime artifact, move `DEFAULT` only
+after it is READY, then run bounded PNG/JPEG and text-only production smoke
+tests. Keep DSQL canonical and do not change prompts or Guardrails.
+
+### Problem Identification working-HMW completion (2026-08-22)
+
+**Change.** The AgentCore and local Problem Identification prompts now treat a
+substantive student-authored HMW as a working draft. A rough, bullet/plus-sign,
+problem/friction-oriented, or multi-benefit statement advances when it still
+communicates an identifiable user, meaningful problem/need/opportunity, and
+desired outcome. Refinement is feedback rather than a progression gate. The
+existing 2/3 scaffold rule, provenance guard, server stage authority, and
+solution-locked/template-filler STAY behavior are unchanged. The deterministic
+mock now stamps normal coaching assessments with `response_mode=coaching`.
+
+**Validation.** Added the exact live rough HMW regression plus rough-format,
+multi-outcome, solution-locked, and empty-template cases. Focused HMW,
+workflow, prompt, schema, and learning tests pass (**129 passed** in the
+combined run; no AWS/model calls). No database migration or runtime service
+change was made. AgentCore must be republished and the app redeployed before
+this prompt behavior reaches production.
+
+**Next exact action.** Publish the updated AgentCore stage prompt, then run one
+production smoke with the exact working HMW and verify `recommendation=advance`,
+`hmw_scaffold_ready=false`, and Concept Generation stage authority. Do not
+change the scaffold or provenance guards.
+
+### Progress-over-interrogation pedagogy (2026-08-22)
+
+**Change.** Added one high-priority shared coaching rule in the mirrored local
+and AgentCore prompt trees: once the current stage purpose is adequately met,
+advance usable-but-imperfect work rather than probing for optional refinement.
+STAY remains appropriate for substantive blockers, and advancing responses do
+not need to end with a Socratic question. Problem Identification HMW rules,
+stage authority, Q&A isolation, RAG, and Deep Review are unchanged.
+
+**Validation.** Added deterministic behavior cases for adequate/optional
+refinement, substantive blockers, filler, misconceptions, HMW readiness and
+completion, Concept Generation, and Q&A isolation. Focused pedagogy/Fast Chat/
+HMW/workflow tests pass; Ruff, compileall, and `git diff --check` pass. No AWS
+calls or deployment was performed.
+
+**Next exact action.** Republish AgentCore before production use so the shared
+runtime prompt change is active; then run a no-cost/local smoke and one bounded
+production HMW progression check.
+
+### Unified chat feed and persistent edit history (2026-08-22)
+
+**Change.** The Streamlit chat fragment now owns a single `chat_feed` containing
+persisted history and in-flight user/Coach content, with the composer kept as a
+fixed sibling footer. Edit submission reruns only the fragment, renders the
+active prefix plus the revised prompt/status, hides the obsolete downstream
+branch, and remounts authoritative persisted state after success. Failed edits
+restore the draft and stable retry key without blanking the transcript.
+
+**Validation.** Focused Streamlit UI, scroll, progress, rerun-scope, theme,
+HMW-scaffold, and UI timing tests pass. No backend, API, persistence, or
+coaching behavior changed.
+
+**Next exact action.** Verify the feed and edit waiting/error states visually at
+desktop and narrow mobile widths with a delayed deterministic provider.
+
+### Narrow mobile chat feed scrolling (2026-08-22)
+
+**Change.** Existing tablet/mobile breakpoints now make `chat_feed` the touch
+scroll owner with vertical overscroll containment and remove nested scrolling
+from ordinary user bubbles. Desktop bubble limits and edit/composer textarea
+scrolling remain unchanged; attachment cards and citation controls retain their
+existing ownership.
+
+**Files.** `ui/assets/styles/90-responsive.css` and
+`tests/ui/test_chat_scroll.py`.
+
+**Validation.** The focused Streamlit UI, chat-scroll, and theme suite passes
+(34 tests). Ruff, UI/entrypoint compileall, and `git diff --check` pass. No
+backend, API, persistence, or AgentCore change was made.
+
+**Next exact action.** Verify the feed at desktop and 390 px widths with a
+long ordinary user message, attachment, citation, edit draft, and long
+composer draft.
+
+### AgentCore runtime configuration correction (2026-08-21)
+
+**Issue.** The lifecycle-only v27 update omitted the prior runtime environment
+variables. v27 was `READY`, but its environment was empty, so Fast Chat failed
+immediately with a generic AgentCore-unavailable 503 before model generation.
+
+**Correction.** Created v28 on the same runtime ARN, restoring the v26 model,
+Guardrail v3, gateway, memory, and MMDSv2 metadata configuration while keeping
+`idleRuntimeSessionTimeout=1800` seconds and `maxLifetime=28800` seconds.
+`DEFAULT` now points to v28 `READY`. Existing v27 sessions can retain their
+old environment until expiry, so the application affinity generation was
+advanced to **5** to force fresh v28 sessions. No application code or prompt
+change was made for this correction.
+
+### AgentCore lifecycle update (2026-08-21)
+
+**Change.** Updated the existing runtime ARN in place with the same v26 code
+artifact and runtime role, changing only lifecycle settings to
+`idleRuntimeSessionTimeout=1800` seconds (30 minutes) and
+`maxLifetime=28800` seconds (8 hours). AWS created immutable version **27**;
+`DEFAULT` now points to v27 and is READY. No application model, prompt,
+database, or retrieval behavior changed.
+
+**Affinity cutover.** Production Compose now explicitly enables the existing
+compute-affinity path and sets `AGENTCORE_SESSION_GENERATION=5`. The private
+ignored local `.env` was also bumped from 3 to 5. This forces new affinity
+session identities after the lifecycle/version change; DSQL remains the
+canonical transcript and AgentCore remains generation-only.
+
+**Next exact action.** Rebuild/redeploy the production FastAPI image from the
+intended SHA so Compose generation 4 is active, then run the bounded release
+smoke. Do not change the runtime ARN or create another runtime.
+
+**This phase.** Published AgentCore **v26** on the existing ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Surgical overlay of
+live v25 zip plus working-tree `models.py`, `prompts/fast_chat.md`,
+`prompts/shared_coaching.md`, and `prompts/stages/problem_identification.md`.
+Artifact
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-hmw-prompt-conflict-20260821T040421Z.zip`.
+Runtime env copied from v25 (Haiku 4.5 Fast Chat, Sonnet 4.6 Deep Review,
+Guardrail v3). DEFAULT auto-moved to 26 and is READY. No generation bump.
+No FastAPI/EC2 rebuild. No paid smoke.
+
+**What v26 carries.** The 2/3 HMW rule is unchanged. Later CORE FOCUS /
+READINESS SIGNALS, shared stay-when-missing wording, and the
+`hmw_scaffold_ready` tool-field description now cannot override stay+true
+when at least two of user / problem / outcome are clear.
+
+**Warm sessions.** Production affinity remains ON and
+`AGENTCORE_SESSION_GENERATION` remains **2**. Warm v25 microVMs keep v25
+assets until generation is bumped and FastAPI is recreated. Local testing
+with affinity **off** uses a fresh `stateless-` session and therefore hits
+DEFAULT v26. New production notebooks / new affinity sessions should also
+get v26.
+
+**Next exact action.** Local Fast Chat with `AGENTCORE_QUALIFIER=DEFAULT`
+and affinity off: reproduce the older-pedestrians 2/3 turn and confirm
+`hmw_scaffold_ready_model=true`. Do not bump generation or rebuild EC2
+unless existing production warm sessions must leave v25.
+
+### Fast Chat latency implementation (local, 2026-08-21)
+
+**Scope.** Kept the existing deterministic false-positive `who` retrieval
+gate fix and made the local AgentCore example use the existing affinity path.
+No AWS or paid model calls were made. Runtime model/config caches, AgentCore
+client reuse, prompt-file caching, retrieval deduplication, and the 8,000
+character Fast Chat evidence cap were already present; no speculative changes
+were made to those paths.
+
+**Changes.** `.env.example` now sets
+`AGENTCORE_SESSION_AFFINITY_ENABLED=true` for the single-owner local smoke
+setup, while `backend/settings.py` remains fail-safe when the variable is
+omitted and production must use unique authenticated owner identifiers.
+The private ignored local `.env` also has
+`AGENTCORE_SESSION_AFFINITY_ENABLED=true` with
+`AGENTCORE_SESSION_GENERATION=4`; this is untracked local-only configuration,
+not a commit or deployment change.
+The synthetic provider compression fixture now uses a 6,500-token constrained
+budget (a conservative rounded value; the first integer threshold for the
+fixture was approximately 6,280). The old 6,000-token fixture was stale and
+artificial: it is parser-accepted by the settings range but is not a shipped
+or recommended configuration, and cannot retain the current contract plus the
+memory invariant. Provider documentation now describes affinity as
+compute-only and conditional rather than asserting every invoke is fresh.
+
+**Evidence.** Retrieval-gate, AgentCore provider/affinity, context planner,
+Fast Chat context/one-call/first-cycle, RAG fallback, prompt, deployment, and
+performance tests passed: **690 passed, 1 skipped** (the optional Strands
+middleware test because `strands` is not installed). The separately run
+prompt-baseline lock still has its one known failure because the pre-existing
+dirty HMW prompt edits change `agentcore_runtime/prompts/shared_coaching.md`.
+The six-run warm deterministic provider benchmark medians were: PI no-RAG
+**0.248 ms**, PI fake RAG **0.263 ms**, Q&A fake RAG **0.230 ms**, and
+long-history Fast Chat **2.874 ms**. Fake RAG used an injected evidence
+fixture and excludes retrieval I/O. Ruff, compileall, and
+`git diff --check` passed; live affinity A/B still requires an approved paid
+smoke.
+
+**Next exact action.** Run the bounded approved affinity OFF/ON live A/B on the
+same notebook, recording cold separately from three to five warm turns. Keep
+DSQL/SQLite canonical and bump `AGENTCORE_SESSION_GENERATION` only when
+publishing new runtime assets.
+
+### Prior: AgentCore v25 publish
+
+**HEAD at publish:** `dd7e66d`. Live citations RC remains `64410dc`. Composer
+layout remains `711d4e6`.
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore:** DEFAULT → **v25 READY**. Affinity ON. Generation 2.
+Prompt cache OFF.
+
+**This phase:** Publish AgentCore **v25** on the existing ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Overlay of live v24 zip
+plus HEAD `main.py`, `models.py`, `structured_coach.py`,
+`prompts/fast_chat.md`, `prompts/review_deep.md`, and
+`prompts/stages/problem_identification.md`. Artifact
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-deep-review-hmw-20260821T032025Z.zip`.
+DEFAULT liveVersion **25** READY (`lastUpdated` 2026-08-21T03:20:46Z). Runtime
+env copied from v24. Not bundled: RAG, affinity, generation, prompt cache.
+No paid coaching or Deep Review smoke in this publish.
+
+**What v25 carries.** Deep Review `DeepReviewTurnOutput` with required
+`stage_reviews` / `supporting_message_refs`; exposed-label `M#` prompt
+wording; HMW 0–1 / 2–3 / valid-student-HMW ADVANCE prompts. New notebooks
+and new affinity sessions get v25. Warm v24 microVMs stay on the version
+they were created with because generation remains **2**.
+
+**Not changed.** FastAPI/EC2 image; `AGENTCORE_SESSION_GENERATION=2`; prompt
+cache OFF; DSQL; RAG. Live `ddfc3f4` FastAPI still lacks later HMW-card and
+Deep Review checkpoint mapping until an EC2 rebuild from current HEAD.
+
+**Next exact action at the time.** Rebuild/redeploy the EC2 app image from
+`dd7e66d` or later when production FastAPI should persist mapped
+`supporting_message_ids` and show current HMW-card behaviour. Keep
+generation **2** unless existing warm sessions must leave v24. Do not enable
+prompt cache.
+
+### Prior: Deep Review array and HMW scaffold guards (local)
+
+**HEAD before that work:** `c4a8e1f`. Live AgentCore was still v24.
+
+**Prior blocker phase behavior:** Implemented only the five confirmed RC
+blockers: fail closed when oversized Deep Review `full_history` would be
+compressed; require the
+frozen source ID set to remain intact; reject HMW construction/meta requests
+as provenance; validate new Deep Review arrays strictly while keeping an
+explicit legacy v24 boundary; and normalize rejected PI advances so response,
+scaffold, recommendation, and authoritative stage agree. Keep checkpoint
+version 1, one Sonnet invoke, existing Fast Chat/RAG behavior, and no deploy.
+
+**Behavior.** `context_plan.ref_map` is the model-exposed `M#` map for that
+invoke, not every label theoretically generable from the frozen transcript.
+`checkpoint_delta` therefore accepts supporting refs only for validated
+anchors plus raw delta messages. Compact checkpoint body now includes bounded
+prior `readiness_evidence`. Compacting requires the transcript to exceed
+20,000 estimated tokens **and** save at least 1,000 tokens **and** at least
+20% of the full transcript; otherwise `full_history` (fallback
+`compact_not_smaller`, `compact_savings_too_small`, or
+`compact_savings_ratio_too_small`). Source fingerprinting remains selected
+`source_id` identity: student uploads mint a new UUID per add, so ids are
+immutable per content version. Do not claim production cost savings.
+
+**Not changed.** AgentCore DEFAULT/generation/prompt cache; EC2 image;
+DSQL schema; retrieval/citations; Fast Chat slim schema and `turns=2`;
+checkpoint version; deployment or AWS state. Existing unrelated dirty
+`scripts/load_probe.py` was preserved.
+
+**Validation (local worktree, $0 AWS).** Ruff passed on touched Python.
+`compileall` passed for `backend`, `ui`, `streamlit_app.py`, `tests`, and
+`agentcore_runtime` (`scripts/load_probe.py` remains a pre-existing
+`IndentationError`; left untouched). Focused Deep Review, AgentCore schema,
+Fast Chat, HMW, revision, RAG/citation, and HTTP tests passed. Full
+deterministic suite: **1564 passed**
+(`--ignore=tests/scripts/test_load_probe.py`). Ruff passed on all touched
+Python files; `git diff --check` passed. No paid model calls were made.
+
+**Next exact action at the time.** Publish a matching AgentCore runtime
+(done as v25). Remaining follow-ups from the RC review (same-key
+course-source fingerprints and horizontal-worker running-job claims) were
+intentionally unfixed.
+
+### Prior: Problem Identification → How Might We progression
+
+**HEAD:** `9f32fb5`. Live AgentCore was still v24.
+
+**Behavior.** 0–1 framing components: stay, hide scaffold, one Socratic
+question. 2–3 components without a valid student HMW: stay, show the HMW
+card after the Coach reply (including after the first useful turn). A valid
+student-authored HMW: hide the card, concise Coach feedback, ADVANCE, and
+existing machinery may move to Concept Generation. Equivalent prose without
+an HMW does not complete the stage. A deterministic `student_hmw_candidate_present()`
+guard forces stay when Haiku recommends ADVANCE without an active-user HMW
+attempt. Latest stay+ready governs visibility; a later valid HMW ADVANCE
+hides the card. Q&A and Deep Review stay isolated. One Fast Chat invoke. Zero
+extra Retrieve calls. No minimum Coaching-turn count.
+
+**Next exact action.** A future AgentCore runtime publish is required before
+live Haiku follows the updated Problem Identification / Fast Chat prompts.
+
+### Prior: cost-efficient Deep Review context
+
+**HEAD:** `a217316`. Live AgentCore was still v24.
+
+**Behavior.** FastAPI freezes revision, message ids, source ids, and prior
+checkpoint identity at enqueue. Context mode is `full_history` or
+`checkpoint_delta`. Default compact threshold is 10,000 estimated transcript
+tokens (`DEEP_REVIEW_CHECKPOINT_TOKEN_THRESHOLD`). Reflection stays full
+history when `DEEP_REVIEW_FORCE_FULL_FINAL` is true. Sonnet returns ephemeral
+`M#` supporting refs; FastAPI maps them to durable ids. Failed Deep Review
+leaves the previous snapshot. Fast Chat is unchanged (one Haiku call).
+Synthetic 30→80 message comparison: full_history 14609 estimated tokens vs
+checkpoint_delta 10802 (saved 3807); all 50 delta turns and the evidence
+anchor remained present.
+
+**Next exact action.** A future AgentCore publish is required before live
+Sonnet emits `supporting_message_refs` (and continues to emit
+`stage_reviews`). Until then, live Deep Review still uses full_history
+whenever anchors are missing. Do not move DEFAULT. Do not rebuild EC2 in
+this phase. Do not enable prompt cache.
+
+### Prior: Review-tab expander remount + stage-aware Deep Review
+
+**HEAD:** `f81d508`. Live citations RC remains `64410dc`. Composer layout
+remains `711d4e6`. HMW 2-of-3 remains `89ccfed`.
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
+Prompt cache OFF. **Do not publish AgentCore for this phase.**
+
+**This phase:** Review-tab expander remount + stage-aware Deep Review
+projection. Uncommitted on `51927c5`.
+
+**Behavior.** When the Thinking Path current stage changes (or the notebook
+changes), Strengths and Areas for improvement remount so only the current
+stage starts open. Same-stage reruns keep widget keys, so a student's
+manual open/close is preserved. Deep Review still freezes the whole active
+conversation at enqueue. New snapshots persist `stage_reviews` and merge
+those lists onto matching Review stages. Holistic synthesis, Facione, and
+working conclusion stay whole-conversation. Legacy snapshots without
+`stage_reviews` still dump flat strengths/areas onto `reviewed_stage_id`.
+Failed Deep Review leaves the previous snapshot. Fast Chat is unchanged
+(one Haiku call, no extra router/retrieval).
+
+**Not changed.** AgentCore DEFAULT/generation/prompt cache; EC2 image;
+DSQL schema; RAG; citations; HMW; stage advancement; Fast Chat
+`turns=2`; Deep Review `turns=3`; frozen `message_ids` / sources /
+revision.
+
+**Validation (local worktree, $0 AWS).** Targeted mock pytest: 212 passed
+(expander remount, Deep Review projection/execution, runtime/specialists,
+HMW, Fast Chat one-call, progress merge). Full deterministic suite:
+1497 passed (`--ignore=tests/scripts/test_load_probe.py`; pre-existing
+broken `scripts/load_probe.py` left unstaged). `compileall` passed for
+`backend`, `ui`, `streamlit_app.py`, `tests`.
+
+**Next exact action.** A future AgentCore publish is required before live
+Sonnet emits `stage_reviews`. Until then, live Deep Review still falls
+back to the legacy flat-list → `reviewed_stage_id` merge. Expander remount
+does not need a runtime publish. Do not move DEFAULT. Do not rebuild EC2
+in this phase. Do not enable prompt cache.
+
+### Prior: AgentCore v24 HMW overlay
+
+**HEAD:** `89ccfed` (HMW 2-of-3 + unlock-turn placement). Citations schema
+RC remains `64410dc`. Composer layout remains `711d4e6`.
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
+Prompt cache OFF.
+
+**This phase:** Surgical AgentCore **v24** overlay so live Haiku can emit
+`hmw_scaffold_ready` and judge Problem Identification HMW readiness as two
+of three framing signals. Same ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. v23 kept READY.
+
+**v24 publish (2026-08-20).** Overlay of live v23 zip + HEAD
+`agentcore_runtime/models.py`, `prompts/fast_chat.md`, and
+`prompts/stages/problem_identification.md` only. Artifact
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-hmw-scaffold-20260820T142111Z.zip`.
+DEFAULT liveVersion **24** READY (`lastUpdated` 2026-08-20T14:22:16Z).
+Runtime env copied from v23: Haiku 4.5 Fast Chat, Guardrail v3, Sonnet
+Deep Review. Not bundled: `structured_coach.py`, `specialists/fast_chat.py`,
+RAG, affinity, generation, prompt cache.
+
+`models.py` also carries the local citations-as-array RC (`64410dc`) so
+flatten no longer advertises `citations: ["array", "null"]`.
+
+**Not changed.** FastAPI/EC2 image; `AGENTCORE_SESSION_GENERATION=2`;
+prompt cache OFF; DSQL; RAG; Deep Review `turns=3`. Existing affinity
+sessions stay on the microVM version they were created with. New notebooks
+get v24.
+
+**Production UI.** Live `ddfc3f4` FastAPI does not project
+`hmw_scaffold.available`. Extra `hmw_scaffold_ready` on the wire is ignored
+until an EC2 rebuild from `89ccfed` or later. Do not bump generation.
+
+**Validation.** Targeted mock pytest for Fast Chat schema, HMW prompts, prompt
+baseline, and first-cycle middleware passed before publish. No paid coaching
+turns in this publish. Control-plane confirm: runtime 24 READY, DEFAULT 24
+READY, artifact prefix `chatbot_harnessAgent-hmw-scaffold-20260820T142111Z.zip`.
+
+**Next exact action.** Rebuild/redeploy the EC2 app image from `89ccfed` or
+later when the HMW card should appear in production. Keep generation **2**
+unless you need existing warm sessions off v23. Do not enable prompt cache.
+
+### Prior: local progressive HMW (published as v24)
+
+**HEAD at the local gate:** `89ccfed`. Live AgentCore was still v23 until
+the overlay above.
+
+**Behavior.** New notebooks stay clean: welcome only, no HMW card. After
+enough qualifying Problem Identification Coaching and a validated
+`hmw_scaffold_ready=true` from the existing Fast Chat structured result,
+FastAPI projects `hmw_scaffold.available`. Streamlit renders one read-only
+card in the chat log immediately after the Coaching response that first
+unlocks it (two qualifying PI Coaching turns, and at least two of three
+framing signals judged ready). Students type a working
+HMW (or equivalent framing) in the existing chat. `hmw_scaffold_ready=true`
+with `recommendation=stay` is normal and does not advance. ADVANCE still uses
+the existing StageDecision / pending Next / auto-advance path. Leaving
+Problem Identification hides the card. Q&A and Deep Review do not count.
+Active-branch revision semantics apply. Old assessments omit the field and
+default false.
+
+**Authority.** Haiku recommends. FastAPI validates, persists slim assessment
+metadata, and derives visibility. The client cannot write the flag.
+
+**Not changed (local HMW work).** AgentCore affinity/generation until v24;
+Fast Chat `turns=2`; first-cycle structured output; Deep Review `turns=3`; RAG;
+citations schema; recommendation `if/then`; DSQL schema; auth; prompt-cache
+config.
+
+**Known residual risk before v24.** Live v23 Haiku did not emit
+`hmw_scaffold_ready`. FastAPI treated omit as false.
+
+**Validation (local worktree, $0 AWS).** Ruff on touched Python: passed.
+`compileall` passed for `backend`, `ui`, `streamlit_app.py`, `tests`, and
+`scripts` excluding pre-existing broken `scripts/load_probe.py`
+(`IndentationError`; left unstaged). `git diff --check` clean on this
+change. Targeted HMW / Fast Chat schema / first-cycle / prompt-baseline /
+quality matrix / workflow / retrieval / Deep Review / revision /
+idempotency tests passed. Full mock pytest **1454 collected, passed**,
+ignoring `tests/scripts/test_load_probe.py`.
+
+The first uncommitted HMW pass showed the formula whenever the stage was
+`problem_identification`, including on an empty notebook. Progressive HMW
+replaces that gate. Completion still uses semantic stay/advance, not a regex.
+
+### Prior: citations schema RC (2026-08-20)
+
+**HEAD:** citations schema RC on `Integrate-Bedrock-v2` (`64410dc`).
+Composer layout remains `711d4e6`.
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore at that RC:** DEFAULT → **v23**. Affinity ON. Generation 2.
+Prompt cache OFF. The citations-as-array change shipped in the v24 overlay.
+
+**This phase:** Local Fast Chat citations schema release candidate. No
+AgentCore publish, no DEFAULT move, no EC2 rebuild, $0 AWS.
+
+**Root cause (proven against strands-agents==1.52.0).** Pydantic
+`FastChatTurnOutput.citations` is `list[CitationOutput]` with
+`type: array` and a Python default of `[]`, so it is omitted from JSON
+Schema `required`. Strands `_process_property` then rewrites every
+non-required field to `type: [T, "null"]`. The model-facing tool spec
+therefore advertised `citations: ["array", "null"]`. Claude emitted
+`citations: null`; Pydantic still rejected it (`Input should be a valid
+list`); bounded recovery ran a second Haiku cycle.
+
+**Local fix (later included in v24).** Keep Pydantic rejecting JSON `null`. Do not
+normalize `None → []`. Mark `citations` required as `type: array` in
+`json_schema_extra` and add the short Field description “Always return an
+array. Use [] when no citations are needed.” After Strands flatten the
+tool spec is `type: array` and `required` includes `citations`. Python
+construction may still omit the field (default `[]`).
+
+**Not changed.** Recommendation `if/then` / `coaching_requires_recommendation`;
+first-cycle `tool_choice={"any": {}}`; Fast Chat `turns=2`; Deep Review
+`turns=3`; RAG; models; prompts; pedagogy.
+
+**Validation ($0 AWS).** `git diff --check` clean on RC files.
+`.venv/bin/ruff check --no-fix . --exclude scripts/load_probe.py` passed
+(unrelated dirty `scripts/load_probe.py` is syntax-broken and was excluded).
+`compileall` passed. Focused Fast Chat / citation / RAG / Deep Review tests
+passed. Full mock pytest **1414 collected, passed**, ignoring
+`tests/scripts/test_load_probe.py`. Throwaway `strands-agents==1.52.0`
+`pytest --noconftest tests/domain/test_strands_first_cycle_middleware.py`:
+**14 passed**.
+
+**Production recommendation at the RC.** Keep DEFAULT → **23** until reviewed.
+The citations-as-array change then shipped in the v24 `models.py` overlay
+together with `hmw_scaffold_ready`. Do not bump generation. Do not enable
+prompt cache.
+
+**Next exact action at the RC.** Publish v24 (done 2026-08-20). Keep
+generation 2. Do not enable prompt cache.
+
+**Known residual risk.** Claude can still emit `citations: null` against an
+array-only schema; that remains invalid and recovery still runs. Nested
+`CitationOutput` optional strings remain `[string, null]` after flatten;
+that is not the observed failure.
+
+### Prior live baseline: v23 schema release (2026-08-19)
+
+**HEAD at publish:** `6616e15cff703c70254f7442a75773477b01f22c`
+**This phase:** Surgical AgentCore **v23** schema release. Affinity ON.
+Generation 2. Prompt cache OFF.
+
+**v23 publish (2026-08-19).** Overlay of live v22 zip + HEAD
+`agentcore_runtime/models.py` only. Artifact
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-schema-fix-20260819T170837Z.zip`.
+Same ARN `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. v22 kept
+READY. DEFAULT liveVersion **23** READY (`lastUpdated`
+2026-08-19T17:08:56Z).
+
+**Live coaching sample (3 paid Fast Chat turns, dedicated notebook).** New
+affinity session `codesign-c33b219f…` (not the v22 Hello session). C1 cold
+OTEL boot; C2/C3 warm same `runtimeSessionId`. All three: mode=coaching,
+recommendation=stay, stage stayed `problem_identification`, persistence ok,
+Deep Review not invoked, `rag_used=false`. CloudWatch: **zero**
+`coaching mode requires` / `recommendation=null` events. Cycle 1 still
+recovered (`event_loop_cycle_count=2`) because `citations` was `null`
+(`Field 'citations': Input should be a valid list`) — **other** bounded
+recovery, not the published schema hole.
+
+| | C1 cold | C2 warm | C3 warm |
+|---|---:|---:|---:|
+| pre-handler (invoke − runtime) | ~5452 ms | **~110 ms** | **~110 ms** |
+| `agentcore_invoke_ms` | 13604 | 8347 | 9066 |
+| cycles | 2 | 2 | 2 |
+| first-cycle applied | true | true | true |
+| old coaching+null bug | absent | absent | absent |
+
+C3 set `retrieval_required=true` from the evidence-worded prompt; KB returned
+0 validated hits (`rag_used=false`). Do not treat that as a selected-source
+RAG run.
+
+**Production recommendation at v23.** Keep DEFAULT → **23**, affinity ON,
+generation 2, prompt cache OFF. Do not bump generation. Do not enable prompt
+cache. Do not rebuild EC2 for that schema-only change.
+
+**Next exact action at the time of v23.** The citations flatten hole was the
+leftover recovery; it shipped in v24 with HMW. Do not start Deep Review on
+the v23 validation notebook.
+
+**Session affinity:** Compose `AGENTCORE_SESSION_AFFINITY_ENABLED=true` and
+`AGENTCORE_SESSION_GENERATION=2`. Host `.env` still has unused generation
+`=3`; do not use it.
+
+### First-cycle hardening publish (2026-08-19): DEFAULT 21 → 22
+
+v21 source (`b81a5b0` zip) had **no** `first_cycle_tool_choice_*` middleware.
+HEAD contains it (`bf7bec5` / `e556ad7` / `d7d6f1d`). Live v21 logs also lacked
+those fields. `V21_FIRST_CYCLE_HARDENING = ABSENT`.
+
+Published artifact is a **surgical overlay** of live v21 zip + current
+`main.py` + current `structured_coach.py` with the `4f5953e` Q&A prompt hunk
+reverted. `specialists/fast_chat.py` stayed at v21. Not bundled: RAG, model,
+guardrail, Deep Review limits, cache, affinity, generation.
+
+Local: `git diff --check` clean; Ruff passed; `compileall` passed; companion
+pytest 147 passed; Strands 1.52.0 throwaway venv 5 first-cycle middleware tests
+passed (`--noconftest`).
+
+Validation used a **new untitled notebook** (new `codesign-d0bf0a01…` session)
+because existing microVMs stay on the version they were created with. Two paid
+Hellos. C1 cold one-cycle; C2 warm reused the same session (pre-handler ~117 ms)
+but recovered once (`event_loop_cycle_count=2`) even though
+`first_cycle_tool_choice_applied=true`. Compare C2 invoke **4914 ms** to warm
+v21 B2 **7225 ms**, not to cold A. RAG off, DSQL unchanged, Deep Review not
+invoked. Hello is structural latency only.
+
+**Production recommendation.** Keep DEFAULT → **22**, affinity ON, generation 2,
+prompt cache OFF. Do not overfit coaching quality to Hello. Do not bump
+generation merely because the runtime version changed.
+
+**C2 recovery cause (2026-08-19, read-only).** Cycle 1 `tool_use` of
+`FastChatTurnOutput` failed Pydantic `coaching_requires_recommendation`:
+`mode=coaching` with `recommendation=null` (`Field 'root'`). Live v22 JSON
+Schema still allows that shape. Local HEAD now rejects it (not published).
+
+### Affinity A/B (2026-08-19): warm session removes ~5.4s pre-handler
+
+Reused the 15:07 stateless Hello as **A**. Enabled affinity only; recreated the
+same `ddfc3f4` container. Two paid Hellos on the same KM notebook (RAG off).
+
+| | Stateless A | Affinity B1 (cold) | Affinity B2 (warm) |
+|---|---:|---:|---:|
+| `runtimeSessionId` | `stateless-1e4d…` | `codesign-bd337c…` | **same as B1** |
+| Pre-handler | 5402 ms | 5475 ms | **116 ms** |
+| Handler | 5300 ms | 8560 ms (2 cycles) | 7091 ms (2 cycles) |
+| Invoke clock | 10725 ms | 14055 ms | 7225 ms |
+
+B2 reused B1’s opaque `codesign-` id. First B2 runtime log was `POST /invocations`
+(no OTEL process boot). Pre-handler dropped 97.8% vs A (**excellent**, &lt;500 ms).
+B1/B2 each used two model cycles (`end_turn` then `tool_use`); that extra model
+time is **not** an affinity effect. DSQL remained the transcript (`rag_used=false`,
+history still sent, stage unchanged). Mock tests in
+`tests/domain/test_agentcore_session_affinity.py` still pass.
+
+**Production recommendation.** Keep affinity **on** for the Month-1 pilot unless
+the operator asks to revert. Idle timeout remains 900 s; after idle, the same
+session id may wake a new microVM. This v22 publish kept generation **2** and
+used a new notebook so the warm session was not pinned to v21. Do not bump
+generation merely to force a new runtime version.
+
+### Streamlit UI TIMING: visible logs + pre-API step spans (no UI optimization)
+
+Live CloudFront already showed the ~14–19s Send delay is **before FastAPI**.
+The instrumented `log_ui_timing` helper existed, but Streamlit is a separate
+process from uvicorn: `co_design.ui_perf` had no handler, parents were unset,
+and Python lastResort is WARNING, so INFO `UI TIMING` never reached
+`docker logs`. FastAPI `configure_operational_loggers()` does not run in the
+Streamlit process.
+
+**Change:** `configure_ui_perf_logger()` attaches
+one idempotent INFO stderr handler to **only** `co_design.ui_perf`. Send now
+logs `fragment_to_api_ms`, `pre_api_ms`, plus wall-clock spans for fragment
+enter, `st.chat_input`, `sync_composer_layout`, source list, notebook lookup,
+inflight user paint, `sync_chat_scroll(mode="send")`, CoachRequest build,
+Thinking/`st.status`, and first NDJSON event (`api_to_started_ms` /
+`api_to_first_event_ms` / `stream_ms`). Fragment submit architecture is
+unchanged. No FastAPI, AgentCore, RAG, Fast Chat, or prompt-cache changes.
+
+**Validation (this worktree, $0 AWS):** `git diff --check` clean; `ruff check .`
+passed; `compileall` passed. Targeted pytest passed for
+`tests/ui/test_ui_perf_logging.py`, `test_rerun_scope.py`,
+`test_chat_scroll.py`, and `test_chat_progress.py`. Full mock pytest passed.
+Backend, AgentCore, RAG, and Fast Chat files are unchanged.
+
+**Status:** Deployed as `cde2300-chatbot:ddfc3f4`. Live Hello TIMING is in Docker logs.
+
+Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
+(SOURCE CODE READY → EC2 IMAGE DEPLOYED; AgentCore DEFAULT stays on the
+existing liveVersion). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
+
+This file’s **CURRENT** sections are the operator runbook. Everything under
+**HISTORICAL INVESTIGATION** is a dated archive and is not current.
+
+### Prior on this branch: Deep Review adversarial workflow regressions
+
+Product behavior is unchanged from `1e1e069` (frozen `reviewed_stage_id`,
+latest-snapshot-only Review-tab merge). That phase added three adversarial
+tests and did not redesign Deep Review.
+
+
+### Prior on this branch: Deep Review Review-tab projection (`1e1e069`)
+
+A successful Deep Review already persisted `strengths`, `areas_to_develop`,
+`synthesis`/`summary`, `facione_scores`, and `working_conclusion` in durable
+`deep_review_snapshot`. Summary, Facione, and working conclusion updated in
+the Review tab; Strengths and Areas for improvement did not, because
+`learning_review()` built those sections only from incremental assistant
+`review_strengths` / `review_improvements`.
+
+**Change (committed):** persist `reviewed_stage_id` (enqueue-time Thinking
+Path stage) on the snapshot. `learning_review()` still builds stage history
+from messages, then merges the latest snapshot's strengths/areas onto that
+frozen stage (Deep Review items first, case-insensitive dedupe). Old
+snapshots without a valid stage id skip the merge instead of attaching to
+the current stage.
+
+### Prior on this branch: catalog sidecar hide (`18c288e`, not deployed)
+
+**Committed HEAD:** `18c288e`. Live RAG remains on the previous image until
+this patch is built and deployed.
+
+Live RAG is working (sidecars ingested, equals/`in` Retrieve validated,
+CloudFront Week 1 Q&A cited). After sidecar upload the Sources panel listed
+those indexing artifacts because `Path(filename).suffix == ".json"` is a
+supported upload suffix.
+
+**Change:** `backend/sources/library.py` skips
+`is_metadata_sidecar_key(...)` **before** suffix eligibility and
+`max_lecture_notes` in the shared S3 catalog, local fingerprint, and local
+lecture-notes sync. Personal `.json` uploads are unchanged. RAG Retrieve,
+filters, citations, and S3 sidecars are unchanged.
+
+**Expected after deploy:** Lecture Notes **7**, Readings **3**. The 10
+sidecars stay in S3 for Bedrock. They must not appear as locked sources.
+
+### Prior worktree note (superseded for this follow-up)
+
+The following release-hardening write-up was prepared on earlier uncommitted
+work that is now at `d7d6f1d`. Keep it for operator context. Do not treat it
+as the current catalog-sidecar diff.
+
+### Release hardening (this worktree): observability + fail-open, not a redesign
+
+Prepared on `Integrate-Bedrock-v2` on top of `bfb1cba`. **AWS cost $0.** No
+Bedrock model, AgentCore, Knowledge Base, DSQL, S3, or Cognito calls. No
+deploy, no AgentCore publish, no new runtime ARN, no production worker-count
+change. Fast Chat / Deep Review models unchanged. RAG/citation/coaching
+prompts unchanged.
+
+- Fast Chat still: FastAPI → **one** `InvokeAgentRuntime` → `role=fast_chat` →
+  Strands `Agent(tools=[])` → first cycle may force `tool_choice={"any": {}}`
+  → normally one Haiku generation → `turns=2` remains as bounded recovery.
+- **Applied telemetry:** `first_cycle_tool_choice_installed` still means
+  middleware **registered**. New `first_cycle_tool_choice_applied` is true
+  only when cycle 1 actually changed an unset `tool_choice` to `{"any": {}}`.
+  Optional allow-listed `first_cycle_tool_choice_decision`. Omit both applied
+  fields for Deep Review. Never logs tool schemas, prompts, or student text.
+- **Tool identity:** Strands 1.52.0 specs are Converse-shaped dicts whose
+  `name` is the Pydantic class (`FastChatTurnOutput` in prod, test doubles in
+  fake-model tests). No brittle name match. Invariant is `Agent(tools=[])` plus
+  exactly one spec; multiple specs are not forced.
+- **Fail-open:** middleware unavailable → `installed=false`,
+  `applied=false` / `middleware_unavailable`, Fast Chat still proceeds,
+  `turns=2` recovery remains.
+- Deep Review: no first-cycle middleware; `DEEP_REVIEW_INVOKE_LIMITS` still
+  `{"turns": 3}`; Sonnet / job / eligibility / persistence unchanged.
+- Load probe: snapshot/restore now includes `app_env` and
+  `course_material_sync_enabled`; runtime force sets development + sync off.
+  `rss_peak_kb` kept; `process_max_rss_kb` is the same process-lifetime
+  `ru_maxrss` high-water (not per-scenario incremental RSS).
+
+#### Validation (this worktree, $0 AWS)
+
+- `git diff --check` clean; `ruff check .` passed (added
+  `scripts/load_probe.py` E402 per-file ignore for the env-bootstrap import
+  order; that pattern was already required).
+- `compileall` passed (`backend`, `ui`, `streamlit_app.py`, `tests`,
+  `scripts`, `agentcore_runtime`).
+- Companion `.venv` mock pytest: **1369 collected, exit 0** (Strands
+  integration module skipped; companion pytest does not install
+  `strands-agents`).
+- Throwaway venv with `agentcore_runtime/requirements.txt`
+  (`strands-agents==1.52.0`, `bedrock-agentcore==1.21.0`,
+  `pydantic==2.13.4`): diagnostic
+  `check_agentcore_runtime_dependencies.py` printed
+  `agentcore_runtime_dependency_check=ok`; **26 passed**
+  (`test_strands_first_cycle_middleware.py` 5 +
+  `test_first_cycle_structured_output.py` 21).
+- GitHub Actions for this uncommitted worktree: **not independently proven**.
+
+**Next exact action.** Do **not** publish AgentCore or rebuild EC2 until
+authorised. After authorisation follow the checklist: commit/push → CI → new
+version on the **existing** runtime ARN → wait READY → move DEFAULT → bump
+`AGENTCORE_SESSION_GENERATION` → ARM64 image from the **same SHA** → deploy →
+`/api/v1/ready` → small controlled live validation. Measure
+`event_loop_cycle_count`, `first_cycle_tool_choice_installed`,
+`first_cycle_tool_choice_applied`, and `UI TIMING fragment_to_api_ms`.
+
+### Local $0 capacity validation (mock/fake only)
+
+Load-probe work **is committed and pushed** at
+`bfb1cbacf9a097ee2ac2e8fc2c80fe68810f586a`. This worktree only hardens
+snapshot/restore, RSS naming, and operator docs. **AWS cost $0.** No Bedrock
+model, AgentCore, Knowledge Base, DSQL, S3, or Cognito calls. No deploy, no
+AgentCore publish, no production worker-count change.
+
+[`../scripts/load_probe.py`](../scripts/load_probe.py): fake-slow
+`DeterministicCoachProvider.assess` (restored on exit), real
+`BedrockKnowledgeBaseRetriever` with only `client.retrieve` faked, thread/RSS
+sampler, JSON capacity rows. Pytest uses tiny delays. Operator matrix:
+[`operations/LOAD_PROBE.md`](operations/LOAD_PROBE.md).
+
+The probe raises RPM to 10_000 so it is **not** testing production
+`COACH_REQUESTS_PER_MINUTE=8`. That cap is **per authenticated user**, not a
+class-wide 8-RPM ceiling. Ninety distinct students each sending one request
+can pass the per-user RPM rule; class burst ceilings are global concurrency
+(`MAX_CONCURRENT_MODEL_CALLS`), the AnyIO thread limiter, AgentCore, and KB
+Retrieve capacity.
+
+**What this proves:** FastAPI + owner isolation + notebook/user/global caps +
+SQLite persist can accept 120 concurrent mock turns and 90 concurrent 10s
+fake-slow turns with 0 unexpected 429s, 0 ownership leaks, 1-call
+idempotency replay, and no partial assistant turns. The Retrieve pool
+fail-closes at `workers` (default 4): 90 concurrent fake Retrieves → 4 ok +
+86 `capacity_exhausted`, no queueing, slots recover, foreign-bucket hits
+return no evidence.
+
+**What this does not prove:** AgentCore/Haiku P95, live KB Retrieve, DSQL OCC,
+Cognito, Uvicorn-on-ARM64-2GB, or EC2 class capacity. Mock/fake-sleep latency
+is not model latency. Docker 2 CPU / 2 GB envelope was **not run** (Docker
+engine unavailable on this host).
+
+**Do not raise** `KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS` from 4 on this
+evidence. Per-request `ThreadPoolExecutor(max_workers=2)` stays (option A);
+90×10s peaked ~431 Python threads / ~258 MiB process-lifetime RSS locally,
+not proven harmful.
+
+**Next exact live AWS action (operator-approved only):** staged 2 → 5 → 10 →
+25 real students on the deployed image/runtime. Count live
+`capacity_exhausted`, AgentCore P95, DSQL errors, and RSS. Do not open 90
+live students from this mock probe.
+
+**Always-visible Deep Review button:** Review always shows **Start Deep Review**. Locked/unlocked state and the `{n}/{interval}` caption are derived from persisted `coaching_turns_since_deep_review` and `DEEP_REVIEW_INTERVAL_TURNS`. Eligibility remains FastAPI/DSQL (`explicit_deep_review_available`); Streamlit does not keep a second counter. Ineligible `POST /api/v1/threads/{id}/deep-review` still returns 400. The Review spinner follows persisted `deep_review_job` status via a 2s fragment poll, not a Streamlit session flag. This UI/API change is not assumed to be in the live EC2 image.
+
+**Divergence vs `main`:** history-only ancestry. `git log --no-merges origin/Integrate-Bedrock..origin/main` is empty, and no file exists on `main` that is missing from this branch. `main`’s extra commits are merge commits of PRs #7–#12. This branch is strictly ahead in content.
+
+**Last documented live cutover (2026-08-17, historical):** same AgentCore ARN, version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0`. Compose / host pin `AGENTCORE_SESSION_GENERATION=2`. **Re-query before release.**
+
+
+
+
+### Fast Chat latency: fragment reconcile + Fast-Chat-only first-cycle force
+
+Prepared on `Integrate-Bedrock-v2` after `bf7bec5`. **Not published to
+AgentCore. Not deployed to EC2.** Prompt cache remains disabled. Canonical
+stage/shared coaching prompts are unchanged. RAG filters/timeouts/chunk
+caps are unchanged.
+
+#### What this follow-up changes
+
+- Streamlit: keep the composer `@st.fragment` so Send starts FastAPI without
+  rebuilding Journey/Sources/history first. After a successful persist,
+  always `rerun_app()` so completed turns live in persisted `chat_log`,
+  not only inside the fragment (consecutive Q&A cannot vanish).
+- Runtime: first-cycle `tool_choice={"any": {}}` is Fast Chat only. Deep
+  Review is not modified. Unexpected multiple tool specs are not forced.
+  `first_cycle_tool_choice_installed` is stamped true/false. `turns=2` kept.
+  Applied telemetry (`first_cycle_tool_choice_applied` / allow-listed
+  decision) is in the later uncommitted hardening worktree, not in this
+  fragment SHA.
+- Observability: `fragment_to_api_ms` from fragment start to HTTP; runtime
+  flag copied onto `coach_turn_perf`.
+- Tests: Strands fake-model integration (skipped without strands); A–T
+  quality matrix inventory (no invented live scores).
+
+#### Production measurements that motivated this phase (heavy notebook)
+
+Taken on the live CloudFront path before these patches. Approximate:
+
+| Case | UI pre-API | FastAPI | AgentCore | cycles | persist |
+|---|---:|---:|---:|---:|---:|
+| Hello | ~3.84 s | ~10.9–12.7 s | ~9.6–12.2 s | 1 | ~0.2–0.3 s |
+| Coaching | (same order) | ~14.1 s | ~13.4 s | 2 | ~0.2–0.3 s |
+| Evidence-gap Q&A | — | ~0.98 s | 0 | n/a | — |
+
+Empty filtered KB Retrieve ~0.51 s. DSQL ~0.26–0.46 s. Prompt cache off.
+EC2 was not CPU-bound. Fresh-notebook Hello was **not** measured live.
+
+#### Cycle-2 root cause (Strands 1.52.0 wheel, not a guess)
+
+Inside **one** `invoke_agent_runtime`, `Agent.invoke_async(..., structured_output_model=FastChatTurnOutput, limits={"turns": 2})` starts with voluntary tool use (`tool_choice` unset). If cycle 1 returns `stop_reason=end_turn` without the structured-output tool, Strands appends `Please use the output tool now.`, `set_forced_mode()` (`tool_choice={"any": {}}`), and recurses. Hello often used the tool on cycle 1; Socratic Coaching more often wrote prose first.
+
+`invoke_async` in 1.52.0 has **no** first-cycle `tool_choice` argument. The documented seam first-party plugins use is `InvokeModelStage.Input` on `agent._middleware_registry`.
+
+#### Historical notes from the first latency patch
+
+Cycle-2 cause and production timings are above. Prompt cache stays disabled.
+Duplicate notebook load and DSQL pooling were not changed. Guardrails, RAG
+validation, and Deep Review architecture were not changed.
+
+#### Validation (this follow-up)
+
+Evidence from this worktree on top of `bf7bec5` (not committed):
+
+- `ruff check` passed (full repo).
+- `compileall` passed (`backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`, `agentcore_runtime`).
+- Companion `.venv` mock pytest: **1353 collected, exit 0**. The Strands
+  integration module is skipped here because companion pytest does not
+  install `strands-agents`.
+- Throwaway venv with `agentcore_runtime/requirements.txt`
+  (`strands-agents==1.52.0`): **19 passed**
+  (`test_strands_first_cycle_middleware.py` 5 +
+  `test_first_cycle_structured_output.py` 14). Diagnostic
+  `check_agentcore_runtime_dependencies.py` printed
+  `agentcore_runtime_dependency_check=ok`.
+- Targeted quality/RAG/stage/Deep Review run: **180 passed**
+  (`test_qa_grounding`, `test_bedrock_retrieve`, `test_citation_resolution`,
+  `test_deep_review_execution`, `http/test_deep_review`,
+  `test_fast_chat_one_call`, `test_coaching_prompt_baseline`,
+  `test_security_invariants`, `test_mode_classification`,
+  `test_structured_output_limits`, `test_review_agent`).
+- Informational mock benchmark only (not AgentCore): fresh submit_ms ~510
+  (cold SQLite), medium 13.3, heavy 11.0. `agentcore_invokes=0`.
+
+Cycle=1 on live Haiku Coaching remains **LIVE TRACE REQUIRED** after an
+authorised AgentCore republish. Fragment `pre_api_ms` improvement is
+architectural; production click-to-API is unproven. Live A–T quality
+scores were **not** invented.
+
+#### Next exact action
+
+Do **not** publish AgentCore or rebuild EC2 until authorised. After
+authorisation: publish runtime with Fast-Chat-only middleware, bump
+`AGENTCORE_SESSION_GENERATION`, recreate the app image, then measure Fresh
+and Heavy Hello/Coaching/Q&A with `event_loop_cycle_count`,
+`first_cycle_tool_choice_installed`, and `UI TIMING fragment_to_api_ms`.
+
+### Week 1 RAG, Q&A stay, and latency
+
+On `Integrate-Bedrock` after `e7132ff`. **Not deployed.** Chat overlay/composer layout is in `e7132ff`. No AgentCore runtime republish (DEFAULT remains liveVersion **21**). Paid generation was not used. One capped live Retrieve was approved; this laptop could not execute it (`KNOWLEDGE_BASE_ID` empty). Do not flip production off `required` filters.
+
+**Live / local probe (2026-08-18).** Dry-run `scripts/diagnostics/test_course_retrieval.py --query "what does week 1 material cover" --source "Week 1 Introduction to innovation v3.pdf"`: `metadata_filter_mode=required`, `filter_kind=equals`, `course_material_id=lecture_week_1_introduction_to_innovation_v3`, object key `course/lectureNotes/Week 1 Introduction to innovation v3.pdf`, expanded query `what does week 1 material cover lecture 1`. Local `KNOWLEDGE_BASE_ID=(empty)` so Retrieve was not called (`config_missing` / unavailable). `check_course_kb_metadata.py --dry-run`: `sidecar_missing_count=10` / `local_sidecar_ok=false`, including the Week 1 sidecar. Operator path remains [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md). Production student trace for this utterance was `COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT` (`course_retrieval_status=unavailable`), not empty-validated-hits.
+
+**Application changes in this worktree**
+
+- Session narrowing among **already-selected** course sources (`prefer_session_matching_sources`); fail-open if none match. KB query text stays the student question plus week/lecture alias.
+- Secret-safe KB perf: `kb_sdk_ms`, `kb_validate_ms`, drop counts (`bucket_mismatch` / `key_mismatch` / `empty_text`). Optional `CO_DESIGN_RAG_DEBUG` (default false) logs query length, selected titles, top scores — never excerpts.
+- Q&A: `RUNTIME_HINT_QA` takes precedence; composer omits Strict/stay-advance language on `expected_response_mode=qa`; prior assistant / memory are continuity only. Server-authored `QA_EVIDENCE_GAP_RESPONSE` skips AgentCore when Q&A + selected sources + no validated chunks (image-only Q&A still invokes). Fast Chat assembly: Q&A runtime rules override stage pedagogy (needs a **new AgentCore runtime version** for the success path).
+- Latency: `auth_context_ms` copied onto `/coach/turn`; TIMING now includes `auth`, `kb_sdk`, `kb_validate`; `get_messages` ∥ `list_visible_sources` after notebook load. No region/retry/threshold change. Duplicate notebook load in `_submit_body` vs `_prepare` was **not** removed.
+- First-prompt duplicate: `set_coach_turn_streaming()` writes session state and an in-process session-id set so the prior run’s Sources `run_every` fragment can skip `rerun_app()` while `handle_prompt` is blocked (chat renders before Sources).
+- Inflight overlap: `chat_log` no longer shares `height: 100%` with studio scroll. Occupied inflight uses `overflow: hidden`, `height: auto`, and `min-height: min-content` so a long pending bubble takes in-flow height under history instead of painting over the last Coach reply; empty inflight still collapses to `max-height: 0`.
+- Composer autogrow: paste/wrap measures `height: auto` and capture-phase input listeners grow the composer to the existing 5-row cap at any width.
+
+**Validation.** Focused UI: `tests/ui/test_streamlit_ui.py` for composer autogrow; `tests/ui/test_rerun_scope.py`, `tests/ui/test_chat_progress.py`, `tests/test_architecture_contracts.py` for the remount guard; `tests/ui/test_theme_styles.py` for inflight-overlap CSS (contain long pending bubbles). `compileall` + ruff on touched files passed. Full mock pytest **1323 passed** before these UI patches; re-run the suite before handoff. No live Bedrock/AgentCore from pytest.
+
+**Next exact action.** Operator: upload Week 1 (and other) sidecars and run ingest per the runbook, then one capped live Retrieve on EC2/production credentials. Publish a new AgentCore runtime only after FastAPI lands, and bump `AGENTCORE_SESSION_GENERATION`. Measure one Week 1 coach TIMING line in production logs before any further DSQL pooling.
+
+### What is committed on this SHA
+
+Committed application/runtime (not an uncommitted worktree):
+
+- Fast Chat: one FastAPI `InvokeAgentRuntime` per normal turn; slim `FastChatTurnOutput` (`fast_chat_turn_v1`); Haiku 4.5; `runtime_context.specialist=fast_chat`.
+- Deep Review: explicit `POST /api/v1/threads/{thread_id}/deep-review` enqueues a
+  background Sonnet 4.6 job and returns `{ review_id, status, reviewed_revision }`
+  immediately. `GET` the same path for job status (snapshot when completed).
+  Coaching `/coach/turn` can overlap. The browser cannot pick a privileged
+  specialist on `/coach/turn`.
+- Course RAG: shared `course/` objects → Bedrock **MANAGED** Knowledge Base → validated `Retrieve` mapped to `[S#]`. Student uploads stay on local lexical retrieval.
+- Student-source hydration: precomputed `derived/chunks.v1.json` plus an in-process LRU; missing/invalid artifacts fall back to chunking extracted text.
+- Auth/persistence: Cognito owner isolation; Aurora DSQL is the only durable transcript; S3 for objects; atomic persist; append-only conversation revisions; durable idempotency lease.
+- Month-1 production pilot in [`../compose.prod.yaml`](../compose.prod.yaml): `AUTO_ADVANCE_STAGES=true`, `STUDENT_STAGE_SELECTION=false` (coach ADVANCE auto-applies; no student Next; no Journey stage picker). Intentional. Note the three stage-config sources disagree on purpose, so quote the right one: the **code** default is confirmation-gated (`backend/settings.py` `AUTO_ADVANCE_STAGES` → `False`), while **both** `.env.example` (`AUTO_ADVANCE_STAGES=true`) and production Compose auto-apply. A local demo that copies `.env.example` therefore auto-advances; only a run with no `.env` value is confirmation-gated.
+- Production runtime pin (Compose): `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT` (currently liveVersion **21**, slim `fast_chat`), `AGENTCORE_SESSION_GENERATION=2`, `GUARDRAIL_VERSION=3`, `KNOWLEDGE_BASE_TYPE=MANAGED`, `DATABASE_PROVIDER=dsql`, `FILE_STORAGE_PROVIDER=s3`. Topology: one EC2, one container, one Uvicorn worker, Caddy behind CloudFront.
+
+### What CI actually proves
+
+Three workflows. [`../.github/workflows/mock-ci.yml`](../.github/workflows/mock-ci.yml)
+is the correctness gate and the only one that should be a required check:
+
+| Job | Gates |
+|---|---|
+| `mock-suite` | `ruff check`; shell syntax (`start.sh`, `build.sh`, `start_prod.sh`, `deploy_ecr.sh`, `browser_e2e_smoke.sh`); `docker compose` + `compose.prod.yaml` + Caddy validate; `compileall` (`backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`, `agentcore_runtime`); production-config tests; idempotency + ownership + production-critical-path tests; **complete mock pytest**; Docker image build **on push only** (`co-design:ci-<12-char-sha>`). |
+| `agentcore-runtime-compatibility` | `pip install -r agentcore_runtime/requirements.txt`; `scripts/diagnostics/check_agentcore_runtime_dependencies.py`; compile `agentcore_runtime`; pytest `test_strands_first_cycle_middleware.py` + `test_first_cycle_structured_output.py` with the pinned Strands wheel. Companion pytest does **not** install Strands. |
+
+Two supply-chain workflows report but must **not** become required checks:
+[`dependency-audit.yml`](../.github/workflows/dependency-audit.yml) (pip-audit,
+path-filtered to requirements files, fail-closed) and
+[`codeql.yml`](../.github/workflows/codeql.yml) (Python, `main` only). Both are
+filtered, so on a branch or PR that does not touch their paths they are skipped
+rather than passing. A required check that is skipped blocks merges in GitHub,
+so mark only `mock-ci` jobs required. [`dependabot.yml`](../.github/dependabot.yml)
+opens grouped weekly pip / actions / docker PRs.
+
+### What is not live-validated
+
+CI is **mock-only**. It does not prove live AgentCore, Bedrock Converse, Knowledge Base `Retrieve`, DSQL, S3, Cognito, or CloudFront. Passing mock pytest is not a production smoke.
+
+This hardening worktree did not invoke AWS. A capped isolated Fast Chat invoke (`student_message=testing`, no DSQL write) on DEFAULT **v21** was historical (prior session). Deep Review, Cognito login, and RAG were not re-run here.
+
+### Deployment impact of this tip
+
+This worktree is **not live**. Query AgentCore DEFAULT `liveVersion` and the
+running EC2 image before any cutover. Last documented live app image was
+`cde2300-chatbot:b81a5b0` (label/revision `b81a5b09ce622889f60fdcd743c23d7845eb9ee8`)
+with host `AGENTCORE_SESSION_GENERATION=2` and rollback image
+`cde2300-chatbot:2386d65`. Those facts can be stale.
+
+- **EC2 / container:** rebuild from the **same git SHA** as the authorised
+  source after CI. Do not use `latest`. Do not assume the current host image
+  matches this worktree.
+- **AgentCore:** publish a **new version** to the **existing** runtime ARN
+  (`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` is the last documented
+  id; confirm on the host). Wait until READY, then move DEFAULT. Do **not**
+  create a new runtime ARN. Isolated `"testing"` invoke on last documented
+  DEFAULT **v21** is historical, not this worktree.
+- **Console:** no new Cognito callback, bucket, or Guardrail version (stay on
+  version **3** on both FastAPI Compose and the runtime).
+- **DSQL:** no new DDL in this worktree. Confirm the cluster already has
+  revision/idempotency columns. Never run `init_dsql.py` at app startup or as
+  `co_design_app`.
+- **S3:** no new bucket. User objects under `users/`; course objects under
+  `course/` only.
+
+## CURRENT ARCHITECTURE
+
+Authoritative layering remains [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md). Production generation is AgentCore; FastAPI still owns identity, RAG authorization, transcript, and stage mutation.
+
+**Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Fast Chat cycle 1 sets `tool_choice={"any": {}}` via Strands 1.52.0 `InvokeModelStage.Input` when exactly one structured-output tool is present. Deep Review is not modified by that force. Event-loop recovery inside that one Fast Chat invoke remains capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`. Do not set `turns=1` while first-cycle output can fail. `first_cycle_tool_choice_installed` is true only when the middleware registered. `first_cycle_tool_choice_applied` is true only when cycle 1 actually changed an unset `tool_choice` to `{"any": {}}`. Omit applied/installed for Deep Review.
+
+**Deep Review.** Separate HTTP route `POST /api/v1/threads/{thread_id}/deep-review`. Server-owned eligibility, Sonnet 4.6, counter, snapshot, idempotency. Event-loop cap `{"turns": 3}`. Not on `/coach/turn`. The latest successful snapshot is the Review-tab source for summary, Facione scores, working conclusion, and merged strengths / areas-to-develop. Snapshot strengths and areas are merged onto the frozen `reviewed_stage_id` (enqueue-time stage), not the student's stage at completion or render. Incremental Haiku `review_strengths` / `review_improvements` remain in message history. Failed jobs do not replace the snapshot.
+
+**Course RAG.** Locked Lecture Notes/Readings are virtual catalog rows (no local extracted text). Evidence comes from Bedrock **MANAGED** `Retrieve` with `course_material_id` metadata filters when configured, then bucket/object-key validation onto request-local `[S#]`. Details: [`RAG_ARCHITECTURE.md`](RAG_ARCHITECTURE.md) and [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md). AgentCore specialists have `tools=[]` (no KB search).
+
+**Student source retrieval.** Private notebook sources only. FastAPI hydrates selected textual sources from `derived/chunks.v1.json` when valid; otherwise chunks `derived/extracted.txt` with the local lexical chunker (`local_lexical_v1`, ~1,800 / 220). In-process LRU is keyed by server-built object key + content digest. Course/virtual rows never become fake local chunks.
+
+**Auth / persistence.** Cognito is the browser session. DSQL `messages` is the only durable transcript (no AgentCore Memory, DynamoDB, or JSON sidecar). S3 holds user uploads and shared course bytes. Persist is atomic with the idempotency lease. User-message Edit creates an append-only conversation revision; `get_messages` returns the active branch.
+
+**Month-1 stage policy.** Production Compose auto-applies coach ADVANCE. Only the
+`backend/settings.py` code default is confirmation-gated; `.env.example` ships
+`AUTO_ADVANCE_STAGES=true`, so a demo started from a copied example file
+auto-advances too.
+
+## CURRENT PERFORMANCE WORK
+
+**Source hydration / prechunking / cache.** Upload/ingest writes disposable `derived/chunks.v1.json`. Coach turns hydrate selected student sources once per request (`hydrate_selected_retrieval_sources`); RAG fallback does not re-GET extracted text when the snapshot already has chunks. Byte-bounded LRU: `STUDENT_SOURCE_CHUNK_CACHE_MAX_BYTES` (default 32 MiB). Offline SQLite backfill exists (`scripts/backfill_source_chunks.py`) and must not be run against production.
+
+**Retry bounds (current code, not historical `max_attempts` Botocore wording).**
+
+- Botocore client config uses **`total_max_attempts`** (inclusive of the first call). Legacy `retries={"max_attempts": N}` is normalised to **N+1** attempts and is not used. FastAPI AgentCore/Bedrock/harness clients set `total_max_attempts = max_retries + 1` with production `AGENTCORE_MAX_RETRIES=0` → one read-timeout window. Runtime Converse (`agentcore_runtime/model.py`) pins `total_max_attempts=1` so Strands `ModelRetryStrategy` is the only Converse retry layer. KB Retrieve also uses `total_max_attempts=1`. DSQL OCC retries are application-level `max_attempts` in `backend/persistence/dsql_connection.py`, not Botocore.
+- Strands `ModelRetryStrategy` (distinct from Botocore): Haiku roles `max_attempts=2` (1s/4s); Deep Review `max_attempts=3` (2s/16s). New strategy instance per Agent.
+- Application RAG fallback: at most one extra retrieve + one extra Fast Chat invoke when the gate skipped retrieval and Haiku sets `needs_source_retrieval`. First result is not persisted. `FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN=2`.
+- Fast Chat event-loop: `FAST_CHAT_INVOKE_LIMITS={"turns": 2}` plus first-cycle
+  `tool_choice={"any": {}}` so recovery is not the normal Coaching path.
+
+**Cycle telemetry.** When Strands metrics expose it, the runtime copies `event_loop_cycle_count` onto the payload; FastAPI records it on privacy-safe `coach_turn_perf` JSON. Absent metrics stay unset (not invented). Grep-friendly `TIMING` lines (`auth`, `student_state`, `memory`, `retrieval`, `kb_sdk`, `kb_validate`, `context_build`, `agent`, `persistence`, `TOTAL`) are seconds on logger `co_design.turn_perf`. The JSON event also records `hydrate_total_ms` and `qa_evidence_gap_authored`.
+
+**KB Retrieve latency.** Default wall-clock timeout 10s (`KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS`); shared executor; excess calls fail closed (`capacity_exhausted`) rather than queueing.
+
+### Session affinity and runtime model provenance
+
+**AgentCore compute affinity (default OFF).** `AGENTCORE_SESSION_AFFINITY_ENABLED`
+(default `false`) and `AGENTCORE_SESSION_GENERATION` (default `1`) are the only
+controls. When disabled — the shipped default — every invoke still gets a fresh
+`stateless-<uuid4hex>` id, byte-identical to prior behaviour. When enabled,
+`backend/agentcore_provider.py::_runtime_session_id` derives an opaque
+`codesign-<sha256 hex>` from owner id, notebook id, role, and generation, so a
+returning student can land on a warm microVM. Properties that matter:
+
+- The id is a one-way digest. Raw owner or notebook ids are never placed in the
+  session id and the id itself is never logged
+  (`tests/domain/test_security_invariants.py`).
+- Role is part of the digest: Deep Review uses `review_deep`, normal chat uses
+  `fast_chat`, so a privileged review cannot land on a Fast Chat session.
+- Missing or blank identity fails **open** to a unique stateless id rather than
+  collapsing distinct students onto a shared session.
+- Affinity is a **compute** optimization only. DSQL remains the sole durable
+  transcript and the bounded history is still sent on every turn; nothing reads
+  state back out of AgentCore. Bump `AGENTCORE_SESSION_GENERATION` whenever new
+  runtime code assets are published so clients cannot stay pinned to a warm
+  microVM running the previous build.
+
+**Runtime model provenance.** `agentcore_runtime/model.py::safe_response_provenance()`
+reports what the runtime actually loaded; `structured_coach.py` and `main.py`
+attach it beside the cycle/cache telemetry. FastAPI parses it in
+`backend/agentcore_provider.py` and allow-lists `runtime_model_role`,
+`runtime_model_provider`, `runtime_model_id`, `runtime_model_region`, and
+`runtime_strands_agents` in `backend/turn_perf.py`. Production logs therefore
+carry the **runtime-reported, FastAPI-sanitized** model instead of echoing the
+FastAPI-configured value. Absent telemetry stays unset; there is no fallback to
+the configured model, so a missing field is visible rather than silently
+plausible. This is provenance, **not attestation**: the runtime self-reports and
+FastAPI only bounds the value (80 characters, restricted charset), so a
+compromised runtime could still report a plausible-looking model id.
+
+### Message ordering correctness
+
+`persist_coach_turn` previously stamped its user and assistant rows with two
+back-to-back `utc_now()` calls. Message reads order by `created_at ASC, id ASC`,
+and `id` is a random UUID4, so whenever both rows landed in the same microsecond
+the tiebreaker was effectively a coin flip and an assistant reply could sort
+**before** the student message that produced it. That corrupted transcript
+display order and the bounded history handed to the model. The assistant stamp
+now comes from `utc_now_after(user_created_at)`
+(`backend/persistence/store/contracts.py`), which guarantees a strictly later
+value. Regression coverage freezes the clock so the collision is deterministic
+rather than timing-dependent (`tests/persistence/test_message_ordering.py`).
+
+## HISTORICAL INVESTIGATION
+
+> **Not the current runbook.** Entries below describe the repository, CI, and
+> production state **at the time each phase was written**. They are preserved
+> for investigation (traces, retry analysis, publish notes). Do not treat SHA
+> claims, "uncommitted" banners, Botocore `max_attempts` wording, liveVersion
+> numbers, or "next exact action" lines here as current operator instructions.
+> For current HEAD, CI, and deploy impact, use **CURRENT STATUS** above and
+> [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md).
+
+### Current phase — Background Deep Review jobs (non-blocking coaching + poll UI)
+
+**Code is local on `Integrate-Bedrock` and is not committed or deployed.** No
+AgentCore publish, EC2 deploy, or live AWS inference was performed. Fast Chat,
+RAG, STAY/ADVANCE, Facione, and CLEAR are unchanged. Live app image remains
+`cde2300-chatbot:b81a5b0`.
+
+#### What this phase changed
+
+1. **Non-blocking enqueue.** `POST /api/v1/threads/{thread_id}/deep-review`
+   persists `deep_review_job` on notebook `settings_text` and returns
+   `{ review_id, status, reviewed_revision }` immediately. A process-local
+   `ThreadPoolExecutor` (one Uvicorn worker) runs Sonnet against
+   `get_messages_at_revision` plus frozen message/source ids. Completion writes
+   `deep_review_snapshot`, job `completed`, and counter `0` without inserting
+   transcript rows or requiring a matching live stage/revision.
+2. **Coaching overlap.** Deep Review no longer takes
+   `MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK`. Chat keeps notebook=1.
+   `DEEP_REVIEW_MAX_CONCURRENT` (default 8) is a separate semaphore.
+3. **GET status + stale fail-closed.** `GET` the same path returns the job
+   (snapshot when completed). Queued/running jobs older than
+   `DEEP_REVIEW_JOB_TIMEOUT_SECONDS` (then-default 180; current default 240)
+   become `failed` / `review_timeout`. Duplicate POST while queued/running
+   reuses `review_id`.
+4. **Review UI poll.** Streamlit fragments poll GET every 2s only while
+   queued/running. The spinner follows backend job status. Chat stays enabled.
+   Browser refresh recovers from the job record. Failed jobs keep the counter
+   and show the existing safe error.
+
+#### Files
+
+- `backend/persistence/store/contracts.py` — `deep_review_job` settings key
+- `backend/specialists/review_orchestration.py` — job parse/stale helpers
+- `backend/student_store.py` — start/mark/complete/fail settings writers
+- `backend/persistence/dsql_student_store.py` — OCC coverage for those writers
+- `backend/domain.py`, `backend/settings.py`, `backend/rate_limit.py`
+- `backend/coaching/deep_review_jobs.py`, `backend/coaching/execution.py`
+- `backend/http/app.py`, `backend/api_client.py`, `ui/services/runtime.py`
+- `backend/agentcore_provider.py` — optional affinity salt with `review_id`
+- `ui/panels/studio.py` — stable vs 2s polling fragments
+- `tests/conftest.py` — reset in-process review executor between tests
+- `tests/http/test_deep_review.py`, `tests/domain/test_deep_review_execution.py`,
+  `tests/ui/test_deep_review_control.py`, `tests/ui/test_chat_progress.py`,
+  `tests/test_architecture_contracts.py`, `tests/domain/test_review_agent.py`
+- `docs/IMPLEMENTATION_STATUS.md` — this phase
+
+#### Validation
+
+- `ruff check` on touched Python files: passed.
+- `python -m compileall -q backend ui streamlit_app.py tests scripts`: passed.
+- Targeted: `tests/domain/test_deep_review_execution.py`,
+  `tests/http/test_deep_review.py`, `tests/ui/test_deep_review_control.py`,
+  `tests/ui/test_chat_progress.py`, `tests/test_architecture_contracts.py`,
+  `tests/domain/test_review_agent.py`: passed.
+- Full mock pytest: 1312 passed.
+- No live AWS, AgentCore, Bedrock, DSQL, S3, or KB calls.
+
+#### Migration / compatibility / rollback
+
+No DSQL DDL. New settings key is ignored by older code and dropped only if an
+old writer splits metadata without `deep_review_job` in `SETTINGS_KEYS`.
+Rollback is a code revert. In-flight jobs are not durable across process
+restart; the next GET fail-closes them.
+
+#### Risks / blockers
+
+Staging-ready for a pilot, not a 100-student soak. Remaining: in-process jobs
+die on container restart; AgentCore/Bedrock account concurrency; polling load
+is one GET / 2s / in-flight review only.
+
+#### Next exact action
+
+Do **not** commit, publish AgentCore, or rebuild the EC2 image unless asked.
+
+### Previous phase — Always-visible Deep Review button (server-owned eligibility)
+
+**Committed on `Integrate-Bedrock`.** No AgentCore publish, EC2 deploy, or live
+AWS inference was performed. Fast Chat, RAG, stage advancement, Sonnet, and
+the Deep Review HTTP contract are unchanged. Live app image remains
+`cde2300-chatbot:b81a5b0`.
+
+#### What this phase changed
+
+1. **Always-visible control.** Review always renders `Start Deep Review`.
+   Locked = Streamlit `disabled=True` with
+   `Deep Review unlocks after {interval} coaching turns — {n}/{interval} completed.`
+   Unlocked idle = `type="primary"` plus wait copy. Full-width control with a
+   10px caption gap. Locked uses a muted outlined shade; ready uses a solid
+   `--cd-accent` fill (`20-studio.css`).
+2. **Server-owned eligibility.** Presentation uses
+   `deep_review_control_view(counter, interval, running=...)` over
+   `parse_coaching_turns_since_deep_review` and
+   `settings.deep_review_interval_turns` (bounded). No Streamlit counter.
+   FastAPI still rejects ineligible calls with 400.
+3. **Click / loading.** Eligible click sets session
+   `_deep_review_running_thread_id` and reuses one
+   `_deep_review_idempotency_key`, shows compact `st.status`, and calls
+   existing `start_deep_review()` → `POST /deep-review`. Success clears the
+   guard and reruns (backend resets the counter to 0). Failure clears the
+   guard, shows `Deep Review could not be completed. Try again.`, and keeps
+   eligibility.
+4. **Caption refresh.** Chat reruns studio when the persisted counter
+   changes, not only when the boolean entitlement flips, so 1/3 and 2/3
+   update after qualifying coaching turns.
+5. **DESIGN.md.** One-sentence clarification that a single eligibility
+   caption is not a Journey counter.
+
+#### Files
+
+- `ui/panels/studio.py` — view helper, always-visible button, status, guard
+- `ui/panels/chat.py` — studio rerun on counter change
+- `ui/assets/styles/20-studio.css` — full-width button, 10px gap, locked vs ready shades
+- `tests/ui/test_deep_review_control.py` — helper views at 0/1/2/3 + running
+- `tests/ui/test_chat_progress.py` — always present; disabled then enabled;
+  ineligible click spy; failure keeps counter and safe error
+- `DESIGN.md` — eligibility caption is not a second Journey counter
+- `docs/IMPLEMENTATION_STATUS.md` — this phase
+
+#### Validation
+
+- `ruff check` on touched Python files: passed.
+- `python -m compileall -q backend ui streamlit_app.py tests scripts`: passed.
+- Targeted: `tests/ui/test_deep_review_control.py`,
+  `tests/ui/test_chat_progress.py`, `tests/domain/test_deep_review_execution.py`,
+  `tests/domain/test_review_agent.py`, `tests/http/test_deep_review.py`:
+  57 passed.
+- Full mock pytest: 1305 passed.
+- No live AWS, AgentCore, Bedrock, DSQL, S3, or KB calls.
+
+#### Migration / compatibility / rollback
+
+No schema, API, or counting-rule change. Rollback is a code-only revert of
+the Streamlit presentation. Existing notebooks keep
+`coaching_turns_since_deep_review`. Failed Deep Review still does not reset
+the counter.
+
+#### Risks / blockers
+
+Leaving the Review **tab** still does not cancel an in-flight Deep Review
+(`st.tabs` is client-side). A full Streamlit rerun (Chat send, notebook
+switch) can show a UI error while FastAPI finishes; notebook lease remains 1
+in-flight request.
+
+#### Next exact action
+
+Do **not** publish AgentCore or rebuild the EC2 image for this
+presentation-only patch unless a new app image is requested. Live image
+remains `cde2300-chatbot:b81a5b0`.
+
+### Previous phase — Fast Chat first-pass structured output, retry bounds, Deep Review cap
+
+**Code is local on a worktree of `Integrate-Bedrock` at `e88393d` and is not
+committed or deployed.** No AgentCore publish, EC2 deploy, or live AWS
+inference was performed.
+
+#### Trace vs current code
+
+The supplied two-cycle production trace used a **rich** Fast Chat schema
+(`assessment`, `research_coding`). Current HEAD Fast Chat is slim
+`FastChatTurnOutput` (`fast_chat_turn_v1`). That trace is therefore a
+**stale runtime / older DEFAULT** observation, not proof that current
+published AgentCore still emits the rich schema.
+
+#### Root cause of cycle #2
+
+**PROVEN (Strands 1.52.0 SDK mechanism, from the pinned wheel):** inside
+**one** `invoke_async` / **one** `InvokeAgentRuntime`, if structured output
+is enabled and the first generation returns `stop_reason=end_turn` without
+the output tool, Strands appends `structured_output_prompt`
+(`Please use the output tool now.`), `set_forced_mode()`, and
+`recurse_event_loop`. That is a second **event-loop cycle**, not a second
+application AgentCore invoke.
+
+**UNPROVEN:** that the supplied live trace's cycle #2 was this recovery on
+**current slim** Fast Chat. No live AWS call was made here, and that trace's
+schema does not match `fast_chat_turn_v1`.
+
+**INFERENCE:** first-pass conversational prose is more likely when the
+system prompt opens as a locked Coaching specialist and asks Haiku to be
+conversational before the structured-output contract. The working-tree
+prompt/identity changes are a hedge, not live proof of one-cycle Haiku.
+
+#### What this phase changed
+
+1. **First-pass instruction.** Fast Chat tells Haiku to complete the
+   structured-output mechanism on the first generation and not to emit an
+   intermediate conversational answer. Fast Chat identity is no longer a
+   locked Coaching specialist: `shared_coaching.md` is unchanged for legacy
+   Coaching, but Fast Chat replaces only the opening identity sentence.
+2. **`runtime_context.specialist=fast_chat`.** Fast Chat no longer stamps
+   `specialist=coaching`. Optional `expected_response_mode` is included when
+   the server policy is qa or coaching.
+3. **Model retries.** Per-invoke `ModelRetryStrategy`: Haiku roles
+   `max_attempts=2` (1s/4s backoff); Deep Review `max_attempts=3` (2s/16s).
+   Distinct from event-loop turns. New strategy instance per Agent.
+   Botocore Converse retries are pinned to `max_attempts=1` so they do not
+   multiply the Agent retry budget.
+4. **Deep Review event-loop cap.** `limits={"turns": 3}` (was uncapped).
+5. **Welcome exclusion.** Static `coach_welcome` stays in the transcript for
+   UI and is omitted from model history.
+6. Guardrail-safe ConversationMemory rendering from `847d0c6` is unchanged.
+
+#### Validation
+
+- `ruff check .`: passed.
+- `python -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime`:
+  passed.
+- Focused Fast Chat / AgentCore / mode / memory / RAG fallback / Deep Review
+  tests: passed.
+- `tests/domain` excluding three POSIX-`resource` collectors
+  (`test_files_and_engine.py`, `test_retrieval.py`, `test_source_library.py`):
+  passed after LF-normalizing the coaching prompt hash lock (Windows CRLF).
+- Companion pytest does not install `strands-agents`. Cycle-#2 semantics were
+  proven by reading the downloaded `strands-agents==1.52.0` wheel
+  (`event_loop.py` `end_turn` recurse + `_retry.py` `ModelRetryStrategy`).
+  The GitHub `agentcore-runtime-compatibility` job remains the CI install path.
+- No live AWS, AgentCore, Bedrock, DSQL, S3, or KB calls.
+
+Windows-only collectors/failures outside this phase (POSIX `resource`,
+SQLite `WinError 32` load probes, LFS PDF pointer noise) are not treated as
+Fast Chat regressions.
+
+#### Next exact action
+
+Do **not** publish AgentCore or deploy EC2 until authorised. After an
+authorised runtime publish, live-validate one-cycle Fast Chat and the
+old-notebook Guardrail path.
+
+### Previous phase — Per-service TIMING latency lines
+
+**Prepared on 2026-08-17.** FastAPI-side instrumentation on
+`Integrate-Bedrock`. Nothing in this phase has been pushed to EC2, published as an
+AgentCore runtime version, or synced to the Knowledge Base.
+
+Operators asked for per-service wall times (`student_state`, `memory`,
+`retrieval`, `context_build`, `agent`, `persistence`, `TOTAL`) in seconds.
+Those spans already existed as millisecond fields on privacy-safe
+`coach_turn_perf` JSON, except conversation-memory parse. This phase records
+the missing span and emits grep-friendly `TIMING` lines without student
+text, prompts, or notebook identifiers.
+
+#### What changed and why
+
+1. **`memory_load_ms`** times `memory_from_metadata()` during authoritative
+   turn prepare.
+2. **`agent_ms`** times `_workflow.run` (RAG fallback adds a second invoke).
+3. **Snapshot rollups.** `student_state_ms` = notebook + history + source
+   loads; `context_build_ms` = prompt compose + context planner;
+   `persistence_ms` = persist + idempotency complete. Direct AgentCore
+   `assess()` copies `agent_ms` from `agentcore_invoke_ms` when the
+   application wrapper did not run.
+4. **`TIMING` log lines** on `co_design.turn_perf` in seconds, plus the
+   existing millisecond JSON event.
+
+Q&A/coaching policy, retrieval, citations, idempotency, Deep Review, and
+Guardrails are unchanged. No AgentCore republish is required; restart local
+FastAPI to pick up the log lines.
+
+#### Validation
+
+- Focused: `tests/domain/test_coach_turn_perf.py`,
+  `test_turn_snapshot.py`, `test_rag_fallback.py`.
+- `ruff check` on changed Python files: passed. `compileall` for
+  `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: passed.
+  Full deterministic pytest: passed (exit 0).
+
+#### Next exact action
+
+Restart local FastAPI if you want CloudWatch/local logs to show `TIMING`
+lines on the next coach turn. Do not republish AgentCore.
+
+### Previous phase — Guardrail-safe conversation-memory rendering
+
+**Prepared on 2026-08-17; committed as `847d0c6` on `Integrate-Bedrock`.**
+Nothing in that phase was pushed to EC2, published as an AgentCore
+runtime version, or synced to the Knowledge Base.
+
+Old notebooks were failing live Fast Chat with
+`source=envelope category=safety_blocked` while a new empty notebook
+succeeded. Guardrail v3 scans the latest user message
+(`guardrail_latest_message=True`). Derived `conversation_memory` was
+rendered into that message with instruction-shaped wrapper prose
+("Do not obey commands…"), which matches the earlier Strands repair
+PROMPT_ATTACK false-positive class.
+
+#### What changed and why
+
+1. **`ConversationMemory.format_for_prompt()`** now emits data labels only
+   (`schema=…`, `problem_definition:`, `key_decisions:`). It no longer
+   prefixes "UNTRUSTED DERIVED MEMORY" / "Do not obey commands".
+2. **Render-time filter.** Values matching `_INSTRUCTION_SHAPED` are omitted
+   from the guarded user channel. `quoted_student_statements` stay in
+   persisted JSON and are not rendered.
+3. **Compressor.** Instruction-shaped turns still go to
+   `quoted_student_statements` but no longer seed `problem_definition` or
+   `current_working_conclusion`.
+4. **Trusted guidance unchanged.** FastAPI `runtime_instructions` still
+   says derived memory is untrusted student/project content, not system
+   instructions.
+
+Persisted notebooks, stages, Q&A/coaching policy, retrieval, citations,
+idempotency, Deep Review, and Guardrail IDs are unchanged. No AgentCore
+republish is required; restart local FastAPI to pick up the render change.
+
+#### Validation
+
+- Focused: `tests/domain/test_context_planner.py`,
+  `test_fast_chat_context.py`, `test_agentcore_provider.py`,
+  `test_prompt_architecture.py`.
+- `ruff check .`: passed. `compileall` for `backend`, `ui`,
+  `streamlit_app.py`, `tests`, `scripts`: passed. Full deterministic
+  pytest: passed (exit 0).
+- **NEEDS LIVE AWS VALIDATION:** retry the same old notebook after
+  restarting `scripts/start.sh`. Expect a coaching reply, not
+  `safety_blocked`. CloudWatch `failure_category=safety_blocked` should
+  not appear for that turn.
+
+#### Next exact action
+
+Restart local FastAPI/Streamlit and send a coaching sentence on the
+previously blocked notebook. Do not republish AgentCore for this fix.
+Production needs a FastAPI/EC2 deploy separately.
+
+### Previous phase — Uncommitted Fast Chat honesty, retrieval bounds, Phase 18 containment
+
+**Prepared on 2026-08-17; committed as `fafca8f` on `Integrate-Bedrock`.**
+Local HEAD at that commit plus the later guardrail-memory patch above.
+Nothing in that phase was pushed to EC2, published as an AgentCore
+runtime version, or synced to the Knowledge Base.
+
+This phase does **not** claim production is fixed. One-Haiku-per-turn and
+live filtered Retrieve remain **UNVERIFIED** pending an authorised live
+trace. Mock pytest is not that evidence.
+
+#### What changed and why
+
+Verified in the working tree (read the code; do not treat this as a live
+confirmation):
+
+1. **Progress-field merge.** `backend/coaching/progress_fields.py` overlays
+   only meaningful values. Empty slim Fast Chat fields can no longer blank
+   stored `learning_summary` / `working_conclusion` /
+   `understanding_change` / `critical_understanding` on ADVANCE confirm
+   (`learning_service.py`, `student_store.py`, `coaching/execution.py`).
+2. **Request-scoped citation map.** After the model call, `[S#]` resolution
+   uses `TurnSnapshot.sources_by_id` plus `CoachRequest.source_ids`. It does
+   not `get_source` per id and does not list the S3 catalog again. Course
+   `list_prefix` still runs once per folder when the snapshot is built
+   (mock test: 2 prefix calls, 0 `get_source` calls).
+3. **Request-scoped turn snapshot.** `backend/coaching/turn_snapshot.py`
+   holds the authoritative notebook row, stage, and visible sources for one
+   `submit()`. Mock test: notebook row is loaded twice (existence +
+   authoritative re-read), not three times.
+4. **Strands event-loop cap.** Fast Chat / router / legacy Haiku pass
+   `limits={"turns": 2}` (Strands 1.52.0: initial generation plus at most
+   one recovery). Deep Review is uncapped (`structured_output_limits_for_role`
+   returns `None`). **NEEDS LIVE TRACE** — companion pytest does not install
+   Strands and cannot prove Haiku span count.
+5. **`fast_chat_turn_v1` wire marker.** Slim `FastChatTurnOutput` plus
+   fail-closed `adapt_fast_chat_turn_payload` for the previous nested
+   `CoachTurnOutput` / Q&A shape. Deploy order (documented, not executed):
+   publish FastAPI with the tolerant parser **before** or together with a
+   runtime that emits slim JSON. Do not publish slim-only runtime JSON to an
+   old FastAPI image.
+6. **Fast Chat system-prompt de-duplication.** Facione / research-coding /
+   nested-assessment instructions were removed from `shared_coaching.md` and
+   from FastAPI `trusted_instructions`; the JSON contract lives once in
+   `_FAST_CHAT_JSON_CONTRACT`. Live reconstruction of the
+   `problem_identification` Fast Chat system prompt (composer +
+   `specialist_system_prompt`, including trusted rules and
+   `runtime_context`):
+   - **Now:** 11,467 characters / **3,823** estimated tokens (chars/3).
+   - **HEAD reconstruction** (HEAD prompt files + HEAD JSON contract + the
+     two FastAPI runtime paragraphs this patch removed): 13,978 characters /
+     **4,660** estimated tokens.
+   - Pedagogical files: `shared_coaching.md` 10,026 → 7,397 chars (−2,629);
+     `fast_chat.md` 994 → 1,309 (+315); stage file unchanged.
+   Earlier status at `f663740` recorded 12,958 / 4,320 before
+   `runtime_context`; that is a different baseline, not this HEAD delta.
+7. **Retrieval gate recall.** `classify_retrieval_intent` is graded
+   (`high_confidence_source` / `high_confidence_personal` / `ambiguous`).
+   Bare week/lecture, course grounding, and `S1`/`S2` labels retrieve.
+   `looks_like_course_question` is unchanged (mock specialist routing).
+8. **Server-side mode policy.** `backend/coaching/mode_policy.py` stamps
+   expected Q&A/coaching from the student message and selected-source
+   metadata. No second model call. High-confidence source turns without
+   first-person project reasoning coerce `mode=qa` downstream (prose kept,
+   recommendation stripped). Mixed lecture+project language stays
+   ambiguous so Haiku chooses.
+9. **Bounded Retrieve admission.** Semaphore sized to the shared executor
+   worker count. Excess calls fail closed as `capacity_exhausted`. Empty
+   configured bucket and empty-bucket URIs (`s3:///...`) drop hits.
+   Production requires `COURSE_MATERIALS_BUCKET` whenever
+   `KNOWLEDGE_BASE_ID` is set. Retrieve timeout default is **10s** (was 5s
+   at HEAD `ae3be3d`).
+10. **Idempotency lease derived from timeouts.** No independent 180s knob.
+    With defaults (AgentCore 110s, retries 0, Retrieve 10s) the derived
+    lease is **270s** (timeout-bounded work 240s + 10s persist budget + 20s
+    margin). Tests prove 180s cannot cover two 110s windows.
+11. **Streamlit `done` rendering.** `ui/panels/chat.py` draws the validated
+    `done` payload in the same script run. `rerun_app()` runs only when
+    stage, pending transition, or Deep Review availability changed
+    (`needs_reconcile`). AppTest: a stay turn shows the reply with zero
+    forced reruns.
+12. **Phase 18 legacy-path containment.** Classification and lock tests in
+    `tests/domain/test_legacy_path_containment.py`. Dead FastAPI helpers are
+    not deleted. The published runtime still dispatches leftover `phase`
+    values for IAM callers — documented in
+    [`SECURITY_BOUNDARIES.md`](SECURITY_BOUNDARIES.md). That is not a
+    browser bypass and must not be "fixed" in UI code.
+
+#### Files changed
+
+Uncommitted working tree (not a complete path dump): progress merge
+(`backend/coaching/progress_fields.py`, `learning_service.py`,
+`student_store.py`, `coaching/execution.py`); turn snapshot and mode policy;
+citation catalog; retrieval gate, Bedrock Retrieve pool/bucket checks,
+`sources/kb_metadata.py`; slim Fast Chat schema/parser and prompt files;
+Strands `limits`; lease derivation in `settings.py`; Streamlit chat/runtime;
+KB sidecar scripts and
+[`docs/KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md);
+containment tests and security-boundary docs. Preserve this working tree;
+do not commit unless asked.
+
+#### Adversarial review outcome and follow-up fixes
+
+An independent reviewer that made none of the edits answered the fifteen
+regression questions against this tree. Thirteen were clean. Two P1 defects
+were found in the new mode policy and have been fixed:
+
+1. **Third-person project reasoning was force-flattened to Q&A.** The
+   retrieval gate is deliberately recall-oriented, so any lecture/week/slides
+   cue produced `high_confidence_source`, and the mode overlay only demoted
+   that back to ambiguous on a narrow *first-person* matcher. A student
+   writing "The core problem is that first-year students skip the week 2
+   lecture" therefore lost its stay/advance recommendation and its Deep
+   Review credit. `backend/coaching/mode_policy.py` now demotes on a
+   person-agnostic project-deliberation matcher **and** requires the turn to
+   actually be an information request before Q&A can be forced. Six
+   confirmed regressions now return `expected_mode=None` while still
+   retrieving. Locked by
+   `test_third_person_project_reasoning_is_never_forced_to_qa`.
+2. **Cue-less course questions could still become Coaching.** "what is the
+   definition of a job story" carried no lecture/week/S# cue, so the model
+   was free to label it coaching, increment the Deep Review counter, and open
+   an ADVANCE. `backend/retrieval_gate.py` now recognises impersonal
+   course-concept questions as a source cue (so evidence is retrieved and the
+   Q&A expectation applies). Any first- or second-person pronoun disqualifies
+   the turn, so "what assumption am I making here" stays with the coach.
+   Locked by `test_impersonal_course_concept_questions_expect_qa` and
+   `test_personal_reflection_phrased_as_a_question_is_not_qa`.
+
+Also fixed from the same review: the shared-catalog `ContextVar` is now reset
+before telemetry is recorded so a metrics failure cannot strand the memo on a
+pooled worker thread (`backend/sources/library.py`), and a composer upload now
+invalidates the Streamlit source-list memo, because a stay turn no longer
+reruns and the Sources panel would otherwise render the pre-upload list
+(`ui/services/runtime.py`, `ui/panels/chat.py`).
+
+**Known remaining cost (accepted, not fixed):** `_selected_source_count` in
+`backend/http/app.py` lists selected sources before `submit()` for the
+pre-submit ops log and the error-path metrics. On the streaming route
+`submit()` runs on a separate daemon thread, so a `ContextVar` memo cannot be
+shared across that boundary. This costs one bounded catalog listing per coach
+HTTP request when locked course sources are selected. It is not N+1.
+
+#### Validation evidence
+
+- Full deterministic pytest after the review fixes: **1163 tests, all
+  passing** (`.venv/bin/python -m pytest -q`, exit 0).
+  `.venv/bin/ruff check --no-fix .`: **All checks passed** (was 14 F401).
+  `compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime`:
+  **passed**.
+- Targeted (containment pass): **25 passed**
+  (`test_legacy_path_containment.py` 12,
+  `test_security_invariants.py` 4,
+  `test_architecture_contracts.py` 9).
+  `.venv/bin/ruff check --no-fix .`: **All checks passed**.
+  `compileall -q backend agentcore_runtime`: **passed**.
+- Prior mock tests in this working tree cover progress merge, citations,
+  snapshot, schema adapter, prompt composition, retrieval-gate recall,
+  Retrieve pool, lease alignment, and Streamlit `done` rendering. Those are
+  **mock-only**.
+- Full deterministic pytest: **not re-run** in the containment pass
+  (targeted subsets only).
+- **No** paid/live Bedrock, AgentCore, S3, DSQL, or KB sync call was made.
+- One-Haiku-per-turn: **UNVERIFIED**.
+- Live `required`-mode Week 1 equals/in Retrieve: **UNVERIFIED**.
+
+#### Compatibility, rollback, risks, and next action
+
+- No DSQL schema migration. Old nested `CoachTurnOutput` JSON still parses
+  through the fail-closed adapter. New Fast Chat rows persist a slim
+  assessment mapping. Empty progress fields no longer overwrite stored
+  notebook progress.
+- Stage pedagogy files: `shared_coaching.md` hash fixture updated after
+  explicit review; stage files unchanged.
+- Rollback is the previous app image (`cde2300-chatbot:f271088` is what is
+  live; this tree is not). Persisted notebooks are unchanged.
+- Deploying `required` before sidecar ingest yields an evidence gap, not a
+  110s unfiltered search. Operators who have not ingested sidecars must keep
+  `KNOWLEDGE_BASE_METADATA_FILTER_MODE=degraded_unfiltered`.
+- IAM: `bedrock-agentcore:InvokeAgentRuntime` on the published ARN still
+  bypasses FastAPI phase controls. Mitigate with least privilege. Do not
+  patch the browser.
+- `README.md` still says `StudentChatEngine` is a `USE_LOCAL_API=false`
+  fallback. Code and `docs/CODEBASE_STRUCTURE.md` say the in-process
+  fallback is `CoachApplicationService`. Containment tests lock the code
+  fact; README was not edited (outside this pass's file ownership).
+- Next exact action: authorised sidecar upload + KB sync (runbook
+  [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md)), then one
+  live Week 1 `equals` Retrieve with `--i-approve-live-bedrock`, then a
+  capped AgentCore trace that records Haiku span / event-loop cycle count.
+  Do not publish AgentCore and do not rebuild the ARM64 app image until
+  those two live checks exist. Do not delete leftover runtime `phase`
+  dispatch until a published allowlist (or split runtimes) lands.
+
+---
+
+### Previous phase — Cap Fast Chat Retrieve at five seconds
+
+**Prepared on 2026-08-17; not yet deployed.**
+
+#### What changed and why
+
+`f271088` is live on EC2 (`cde2300-chatbot:f271088`). That image skipped the
+rejected MANAGED metadata filter and set a 15-second SDK read timeout. The
+119-second double-Retrieve path is gone, but asking what is in the Week 1
+lecture still took more than 30 seconds.
+
+Production evidence after that recreate:
+
+- Application loggers were at WARNING, so `coach_turn_perf` and
+  `course_retrieval_query` never appeared in Docker logs.
+- No `course_retrieval_validation_error` / `retrying_unfiltered` after restart.
+- The blocking `POST .../messages/.../revise` path completed at `19:55:32`.
+  Haiku itself remains ~5 seconds. A 15-second Retrieve plus that invoke plus
+  the Streamlit reload still exceeds 30 seconds.
+
+1. Knowledge Base Retrieve now has a **5-second wall-clock** cap
+   (`KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS`, also used as the SDK read
+   timeout) and `numberOfResults=4` (the Fast Chat chunk budget). A hung
+   MANAGED search fails closed as an evidence gap instead of occupying the
+   spinner. Catalog titles still reach AgentCore.
+2. FastAPI sets INFO on the operational loggers so `coach_turn_perf` and
+   Retrieve elapsed-ms lines are visible without lowering the root logger.
+   Slow or unavailable Retrieve also logs at WARNING.
+
+#### Files and validation
+
+- Changed: `backend/bedrock_retrieve.py`, `backend/settings.py`,
+  `backend/operational_metrics.py`, `backend/http/app.py`,
+  `tests/domain/test_bedrock_retrieve.py`,
+  `tests/domain/test_coach_turn_perf.py`, `docs/RAG_ARCHITECTURE.md`,
+  `.env.example`, and this status file.
+- Deterministic retrieval + perf tests: **focused passed**.
+- Repository-wide Ruff: **passed**.
+- Full deterministic pytest: **970 passed**.
+- Compileall for backend, UI, tests, scripts: **passed**.
+- No paid/live Bedrock or AgentCore call was made for this patch.
+
+#### Compatibility, rollback, risks, and next action
+
+- No schema, DSQL, S3, Cognito, AgentCore runtime, or prompt change.
+- Rollback is the previous app image (`cde2300-chatbot:f271088`); persisted
+  notebooks and sources are unchanged.
+- A Retrieve that cannot finish in 5 seconds becomes an evidence gap. Week 1
+  answers may cite catalog titles without PDF excerpts until the MANAGED KB
+  is faster or `course_material_id` metadata is verified.
+- Next: build a new ARM64 app image from this tree, recreate only the `app`
+  container, ask the Week 1 lecture question once, and confirm Docker shows
+  `course_retrieval_elapsed_ms` plus `coach_turn_perf`.
+
+---
+
+### Previous phase — Bound MANAGED Knowledge Base retrieval latency
+
+**Committed on `Integrate-Bedrock` as `3b393d6` / `f271088` and deployed as
+`cde2300-chatbot:f271088`.**
+
+Production evidence for the earlier Week 1 query showed the Streamlit-to-FastAPI
+stream begin at `19:14:52.527`, a MANAGED Knowledge Base metadata-filter
+`ValidationException` at `19:14:53.265`, and the first post-turn UI reload at
+`19:16:51.484`. The AgentCore trace itself was 4.73 seconds.
+
+MANAGED Retrieve makes one unfiltered request while strict metadata mode is
+off. The Bedrock Agent Runtime client used `total_max_attempts=1` and a
+15-second read timeout. That removed the ~119-second filter-retry hole but
+left Fast Chat above 30 seconds.
+
+---
+
+### Previous phase — Explicit Deep Review HTTP + token-aware Fast Chat
+
+
+**Committed on `Integrate-Bedrock` as `f663740`.** Canonical Coaching prompts
+still match baseline `a6d163668902beae4938fe552cced7ba92b15e88`. AgentCore
+**version 20 READY** on the existing ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`; `DEFAULT` liveVersion
+is **20**. EC2 app image has **not** been rebuilt (Docker daemon was down).
+
+This patch does **not** redo the 2620db one-call Haiku / RAG-fallback
+architecture. It makes explicit Deep Review reachable and makes Fast Chat
+history token-aware, including AgentCore system-prompt overhead in the
+12k/16k total.
+
+#### What changed and why
+
+1. **Server-owned Deep Review HTTP.** `POST /api/v1/threads/{thread_id}/deep-review`
+   authenticates the owner, loads notebook/stage/history/sources, checks
+   persisted eligibility (`coaching_turns_since_deep_review >= 3`), acquires
+   the same notebook execution lease, then stamps `specialist=review` **after**
+   `_authoritative_request()` has already cleared client specialist hints.
+   `POST /api/v1/coach/turn` still cannot choose Sonnet. Body accepts only
+   `idempotency_key` (`extra=forbid`).
+2. **Eligibility / counter.** One entitlement at counter >= 3; unused 4/5/6
+   still yield one review. Successful persist resets to 0. Failure, timeout,
+   guardrail, malformed output, and persist failure leave the counter
+   unchanged. Q&A, Deep Review, UI navigation, and idempotent replay do not
+   increment. Replay of a completed Deep Review key is allowed even after
+   the counter has reset. Idempotency fingerprints include a Deep Review
+   surface, so ``/coach/turn`` cannot complete a ``/deep-review`` key even
+   with the fixed ``Start Deep Review`` message.
+3. **Deep Review persistence.** Latest successful review is stored as
+   `deep_review_snapshot` in notebook settings. Normal Haiku Coaching persist
+   omits that key, so the snapshot is not overwritten. The next successful
+   Deep Review replaces it. Stage stays `STAY`; FastAPI remains stage
+   authority.
+4. **Token-aware Fast Chat history.** At most 6 recent message objects **and**
+   <= 3000 estimated recent-history tokens **and** <= 1500 estimated tokens
+   per historical message. Newest-to-oldest packing; dropped window turns
+   **and** later total-budget shrinks feed ConversationMemory from the
+   original text, not the 1500-token clip. Late decision cues in a huge
+   paste are kept in the 800-character memory excerpt. The current student
+   message is not history-capped (CoachRequest still enforces the
+   12,000-character safety cap). Current-turn Converse overhead is reserved
+   in the total estimate. The current message is still not 1500-capped; a
+   max-length paste can crowd out recent history under the 12k/16k totals,
+   which is the intended current-turn priority.
+5. **Total budget includes system prompt.** FastAPI estimates the AgentCore
+   Fast Chat system prompt via `agentcore_runtime/system_prompt_budget.py`
+   (same canonical loader; no prompt copy), including `runtime_context`
+   JSON. Soft 12,000 / hard 16,000 are local total estimates (system +
+   untrusted turn + history + memory + images + current-turn overhead).
+   Conservative local estimator; not Bedrock CountTokens.
+6. **RAG fallback repacks.** The second Haiku invoke re-enters workflow
+   planning with retrieved evidence. History is reduced if needed so the
+   estimated total stays <= 16,000.
+7. **Live eval candidate path.** `evaluate_fast_chat_regression.py` can invoke
+   the already-configured AgentCore runtime when `--i-approve-live-claude` is
+   set and `AGENTCORE_RUNTIME_ARN` is present. Default remains refuse. No
+   judge model, no publish, no fake baseline (`--baseline-artifact` or
+   "baseline comparison unavailable").
+8. **OCI provenance.** Dockerfile accepts `ARG GIT_SHA` and sets
+   `org.opencontainers.image.revision` plus `APP_GIT_SHA`. Recommended:
+   `docker build --build-arg GIT_SHA=$(git rev-parse HEAD) ...`. Image was
+   not rebuilt or deployed.
+
+#### Main files changed
+
+- Deep Review: `backend/http/app.py`, `backend/coaching/execution.py`,
+  `backend/domain.py`, `backend/workflow.py`, `backend/mock_provider.py`,
+  `backend/specialists/review_orchestration.py`, `backend/learning/journey.py`,
+  `backend/api_client.py`, `ui/panels/studio.py`, `ui/services/runtime.py`
+- Fast Chat tokens: `backend/context_planner.py`, `backend/settings.py`,
+  `backend/agentcore_provider.py`, `backend/turn_perf.py`,
+  `agentcore_runtime/system_prompt_budget.py`, `.env.example`, Compose
+- Eval / Docker / docs / tests: `scripts/evals/evaluate_fast_chat_regression.py`,
+  `Dockerfile`, this file, architecture/security/prompt docs, Deep Review and
+  token-budget tests
+
+#### Validation evidence
+
+- Canonical Coaching hashes unchanged vs `a6d163668902beae4938fe552cced7ba92b15e88`
+  (`git diff` empty on `shared_coaching.md` and `prompts/stages/`; SHA-256
+  fixture still `tests/fixtures/coaching_prompt_baseline.json`).
+- `ruff check .` passed.
+- `PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache python -m compileall -q
+  backend ui streamlit_app.py tests scripts agentcore_runtime` passed.
+- Focused pytest: fast-chat context/memory, AgentCore provider, prompt cache,
+  and context planner passed after the token-policy follow-up.
+- Full deterministic `.venv/bin/python -m pytest -q`: **967 passed**.
+- GitHub CI for `f663740`: **NOT RUN** in this session.
+- AgentCore publish 2026-08-16: **version 20 READY**. Same ARN
+  `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. `DEFAULT`
+  liveVersion **20**. Artifact
+  `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-fast-chat-v20-20260816T184830Z.zip`.
+  Env copied from v19 (Haiku coaching/fast_chat, Sonnet Deep Review,
+  Guardrail v3). Site-packages preserved from v19.
+- EC2 image build/push: **NOT RUN** (Docker daemon down on this machine).
+  ECR repository `cde2300-chatbot` does **not** exist yet in account
+  `355604674280`.
+- Capped live smoke / Deep Review live invoke: **NOT RUN**.
+- Local Fast Chat system-prompt estimate for problem_identification: 12,958
+  chars / **4,320** estimated tokens (chars/3) before `runtime_context`.
+  Typical no-RAG short coaching with that reserve stayed <= 12,000 in tests.
+- ConversationMemory continuity 20/50/100 plus chunky-history passed. Soft
+  total-budget shrink now preserves a decision that sits after the 1500-token
+  history clip. No LLM summarizer.
+
+#### Production readiness (do not collapse these)
+
+- **CODE CORRECT:** YES for the mock/deterministic path
+- **CONCURRENCY SAFE:** YES — Deep Review uses the same notebook lease as
+  Coaching; RAG fallback stays inside that lease
+- **IDEMPOTENCY SAFE:** YES — completed Deep Review keys replay without a
+  second Sonnet call or a second counter reset
+- **MOCK TESTED:** YES (967)
+- **CI GREEN:** NOT RUN for `f663740`. Previous committed HEAD `2620db1`
+  had Mock CI + AgentCore runtime compatibility successful.
+- **DOCKER READY:** NO (image not built; Docker daemon down)
+- **LIVE LOAD TESTED:** NO
+- **AWS QUOTAS VERIFIED:** NO
+- **PRODUCTION READY:** **NO** until the EC2 app image at `f663740` is
+  running, a capped Haiku smoke succeeds, and Deep Review is exercised.
+  Prompt cache stays disabled.
+
+#### Next exact action
+
+1. Create ECR repo `cde2300-chatbot` if missing, start Docker, then
+   `docker buildx build --platform linux/arm64 --build-arg GIT_SHA=f663740
+   -t 355604674280.dkr.ecr.us-west-2.amazonaws.com/cde2300-chatbot:f663740 --push .`
+2. On EC2: set `APP_IMAGE` to that tag, keep `AGENTCORE_QUALIFIER=DEFAULT`
+   (now v20), then `sh scripts/deploy_ecr.sh`. Recreate the app container.
+3. Keep `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
+4. Capped smoke:
+   `PYTHONPATH=. python scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`
+5. Rollback runtime if needed: `update-agent-runtime` with the v19 zip
+   `agentcore-patches/chatbot_harnessAgent-repair-prompt-v19-20260816T101413Z.zip`,
+   or pin `AGENTCORE_QUALIFIER=19`.
+
+---
+
+### Previous phase — Fast-chat 6-message window, RAG fallback, pedagogy lock
+
+**Committed on `Integrate-Bedrock` as `2620db115a0671042859743daace3fc54de335d3`.**
+Starting HEAD was `db6d1bae7403c05e68c38bad39dd2afd9bd268fc`. Canonical
+Coaching prompts match baseline `a6d163668902beae4938fe552cced7ba92b15e88`.
+
+GitHub CI for **that** commit: Mock CI successful; AgentCore runtime
+compatibility successful. That CI result does **not** apply to later local
+work.
+
+Normal student chat remains one Claude Haiku 4.5 `phase=fast_chat` invoke.
+The rare accuracy fallback may add one application-owned retrieve and one
+Haiku retry. Router and Incremental Review stay off the active path.
+
+#### What changed and why
+
+1. **Six recent messages.** Fast chat sent ConversationMemory plus at most
+   **6** recent verbatim message objects (not pairs). No per-message token
+   cap yet; soft/hard totals were 15k/20k and undercounted the AgentCore
+   system prompt. Deep Review HTTP was still unreachable because
+   `_authoritative_request()` cleared `specialist`.
+2. **Pedagogy lock.** `fast_chat_system_prompt` concatenates the canonical
+   `shared_coaching.md` and current stage file. Hash fixtures fail if those
+   files change without explicit pedagogical review.
+3. **Rare RAG fallback.** When the gate skipped retrieval and Haiku sets
+   `needs_source_retrieval=true` and selected sources exist, FastAPI
+   retrieves once and retries Haiku once. The first result is not persisted.
+   Same notebook lease and idempotency claim.
+4. **Prompt cache (opt-in, conservative).** Prefix cache behind
+   `FAST_CHAT_PROMPT_CACHE_ENABLED` (default false). No
+   `CacheConfig(strategy="auto")`. No padding.
+5. **Behaviour regression suite.** Versioned cases plus a dry-run CLI.
+   Live Claude was harness-only until the follow-up patch.
+
+#### Validation evidence (that commit)
+
+- Canonical Coaching hashes match `a6d163668902beae4938fe552cced7ba92b15e88`.
+- Local `ruff check .` and `compileall` passed before commit.
+- Full deterministic pytest at that handoff: **933 passed**.
+- GitHub CI for `2620db1`: Mock CI successful; AgentCore runtime
+  compatibility successful.
+- Live Claude / AWS / AgentCore publish / EC2 deploy: **NOT RUN**.
+
+#### Production readiness (that commit)
+
+- **CODE CORRECT:** YES for the mock/deterministic path
+- **CI GREEN:** YES for `2620db1` (Mock CI + AgentCore runtime compatibility)
+- **PRODUCTION READY:** **NO** until AgentCore DEFAULT matches that runtime
+  and live timings are collected.
+
+---
+
+### Previous phase — One-call Haiku fast chat, selective RAG, latency instrumentation
+
+**Committed on `Integrate-Bedrock` as `db6d1bae7403c05e68c38bad39dd2afd9bd268fc`.**
+Starting HEAD was `a6d163668902beae4938fe552cced7ba92b15e88`. Do **not**
+publish AgentCore, mutate AWS, push, or deploy EC2 until authorized.
+
+Normal student chat is now one Claude Haiku 4.5 `phase=fast_chat` invoke.
+The Haiku router, Incremental Review, and automatic Sonnet are off the
+active path. Deep Review remains an explicit `specialist=review` operation.
+
+#### What changed and why
+
+1. **One model call.** FastAPI invokes AgentCore once. Haiku chooses
+   Coaching vs Q&A and writes the student reply in the same structured
+   `FastChatTurnOutput`. ADVANCE is advisory; `AUTO_ADVANCE_STAGES=false`
+   (tests) does not mutate stage. Production Compose still has
+   `AUTO_ADVANCE_STAGES=true`, so a Haiku ADVANCE can still auto-apply
+   there without Deep Review confirmation — product risk, not changed here.
+2. **Bounded context.** Fast chat always sends ConversationMemory plus at
+   most 8 recent verbatim messages (hard ~20k estimated input tokens, soft
+   ~15k). Deep Review keeps a separate `full_history` planner.
+3. **Selective RAG.** A deterministic gate decides retrieval before
+   AgentCore. No extra LLM. Ownership and selected-source validation are
+   unchanged. Opening Review/Journey still performs zero model/KB calls.
+4. **Safe timings.** `coach_turn_perf` records DSQL load/claim/persist,
+   retrieval, context, AgentCore, and estimated tokens without student
+   text, prompts, excerpts, or secrets. DSQL pooling was not added.
+
+#### Main files changed
+
+- Runtime: `agentcore_runtime/main.py`, `models.py`, `model.py`,
+  `structured_coach.py`, `specialists/routing.py`,
+  `specialists/fast_chat.py`, `prompts/fast_chat.md`, `prompts/loader.py`
+- Backend: `agentcore_provider.py`, `coaching/execution.py`,
+  `context_planner.py`, `prompts/composer.py`, `retrieval.py`,
+  `retrieval_gate.py`, `turn_perf.py`, `operational_metrics.py`,
+  `settings.py`, `domain.py`
+- Tests: `test_fast_chat_one_call.py`, `test_fast_chat_context.py`,
+  `test_retrieval_gate.py`, `test_coach_turn_perf.py`, plus AgentCore,
+  Review, hybrid, retrieval, API, and production-path updates
+- Docs / example env: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
+  `docs/RAG_ARCHITECTURE.md`, `agentcore_runtime/README.md`, `.env.example`
+
+#### Validation evidence
+
+- `ruff check .`: **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`,
+  `scripts`, `agentcore_runtime`: **passed**.
+- Focused AgentCore / fast_chat / context / retrieval / Review /
+  production-config tests: **passed**.
+- Full mock pytest: **passed** (902 collected, exit 0).
+- Docker Compose config (`compose.yaml` and `compose.prod.yaml` with
+  placeholder `PUBLIC_ORIGIN` / `APP_IMAGE`): **passed**. Daemon image
+  build did **not** run.
+- Live Haiku/AgentCore latency: **not measured**.
+- GitHub Actions / AWS / AgentCore publish: **NOT RUN**.
+
+#### Production readiness (do not collapse these)
+
+- **CODE CORRECT:** YES for the one-call fast path under mock.
+- **CONCURRENCY SAFE:** YES for existing lease/idempotency tests.
+- **IDEMPOTENCY SAFE:** YES.
+- **MOCK TESTED:** YES.
+- **CI GREEN:** NOT RUN (no push).
+- **DOCKER READY:** NO (compose config ok; image not built).
+- **LIVE LOAD TESTED:** NO.
+- **AWS QUOTAS VERIFIED:** NO.
+- **PRODUCTION READY:** **NO** until AgentCore is republished on the same
+  ARN and live timings are collected.
+
+#### Next exact action
+
+1. Code review this patch. Do not commit unless authorized.
+2. **AGENTCORE REPUBLISH REQUIRED: YES** (new `fast_chat` phase, output
+   contract, and prompt). Same ARN. Do not create a second runtime.
+3. After authorized republish: measure live `coach_turn_perf` breakdowns
+   before considering DSQL pooling.
+4. Keep `AGENTCORE_QUALIFIER=DEFAULT` until the new runtime version is
+   published and the qualifier is pointed at it.
+
+### Previous phase — Request-local AgentCore state, revise lease, exact limiter release
 
 **Code is local on `Integrate-Bedrock` and is not committed or deployed.**
 Base commit for this work is `d619e73` (notebook-scoped limiter). AgentCore
 DEFAULT v19, models, Guardrail v3, `AGENTCORE_QUALIFIER=DEFAULT`, and
 pedagogical orchestration are **unchanged**.
 
-### Root causes fixed
+#### Root causes fixed
 
 1. `AgentCoreCoachProvider._last_plan` was instance-wide. One cached provider
    per owner can now run two notebooks concurrently, so Notebook B could
@@ -22,7 +5175,7 @@ pedagogical orchestration are **unchanged**.
    **Fix:** `acquire()` returns a `CoachExecutionLease` token; `release` only
    decrements if that exact `(owner_id, thread_id)` slot (and token) is held.
 
-### Main files changed
+#### Main files changed
 
 - `backend/agentcore_provider.py`, `backend/agentcore_harness_provider.py`
 - `backend/rate_limit.py`, `backend/coaching/execution.py`
@@ -32,7 +5185,7 @@ pedagogical orchestration are **unchanged**.
   `tests/http/test_coach_concurrency.py`
 - This file
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check .`: **passed**.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: **passed**.
@@ -49,7 +5202,7 @@ pedagogical orchestration are **unchanged**.
 - GitHub Actions for this uncommitted patch: **NOT RUN**.
 - No live AWS, AgentCore, Bedrock, DSQL, S3, or quota changes.
 
-### Production readiness (do not collapse these)
+#### Production readiness (do not collapse these)
 
 - **CODE CORRECT:** YES for the three defects (mock-proven).
 - **CONCURRENCY SAFE:** YES for the identified races under mock interleavings.
@@ -62,7 +5215,7 @@ pedagogical orchestration are **unchanged**.
 - **AWS QUOTAS VERIFIED:** NO / PARTIAL (read-only documentation only).
 - **PRODUCTION READY:** **NO**.
 
-### Next exact action
+#### Next exact action
 
 1. Commit this patch only when explicitly authorized. Do **not** push, merge,
    or deploy until the image and `compose.prod.yaml` can ship **together**.
@@ -75,14 +5228,14 @@ pedagogical orchestration are **unchanged**.
    110s AgentCore / 120s API client), Incremental Review fail-closed, explicit
    Review ADVANCE auto-apply under month-1 `AUTO_ADVANCE_STAGES=true`.
 
-## Previous phase — Notebook-scoped coach concurrency for ~100 students
+### Previous phase — Notebook-scoped coach concurrency for ~100 students
 
 **Code landed 2026-08-16 on `Integrate-Bedrock`.** AgentCore DEFAULT v19,
 models, Guardrail v3, and pedagogical orchestration are **unchanged**. This
 patch only changes process-local coaching capacity on the existing single
 FastAPI process.
 
-### Root cause / previous limitation
+#### Root cause / previous limitation
 
 `CoachRateLimiter` allowed only **one active coaching workflow per
 authenticated user** (`MAX_ACTIVE_COACH_REQUESTS_PER_USER=1`) and **20**
@@ -98,7 +5251,7 @@ not share that per-user lock, but:
 
 Students still must not overlap two executions in the **same** notebook.
 
-### Concurrency policy implemented
+#### Concurrency policy implemented
 
 | Ceiling | Production | Meaning |
 |---|---|---|
@@ -112,7 +5265,7 @@ Enforcement order under one lock: notebook → user → RPM → global. Same-key
 idempotency replays/waiters still do **not** acquire slots. Release is in a
 `finally` on both user and notebook counters.
 
-### Main files changed
+#### Main files changed
 
 - `backend/rate_limit.py`, `backend/settings.py`, `backend/coaching/execution.py`
 - `backend/http/app.py`, `backend/operational_metrics.py`
@@ -122,7 +5275,7 @@ idempotency replays/waiters still do **not** acquire slots. Release is in a
   `tests/test_deployment_config.py`, `tests/conftest.py`
 - `scripts/load_probe.py`, `docs/operations/LOAD_PROBE.md`, this file
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check` on the concurrency patch files: **passed**.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: **passed**.
@@ -137,7 +5290,7 @@ idempotency replays/waiters still do **not** acquire slots. Release is in a
   host; daemon/env not used for this patch).
 - No live AWS, AgentCore, or Bedrock calls.
 
-### Production readiness (do not collapse these)
+#### Production readiness (do not collapse these)
 
 - **CODE READY:** YES for this limiter/threadpool patch (mock suite green).
 - **MOCK CONCURRENCY TESTED:** YES (unit + HTTP + mock load-probe scenarios).
@@ -148,7 +5301,7 @@ idempotency replays/waiters still do **not** acquire slots. Release is in a
 - **PRODUCTION READY:** **NO** — live load, five-stage walk, ~105s UI timeout,
   and AgentCore/Bedrock quotas remain separate gates.
 
-### Next exact action
+#### Next exact action
 
 1. Build/push a new ARM64 app image that includes this code, then recreate
    the production app container so Compose injects the new capacity env vars.
@@ -161,7 +5314,7 @@ idempotency replays/waiters still do **not** acquire slots. Release is in a
 4. Remaining separate gates: five-stage CloudFront walk, Streamlit/CloudFront
    timeout, Incremental Review fail-closed follow-up.
 
-## Previous phase — Strands structured-output repair prompt (Guardrail PROMPT_ATTACK false positive)
+### Previous phase — Strands structured-output repair prompt (Guardrail PROMPT_ATTACK false positive)
 
 
 **Runtime published 2026-08-16.** Same ARN
@@ -178,7 +5331,7 @@ CloudFront walk and ~105–117s timeout remain separate gates.
 Artifact:
 `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-repair-prompt-v19-20260816T101413Z.zip`
 
-### Root cause
+#### Root cause
 
 All Bedrock roles use Strands `structured_output_model`. If a model first
 responds in prose, Strands enters a forced structured-output repair turn.
@@ -189,7 +5342,7 @@ by Guardrail v3 when it was the latest scanned message
 during Haiku Incremental Review. The student message was not the cause:
 Coaching had already succeeded on the same content.
 
-### Fix
+#### Fix
 
 Shared custom repair prompt on `Agent.invoke_async(...)` for every
 structured Bedrock role (Router, Q&A, Coaching, Incremental Review, Deep
@@ -205,7 +5358,7 @@ The live five-stage walk and the ~105–117s Streamlit/CloudFront timeout
 remain separate gates. Incremental Review fail-closed behavior is also
 still a separate follow-up.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/structured_coach.py`,
   `agentcore_runtime/main.py`, `agentcore_runtime/README.md`
@@ -215,7 +5368,7 @@ still a separate follow-up.
 - Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
   `docs/SECURITY_BOUNDARIES.md`, `scripts/AGENTS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Strands `1.52.0` `Agent.invoke_async` parameters include
   `structured_output_prompt` (installed pin inspection in a clean venv).
@@ -248,7 +5401,7 @@ still a separate follow-up.
   liveVersion remains **19**. App container recreated after the qualifier
   change. Caddy was not recreated.
 
-### Next exact action
+#### Next exact action
 
 1. Retest one Incremental Review path that previously hit the structured-output
    repair cycle (CloudWatch should show Haiku incremental, not `safety_blocked`
@@ -262,7 +5415,7 @@ still a separate follow-up.
    `agentcore-patches/chatbot_harnessAgent-haiku-sonnet-v18-20260816T082420Z.zip`.
    Do not delete old versions.
 
-## Previous phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
+### Previous phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -281,7 +5434,7 @@ performs the final pedagogical readiness assessment. Incremental Review
 Artifact:
 `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-haiku-sonnet-v18-20260816T082420Z.zip`
 
-### Model assignment
+#### Model assignment
 
 | Role | Provider | Model |
 |---|---|---|
@@ -293,13 +5446,13 @@ Artifact:
 
 There is no silent Haiku↔Sonnet substitution and no Luna fallback.
 
-### Periodic Deep Review
+#### Periodic Deep Review
 
 Unchanged: every N newly executed, successful Coaching turns since the
 previous successfully persisted Deep Review (`DEEP_REVIEW_INTERVAL_TURNS=3`).
 The Review tab remains display-only: zero model calls.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Haiku router selects `qa` | `coaching` | `review`. Browser specialist
    hints are dropped. Router failure/timeout/malformed/low confidence
@@ -314,7 +5467,7 @@ The Review tab remains display-only: zero model calls.
 5. Mock CI Compose step now sets `PUBLIC_ORIGIN` and `APP_IMAGE` for both
    Compose files.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/model.py`, `agentcore_runtime/main.py`,
   `agentcore_runtime/README.md`
@@ -328,7 +5481,7 @@ The Review tab remains display-only: zero model calls.
   `docs/PROMPT_ARCHITECTURE.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
   `docs/SECURITY_BOUNDARIES.md`
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check .`: **passed**.
 - Shell syntax (`start.sh`, `build.sh`, `start_prod.sh`, `deploy_ecr.sh`,
@@ -368,7 +5521,7 @@ The Review tab remains display-only: zero model calls.
 - EC2 / CloudFront E2E were **not** run. Host compose remains stale until
   CI is green and the app image is recreated.
 
-### Next exact action
+#### Next exact action
 
 1. Commit/push only when authorized so Mock CI can go green.
 2. After CI is green, recreate the EC2 app container from the current
@@ -380,7 +5533,7 @@ The Review tab remains display-only: zero model calls.
    Rollback remains **version 14** (Sonnet-only) or **v17** (Luna/Sonnet)
    if needed. Do not delete old versions.
 
-## Previous phase — Three pedagogical agents + Luna router (DEFAULT v17)
+### Previous phase — Three pedagogical agents + Luna router (DEFAULT v17)
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -398,7 +5551,7 @@ Review live smoke on Claude Sonnet 4.6 succeeded. Do not treat DEFAULT v17
 as student-ready until Bedrock enables GPT-5.6 Luna. This phase is superseded
 by the Haiku 4.5 lightweight migration above.
 
-### Model assignment
+#### Model assignment
 
 | Role | Model |
 |---|---|
@@ -408,7 +5561,7 @@ by the Haiku 4.5 lightweight migration above.
 | Review Agent — incremental | GPT-5.6 Luna |
 | Review Agent — deep | Claude Sonnet 4.6 |
 
-### Periodic Deep Review
+#### Periodic Deep Review
 
 Periodic Deep Review means every N newly executed, successful Coaching
 turns since the previous successfully persisted Deep Review. It is
@@ -423,7 +5576,7 @@ Event overrides (explicit Review, `readiness_candidate`, Reflection
 checkpoint) run Deep Review immediately. The Review tab remains
 display-only: zero model calls.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Luna router selects `qa` | `coaching` | `review`. Browser specialist
    hints are dropped. Router failure/timeout/malformed/low confidence
@@ -440,7 +5593,7 @@ display-only: zero model calls.
    transition pipeline. Malformed/timeout/unavailable/wrong-stage Deep
    Review fails closed to STAY.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/main.py`, `model.py`, `models.py`,
   `specialists/routing.py`, `prompts/review_incremental.md`,
@@ -455,7 +5608,7 @@ display-only: zero model calls.
   `docs/providers/AGENTCORE_ADAPTER.md`, `docs/PROMPT_ARCHITECTURE.md`,
   `docs/deploy/AWS_STATELESS_EC2.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Focused AgentCore/review tests: **passed**.
 - Full mock pytest: **passed** (exit 0; 822 tests on 2026-08-16 readiness pass).
@@ -487,7 +5640,7 @@ display-only: zero model calls.
   / Review-tab live path was not exercised. Periodic three-turn live
   sequence was not executed.
 
-### Next exact action
+#### Next exact action
 
 Reauthenticate AWS SSO (`aws login`), then re-verify AgentCore DEFAULT,
 Guardrail 3, Managed KB `course/` retrieval, and Luna account access.
@@ -496,7 +5649,7 @@ SHA. Recreate the EC2 app container only after Luna is enabled and CI is
 green. Rollback remains **version 14** (Sonnet-only generation) if
 students need a working coach today. Do not delete v15, v16, or v17.
 
-## Previous phase — Hybrid Luna router + Sonnet Stage Judge (DEFAULT v16)
+### Previous phase — Hybrid Luna router + Sonnet Stage Judge (DEFAULT v16)
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -508,7 +5661,7 @@ Coaching live smokes therefore failed closed. Review and Stage Judge live
 smokes on Claude Sonnet 4.6 succeeded. Do not treat DEFAULT v16 as
 student-ready until Bedrock enables GPT-5.6 Luna.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Free-text routing is GPT-5.6 Luna (`router_turn`). Server-owned specialist
    or review surface still bypasses the router. Browser specialist hints are
@@ -526,7 +5679,7 @@ student-ready until Bedrock enables GPT-5.6 Luna.
    `bedrock-mantle:CallWithBearerToken`). After that grant, Luna still
    returns account-level model unavailability.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/model.py`, `main.py`, `models.py`, `router.py`,
   `stage_judge.py`, `prompts/router.md`, `prompts/stage_judge.md`
@@ -537,7 +5690,7 @@ student-ready until Bedrock enables GPT-5.6 Luna.
 - Docs/env: `.env.example`, compose files, this file,
   `docs/providers/AGENTCORE_ADAPTER.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Full mock pytest: **passed**.
 - AgentCore `DEFAULT` **v16 READY**. Artifact
@@ -548,7 +5701,7 @@ student-ready until Bedrock enables GPT-5.6 Luna.
 - Live Luna router/QA/coaching: **failed** (account model access).
 - EC2 was not restarted. CloudFront UI hybrid path was not exercised.
 
-### Next exact action
+#### Next exact action
 
 Enable GPT-5.6 Luna for account `355604674280` in `us-west-2` (Bedrock model
 access / AWS Sales). Then rerun capped Luna smokes. Until then, production
@@ -556,7 +5709,7 @@ coaching/QA/router on DEFAULT v16 will fail closed. Rollback to **version 14**
 (Sonnet-only, known-good generation) if students need a working coach today.
 Do not delete v15 or v16.
 
-## Previous phase — AgentCore DEFAULT v15 Luna + guardrail version 3
+### Previous phase — AgentCore DEFAULT v15 Luna + guardrail version 3
 
 **Completed on 2026-08-16.** Same runtime ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -564,7 +5717,7 @@ Do not delete v15 or v16.
 from 1 to **3**. Generation model is GPT-5.6 Luna. No live paid smoke in
 this pass.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. AgentCore runtime env is now
    `AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses`,
@@ -579,7 +5732,7 @@ this pass.
    **id** stays in host `.env` (not interpolated). FastAPI fail-closed env
    must match the runtime.
 
-### Main files changed
+#### Main files changed
 
 - `compose.yaml`, `compose.prod.yaml`, `.env.example`
 - `agentcore_runtime/requirements.txt`, `agentcore_runtime/README.md`,
@@ -588,7 +5741,7 @@ this pass.
 - Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
   `docs/deploy/AWS_STATELESS_EC2.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Focused pytest `tests/test_deployment_config.py`
   `tests/domain/test_runtime_model.py`
@@ -599,7 +5752,7 @@ this pass.
 - `DEFAULT` endpoint: READY, `liveVersion` **15**.
 - Guardrail `o8aipba8m129` version 3: READY. Version 2 was not used.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. ARN unchanged. `DEFAULT` auto-moved on
   `update-agent-runtime`.
@@ -609,7 +5762,7 @@ this pass.
 - Live artifact:
   `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-luna-v15-20260816T044445Z.zip`
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Recreate the EC2 app container so FastAPI Compose env matches Luna +
   guardrail 3. Runtime DEFAULT already serves Luna; a stale container still
@@ -619,7 +5772,7 @@ this pass.
 - Next paid check is a capped Luna smoke only if explicitly approved:
   `PYTHONPATH=. .venv/bin/python scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
 
-## Previous phase — Production Knowledge Base Retrieve diagnosis and adapter fix
+### Previous phase — Production Knowledge Base Retrieve diagnosis and adapter fix
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD
 `8b0d5f06e80f78efaf277dd8c3f8f7899fe0b4a2`. AgentCore / Sonnet / Q&A routing
@@ -627,7 +5780,7 @@ were not the failure. Shared course files still use Bedrock Knowledge Base
 **Retrieve only**. Exact S3 key validation is unchanged. No local fallback
 for production `course/` objects.
 
-### Root cause (proved)
+#### Root cause (proved)
 
 1. Knowledge Base `JUQNP8AZAZ` is type **MANAGED** and **ACTIVE**. The adapter
    always sent `vectorSearchConfiguration`. Live Retrieve raised
@@ -641,7 +5794,7 @@ for production `course/` objects.
    Exact-key validation correctly discarded every hit. Both objects exist in
    S3 (same size). The data source prefix is wrong, not the PDF.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Retrieve failures are classified (`access_denied`, `not_found`,
    `validation_error`, `timeout`, `throttled`, `client_error`,
@@ -656,7 +5809,7 @@ for production `course/` objects.
    `scripts/diagnostics/check_knowledge_base_retrieve.py` prints secret-safe
    JSON and refuses live AWS by default.
 
-### Main files changed
+#### Main files changed
 
 - `backend/bedrock_retrieve.py`, `backend/retrieval.py`, `backend/settings.py`,
   `compose.prod.yaml`, `.env.example`
@@ -667,7 +5820,7 @@ for production `course/` objects.
   `tests/scripts/test_agentcore_course_cli.py`
 - Docs: `docs/RAG_ARCHITECTURE.md`, `docs/deploy/AWS_STATELESS_EC2.md`
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check .`: **passed**.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
@@ -679,13 +5832,13 @@ for production `course/` objects.
   MANAGED search works; validated count 0 until the data source indexes
   `course/`.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Rollback is reverting this working tree.
 - Production must deploy this image **and** re-point/sync the Knowledge Base
   data source to `s3://cde2300-course-content-s3/course/`.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Deploying the adapter without re-ingesting `course/` yields
   `course_retrieval_empty` (raw hits, zero validated), not a grounded Week 1
@@ -694,7 +5847,7 @@ for production `course/` objects.
   `KNOWLEDGE_BASE_TYPE=MANAGED`, run the gated diagnostic, then in the AWS
   console set the KB data source prefix to `course/` and sync.
 
-## Previous phase — Publish vendored AgentCore DEFAULT v14 and capped Sonnet smoke
+### Previous phase — Publish vendored AgentCore DEFAULT v14 and capped Sonnet smoke
 
 
 **Completed on 2026-08-16.** Same runtime ARN
@@ -709,7 +5862,7 @@ v9 site-packages zip plus current sources and OTEL entrypoint; it started,
 then exited for the same missing `app.run()`. v14 is that zip with
 `if __name__ == "__main__": app.run()`.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Live artifact is a ~47MB zip: v9 linux/arm64 Python 3.14 site-packages
    (pydantic 2.13.4, strands-agents 1.52.0, bedrock-agentcore 1.21.0,
@@ -723,13 +5876,13 @@ then exited for the same missing `app.run()`. v14 is that zip with
 3. `agentcore_runtime/main.py` now starts `BedrockAgentCoreApp` when executed
    as `__main__`.
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/main.py`, `agentcore_runtime/README.md`
 - Tests: `tests/domain/test_agentcore_runtime.py` asserts `app.run()`
 - Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Focused pytest `tests/domain/test_agentcore_runtime.py`
   `test_runtime_model.py` `test_security_invariants.py`: **passed**.
@@ -741,7 +5894,7 @@ then exited for the same missing `app.run()`. v14 is that zip with
 - CloudWatch v13 showed OTEL + IAM credentials then silence (process exit).
   v11 showed `ModuleNotFoundError: pydantic` (source-only zip).
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. ARN unchanged. `DEFAULT` auto-moved on each successful
   `update-agent-runtime` (preprod, accepted).
@@ -751,7 +5904,7 @@ then exited for the same missing `app.run()`. v14 is that zip with
 - Live artifact:
   `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-sonnet46-v14-20260815T193913Z.zip`
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - This is **preprod**. Do not call the app student-ready until host `.env`,
   ECR/`APP_IMAGE`, and CloudFront/Caddy alignment are done.
@@ -760,7 +5913,7 @@ then exited for the same missing `app.run()`. v14 is that zip with
   remaining cutover blocker. Do not invoke unbounded Streamlit chat as the
   next paid test.
 
-## Previous phase — AgentCore runtime dependency reproducibility
+### Previous phase — AgentCore runtime dependency reproducibility
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD at start of this
 pass: `529716c46fa45d20cdba02a145f6d63f088629b8`. This pass proved the
@@ -770,7 +5923,7 @@ diagnostic plus a GitHub job that actually installs
 `agentcore_runtime/requirements.txt`. Architecture, specialists, Sonnet 4.6,
 and guardrails are unchanged. No live AWS or paid model calls.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Clean-venv `pip index` + install confirmed `strands-agents==1.52.0`,
    `bedrock-agentcore==1.21.0`, and `pydantic==2.13.4` are available together.
@@ -789,7 +5942,7 @@ and guardrails are unchanged. No live AWS or paid model calls.
    requirements on Python 3.12, runs the diagnostic, and compiles
    `agentcore_runtime`. Companion pytest remains Strands-free.
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/requirements.txt`, `agentcore_runtime/model.py`
 - `scripts/diagnostics/check_agentcore_runtime_dependencies.py`
@@ -797,7 +5950,7 @@ and guardrails are unchanged. No live AWS or paid model calls.
 - Tests: `tests/domain/test_runtime_model.py` pin-sync assertions
 - Docs: this file, AgentCore adapter, scripts/tests agent guides
 
-### Validation evidence
+#### Validation evidence
 
 - Clean CPython 3.12.10 venv `/tmp/codesign-agentcore-runtime-fresh`:
   `pip install -r agentcore_runtime/requirements.txt` **succeeded**.
@@ -825,19 +5978,19 @@ and guardrails are unchanged. No live AWS or paid model calls.
 - No live AgentCore, Bedrock generation, OpenAI, KB Retrieve, DSQL, or S3
   calls. Runtime not republished. `AGENTCORE_RUNTIME_ARN` unchanged.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Five persisted stages unchanged. No runtime publish.
 - `AGENTCORE_RUNTIME_ARN` unchanged. Do not promote DEFAULT until a new
   READY qualifier is tested with a capped Sonnet 4.6 smoke.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Publish `agentcore_runtime/` onto
   `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` with explicit Sonnet
   4.6 + guardrail env, then one capped smoke. Not done in this pass.
 
-## Previous phase — Explicit Sonnet 4.6 runtime model and guardrail fail-closed
+### Previous phase — Explicit Sonnet 4.6 runtime model and guardrail fail-closed
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD at start of this
 pass: `af79a693347a33ebbd9c92c5a33c297df70ce05b`. The runtime no longer
@@ -847,7 +6000,7 @@ plus `GUARDRAIL_ID` / `GUARDRAIL_VERSION`. First paid evaluation remains
 Sonnet 4.6. Luna is optional, stateless, and uses ApplyGuardrail. No live
 AWS generation or runtime publish in this pass.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `agentcore_runtime/model.py` fail-closed loader. Bedrock path uses
    `guardrail_latest_message=True`. Luna cannot be passed to `BedrockModel`.
@@ -860,14 +6013,14 @@ AWS generation or runtime publish in this pass.
    `pydantic==2.13.4` (companion-tested Pydantic; Strands/AgentCore pins are
    current documented PyPI versions, not yet installed in the companion venv).
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/model.py`, `guardrails.py`, `main.py`, `requirements.txt`
 - `backend/settings.py`, `backend/specialists/routing.py`
 - Tests: `tests/domain/test_runtime_model.py` and production-config updates
 - Docs: AgentCore adapter, security boundaries, methodology, implementation status
 
-### Validation evidence
+#### Validation evidence
 
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
   and `agentcore_runtime`: **passed**.
@@ -883,20 +6036,20 @@ AWS generation or runtime publish in this pass.
 - No live AgentCore, Bedrock generation, or OpenAI calls. Runtime not
   republished. `AGENTCORE_RUNTIME_ARN` unchanged.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Five persisted stages unchanged.
 - Live DEFAULT still needs this package published onto
   `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` with runtime env
   injected. Do not promote DEFAULT until READY and a capped Sonnet smoke.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Confirm pins on the published runtime. Run the opt-in KB diagnostic, then a
   new READY qualifier, then a capped Sonnet 4.6 specialist test.
 - Do not commit, push, or deploy from this phase unless asked.
 
-## Previous phase — AgentCore specialist brain (POC pedagogy, production shell)
+### Previous phase — AgentCore specialist brain (POC pedagogy, production shell)
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock remains the production
 application shell. Canonical Q&A, Coaching, and Formative Review pedagogy now
@@ -904,7 +6057,7 @@ lives in `agentcore_runtime/`. FastAPI authorizes sources, retrieves evidence,
 sends runtime rules, validates structured output, and persists DSQL state.
 AgentCore Memory is not the transcript. Live AWS invokes were not made.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. One AgentCore runtime, three specialists, deterministic `phase` selection.
    Unknown phases fall closed to coaching. Scoring was renamed Review and is
@@ -919,7 +6072,7 @@ AgentCore Memory is not the transcript. Live AWS invokes were not made.
 5. Q&A uses pre-retrieved `[S#]` evidence. No KB/S3 tools. Review is on-demand
    from explicit student intent, not every turn.
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/` specialists, prompts, contracts, `main.py`
 - `backend/specialists/routing.py`, `backend/agentcore_provider.py`,
@@ -928,7 +6081,7 @@ AgentCore Memory is not the transcript. Live AWS invokes were not made.
 - Tests listed in `tests/AGENTS.md`
 - Docs: prompt, RAG, security, AgentCore adapter, implementation status
 
-### Validation evidence
+#### Validation evidence
 
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
   and `agentcore_runtime`: **passed**.
@@ -940,7 +6093,7 @@ AgentCore Memory is not the transcript. Live AWS invokes were not made.
 - No live AgentCore, Bedrock generation, or OpenAI calls. Runtime not
   republished. `AGENTCORE_RUNTIME_ARN` unchanged.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Five persisted stages unchanged. `ethics_critical` remains
   an AgentCore topic key only.
@@ -949,13 +6102,13 @@ AgentCore Memory is not the transcript. Live AWS invokes were not made.
   `agentcore_runtime/` tree. Rollback is the previous READY qualifier.
 - `backend/prompts/` remains for mock/OpenAI/Bedrock Converse.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Publish the runtime after approval, then one paid smoke. Do not run live
   specialist evaluation until that publish.
 - Do not commit, push, or deploy from this phase unless asked.
 
-## Previous phase — AgentCore structured coach_turn output (no str(AgentResult))
+### Previous phase — AgentCore structured coach_turn output (no str(AgentResult))
 
 **Completed locally on 2026-08-16.** Live coaching could fail after
 `await agent.invoke_async(prompt)` because the deployed harness did
@@ -969,7 +6122,7 @@ Architecture is unchanged: DSQL transcript, full-history planner, RAG
 authorization, AgentCore reasoning-only (`tools=[]`), five Thinking Path
 stages, research independence, and atomic persist.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Canonical production harness lives in `agentcore_runtime/` (`models.py`,
    `structured_coach.py`, `main.py`). `scripts/agentcore/harness_patch/` is a
@@ -987,7 +6140,7 @@ stages, research independence, and atomic persist.
    text such as "A quiet residential street" is not treated as empty and is
    not hardcoded to ADVANCE.
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/` (new canonical harness)
 - `backend/agentcore_provider.py`, `backend/providers.py`
@@ -1001,7 +6154,7 @@ stages, research independence, and atomic persist.
 - Docs: `docs/providers/AGENTCORE_ADAPTER.md`, `docs/CODEBASE_STRUCTURE.md`,
   `tests/AGENTS.md`, `scripts/AGENTS.md`, `backend/AGENTS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
   and `agentcore_runtime`: **passed**.
@@ -1014,7 +6167,7 @@ stages, research independence, and atomic persist.
 - No live AgentCore invoke. Runtime not republished. `AGENTCORE_RUNTIME_ARN`
   unchanged.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Companion still accepts a raw coach_turn JSON body.
 - Live DEFAULT still runs the old `str(result)` harness until operators copy
@@ -1024,7 +6177,7 @@ stages, research independence, and atomic persist.
 - Rollback is reverting this working tree; live runtime rollback is the
   previous READY qualifier.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Production blocker: publish the new harness version, then one approved
   smoke: `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`,
@@ -1032,7 +6185,7 @@ stages, research independence, and atomic persist.
 - Do not change `AGENTCORE_RUNTIME_ARN`. Do not create another student runtime.
 - Do not commit, push, or deploy from this phase unless asked.
 
-## Previous phase — Virtual course sources must not become fake local evidence
+### Previous phase — Virtual course sources must not become fake local evidence
 
 **Completed locally on 2026-08-16.** Shared Week 1 catalog rows have empty
 `extractedText` on purpose. When `KNOWLEDGE_BASE_ID` was missing, mock, or
@@ -1045,7 +6198,7 @@ Architecture is unchanged: one shared S3 `course/` copy, virtual catalog
 sources, Bedrock KB Retrieve only, student uploads local, FastAPI source
 scope, DSQL transcript, AgentCore reasoning only.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Virtual/shared `course/` sources keep `text=""` for retrieval. The
    unanalyzable placeholder is display-only for real empty student files.
@@ -1062,7 +6215,7 @@ scope, DSQL transcript, AgentCore reasoning only.
    Retrieve only with `--i-approve-live-bedrock`. Pytest never runs it.
    No generation call.
 
-### Main files changed
+#### Main files changed
 
 - `backend/retrieval.py`, `backend/bedrock_retrieve.py`,
   `backend/coaching/execution.py`, `backend/sources/context.py`,
@@ -1079,7 +6232,7 @@ scope, DSQL transcript, AgentCore reasoning only.
   `docs/LOCAL_DEMO_IMPLEMENTATION.md`, `.env.example`, `README.md`,
   `compose.prod.yaml`, `tests/AGENTS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`:
   **passed**.
@@ -1093,7 +6246,7 @@ scope, DSQL transcript, AgentCore reasoning only.
   `APP_IMAGE` set (blank `APP_IMAGE` is invalid by design).
 - No live Bedrock Retrieve call. No paid AgentCore/OpenAI generation call.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Shared course files stay virtual; student uploads stay
   notebook-scoped. Rollback is reverting this working tree.
@@ -1101,7 +6254,7 @@ scope, DSQL transcript, AgentCore reasoning only.
   is re-ingested with that attribute. Unfiltered retry plus exact-key
   post-validation stays.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live Knowledge Base Retrieve is not yet proven from this tree. Do not mark
   strict metadata mode as working until re-ingestion is verified.
@@ -1110,7 +6263,7 @@ scope, DSQL transcript, AgentCore reasoning only.
 - Do not run a paid AgentCore generation turn until Retrieve returns actual
   Week 1 text. Do not commit, push, or deploy from this phase unless asked.
 
-## Previous completed phase — Live AgentCore DEFAULT coaching (harness patch + smoke)
+### Previous completed phase — Live AgentCore DEFAULT coaching (harness patch + smoke)
 
 **Completed on 2026-08-15.** `Integrate-Bedrock` is merged into `main`.
 Production still uses `MODEL_PROVIDER=agentcore` against existing runtime
@@ -1125,7 +6278,7 @@ streaming into separate functions. Live JSON then failed validation on
 `recommendation: "STAY"` and object-shaped `stage_assessment`; the domain
 contract now coerces those live-model variants.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Existing DEFAULT runtime updated in place to **version 9**, READY.
 2. `coach_turn` invokes return unfenced JSON (no tools, no AgentCore Memory as
@@ -1136,7 +6289,7 @@ contract now coerces those live-model variants.
 4. Runtime instructions tell the model `stage_assessment` is a string and
    `recommendation` is lowercase `stay` or `advance`.
 
-### Main files changed
+#### Main files changed
 
 - Live harness (POC worktree, not this git tree): `chatbot_harnessAgent/main.py`
   split `_coach_turn_invoke` / `_stream_specialist_invoke`
@@ -1147,7 +6300,7 @@ contract now coerces those live-model variants.
 - Tests: `tests/domain/test_models_and_support.py`,
   `tests/domain/test_agentcore_provider.py`
 
-### Validation evidence
+#### Validation evidence
 
 - Focused deterministic tests for the coercion and AgentCore/prompt/harness
   contracts: **passed** (Starlette/httpx deprecation warnings only).
@@ -1158,7 +6311,7 @@ contract now coerces those live-model variants.
 - Local `/api/v1/ready` was `provider: agentcore` before restart; stack restarted
   after the domain coercion so UI turns use the same parser.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database migration. Runtime ARN and `AGENTCORE_QUALIFIER=DEFAULT` unchanged.
 - Rollback of the live runtime is pointing DEFAULT at version 7 (pre-patch) or
@@ -1166,7 +6319,7 @@ contract now coerces those live-model variants.
 - Companion rollback is reverting this working tree; uppercase `STAY` would
   again fail closed as malformed.
 
-### Localhost UI follow-up (2026-08-15)
+#### Localhost UI follow-up (2026-08-15)
 
 Profile settings on http://127.0.0.1:8501/ : display name Kai Ming, appearance
 System, language English, coaching style **Strict** (`response_detail=long`).
@@ -1184,7 +6337,7 @@ persisted. No mock fallback. No Claude.
 Additional files: `backend/retrieval.py`, `tests/domain/test_retrieval.py`.
 Focused retrieval tests: **17 passed**.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Empty assistant rows from earlier failed streams remain in this notebook;
   they are not used as transcript history for the successful turn.
@@ -1196,7 +6349,7 @@ Focused retrieval tests: **17 passed**.
   CloudFront as the only public hostname and Caddy `:80` with `/api/v1/auth/me`
   on the auth allow-list.
 
-## Previous completed phase — AgentCore coaching availability, guardrail handling, trust split
+### Previous completed phase — AgentCore coaching availability, guardrail handling, trust split
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 Production `MODEL_PROVIDER=agentcore` still uses `InvokeAgentRuntime` and does
@@ -1206,7 +6359,7 @@ user payload, including a literal attack example in shared instructions. This
 phase unblocks that path without disabling safety controls, then splits trusted
 instructions from untrusted turn content.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Shared coaching no longer contains a literal prompt-attack example.
    Quoted/retrieved override attempts remain untrusted evidence.
@@ -1227,7 +6380,7 @@ instructions from untrusted turn content.
 6. `requirements.txt` pins `boto3==1.43.35` and `botocore[crt]==1.43.35` so
    clean installs include AgentCore and `aws login` CRT credentials.
 
-### Main files changed
+#### Main files changed
 
 - Prompts/adapters: `backend/prompts/shared/coaching.md`,
   `backend/prompts/composer.py`, `backend/providers.py`,
@@ -1239,14 +6392,14 @@ instructions from untrusted turn content.
   security, AgentCore, and this status file
 - Dependencies: `requirements.txt`
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic suite: **591 passed, 0 failed** (Starlette/httpx
   deprecation warnings only; classified as harmless test-client debt).
   `compileall` passed. `git diff --check` passed. No live AWS or paid OpenAI
   call from pytest.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database migration. Production runtime ARN and `AGENTCORE_QUALIFIER=DEFAULT`
   are unchanged. No experimental student runtime.
@@ -1254,7 +6407,7 @@ instructions from untrusted turn content.
   of a bare string. Stream error events add `category`.
 - Rollback is reverting this working tree.
 
-## Previous completed phase — Full-history-first planner, exact RAG keys, isolated Luna eval path
+### Previous completed phase — Full-history-first planner, exact RAG keys, isolated Luna eval path
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 Production `MODEL_PROVIDER=agentcore` still uses `InvokeAgentRuntime` and
@@ -1263,7 +6416,7 @@ full-history-first token-aware planner. Compression is derived model context
 only. Object-key matching is exact. Live pedagogical evaluation, when
 approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `HistoryContextPlanner` sends the entire active DSQL transcript when it
    fits; otherwise extractive (production) or Luna (eval) compression plus a
@@ -1277,7 +6430,7 @@ approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
    `openai.gpt-5.6-luna` / `responses` before every eval invoke. Production
    factory is unchanged.
 
-### Main files changed
+#### Main files changed
 
 - Planner/eval: `backend/context_planner.py`, `backend/live_eval_config.py`,
   `backend/agentcore_harness_provider.py`, `backend/agentcore_provider.py`,
@@ -1286,19 +6439,19 @@ approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
 - Retrieval: `backend/retrieval.py`, `backend/bedrock_retrieve.py`
 - Docs: prompt, AgentCore, RAG, security, this status file
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic suite: **579 passed, 0 failed** (Starlette/httpx deprecation
   warnings only; classified as harmless test-client debt). `compileall` passed.
   `git diff --check` passed. No live AWS or paid OpenAI call from pytest.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database migration. `conversation_memory` is an additive settings key.
 - Production DEFAULT and InvokeAgentRuntime ARN are unchanged.
 - Rollback is reverting this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live KB `course_material_id` metadata may still be absent; filter fallback
   remains. Local venv boto3 1.35.99 lacks `InvokeHarness` (need 1.43+ in the
@@ -1308,7 +6461,7 @@ approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
   `.venv/bin/python scripts/evals/evaluate_live_coach.py --i-approve-live-luna --quick`.
   Do not commit/push or switch production DEFAULT unless asked.
 
-## Previous completed phase — Ethics & CT integration, KB metadata filter, history de-dup
+### Previous completed phase — Ethics & CT integration, KB metadata filter, history de-dup
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 AgentCore is still a stateless reasoning adapter. Course Retrieve can send a
@@ -1319,7 +6472,7 @@ student-facing fourth stage is **Ethics & Critical Thinking** (persisted id
 Assumption Check, and V&V lens. Co-occurrence is professor-only post-hoc
 analytics.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `compose_coach_prompt(..., include_recent_messages=False)` for AgentCore.
    Bounded DSQL turns travel as Converse `messages` only.
@@ -1332,7 +6485,7 @@ analytics.
 5. Professor research summary includes read-only co-occurrence / co-absence.
    Research codes still do not advance stages or drive coaching.
 
-### Main files changed
+#### Main files changed
 
 - Prompts/journey: `backend/prompts/shared/coaching.md`,
   `backend/prompts/stages/deep_analysis.md`, `backend/learning/stages.py`,
@@ -1345,14 +6498,14 @@ analytics.
   `docs/PROMPT_ARCHITECTURE.md`, `docs/providers/AGENTCORE_ADAPTER.md`,
   `docs/research/METHODOLOGY.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic suite: **558 passed, 0 failed**. Existing Starlette/httpx
   deprecation warnings. No live AWS or paid OpenAI call from pytest.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database migration. Internal stage id remains `deep_analysis`.
 - Knowledge Base metadata `course_material_id` is recommended; without it the
@@ -1360,7 +6513,7 @@ analytics.
 - Harness patch system prompt changed; redeploy DEFAULT if that overlay is
   used. Rollback is reverting this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live AgentCore still streams prose until the harness patch is on DEFAULT
   READY. KB metadata filter is ineffective until course objects are
@@ -1368,7 +6521,7 @@ analytics.
 - Next: optional approved live smoke after harness JSON cutover. Do not
   commit/push/deploy from this phase unless asked.
 
-## Previous completed phase — POC-style DSQL history messages + selected-source KB Retrieve
+### Previous completed phase — POC-style DSQL history messages + selected-source KB Retrieve
 
 **Completed locally on 2026-08-15.** AgentCore invokes send bounded DSQL
 history as Converse `messages` (POC Memory equivalent) while remaining
@@ -1376,7 +6529,7 @@ stateless. Locked Lecture Notes/Readings can use Bedrock Knowledge Base
 `Retrieve` mapped onto selected `[S#]` labels. FastAPI/Streamlit/DSQL stay.
 The coaching specialist still has zero KB tools.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `AgentCoreCoachProvider` always sends `messages`: last six DSQL turns plus
    the composed current turn (and images). `student_id` is the store owner
@@ -1389,7 +6542,7 @@ The coaching specialist still has zero KB tools.
    `KNOWLEDGE_BASE_ID` is set and the provider is not mock. Pytest keeps the
    local retriever.
 
-### Main files changed
+#### Main files changed
 
 - `backend/agentcore_provider.py`, `backend/domain.py`,
   `backend/coaching/execution.py`, `backend/retrieval.py`,
@@ -1402,19 +6555,19 @@ The coaching specialist still has zero KB tools.
   `docs/PROMPT_ARCHITECTURE.md`, `docs/LOCAL_DEMO_IMPLEMENTATION.md`,
   `.env.example`
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic suite: **544 passed, 0 failed**. Existing Starlette/httpx
   deprecation warnings. No live AWS or paid OpenAI call from pytest.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Empty `KNOWLEDGE_BASE_ID` keeps local retrieval. Rollback
   is reverting this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live AgentCore still streams prose until
   `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
@@ -1423,13 +6576,13 @@ The coaching specialist still has zero KB tools.
   `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
   Never restore six stages.
 
-## Previous completed phase — Strict coaching style by default
+### Previous completed phase — Strict coaching style by default
 
 **Completed locally on 2026-08-15.** New notebooks and empty progress blobs
 default to Strict coaching (`response_detail=long`). Students can still choose
 Quick. Notebooks that already persisted Quick stay Quick.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Canonical default is `DEFAULT_RESPONSE_DETAIL = "long"` in
    `backend/learning/journey.py`. Session, composer, store fallbacks, and the
@@ -1443,7 +6596,7 @@ Quick. Notebooks that already persisted Quick stay Quick.
    so a previous Quick choice cannot leak onto the new notebook. The selected
    chip uses the filled accent highlight.
 
-### Main files changed
+#### Main files changed
 
 - Domain/UI: `backend/learning/journey.py`, `backend/student_store.py`,
   `backend/coaching/execution.py`, `backend/chat_service.py`,
@@ -1456,7 +6609,7 @@ Quick. Notebooks that already persisted Quick stay Quick.
 - Docs: `README.md`, `DESIGN.md`, `backend/AGENTS.md`, `ui/AGENTS.md`,
   `docs/IMPLEMENTATION_STATUS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Targeted journey, Streamlit, primary-path, and HTTP confirmation tests passed.
 - Full deterministic suite: **536 passed, 0 failed**. Existing Starlette/httpx
@@ -1464,13 +6617,13 @@ Quick. Notebooks that already persisted Quick stay Quick.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Empty `progress_text` now reads as Strict. Explicit
   `response_detail=short` notebooks are unchanged. Rollback is reverting this
   working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live AgentCore still streams prose until
   `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
@@ -1479,7 +6632,7 @@ Quick. Notebooks that already persisted Quick stay Quick.
   `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
   Never restore six stages.
 
-## Previous completed phase — DSQL-only transcript + student download
+### Previous completed phase — DSQL-only transcript + student download
 
 **Completed locally on 2026-08-15.** Aurora DSQL / SQLite `messages` remain the
 only durable chat transcript. AgentCore stays generation-only (stateless
@@ -1487,7 +6640,7 @@ invokes). Students can download a `.txt` projection of persisted messages from
 Notebook Actions. POC JSON, DynamoDB, and AgentCore session memory are not
 used as chat history. A sixth Thinking Path stage is not added.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Documented and tested that `AgentCoreCoachProvider` never reuses a notebook
    id as `runtimeSessionId`, never sends AgentCore Memory/history fields, and
@@ -1502,7 +6655,7 @@ used as chat history. A sixth Thinking Path stage is not added.
    sources. Explicitly out of scope: scoring specialist replacement, critique
    every Nth turn, `ethics_critical` as a sixth stage, CDK student UI merge.
 
-### Main files changed
+#### Main files changed
 
 - Export: `backend/workspace_service.py`, `backend/http/app.py`,
   `backend/api_client.py`, `ui/services/runtime.py`, `ui/notebooks.py`,
@@ -1514,7 +6667,7 @@ used as chat history. A sixth Thinking Path stage is not added.
   `docs/providers/AGENTCORE_ADAPTER.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
   nested `AGENTS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Targeted: `tests/domain/test_agentcore_provider.py`,
   `tests/http/test_workspace_api.py`, `tests/http/test_multiuser_ownership.py`,
@@ -1526,12 +6679,12 @@ used as chat history. A sixth Thinking Path stage is not added.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database schema change. Transcript download is a read of existing
   `messages`. Rollback is reverting this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live AgentCore still streams prose until
   `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
@@ -1541,7 +6694,7 @@ used as chat history. A sixth Thinking Path stage is not added.
   Do not add course Q&A or a scoring specialist until that cutover is done.
   Never restore six stages.
 
-## Previous completed phase — AgentCore generation + shared course S3 keys
+### Previous completed phase — AgentCore generation + shared course S3 keys
 
 **Completed locally on 2026-08-14.** FastAPI/Streamlit remain the student
 product. Production generation is `MODEL_PROVIDER=agentcore` (one
@@ -1549,7 +6702,7 @@ product. Production generation is `MODEL_PROVIDER=agentcore` (one
 `course/` objects instead of copying PDFs into `users/`. Automated tests inject
 fake clients and never call AWS.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `AgentCoreCoachProvider` sends `phase=coaching`, composed CDE2300 prompt,
    and `output_contract=coach_turn`. `deep_analysis` maps to AgentCore topic
@@ -1572,7 +6725,7 @@ fake clients and never call AWS.
    `CDE2300ChatbotEC2Role` inline policy `AgentCore-Course-Materials`
    (invoke, Retrieve, course Get/List, no course delete).
 
-### Main files changed
+#### Main files changed
 
 - New: `backend/agentcore_provider.py`, `tests/domain/test_agentcore_provider.py`,
   `scripts/agentcore/harness_patch/`, `scripts/agentcore_smoke.py`,
@@ -1582,7 +6735,7 @@ fake clients and never call AWS.
 - Config/docs: `.env.example`, `compose.prod.yaml`, `docs/deploy/AWS_STATELESS_EC2.md`,
   `docs/PROMPT_ARCHITECTURE.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Targeted: `tests/domain/test_agentcore_provider.py`,
   `tests/domain/test_source_library.py`,
@@ -1594,7 +6747,7 @@ fake clients and never call AWS.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database schema change. Default local provider remains `mock`.
 - Host `.env` should set `MODEL_PROVIDER=agentcore`,
@@ -1603,7 +6756,7 @@ fake clients and never call AWS.
 - Rollback: leave `.env` on `openai` or `bedrock` and set
   `COURSE_MATERIAL_SYNC_ENABLED=false`.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live runtime still streams prose until
   `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
@@ -1611,14 +6764,14 @@ fake clients and never call AWS.
 - Next: deploy that harness patch, then one approved
   `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
 
-## Previous completed phase — Amazon Bedrock coach adapter
+### Previous completed phase — Amazon Bedrock coach adapter
 
 **Completed locally on 2026-08-14.** The coach provider contract now includes a
 Bedrock Converse adapter. Phase progression, citations, persistence, and
 selected-source retrieval stay in the application. Automated tests inject a
 fake client and never call AWS.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `BedrockCoachProvider` makes one Converse call per turn with a required
    `coach_turn` tool whose schema is the provider-neutral
@@ -1636,7 +6789,7 @@ fake client and never call AWS.
    `BEDROCK_MODEL_ID` and timeout/retry bounds and does not require
    `OPENAI_API_KEY`. Credentials stay on the AWS chain / EC2 role.
 
-### Main files changed
+#### Main files changed
 
 - New: `backend/bedrock_provider.py`, `tests/domain/test_bedrock_provider.py`
 - Wiring: `backend/providers.py`, `backend/settings.py`, `backend/http/app.py`
@@ -1644,7 +6797,7 @@ fake client and never call AWS.
   `docs/LOCAL_DEMO_IMPLEMENTATION.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
   nested `AGENTS.md` maps
 
-### Validation evidence
+#### Validation evidence
 
 - Targeted: `tests/domain/test_bedrock_provider.py`,
   `tests/http/test_production_config.py`,
@@ -1655,14 +6808,14 @@ fake client and never call AWS.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database schema change. Default local provider remains `mock`.
 - Production can keep `MODEL_PROVIDER=openai` until Bedrock model access and
   IAM invoke are granted. Rollback is reverting this working tree and leaving
   `.env` on `openai` or `mock`.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - The pinned boto3 Converse path uses strict tool use, not
   `outputConfig.textFormat`. Confirm the chosen model/inference profile
@@ -1674,7 +6827,7 @@ fake client and never call AWS.
   `MODEL_PROVIDER=bedrock` and remove `OPENAI_API_KEY` from the host `.env` if
   OpenAI is no longer used. Do not add a Bedrock Knowledge Base for coaching.
 
-## Previous completed phase — port architecture package splits onto this branch
+### Previous completed phase — port architecture package splits onto this branch
 
 **Completed locally on 2026-08-14.** Package ownership on
 `professor-analytics-ui` now matches the architecture-refactor *structure*
@@ -1682,7 +6835,7 @@ fake client and never call AWS.
 research-aligned phases, professor analytics/Research, CSS, widget keys, and
 routes are unchanged.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. **Contracts locked first.** `tests/test_architecture_contracts.py` snapshots
    this branch’s façade signatures, `StudentStore` public methods including
@@ -1712,7 +6865,7 @@ routes are unchanged.
    `context.py` and `projection.py` own bounded context and image/storage
    projection. `backend/source_library.py` is a `sys.modules` alias.
 
-### Main files changed
+#### Main files changed
 
 - New packages: `backend/http/`, `backend/learning/`, `backend/coaching/`,
   `backend/persistence/store/`, `backend/sources/`, `ui/panels/`,
@@ -1727,7 +6880,7 @@ routes are unchanged.
   `docs/CODEBASE_STRUCTURE.md`, `docs/TESTING.md`, nested `AGENTS.md`,
   `.github/workflows/mock-ci.yml`, `scripts/build.sh`.
 
-### Validation evidence
+#### Validation evidence
 
 - Architecture contract tests passed before and after each move.
 - Complete deterministic suite: **462 passed, 0 failed** (456 prior tests plus
@@ -1740,7 +6893,7 @@ routes are unchanged.
   mock suite. An isolated `scripts/start.sh` browser session was not repeated
   in this pass.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No product, route, schema, authentication, provider/prompt, CSS, copy, or
   widget-key change. Historical import paths and monkeypatch targets remain.
@@ -1750,7 +6903,7 @@ routes are unchanged.
 - No database write, migration, or learning-data reset. Rollback is reverting
   this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Aliases must keep replacing the module object (`sys.modules[__name__] = …`)
   or re-exporting the same function objects; rebinding names breaks patches.
@@ -1760,7 +6913,7 @@ routes are unchanged.
   `StudentStore` notebook/message operations or one closure-complete HTTP route
   registrar. Preserve the existing compatibility/OCC/route inventories first.
 
-## Previous completed phase — research-aligned five-phase coach and lecturer validation
+### Previous completed phase — research-aligned five-phase coach and lecturer validation
 
 **Implemented on 2026-08-14.** The original Replit workflow, supplied system
 architecture/V&V materials, and the cited research have been translated into a
@@ -1769,7 +6922,7 @@ SQLite/DSQL ownership, S3/local files, notebook history, Quick/Strict profiles,
 source grounding, revisions, and the current student workspace remain the
 application infrastructure; they were not reverted to the Replit architecture.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Thinking Path now uses five research-aligned phases: Problem identification,
   Concept generation, Design specification, Deep analysis, and Reflection.
@@ -1828,7 +6981,7 @@ application infrastructure; they were not reverted to the Replit architecture.
 
 
 
-### Main files changed
+#### Main files changed
 
 - Domain/workflow/provider/prompt: `backend/domain.py`, `workflow.py`,
 `application.py`, `providers.py`, `mock_provider.py`, `student_journey.py`,
@@ -1846,7 +6999,7 @@ persistence, API, UI, transaction-race, and reset tests.
 
 
 
-### Validation evidence
+#### Validation evidence
 
 - Complete deterministic suite: **456 passed, 0 failed**; 65 framework
 deprecation warnings; no live AWS/Cognito/DSQL/S3/provider or paid call.
@@ -1877,7 +7030,7 @@ as a completed human visual sign-off.
 
 
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No Cognito, public student API, source, notebook, model-provider, or external
 request/response contract was removed. Research routes/tables/metadata are
@@ -1892,7 +7045,7 @@ approved retention/recovery plan. No migration/reset has been applied here.
 
 
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Automated CLEAR/Facione/ethics codes are provisional research observations,
 not validated measures. Before a formal study, train human coders, sample and
@@ -1909,7 +7062,7 @@ smoke needs an explicit model, request/token ceiling, and cost cap.
 
 
 
-## Previous completed phase (historical)
+### Previous completed phase (historical)
 
 **Production-grade repository audit and focused hardening.** The full layered
 application, state ownership, persistence, Cognito boundary, provider adapters,
@@ -1918,7 +7071,7 @@ configuration, tests, and canonical documentation were reviewed. No broad
 folder move, schema migration, data rewrite, dependency addition, or product
 redesign was justified.
 
-### Changes in this phase
+#### Changes in this phase
 
 1. The public login-start limiter no longer creates an in-memory client entry
   for every rotated key after the global limit is full, and stale client
@@ -1944,7 +7097,7 @@ redesign was justified.
 
 
 
-### Validation evidence
+#### Validation evidence
 
 - Focused API, configuration, provider, limiter, legacy-provider, professor UI,
 and Streamlit suites → **111 passed**.
@@ -1964,7 +7117,7 @@ claimed as executed.
 
 
 
-### Compatibility, rollback, and remaining risk
+#### Compatibility, rollback, and remaining risk
 
 - No database or file migration. Existing notebooks, revisions, messages,
 sources, assessments, and Cognito identities are untouched. Rollback is a
@@ -1982,14 +7135,14 @@ replicas. Move them to a shared limiter before horizontal scaling.
 
 
 
-### Next exact action
+#### Next exact action
 
 Complete the existing Aurora DSQL revision-schema cutover and the guarded live
 idempotency smoke described below. Then run a read-only professor analytics
 latency/contract check and authenticated desktop/mobile browser QA against the
 deployed lecturer account. Do not open class traffic before those checks pass.
 
-### Prior auth phase (still true)
+#### Prior auth phase (still true)
 
 **Production edge: CloudFront viewer TLS → Caddy HTTP origin.** CloudFront at
 ``d1sxfuoybzedj5.cloudfront.net`` is now the sole production hostname. Caddy
@@ -1998,7 +7151,7 @@ retired dynamic-DNS updater are removed. Both Compose contracts, CI deployment
 tests, Cognito callback examples, operational docs, and manual QA now use the
 CloudFront topology.
 
-### CloudFront/Caddy edge alignment (completed)
+#### CloudFront/Caddy edge alignment (completed)
 
 1. CloudFront owns viewer HTTPS; Caddy accepts origin HTTP on ``:80`` and keeps
    the auth/health allow-list plus the catch-all ``/api/*`` 404 boundary.
@@ -2024,7 +7177,7 @@ uses caching disabled plus full cookie/query/WebSocket forwarding, then run
 ``docs/security/CADDY_PUBLIC_BOUNDARY.md`` and the authenticated production
 smoke. Do not open host TCP 443.
 
-### Prior auth phase (still true)
+#### Prior auth phase (still true)
 
 **Auth: restore Cognito refresh after 1-hour ID cookie expiry.** The
 non-sensitive Path=/ ``co_design_session`` hint now limits refresh attempts to
@@ -2032,7 +7185,7 @@ browsers with an established session. Cold visitors go directly to Sign in;
 expired sessions see the app skeleton and centered loader while the refresh
 bridge runs once; a Sign in launch cannot be intercepted by that bridge.
 
-### Prior UI phase (still true)
+#### Prior UI phase (still true)
 
 **UI: fragment-scoped Streamlit reruns (local interactions).** Explicit
 `rerun_app()` / `rerun_fragment()` helpers replaced the ambiguous
@@ -2043,7 +7196,7 @@ remain full-app. Debug counters: `_app_runs`, `_sources_fragment_runs`,
 `_studio_fragment_runs`, `_topbar_guidance_fragment_runs`,
 `_topbar_profile_fragment_runs`.
 
-### Full-app actions that remain intentional
+#### Full-app actions that remain intentional
 
 - Notebook create / switch / rename / delete
 - Auth / sign-in cooldown / logout
@@ -2057,7 +7210,7 @@ remain full-app. Debug counters: `_app_runs`, `_sources_fragment_runs`,
 
 
 
-### Auth refresh fix (this pass)
+#### Auth refresh fix (this pass)
 
 1. `should_attempt_session_refresh` no longer requires a live `co_design_id`
   cookie before redirecting to `/api/v1/auth/refresh`.
@@ -2067,7 +7220,7 @@ remain full-app. Debug counters: `_app_runs`, `_sources_fragment_runs`,
 
 
 
-### Prior UI hardening
+#### Prior UI hardening
 
 1. **Explicit edit retry.** On revise failure, clear `pending_edit` so the next
   rerun does not auto-resubmit; keep the stable `get_retry_key` UUID; restore
@@ -2078,13 +7231,13 @@ remain full-app. Debug counters: `_app_runs`, `_sources_fragment_runs`,
 
 
 
-### Prior production-hardening (still true)
+#### Prior production-hardening (still true)
 
 Append-only edit remains (no DELETE truncate). DSQL revision migration is
 resumable/idempotent (DEFAULT + batched NULL backfill). Ownership stays
 `messages.notebook_id → notebooks.user_id → users.id`.
 
-### Hardening behavior changes (revision pass)
+#### Hardening behavior changes (revision pass)
 
 1. **DSQL revision migration.** `scripts/init_dsql.py` inspects
   `information_schema` name **and** `column_default`, repairs missing
@@ -2103,7 +7256,7 @@ resumable/idempotent (DEFAULT + batched NULL backfill). Ownership stays
 
 
 
-### Prior append-only phase (still true)
+#### Prior append-only phase (still true)
 
 1. **Active-branch chat.** Discussion renders only active messages for the
   notebook's current `conversation_revision`; superseded turns stay durable
@@ -2125,7 +7278,7 @@ resumable/idempotent (DEFAULT + batched NULL backfill). Ownership stays
 
 
 
-### PART 1 root-cause evidence (“only welcome” on DSQL) — code inspection
+#### PART 1 root-cause evidence (“only welcome” on DSQL) — code inspection
 
 No live DSQL verification was run for this writeup.
 
@@ -2153,7 +7306,7 @@ database name, runtime role/owner (`DSQL_USER` not `co_design_app`), or
 `.env`/Compose config mismatch can produce empty or partial notebooks and
 should be checked after confirming schema columns exist.
 
-### Owner reporting JOIN (do not denormalize messages)
+#### Owner reporting JOIN (do not denormalize messages)
 
 ```sql
 SELECT
@@ -2178,7 +7331,7 @@ ORDER BY m.created_at, m.id;
 
 
 
-### Files changed (this append-only phase)
+#### Files changed (this append-only phase)
 
 - `backend/student_store.py`, `backend/application.py`,
 `backend/chat_service.py`, `backend/repositories.py`, and
@@ -2202,7 +7355,7 @@ deployment steps.
 failure retention, stale CAS, revoked keys, pending supersede, API ownership,
 DSQL message columns, `assessment_text` on assessed assistants only).
 
-### Validation evidence
+#### Validation evidence
 
 - Integrated revision/storage/UI selection:
 `.venv/bin/python -m pytest -q tests/test_conversation_revision.py tests/test_init_dsql.py tests/test_coach_idempotency.py tests/test_streamlit_ui.py tests/test_student_store.py tests/test_storage_providers.py tests/test_learning_service.py` → **115
@@ -2216,7 +7369,7 @@ passed** (deterministic mocks; 2026-08-10).
 
 
 
-### Compatibility / migration / rollback
+#### Compatibility / migration / rollback
 
 - Additive only: existing message rows backfill to revision `0` with
 `superseded_at_revision` NULL; display stays Conversation 01 until an edit.
@@ -2229,7 +7382,7 @@ rollback is required. SQLite migrations are additive on open.
 
 
 
-### Known risks / blockers
+#### Known risks / blockers
 
 - Existing DSQL clusters must receive the additive notebook/message revision
 migration before this application version is deployed. Runtime cannot repair
@@ -2239,7 +7392,7 @@ DSQL write. No live browser/upload/RAG QA is claimed in this phase.
 
 
 
-### Next exact action
+#### Next exact action
 
 **Stop architecture/feature edits.** Proceed only with live AWS / DSQL cutover:
 
@@ -2256,7 +7409,7 @@ DSQL write. No live browser/upload/RAG QA is claimed in this phase.
 
 
 
-### Prior pilot context (Phases 1–14)
+#### Prior pilot context (Phases 1–14)
 
 **Phases 1–13 complete on** `Production-RemoveData`**; Phase 14 verdict:
 READY FOR CONTROLLED PILOT.** Live manual production QA documented in
@@ -2277,7 +7430,7 @@ server-authoritative `POST .../messages/{id}/revise` with
 replaced by append-only revision history on this branch. Regenerate remains
 unavailable.
 
-### Behavior changes (Phases 1–13)
+#### Behavior changes (Phases 1–13)
 
 1. Concurrent identical coach idempotency keys converge to one provider
   execution; completed markers replay without false lease-lost errors.
@@ -2306,7 +7459,7 @@ unavailable.
 
 
 
-### Behavior changes
+#### Behavior changes
 
 1. Public notebook/message payloads are typed and reject stage, progress, and
   transition metadata. Only the internal learning workflow can write
@@ -2448,7 +7601,7 @@ unavailable.
 
 
 
-### Validation evidence
+#### Validation evidence
 
 **Local (Phases 4–8 — this phase):**
 
@@ -2525,7 +7678,7 @@ SQLite backup. It is local data and must never be committed.
 
 
 
-### Compatibility, rollback, and known risks
+#### Compatibility, rollback, and known risks
 
 - New S3 objects use `raw/` and `derived/` subpaths. Existing rows retain
 their full historical keys, remain readable, and stay within the same
@@ -2610,7 +7763,7 @@ files, or uploaded content. No live AWS resource was created or modified.
 
 
 
-### Next exact action
+#### Next exact action
 
 Authoritative next steps for append-only revision are under **Current phase →
 Next exact action** above. Continuing AWS cutover after that:
@@ -2644,11 +7797,11 @@ Next exact action** above. Continuing AWS cutover after that:
 
 
 
-## Previous completed work
+### Previous completed work
 
 **Professor Learning Analytics Dashboard (implementation; local deterministic validation)**
 
-### What changed
+#### What changed
 
 - Added a read-only `backend/professor_analytics` layer with typed API
 contracts, one batch active-branch repository query per analytics snapshot,
@@ -2685,7 +7838,7 @@ not evidence that a student read or understood a source.
 
 
 
-### Calculation definitions
+#### Calculation definitions
 
 - `Active this week` means at least one active-branch student message in the
 previous seven days. Current stage is the most recently active notebook's
@@ -2705,7 +7858,7 @@ judgement of ability.
 
 
 
-### Validation evidence
+#### Validation evidence
 
 - `.venv/bin/python -m pytest -q tests/test_professor_analytics.py tests/test_professor_ui.py tests/test_auth_gate.py tests/test_streamlit_ui.py` → **64 passed**
 (deterministic SQLite/Fake Cognito only; no network or model calls).
@@ -2740,7 +7893,7 @@ mutation from analytics routes.
 
 
 
-### Compatibility / known limits / next action
+#### Compatibility / known limits / next action
 
 - No existing student data changes. Rollback is a code-only revert; analytics
 endpoints have no mutation path. DSQL production deployment remains gated by
@@ -2769,3 +7922,149 @@ object cleanup, ownership-in-write checks, `ca-certificates` in image.
 **DSQL bootstrap / adapter hardening**
 
 **AWS stateless EC2 migration scaffolding**
+
+**Course Q&A evidence-gap hardening** — Current working-tree phase
+
+- High-confidence source questions now fail closed when selected-source
+  retrieval raises before producing validated chunks. The server persists the
+  existing evidence-gap response without invoking AgentCore, emitting model
+  claims, or attaching citations. Image-only Q&A remains model-owned; a mixed
+  image plus textual-source turn still requires textual evidence.
+- Selected source title matching now also indexes the meaningful pieces of
+  hyphenated/underscored filenames, so a question such as “L2 Network
+  Bootstrapping” is classified consistently with the selected
+  `L2-Network-Bootstrapping-ARP-DHCP.pdf` source.
+- Added deterministic coverage for retrieval exceptions, mixed image/text
+  evidence gaps, and hyphenated selected-source matching.
+- Validation: focused Q&A/mode/retrieval/RAG-fallback/citation/one-call suite
+  passed (101 tests); Ruff, compileall, and `git diff --check` passed. No AWS
+  or paid model calls were made.
+- Compatibility: no persistence/schema/API changes and no AgentCore runtime
+  publication required. The next exact action is to run the focused suite in
+  CI/EC2 after deploying the current backend image, then manually verify a
+  selected-source Q&A with a temporarily unavailable retriever.
+
+**Edited-message chat-history visibility** — Current working-tree phase
+
+- During an in-flight edit, the chat fragment now renders only the authoritative
+  prefix before the edited user message, followed by the revised prompt and
+  Coach progress. The obsolete suffix remains hidden until the successful
+  authoritative rerun.
+- A bounded transient prefix snapshot handles stale fragment arguments without
+  becoming a second transcript store. It is cleared on success, failure, and
+  stale-target recovery; DSQL/persisted messages remain canonical.
+- Validation: edit/render-plan, chat-scroll, progress, and rerun-scope tests
+  passed (34 tests); Ruff, UI/backend compileall, and `git diff --check` passed.
+  The broader Streamlit UI run still has the existing attachment-error AppTest
+  timeout; it is unrelated to edit rendering and was not changed here.
+- Compatibility: no backend, API, persistence, AgentCore, RAG, attachment,
+  citation, HMW, or stage semantics changed. The next exact action is a manual
+  delayed edit check at desktop and mobile widths after the app rebuild.
+
+**Fast Chat structured-output boolean contract hardening** — Current working-tree phase
+
+- The Fast Chat model-facing schema now requires `needs_source_retrieval` as a
+  non-null boolean, matching Pydantic validation. Previously its Python default
+  made the generated property optional/nullable, so a Q&A `null` could produce
+  the category-only `structured_output_failure` envelope despite successful RAG.
+- The Fast Chat Q&A prompt now explicitly emits `hmw_scaffold_ready: false` and
+  `needs_source_retrieval: false` as JSON booleans. Strict validation, one outer
+  invoke, bounded recovery, RAG, citations, HMW, Deep Review, and Guardrails
+  are unchanged.
+- Validation: focused schema, prompt-composition, first-cycle, runtime parser,
+  HMW, Fast Chat one-call, Deep Review, and provider envelope tests passed;
+  Ruff, compileall, and `git diff --check` passed. No AWS or paid model calls.
+- Compatibility: `agentcore_runtime` changed, so republish the runtime before
+  using this fix. FastAPI application logic is not required to change, but the
+  production host must recreate the app with the next
+  `AGENTCORE_SESSION_GENERATION` after publishing so affinity sessions cannot
+  retain the previous runtime assets. Next exact action: publish the updated
+  runtime, bump the host generation, and run bounded normal/revised RAG Q&A
+  smoke tests.
+
+**Coach welcome HMW guidance** — Current working-tree phase
+
+- Added a concise opening sentence encouraging students to craft a “How Might
+  We” problem statement before the first design-challenge prompt.
+- No coaching, HMW detection, stage, persistence, or AgentCore behavior changed.
+- Validation: welcome/HMW/context-planner focused tests, Ruff, compileall, and
+  `git diff --check` passed.
+
+**Attachment UX, scrolling, and CDE2300 scope boundary** — Current working-tree phase
+
+- The chat feed is now a bounded flex scrollport, keeping the composer outside
+  the scroll region while long attachment turns remain scrollable.
+- Persisted turn attachments render as compact, type-aware file cards with
+  filename, type, size, and the existing authorized viewer action.
+- Fast Chat now carries a strict model-facing `out_of_scope` boolean. At high
+  confidence only, clearly unrelated content is replaced by fixed server-owned
+  CDE2300 boundary copy with no citations, HMW readiness, stage recommendation,
+  retrieval retry, or qualifying coaching increment. Plausibly project-relevant
+  technical/domain material remains in normal coaching/Q&A.
+- No new model/retrieval call, API/persistence schema, source authorization,
+  citation, HMW, or stage rule was added. The stale attachment AppTest mock was
+  updated to target the current `upload_attachments` path.
+- Compatibility: publish the changed AgentCore prompt/schema as a new
+  immutable runtime version, wait for `READY`, then rebuild the app and bump
+  `AGENTCORE_SESSION_GENERATION` so affinity sessions do not retain the old
+  runtime contract. No database migration is required.
+- Next action: run the focused deterministic suite and a desktop/390 px smoke
+  test with one CDE2300 attachment and one clearly unrelated attachment.
+
+**App-only Course Q&A, progression routing, and Sources refresh** — Current working-tree phase
+
+- Explicit navigation/readiness wording now routes to Coaching even when it
+  follows substantial project reasoning or names a course stage. It excludes
+  selected course/attachment evidence and Retrieve, then retains the existing
+  immediate-next-stage pending transition and exact `confirm` path. Explicit
+  Thinking Path/Reflection completion wording is likewise workflow intent;
+  before Reflection it can only use the ordinary immediate-next-stage flow.
+  At Reflection, the existing terminal ADVANCE→STAY normalization preserves
+  valid coaching prose while creating no transition or completion state.
+- Anaphoric course-source lookups now build one bounded retrieval-only query
+  from the current question plus the nearest already-loaded active-branch
+  substantive user contribution. Acknowledgements, confirmation, navigation,
+  source lookup chains, attachment-only commands, inactive/superseded rows,
+  assistant text, and source metadata are excluded. Direct Week/Lecture queries are unchanged;
+  required KB filtering, authorization, citation validation, and the no-retry
+  evidence-gap path remain intact.
+- Sources uploads now remount their polling fragment after enqueue without
+  interrupting a Coach stream. Completion finalizes exactly once and displays
+  the authoritative source in the same pass; the empty state is hidden while a
+  pending upload card exists. Completion does not request a fragment rerun, so
+  Streamlit preserves its normal scope-error reporting for all other callers.
+- Validation: focused mode/retrieval/Bedrock-retrieval/Q&A-grounding/
+  RAG-fallback/one-call/source-rerun/Streamlit suite passed; Ruff on touched
+  files, compileall, and
+  `git diff --check` passed. No AWS or paid model calls were made.
+- Compatibility: application/EC2 rebuild only. No AgentCore publication,
+  session-generation bump, Guardrail/model change, API/schema migration, or
+  KB mutation is required. Reflection 5/5 completion remains intentionally
+  deferred; the next exact action is a bounded EC2 smoke for a long navigation
+  question, chained course lookup, and live Sources Uploading→card replacement.
+- Broader deterministic run (excluding the known invalid
+  `tests/scripts/test_load_probe.py` collection path) reached 100% with one
+  unrelated stale UI assertion in
+  `tests/ui/test_chat_progress.py::test_submitted_prompt_does_not_share_widget_with_previous_assistant`:
+  the current authoritative rendering shows one prior assistant bubble while
+  that test expects two. No production chat code was changed for this phase.
+
+**Authoritative stage selection and current-stage status** — Current working-tree phase
+
+- The local-only stage picker continues to persist its selection through the
+  existing owned `select-stage` API, then remounts from the returned notebook
+  Journey. Production continues to hide it with
+  `STUDENT_STAGE_SELECTION=false`.
+- Narrow questions such as “What stage am I in?” now produce a persisted,
+  server-owned Q&A reply from the authoritative notebook stage and its existing
+  description. They make no AgentCore or Retrieve call, attach no citations,
+  and cannot change HMW, Deep Review eligibility, pending transitions, or the
+  Thinking Path stage.
+- Validation: 133 focused mode, learning-service, FastAPI, and Streamlit API
+  tests passed; Ruff, compileall, and `git diff --check` passed. No AWS or paid
+  model calls were made.
+- Compatibility: application/EC2 rebuild only. No AgentCore publication,
+  affinity-generation bump, Guardrail change, API/schema migration, or AWS
+  configuration change is required. Next action: locally select each stage,
+  ask a current-stage status question, and confirm the Journey sidebar and
+  persisted reply agree after reload.

@@ -2,10 +2,65 @@
 
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _bounded_int_bounds(env_name: str) -> tuple[int, int, int]:
+    """Return the ``(default, minimum, maximum)`` literals for one setting.
+
+    Reads the ``_bounded_int`` call in ``backend/settings.py`` with the AST so
+    this test cannot drift from the real parser bounds.
+
+    Args:
+        env_name: Environment variable name passed to ``_bounded_int``.
+
+    Returns:
+        The default, minimum, and maximum integer literals for that setting.
+
+    Raises:
+        AssertionError: If no matching ``_bounded_int`` call is found.
+    """
+    tree = ast.parse((ROOT / "backend" / "settings.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "_bounded_int":
+            continue
+        if len(node.args) != 4:
+            continue
+        first = node.args[0]
+        if not isinstance(first, ast.Constant) or first.value != env_name:
+            continue
+        default, minimum, maximum = (
+            ast.literal_eval(node.args[1]),
+            ast.literal_eval(node.args[2]),
+            ast.literal_eval(node.args[3]),
+        )
+        return int(default), int(minimum), int(maximum)
+    raise AssertionError(f"no _bounded_int call for {env_name} in backend/settings.py")
+
+
+def _compose_env_int(compose: str, env_name: str) -> int:
+    """Return one integer value from the production Compose environment block.
+
+    Args:
+        compose: Raw ``compose.prod.yaml`` text.
+        env_name: Environment key to read.
+
+    Returns:
+        The configured integer value.
+
+    Raises:
+        AssertionError: If the key is absent or not an integer literal.
+    """
+    match = re.search(rf'^\s*{re.escape(env_name)}:\s*"?(-?\d+)"?\s*$', compose, re.M)
+    assert match is not None, f"{env_name} is not set in compose.prod.yaml"
+    return int(match.group(1))
 
 
 def _service_block(compose: str, service: str) -> str:
@@ -59,8 +114,16 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
+    assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_RECENT_HISTORY_MAX_TOKENS: "3000"' in app
+    assert 'FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"' in app
+    assert 'FAST_CHAT_SOFT_INPUT_TOKENS: "12000"' in app
+    assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
+    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
+    assert 'AGENTCORE_SESSION_AFFINITY_ENABLED: "true"' not in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
-    assert 'GUARDRAIL_VERSION: "3"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "6"' in app
+    assert 'GUARDRAIL_VERSION: "4"' in app
     assert "source: ./lecture_notes" in app
     assert "target: /app/lecture_notes" in app
 
@@ -75,9 +138,8 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert "source: ./data" not in app
     assert "target: /app/data" not in app
     assert 'APP_ENV: "production"' in app
-    assert 'AUTO_ADVANCE_STAGES: "true"' in app
-    assert 'STUDENT_STAGE_SELECTION: "false"' in app
-    assert "Month-2+" in compose
+    assert 'AUTO_ADVANCE_STAGES: "false"' in app
+    assert 'STUDENT_STAGE_SELECTION: "true"' in app
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "STUDENT_STAGE_SELECTION=false" in env_example
     assert 'DATABASE_PROVIDER: "dsql"' in app
@@ -108,8 +170,11 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "11"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS: "200"' in app
+    assert 'DEEP_REVIEW_JOB_TIMEOUT_SECONDS: "240"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
     assert 'ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'QA_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
@@ -118,7 +183,14 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
-    assert 'GUARDRAIL_VERSION: "3"' in app
+    assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_RECENT_HISTORY_MAX_TOKENS: "3000"' in app
+    assert 'FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"' in app
+    assert 'FAST_CHAT_SOFT_INPUT_TOKENS: "12000"' in app
+    assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
+    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "true"' in app
+    assert 'AGENTCORE_SESSION_AFFINITY_ENABLED: "true"' in app
+    assert 'GUARDRAIL_VERSION: "4"' in app
     assert 'MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK: "1"' in app
     assert 'MAX_ACTIVE_COACH_REQUESTS_PER_USER: "2"' in app
     assert 'COACH_REQUESTS_PER_MINUTE: "8"' in app
@@ -155,6 +227,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "11"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
@@ -165,7 +238,14 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
-    assert 'GUARDRAIL_VERSION: "3"' in app
+    assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_RECENT_HISTORY_MAX_TOKENS: "3000"' in app
+    assert 'FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"' in app
+    assert 'FAST_CHAT_SOFT_INPUT_TOKENS: "12000"' in app
+    assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
+    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "true"' in app
+    assert 'AGENTCORE_SESSION_AFFINITY_ENABLED: "true"' in app
+    assert 'GUARDRAIL_VERSION: "4"' in app
     assert "${KNOWLEDGE_BASE_ID" not in compose
     assert "${COURSE_MATERIALS_BUCKET" not in compose
     assert "${AGENTCORE_RUNTIME_ARN" not in compose
@@ -184,6 +264,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
         "COURSE_MATERIALS_BUCKET=",
         "AGENTCORE_RUNTIME_ARN=",
         "AGENTCORE_QUALIFIER=",
+        "AGENTCORE_SESSION_GENERATION=",
         "GUARDRAIL_ID=",
         "GUARDRAIL_VERSION=",
         "PUBLIC_ORIGIN=",
@@ -207,6 +288,10 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert "handle /api/v1/auth/me" in caddyfile
     assert "handle /api/v1/auth/refresh" in caddyfile
     assert "handle /api/v1/auth/logout" in caddyfile
+    assert "handle /api/v1/auth/guest/start" in caddyfile
+    assert "handle /api/v1/auth/guest/renew" in caddyfile
+    assert "handle /api/v1/auth/guest/claim/preview" in caddyfile
+    assert "handle /api/v1/auth/guest/claim/confirm" in caddyfile
     assert "handle /api/v1/health" in caddyfile
     assert "handle /api/*" in caddyfile
     assert 'respond "Not Found" 404' in caddyfile
@@ -225,6 +310,11 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     me_index = caddyfile.index("handle /api/v1/auth/me")
     refresh_index = caddyfile.index("handle /api/v1/auth/refresh")
     logout_index = caddyfile.index("handle /api/v1/auth/logout")
+    guest_start_index = caddyfile.index("handle /api/v1/auth/guest/start")
+    guest_renew_index = caddyfile.index("handle /api/v1/auth/guest/renew")
+    guest_claim_preview_index = caddyfile.index("handle /api/v1/auth/guest/claim/preview")
+    guest_claim_confirm_index = caddyfile.index("handle /api/v1/auth/guest/claim/confirm")
+    guest_claim_cancel_index = caddyfile.index("handle /api/v1/auth/guest/claim/cancel")
     health_index = caddyfile.index("handle /api/v1/health")
     block_index = caddyfile.index("handle /api/*")
     streamlit_index = caddyfile.index("handle {\n\t\treverse_proxy app:8501")
@@ -233,6 +323,11 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert me_index < block_index
     assert refresh_index < block_index
     assert logout_index < block_index
+    assert guest_start_index < block_index
+    assert guest_renew_index < block_index
+    assert guest_claim_preview_index < block_index
+    assert guest_claim_confirm_index < block_index
+    assert guest_claim_cancel_index < block_index
     assert health_index < block_index < streamlit_index
 
     api_block = caddyfile[block_index:streamlit_index]
@@ -249,6 +344,14 @@ def test_compose_keeps_internal_fastapi_url_for_container_local_calls():
     assert 'CO_DESIGN_PUBLIC_API_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
     assert 'CO_DESIGN_UI_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
     assert "ports:" not in app
+
+
+def test_production_compose_enables_guest_access():
+    """The production deployment opens the student guest path."""
+    compose = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+    app = _service_block(compose, "app")
+
+    assert 'GUEST_ACCESS_ENABLED: "true"' in app
 
 
 def test_compose_sets_production_cognito_redirect_uri():
@@ -314,6 +417,25 @@ def test_production_script_validates_provider_config_without_requiring_data_for_
     assert 'DATABASE_PROVIDER" = "sqlite"' in script
     assert 'FILE_STORAGE_PROVIDER" = "local"' in script
     assert "Application data directory must exist and be writable" in script
+    assert "--workers" not in script
+    assert "python -m uvicorn backend.api:app" in script
+
+
+def test_caddy_documents_loopback_fastapi_and_does_not_time_out_coach_turns():
+    """Caddy fronts Streamlit; coaching HTTP stays on container loopback."""
+    caddyfile = (ROOT / "Caddyfile").read_text(encoding="utf-8")
+    compose_prod = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "Caddy does not proxy" in caddyfile
+    assert "/api/v1/coach" in caddyfile
+    assert "unlimited read timeout" in caddyfile
+    assert "transport http" not in caddyfile
+    assert "read_timeout" not in caddyfile
+    assert "start_prod.sh has no --workers" in compose_prod
+    assert "durable mutex" in compose_prod
+    assert "There is no separate COACH_IDEMPOTENCY_LEASE_SECONDS knob" in env_example
+    assert "DERIVED from this value" in env_example
 
 
 def test_cloudfront_is_the_only_documented_production_edge():
@@ -346,6 +468,13 @@ def test_ci_validates_compose_and_caddy_configuration():
     assert "validate --config /etc/caddy/Caddyfile" in workflow
 
 
+def test_dockerfile_records_immutable_git_revision():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG GIT_SHA=unknown" in dockerfile
+    assert "org.opencontainers.image.revision" in dockerfile
+    assert "APP_GIT_SHA" in dockerfile
+
+
 def test_student_stage_selection_boolean_and_effective_auto_advance(monkeypatch):
     from backend.settings import Settings, _boolean
 
@@ -365,3 +494,79 @@ def test_student_stage_selection_boolean_and_effective_auto_advance(monkeypatch)
     # Settings dataclass fields are import-time; ensure the property still
     # reflects mutual exclusion on a freshly constructed instance shape.
     assert hasattr(Settings, "effective_auto_advance_stages")
+
+
+def test_production_sync_threadpool_covers_the_admitted_workflow_cap():
+    """Production Compose must not admit more workflows than it has threads.
+
+    ``POST /api/v1/coach/turn`` is a sync ``def`` route, so every admitted
+    coaching workflow occupies one AnyIO worker thread for the whole AgentCore
+    call. ``SYNC_THREADPOOL_TOKENS`` below ``MAX_CONCURRENT_MODEL_CALLS`` would
+    let the limiter admit turns that then queue behind the thread ceiling,
+    starving ``/api/v1/ready`` and the container healthcheck.
+    """
+    compose = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+    threadpool = _compose_env_int(compose, "SYNC_THREADPOOL_TOKENS")
+    workflows = _compose_env_int(compose, "MAX_CONCURRENT_MODEL_CALLS")
+
+    assert threadpool >= workflows, (
+        "SYNC_THREADPOOL_TOKENS must cover MAX_CONCURRENT_MODEL_CALLS; "
+        "lower it only with an explicit documented reason"
+    )
+
+    # _bounded_int falls back to its default outside the accepted range, so an
+    # out-of-range Compose value would silently drop the threadpool to 40 while
+    # the workflow cap stayed high. Both values must survive parsing verbatim.
+    for env_name, configured in (
+        ("SYNC_THREADPOOL_TOKENS", threadpool),
+        ("MAX_CONCURRENT_MODEL_CALLS", workflows),
+    ):
+        default, minimum, maximum = _bounded_int_bounds(env_name)
+        assert minimum <= configured <= maximum, (
+            f"{env_name}={configured} is outside [{minimum}, {maximum}] and would "
+            f"silently fall back to {default}"
+        )
+
+
+def test_deep_review_timeout_defaults_match_runtime_release_contract():
+    """The app stale deadline stays at the reviewed 240-second default."""
+    default, minimum, maximum = _bounded_int_bounds("DEEP_REVIEW_JOB_TIMEOUT_SECONDS")
+    assert (default, minimum, maximum) == (240, 30, 600)
+
+
+def test_production_requirements_ship_no_test_or_lint_tooling():
+    """The image installs requirements.txt, so test tooling must not live there.
+
+    ``requirements-dev.txt`` re-exports the runtime pins and adds pytest/Ruff,
+    which keeps CI unchanged while dropping the test framework from the EC2
+    image and out of its vulnerability surface.
+    """
+    runtime = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    dev = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "python -m pip install -r requirements.txt" in dockerfile
+    assert "requirements-dev.txt" not in dockerfile
+
+    runtime_names = {
+        re.split(r"[=<>\[;]", line.strip(), maxsplit=1)[0].lower()
+        for line in runtime.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    for tool in ("pytest", "ruff"):
+        assert tool not in runtime_names, f"{tool} must live in requirements-dev.txt"
+        assert tool in dev, f"{tool} must stay installed for CI via requirements-dev.txt"
+
+    assert "-r requirements.txt" in dev
+
+
+def test_bounded_int_rejects_out_of_range_values_by_falling_back(monkeypatch):
+    """Document the silent-fallback behaviour the Compose guard protects."""
+    from backend.settings import _bounded_int
+
+    monkeypatch.setenv("SYNC_THREADPOOL_TOKENS", "99999")
+    assert _bounded_int("SYNC_THREADPOOL_TOKENS", 40, 8, 500) == 40
+    monkeypatch.setenv("SYNC_THREADPOOL_TOKENS", "not-a-number")
+    assert _bounded_int("SYNC_THREADPOOL_TOKENS", 40, 8, 500) == 40
+    monkeypatch.setenv("SYNC_THREADPOOL_TOKENS", "120")
+    assert _bounded_int("SYNC_THREADPOOL_TOKENS", 40, 8, 500) == 120

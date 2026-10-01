@@ -1,10 +1,22 @@
 """In-process coach and auth-login rate limiting for a single EC2 instance.
 
 This limiter is intentionally process-local. It is acceptable for the current
-single-container production topology, but correctness must never depend on it:
-durable coach idempotency remains DB-backed in ``StudentStore``. A future
-Redis/distributed adapter can replace this module without changing API call
-sites.
+single-container, single-Uvicorn-worker production topology, but correctness
+must never depend on it: durable coach idempotency remains DB-backed in
+``StudentStore.claim_coach_request``. That DSQL/SQLite lease is the real
+mutex. This limiter only sheds load and improves UX inside one process.
+
+What breaks if Uvicorn ``--workers`` (or extra app containers) are added:
+each process has its own in-memory counters, so two workers can both pass
+the per-notebook slot. Duplicate provider execution is then prevented only
+while the durable lease is still valid. If that lease is shorter than
+bounded Fast Chat execution, a retry can reclaim the expired marker, run a
+second model call, and the original worker fails with
+``CoachRequestLeaseLostError`` after a successful generation. Do not add
+workers without treating the derived lease as the cross-process lock.
+
+A future Redis/distributed adapter can replace this module without changing
+API call sites.
 
 ``CoachRateLimiter`` tracks active provider-backed coaching *workflows* (one
 claimed ``submit`` execution), not the internal Haiku/Sonnet invokes inside
@@ -259,6 +271,52 @@ def reset_coach_rate_limiter_for_tests() -> None:
     global _LIMITER
     with _LIMITER_LOCK:
         _LIMITER = None
+
+
+class DeepReviewConcurrencyLimiter:
+    """Separate process-local cap for background Deep Review Sonnet work.
+
+    Coaching keeps ``CoachRateLimiter`` notebook=1. Deep Review must not take
+    that notebook lease; this semaphore only sheds a Sonnet stampede.
+    """
+
+    def __init__(self, *, max_concurrent: int = 8) -> None:
+        """Create a Deep Review slot limiter."""
+        self.max_concurrent = max(1, int(max_concurrent))
+        self._semaphore = threading.BoundedSemaphore(self.max_concurrent)
+
+    @contextmanager
+    def slot(self) -> Iterator[None]:
+        """Hold one Deep Review compute slot for the duration of the block."""
+        self._semaphore.acquire()
+        try:
+            yield
+        finally:
+            self._semaphore.release()
+
+
+_DEEP_REVIEW_LIMITER: DeepReviewConcurrencyLimiter | None = None
+_DEEP_REVIEW_LIMITER_LOCK = threading.Lock()
+
+
+def get_deep_review_limiter() -> DeepReviewConcurrencyLimiter:
+    """Return the process-wide Deep Review concurrency limiter."""
+    global _DEEP_REVIEW_LIMITER
+    with _DEEP_REVIEW_LIMITER_LOCK:
+        if _DEEP_REVIEW_LIMITER is None:
+            from backend.settings import settings
+
+            _DEEP_REVIEW_LIMITER = DeepReviewConcurrencyLimiter(
+                max_concurrent=settings.deep_review_max_concurrent
+            )
+        return _DEEP_REVIEW_LIMITER
+
+
+def reset_deep_review_limiter_for_tests() -> None:
+    """Drop the cached Deep Review limiter so tests can inject fresh ceilings."""
+    global _DEEP_REVIEW_LIMITER
+    with _DEEP_REVIEW_LIMITER_LOCK:
+        _DEEP_REVIEW_LIMITER = None
 
 
 class LoginStartLimiter:

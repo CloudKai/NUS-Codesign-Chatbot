@@ -295,15 +295,33 @@
         background:var(--cd-surface-muted) !important;
     }
 
-    /* Responsive panel selector */
+    /* Hidden flag for the mobile Journey review-update badge. Keep it out of
+       flow on every viewport so it cannot add a gap above the workspace. */
+    .st-key-mobile_journey_attention,
+    .stElementContainer:has(.cd-mobile-journey-attention),
+    [data-testid="stMarkdownContainer"]:has(.cd-mobile-journey-attention) {
+        display:none !important;
+        height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+    }
+
+    /* Responsive Gemini mobile chrome (visible under 1051px). */
     .st-key-mobile_panel {
         display:none;
         flex:0 0 auto;
     }
 
+    .st-key-mobile_nav_backdrop {
+        display:none !important;
+    }
+
     @media (min-width:1051px) {
         .block-container > [data-testid="stVerticalBlock"]
-        > [data-testid="stLayoutWrapper"]:has(.st-key-mobile_panel) {
+        > [data-testid="stLayoutWrapper"]:has(.st-key-mobile_panel),
+        .block-container > [data-testid="stVerticalBlock"]
+        > [data-testid="stLayoutWrapper"]:has(.st-key-mobile_nav_backdrop) {
             display:none !important;
         }
     }
@@ -318,6 +336,11 @@
         border:0;
         border-radius:0;
         background:var(--cd-surface);
+        /* Streamlit vertical blocks default to 1rem gap; zero-height layout
+           iframes still consume that gap and float the composer above the
+           viewport edge. */
+        gap:0 !important;
+        row-gap:0 !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stVerticalBlock"] {
@@ -326,6 +349,8 @@
         height:100%;
         min-height:0;
         flex:1 1 auto;
+        gap:0 !important;
+        row-gap:0 !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stVerticalBlock"]
@@ -351,8 +376,22 @@
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"],
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] {
-        height:100%;
-        min-height:0;
+        flex:1 1 auto !important;
+        height:100% !important;
+        min-height:0 !important;
+    }
+
+    /* Collapse zero-height helper iframes so they cannot reserve flex gap. */
+    .st-key-notebook_workspace > [data-testid="stElementContainer"]:has(iframe[height="0"]),
+    .st-key-notebook_workspace > [data-testid="stElementContainer"]:has(iframe[style*="height: 0"]),
+    .st-key-notebook_workspace > [data-testid="stElementContainer"]:has(iframe[height="0px"]) {
+        flex:0 0 0 !important;
+        height:0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -370,14 +409,40 @@
         min-height:0;
     }
 
+    body.cd-shell-optimistic-resize
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        transition:flex-basis 180ms ease, width 180ms ease,
+            min-width 180ms ease, max-width 180ms ease;
+    }
+
+    body.cd-shell-optimistic-resize .cd-col-resize-handle {
+        pointer-events:none !important;
+    }
+
+    @media (prefers-reduced-motion:reduce) {
+        body.cd-shell-optimistic-resize
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            transition:none !important;
+        }
+    }
+
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
         background:var(--cd-panel);
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel) {
         background:var(--cd-surface);
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
+        background:var(--cd-surface-muted);
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -459,8 +524,7 @@
         background:transparent;
     }
 
-    /* Chat|Sources handle lives on the Sources column so it (and its
-       tooltip) paint above Chat and open toward the center. */
+    /* Legacy leading-edge handle support for resizable panels. */
     .cd-col-resize-handle-start {
         left:-3px;
         right:auto;
@@ -577,15 +641,15 @@
         pointer-events:auto !important;
     }
 
-    /* Thinking Path controls sit on the right divider. */
+    /* Thinking Path is on the right; controls sit on its left divider. */
     [class*="st-key-collapse-studio"],
     [class*="st-key-expand-studio"] {
-        right:0 !important;
-        left:auto !important;
-        transform:translate(50%, -50%) !important;
+        left:0 !important;
+        right:auto !important;
+        transform:translate(-50%, -50%) !important;
     }
 
-    /* Sources controls sit on the left divider. */
+    /* Sources / Library controls sit on the left divider (toward Chat). */
     [class*="st-key-collapse-sources"],
     [class*="st-key-expand-sources"] {
         left:0 !important;
@@ -690,9 +754,10 @@
 
     .st-key-chat_panel {
         /* Same top inset as Thinking Path / Sources so Coach aligns on one line. */
-        padding:1.1rem 1.25rem 0;
+        padding:1.1rem 1.25rem 10px;
         background:var(--cd-surface);
-        overflow:hidden;
+        overflow-x:hidden !important;
+        overflow-y:hidden !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -711,6 +776,29 @@
         flex-direction:column !important;
         height:100% !important;
         min-height:0 !important;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    /* Chat column: grow the panel wrapper; collapse trailing helper iframes. */
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel)
+    > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_panel) {
+        flex:1 1 auto !important;
+        min-height:0 !important;
+        height:100% !important;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel)
+    > [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"]:has(iframe) {
+        flex:0 0 0 !important;
+        height:0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
     [data-testid="stElementContainer"].st-key-studio_panel,
@@ -727,10 +815,137 @@
         row-gap:0 !important;
     }
 
-    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer),
-    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer) {
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(> .st-key-chat_composer),
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_composer),
+    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(> .st-key-chat_composer),
+    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_composer) {
         flex:0 0 auto !important;
-        margin-top:auto !important;
+    }
+
+    /* Inner column that owns transcript (log + inflight + composer). */
+    .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> .st-key-chat_transcript),
+    .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_transcript),
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> .st-key-chat_transcript),
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_transcript),
+    .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> .st-key-chat_log),
+    .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_log) {
+        display:flex !important;
+        flex-direction:column !important;
+        min-height:0 !important;
+        flex:1 1 auto !important;
+        height:100% !important;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    /* Transcript fills the panel so chat_log can consume leftover height.
+       Nested overflow stays visible so inflight is not clipped. */
+    .st-key-chat_transcript,
+    [data-testid="stElementContainer"].st-key-chat_transcript {
+        min-height:0 !important;
+        flex:1 1 auto !important;
+        height:100% !important;
+        display:flex !important;
+        flex-direction:column !important;
+        /* Streamlit's vertical block defaults to 1rem gap; that reads as a
+           dead band between the last message and the composer. */
+        gap:0 !important;
+        row-gap:0 !important;
+        overflow:visible !important;
+    }
+
+    .st-key-chat_transcript > [data-testid="stVerticalBlock"],
+    .st-key-chat_transcript > [data-testid="stLayoutWrapper"] {
+        display:flex !important;
+        flex-direction:column !important;
+        min-height:0 !important;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    .st-key-chat_transcript > [data-testid="stVerticalBlock"]:has(.st-key-chat_log),
+    .st-key-chat_transcript > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log) {
+        flex:1 1 0% !important;
+        min-height:0 !important;
+    }
+
+    .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(> .st-key-chat_inflight),
+    .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_inflight) {
+        display:flex !important;
+        flex-direction:column !important;
+        flex:0 0 auto !important;
+        min-height:0 !important;
+        gap:0 !important;
+        row-gap:0 !important;
+        background:transparent !important;
+        border:0 !important;
+        box-shadow:none !important;
+    }
+
+    /* Composer column must stay input-sized. Growing it (flex 1) leaves a
+       tall empty band above the textarea and shrinks the log. */
+    .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(.st-key-chat_composer),
+    .st-key-chat_transcript [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log)),
+    .st-key-chat_transcript > [data-testid="stVerticalBlock"]:has(.st-key-chat_composer),
+    .st-key-chat_transcript > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer) {
+        display:flex !important;
+        flex-direction:column !important;
+        flex:0 0 auto !important;
+        flex-grow:0 !important;
+        height:auto !important;
+        min-height:0 !important;
+        margin-top:0 !important;
+        gap:0 !important;
+        row-gap:0 !important;
+        background:transparent !important;
+        border:0 !important;
+        box-shadow:none !important;
+    }
+
+    /* Inflight is a layout slot, not a card. Empty slot collapses. */
+    .st-key-chat_inflight,
+    [data-testid="stElementContainer"].st-key-chat_inflight,
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> .st-key-chat_inflight):not(:has(> .st-key-chat_log)):not(:has(> [data-testid="stElementContainer"].st-key-chat_log)),
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_inflight):not(:has(> .st-key-chat_log)):not(:has(> [data-testid="stElementContainer"].st-key-chat_log)) {
+        flex:0 0 auto !important;
+        flex-shrink:0 !important;
+        height:auto !important;
+        min-height:0 !important;
+        max-height:none !important;
+        overflow:visible !important;
+        background:transparent !important;
+        border:0 !important;
+        border-radius:0 !important;
+        box-shadow:none !important;
+        padding:0 !important;
+        margin:0 !important;
+    }
+
+    .st-key-chat_inflight:not(:has([data-testid="stChatMessage"])):not(:has([data-testid="stStatusWidget"])):not(:has([data-testid="stExpander"])):not(:has([data-testid="stAlert"])):not(:has(.cd-user-bubble-text)):not(:has(.st-key-inflight_user_message_row)):not(:has(.cd-inflight-error)) {
+        flex:0 0 0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-chat_inflight:has(.cd-user-bubble-text),
+    .st-key-chat_inflight:has(.st-key-inflight_user_message_row),
+    .st-key-chat_inflight:has([data-testid="stChatMessage"]),
+    .st-key-chat_inflight:has([data-testid="stStatusWidget"]),
+    .st-key-chat_inflight:has([data-testid="stExpander"]),
+    .st-key-chat_inflight:has([data-testid="stAlert"]),
+    .st-key-chat_inflight:has(.cd-inflight-error) {
+        flex:0 0 auto !important;
+        flex-shrink:0 !important;
+        height:auto !important;
+        min-height:0 !important;
+        max-height:none !important;
+        overflow:visible !important;
+        background:transparent !important;
+        border:0 !important;
+        box-shadow:none !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -867,16 +1082,135 @@
     }
 
     .st-key-sources_panel > [data-testid="stLayoutWrapper"]:has(.st-key-sources_scroll),
-    .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll),
-    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log) {
+    .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll) {
         min-height:0;
         flex:1 1 auto;
         overflow:hidden;
     }
 
+    /* History is the scrollport. Composer stays a footer under it.
+       Do not use justify-content:flex-end here: overflow + flex-end
+       clips the top of a long thread and blocks vertical scroll.
+       Short threads pack down via margin-top:auto on the inner wrapper. */
+    .st-key-chat_log,
+    [data-testid="stElementContainer"].st-key-chat_log {
+        min-height:0 !important;
+        flex:1 1 0% !important;
+        height:auto !important;
+        display:flex !important;
+        flex-direction:column !important;
+        justify-content:flex-start !important;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+        overflow-anchor:auto;
+        overscroll-behavior:contain;
+        scroll-behavior:auto;
+        scrollbar-width:thin;
+        scrollbar-color:var(--cd-scrollbar) transparent;
+    }
+
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log),
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log) > [data-testid="stVerticalBlock"] {
+        min-height:0 !important;
+        flex:1 1 auto !important;
+        height:100% !important;
+        overflow:hidden !important;
+        display:flex !important;
+        flex-direction:column !important;
+        justify-content:flex-start !important;
+    }
+
+    /* Log wrapper shares the column with the composer. Do not force 100%
+       height or the taller input card is clipped at the panel bottom. */
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> .st-key-chat_log):not(:has(> .st-key-chat_inflight)):not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight)),
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_log):not(:has(> .st-key-chat_inflight)):not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight)) {
+        min-height:0 !important;
+        flex:1 1 0% !important;
+        height:auto !important;
+        overflow:hidden !important;
+        display:flex !important;
+        flex-direction:column !important;
+        justify-content:flex-start !important;
+    }
+
+    /* Direct inner wrapper absorbs leftover column height above the bubbles.
+       Nested message rows stay content-sized so they can overflow and scroll. */
+    .st-key-chat_log > [data-testid="stVerticalBlock"],
+    .st-key-chat_log > [data-testid="stLayoutWrapper"] {
+        flex:0 0 auto !important;
+        min-height:0 !important;
+        height:auto !important;
+        margin-top:auto !important;
+    }
+
+    .st-key-chat_log > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"],
+    .st-key-chat_log > [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"],
+    .st-key-chat_log > [data-testid="stLayoutWrapper"] > [data-testid="stElementContainer"] {
+        flex:0 0 auto !important;
+        min-height:0 !important;
+        height:auto !important;
+    }
+
+    /* Composer is a footer. Size to the input; chat_log already grows. */
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log)),
+    .st-key-chat_transcript [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log)) {
+        flex:0 0 auto !important;
+        min-height:0 !important;
+        height:auto !important;
+        display:flex !important;
+        flex-direction:column !important;
+        justify-content:flex-start !important;
+        position:relative !important;
+        bottom:auto !important;
+        z-index:8 !important;
+        margin-top:0 !important;
+        overflow:visible !important;
+        overflow-anchor:none;
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log))
+    > [data-testid="stVerticalBlock"] {
+        display:flex !important;
+        flex-direction:column !important;
+        flex:0 0 auto !important;
+        min-height:0 !important;
+        justify-content:flex-end !important;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(iframe[height="0"]),
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(iframe[style*="height: 0"]) {
+        flex:0 0 0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-studio_scroll {
+        height:100%;
+    }
+
+    /* Collapse zero-height layout helpers so they cannot stretch the Review pane. */
+    .st-key-studio_scroll [data-testid="stLayoutWrapper"]:has(iframe[height="0"]),
+    .st-key-studio_scroll [data-testid="stLayoutWrapper"]:has(iframe[style*="height: 0"]),
+    .st-key-studio_scroll [data-testid="stElementContainer"]:has(iframe[height="0"]),
+    .st-key-studio_scroll [data-testid="stElementContainer"]:has(iframe[style*="height: 0"]) {
+        flex:0 0 0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
     .st-key-sources_scroll,
-    .st-key-studio_scroll,
-    .st-key-chat_log {
+    .st-key-studio_scroll {
         min-height:0;
         overflow-y:auto !important;
         overflow-x:hidden;
@@ -885,26 +1219,27 @@
         scrollbar-color:var(--cd-scrollbar) transparent;
     }
 
-    .st-key-studio_scroll,
-    .st-key-chat_log {
-        height:100%;
-    }
-
     .st-key-sources_scroll::-webkit-scrollbar,
     .st-key-studio_scroll::-webkit-scrollbar,
-    .st-key-chat_log::-webkit-scrollbar {
+    .st-key-chat_log::-webkit-scrollbar,
+    .st-key-chat_panel::-webkit-scrollbar,
+    .st-key-chat_transcript::-webkit-scrollbar {
         width:6px;
     }
 
     .st-key-sources_scroll::-webkit-scrollbar-track,
     .st-key-studio_scroll::-webkit-scrollbar-track,
-    .st-key-chat_log::-webkit-scrollbar-track {
+    .st-key-chat_log::-webkit-scrollbar-track,
+    .st-key-chat_panel::-webkit-scrollbar-track,
+    .st-key-chat_transcript::-webkit-scrollbar-track {
         background:transparent;
     }
 
     .st-key-sources_scroll::-webkit-scrollbar-thumb,
     .st-key-studio_scroll::-webkit-scrollbar-thumb,
-    .st-key-chat_log::-webkit-scrollbar-thumb {
+    .st-key-chat_log::-webkit-scrollbar-thumb,
+    .st-key-chat_panel::-webkit-scrollbar-thumb,
+    .st-key-chat_transcript::-webkit-scrollbar-thumb {
         background:var(--cd-scrollbar);
         border-radius:999px;
     }
@@ -960,42 +1295,146 @@
         font-variant-numeric:tabular-nums;
     }
 
-    .st-key-studio_scroll [role="tablist"] {
+    .st-key-studio_section_tabs {
         position:sticky;
         top:0;
         z-index:3;
-        width:100%;
-        height:2.55rem;
-        display:grid !important;
-        grid-template-columns:1fr 1fr;
-        gap:0 !important;
-        overflow:hidden;
-        margin:.35rem 0 .4rem;
+        width:100% !important;
+        max-width:100% !important;
+        margin:.35rem 0 .4rem !important;
         padding:0 !important;
-        border:1px solid var(--cd-border);
-        border-radius:.62rem;
-        background:var(--cd-surface);
     }
 
-    .st-key-studio_scroll [role="tab"] {
-        min-height:2.45rem;
-        display:flex;
-        justify-content:center;
+    /* Force full-width two-pane tabs (Streamlit radio defaults shrink-wrap). */
+    .st-key-studio_section_tabs [data-testid="stElementContainer"],
+    .st-key-studio_section_tabs [data-testid="stLayoutWrapper"],
+    .st-key-studio_section_tabs .st-key-studio_tab,
+    .st-key-studio_section_tabs [data-testid="stRadio"],
+    .st-key-studio_section_tabs [data-testid="stRadio"] > div,
+    .st-key-studio_section_tabs [data-testid="stRadioGroup"],
+    .st-key-studio_section_tabs [role="radiogroup"] {
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        box-sizing:border-box !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-studio_section_tabs [data-testid="stRadioGroup"],
+    .st-key-studio_section_tabs [role="radiogroup"] {
+        height:2.55rem !important;
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+        grid-auto-flow:column !important;
+        align-items:stretch !important;
+        justify-content:stretch !important;
+        gap:0 !important;
+        overflow:hidden !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.62rem !important;
+        background:var(--cd-surface) !important;
+        flex-wrap:nowrap !important;
+    }
+
+    .st-key-studio_section_tabs [role="radiogroup"] > label,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"] {
+        width:100% !important;
+        min-width:0 !important;
+        min-height:2.45rem !important;
+        flex:1 1 0% !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
         margin:0 !important;
         padding:.45rem .7rem !important;
         border:0 !important;
+        border-radius:0 !important;
         color:var(--cd-muted) !important;
         background:transparent !important;
+        gap:0 !important;
     }
 
-    .st-key-studio_scroll [role="tab"]:first-child {
+    .st-key-studio_section_tabs [role="radiogroup"] > label:first-child,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:first-child {
         border-right:1px solid var(--cd-border) !important;
     }
 
-    .st-key-studio_scroll [role="tab"][aria-selected="true"] {
+    .st-key-studio_section_tabs [role="radiogroup"] > label[data-checked="true"],
+    .st-key-studio_section_tabs [role="radiogroup"] > label:has(input:checked),
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"][data-selected],
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"][data-selected="true"],
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"][aria-checked="true"],
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"][aria-pressed="true"],
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input:checked) {
         color:var(--cd-accent) !important;
         background:var(--cd-accent-soft) !important;
         box-shadow:inset 0 -2px 0 var(--cd-accent);
+    }
+
+    /* Red attention dot on Review (same pattern as mobile Analytics).
+       Keep the radio option string stable — changing it remounts the widget
+       and drops the selected highlight. */
+    body:has(.st-key-mobile_journey_attention)
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child,
+    body:has(.cd-mobile-journey-attention)
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child,
+    body:has(.st-key-mobile_journey_attention)
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]),
+    body:has(.cd-mobile-journey-attention)
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) {
+        position:relative !important;
+    }
+
+    body:has(.st-key-mobile_journey_attention)
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child::after,
+    body:has(.cd-mobile-journey-attention)
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child::after,
+    body:has(.st-key-mobile_journey_attention)
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"])::after,
+    body:has(.cd-mobile-journey-attention)
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"])::after {
+        content:"";
+        position:absolute;
+        top:.35rem;
+        right:.55rem;
+        width:.42rem;
+        height:.42rem;
+        border-radius:999px;
+        background:#e11d48;
+        box-shadow:0 0 0 2px var(--cd-surface);
+        pointer-events:none;
+    }
+
+    /* Hide the native radio glyph so this control reads like the old tabs. */
+    .st-key-studio_section_tabs [role="radiogroup"] > label
+    > div > div > div:first-child,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]
+    > div > div > div:first-child {
+        display:none !important;
+    }
+
+    .st-key-studio_section_tabs [role="radiogroup"] > label [data-testid="stWidgetLabel"],
+    .st-key-studio_section_tabs [role="radiogroup"] > label p,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"] p {
+        color:inherit !important;
+        -webkit-text-fill-color:currentColor !important;
+        font-weight:650 !important;
+        margin:0 !important;
+        text-align:center !important;
+    }
+
+    .st-key-studio_section_tabs [role="radiogroup"] input {
+        position:absolute !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+        width:0 !important;
+        height:0 !important;
+    }
+
+    .st-key-studio_section_tabs [role="radiogroup"] [data-testid="stMarkdownContainer"] {
+        margin:0 !important;
+        padding:0 !important;
     }
 
     .st-key-studio_scroll [data-testid="stCaptionContainer"] {
@@ -1019,7 +1458,276 @@
         overflow:visible !important;
     }
 
-    .st-key-studio_scroll [role="tab"] .react-aria-SelectionIndicator {
+    /* One feed owns persisted history and the in-flight turn. The composer is
+       deliberately a sibling footer so the input never scrolls away. */
+    .st-key-chat_feed,
+    [data-testid="stElementContainer"].st-key-chat_feed {
+        min-height:0 !important;
+        flex:1 1 0% !important;
+        /* Keep this flex child bounded so the feed is a real scrollport. */
+        height:0 !important;
+        max-height:100% !important;
+        display:flex !important;
+        flex-direction:column !important;
+        justify-content:flex-start !important;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+        overflow-anchor:auto;
+        overscroll-behavior:contain;
+        scroll-behavior:auto;
+        scrollbar-width:thin;
+        scrollbar-color:var(--cd-scrollbar) transparent;
+        /* Isolate transcript layout from composer auto-grow reflows. */
+        contain:layout style;
+    }
+
+    .st-key-chat_feed > [data-testid="stVerticalBlock"],
+    .st-key-chat_feed > [data-testid="stLayoutWrapper"] {
+        min-height:100% !important;
+        height:auto !important;
+        display:flex !important;
+        flex-direction:column !important;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    /* The legacy chat-panel rule above makes this wrapper shrinkable and
+       clips its overflow. Match the actual feed/log structure with higher
+       specificity so the feed receives the wrapper's content height. */
+    .st-key-chat_panel .st-key-chat_feed > [data-testid="stLayoutWrapper"]:has(> .st-key-chat_log):not(:has(> .st-key-chat_inflight)):not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight)),
+    .st-key-chat_panel .st-key-chat_feed > [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_log):not(:has(> .st-key-chat_inflight)):not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight)) {
+        min-height:100% !important;
+        height:auto !important;
+        flex:0 0 auto !important;
+        overflow:visible !important;
+    }
+
+    /* Keep a short transcript visually anchored at the bottom while allowing
+       the feed itself—not either child—to scroll for long conversations. */
+    .st-key-chat_feed .st-key-chat_log,
+    .st-key-chat_feed [data-testid="stElementContainer"].st-key-chat_log {
+        min-height:0 !important;
+        flex:0 0 auto !important;
+        height:auto !important;
+        overflow:visible !important;
+        margin-top:auto !important;
+    }
+
+    .st-key-chat_feed .st-key-chat_log > [data-testid="stVerticalBlock"],
+    .st-key-chat_feed .st-key-chat_log > [data-testid="stLayoutWrapper"] {
+        min-height:0 !important;
+        height:auto !important;
+        flex:0 0 auto !important;
+        margin-top:0 !important;
+    }
+
+    .st-key-chat_feed .st-key-chat_inflight,
+    .st-key-chat_feed [data-testid="stElementContainer"].st-key-chat_inflight {
+        min-height:0 !important;
+        height:auto !important;
+        flex:0 0 auto !important;
+        overflow:visible !important;
+    }
+
+    .st-key-chat_feed::-webkit-scrollbar {
+        width:6px;
+    }
+
+    .st-key-chat_feed::-webkit-scrollbar-track {
+        background:transparent;
+    }
+
+    .st-key-chat_feed::-webkit-scrollbar-thumb {
+        background:var(--cd-scrollbar);
+        border-radius:999px;
+    }
+
+    /* Gemini-inspired full-height shell: navigation | center | Thinking Path. */
+    .st-key-notebook_workspace,
+    .st-key-notebook_workspace > [data-testid="stVerticalBlock"] {
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
+        background:var(--cd-nav) !important;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-chat_panel {
+        padding:1.45rem clamp(1.35rem,3.8vw,4.6rem) 10px !important;
+        background:var(--cd-surface) !important;
+    }
+
+    /* The fixed chat scroll control survives Streamlit destination remounts.
+       Keep it out of Search and Library until Chat is mounted again. */
+    body:has(.st-key-search_panel):not(:has(.st-key-chat_panel)) #cd-chat-scroll-down,
+    body:has(.st-key-sources_panel):not(:has(.st-key-chat_panel)) #cd-chat-scroll-down {
         display:none !important;
     }
 
+    .st-key-studio_panel {
+        padding:1.35rem 1.15rem .9rem !important;
+        border-right:0 !important;
+        border-left:1px solid var(--cd-border) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-studio_panel .pane-heading {
+        padding-right:2.75rem;
+    }
+
+    /* The expanded Thinking Path collapses from its own header, like nav. */
+    [class*="st-key-collapse-studio"] {
+        top:.72rem !important;
+        right:.72rem !important;
+        left:auto !important;
+        width:2.5rem !important;
+        height:2.5rem !important;
+        min-height:2.5rem !important;
+        max-height:2.5rem !important;
+        transform:none !important;
+    }
+
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"],
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button {
+        width:2.5rem !important;
+        min-width:2.5rem !important;
+        height:2.5rem !important;
+        min-height:2.5rem !important;
+        padding:0 !important;
+        border:0 !important;
+        border-radius:.85rem !important;
+        color:var(--cd-muted) !important;
+        background:transparent !important;
+        box-shadow:none !important;
+    }
+
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button:hover {
+        color:var(--cd-text) !important;
+        background:var(--cd-subtle) !important;
+    }
+
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button p,
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button p,
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button
+    [data-testid="stMarkdownContainer"],
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button
+    [data-testid="stMarkdownContainer"] {
+        position:absolute !important;
+        width:1px !important;
+        height:1px !important;
+        padding:0 !important;
+        margin:-1px !important;
+        overflow:hidden !important;
+        clip:rect(0,0,0,0) !important;
+        white-space:nowrap !important;
+        border:0 !important;
+        /* Prefer display:none so the flex gap next to the icon collapses. */
+        display:none !important;
+    }
+
+    .st-key-studio_rail {
+        justify-content:flex-start !important;
+        padding:1rem .75rem !important;
+        border-right:0 !important;
+        border-left:1px solid var(--cd-border) !important;
+        background:var(--cd-surface-muted) !important;
+    }
+
+    .st-key-studio_rail > [data-testid="stVerticalBlock"] {
+        justify-content:flex-start !important;
+        align-items:center !important;
+    }
+
+    [class*="st-key-expand-studio"] {
+        position:static !important;
+        width:auto !important;
+        height:auto !important;
+        min-height:0 !important;
+        max-height:none !important;
+        transform:none !important;
+        display:flex !important;
+        justify-content:center !important;
+        align-items:center !important;
+    }
+
+    [class*="st-key-expand-studio"] div[data-testid="stButton"],
+    [class*="st-key-expand-studio"] span.stTooltipHoverTarget,
+    [class*="st-key-expand-studio"] span.stTooltipIcon {
+        display:flex !important;
+        justify-content:center !important;
+        align-items:center !important;
+        width:100% !important;
+        margin:0 !important;
+    }
+
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button {
+        width:2.75rem !important;
+        min-width:2.75rem !important;
+        height:2.75rem !important;
+        min-height:2.75rem !important;
+        padding:0 !important;
+        border:0 !important;
+        border-radius:1rem !important;
+        color:var(--cd-accent) !important;
+        background:var(--cd-accent-soft) !important;
+        box-shadow:none !important;
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+    }
+
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button > div,
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button
+    span[data-has-shortcut],
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button > div > span {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        width:100% !important;
+        height:100% !important;
+    }
+
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button
+    [data-testid="stIconMaterial"],
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button
+    [data-testid="stIconMaterial"] {
+        margin:0 !important;
+        font-size:16px !important;
+        line-height:1 !important;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"].cd-col-rail,
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_rail) {
+        flex:0 0 4.5rem !important;
+        width:4.5rem !important;
+        min-width:4.5rem !important;
+        max-width:4.5rem !important;
+    }
+
+    .cd-col-resize-handle {
+        right:-4px;
+        width:8px;
+        z-index:80;
+    }
+
+    .cd-col-resize-handle:hover,
+    .cd-col-resize-handle:focus-visible,
+    body.cd-col-resizing .cd-col-resize-handle {
+        background:color-mix(in srgb,var(--cd-accent) 30%,transparent);
+    }

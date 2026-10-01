@@ -6,6 +6,7 @@ import pytest
 
 from backend.application import CoachApplicationService
 from backend.chat_service import ChatOptions, StudentChatEngine
+from backend.coaching.mode_policy import QA_EVIDENCE_GAP_RESPONSE
 from backend.domain import (
     CitationReference,
     CoachRequest,
@@ -26,13 +27,20 @@ from backend.retrieval import (
     RetrievedChunk,
     UNANALYZABLE_SOURCE_PLACEHOLDER,
     bounded_retrieval_result,
+    contextual_course_query_text,
     course_material_id_collisions,
     course_material_id_from_object_key,
     expand_session_query_text,
     focused_excerpt,
+    prefer_session_matching_sources,
     retrieval_sources_from_notebook,
 )
-from backend.source_library import add_file_sources, add_text_source, image_inputs_for_source_ids
+from backend.source_library import (
+    CHAT_ATTACHMENT_ORIGIN,
+    add_file_sources,
+    add_text_source,
+    image_inputs_for_source_ids,
+)
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
@@ -98,7 +106,10 @@ def test_application_persists_mid_chunk_excerpt_within_domain_limit(tmp_path):
     turn = service.submit(
         CoachRequest(
             thread_id=notebook,
-            student_message="Which older-adult crossing trade-off still needs evidence?",
+            student_message=(
+                "What does the selected source say about evidence for "
+                "older-adult crossing trade-offs?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
         )
@@ -207,6 +218,162 @@ def test_expand_session_query_text_aliases_lecture_and_week():
     assert "lecture 1" in expand_session_query_text("week1")
     assert "week 1" in expand_session_query_text("lecture01")
     assert "lecture 1" in expand_session_query_text("lecture01")
+
+
+def test_contextual_course_query_uses_prior_substantive_reasoning_not_lookup_chain():
+    """Anaphoric lookups skip acknowledgements and earlier source questions."""
+    reasoning = (
+        "I think reliability matters more than convenience because a false negative "
+        "could leave someone in the road."
+    )
+    query = RetrievalQuery(
+        current_message="Does another reading support my previous point?",
+        current_stage="deep_analysis",
+        sources=(),
+        recent_messages=(
+            {"role": "user", "content": reasoning},
+            {"role": "assistant", "content": "What evidence supports that?"},
+            {"role": "user", "content": "Which reading supports what I just said?"},
+            {"role": "user", "content": "okay"},
+        ),
+    )
+
+    text = contextual_course_query_text(query)
+
+    assert "Current source question: Does another reading" in text
+    assert reasoning in text
+    assert "Which reading supports what I just said?" not in text
+    assert "okay" not in text
+
+
+def test_contextual_course_query_recognizes_my_statement_as_anaphoric():
+    """Student wording from the production course-support question stays grounded."""
+    reasoning = "The crossing should prioritise reliable access over convenience."
+    query = RetrievalQuery(
+        current_message="Which lecture materials or readings support my statement?",
+        current_stage="deep_analysis",
+        sources=(),
+        recent_messages=({"role": "user", "content": reasoning},),
+    )
+
+    assert reasoning in contextual_course_query_text(query)
+
+
+def test_contextual_course_query_ignores_inactive_and_attachment_only_messages():
+    """Only active user reasoning can become a retrieval antecedent."""
+    active = "Our stakeholder needs a safe crossing with enough signal time."
+    query = RetrievalQuery(
+        current_message="Which lecture supports what I just said?",
+        current_stage="problem_identification",
+        sources=(),
+        recent_messages=(
+            {"role": "user", "content": "Old superseded argument", "active": False},
+            {"role": "user", "content": "Please summarise this attached PDF."},
+            {"role": "user", "content": active},
+        ),
+    )
+
+    text = contextual_course_query_text(query)
+
+    assert active in text
+    assert "Old superseded argument" not in text
+    assert "attached PDF" not in text
+
+
+def test_contextual_course_query_keeps_reasoning_that_mentions_an_attachment():
+    """Attachment references do not discard an otherwise substantive point."""
+    reasoning = (
+        "The attached PDF shows older pedestrians need a longer crossing interval, "
+        "so reliability should matter more than convenience."
+    )
+    query = RetrievalQuery(
+        current_message="Which reading supports what I just said?",
+        current_stage="problem_identification",
+        sources=(),
+        recent_messages=(
+            {"role": "user", "content": "Please summarise this attached PDF."},
+            {"role": "user", "content": reasoning},
+        ),
+    )
+
+    text = contextual_course_query_text(query)
+
+    assert reasoning in text
+
+
+def test_contextual_course_query_is_bounded_and_uses_relevant_summary_only():
+    """Question and antecedent take priority; summary fills only spare budget."""
+    antecedent = "reliability " * 300
+    query = RetrievalQuery(
+        current_message="Which reading supports my previous point about reliability?",
+        current_stage="deep_analysis",
+        sources=(),
+        project_context="Reliability evidence should guide the crossing threshold.",
+        conversation_summary="Unrelated typography and colour discussion.",
+        recent_messages=({"role": "user", "content": antecedent},),
+    )
+
+    text = contextual_course_query_text(query, max_chars=500, antecedent_max_chars=800)
+
+    assert len(text) <= 500
+    assert "Current source question:" in text
+    assert "Prior student reasoning:" in text
+    assert "Unrelated typography" not in text
+
+
+def test_direct_course_query_keeps_its_existing_query_text():
+    """Non-anaphoric Week/Lecture queries do not gain hidden context."""
+    query = RetrievalQuery(
+        current_message="What is lecture 1 about?",
+        current_stage="problem_identification",
+        sources=(),
+        recent_messages=(
+            {"role": "user", "content": "My earlier design reasoning."},
+        ),
+    )
+    assert contextual_course_query_text(query) == "What is lecture 1 about?"
+
+
+def test_prefer_session_matching_sources_keeps_week_one_among_selected():
+    """Week 1 questions must not retrieve Week 9/10 merely because they are selected."""
+    week1 = RetrievalSource(
+        source_id="week-1",
+        label="S1",
+        title="Week 1 Introduction to innovation v3.pdf",
+        text="Innovation-driven economy",
+        object_key="course/lectureNotes/Week 1 Introduction to innovation v3.pdf",
+        virtual_course_source=True,
+    )
+    week10 = RetrievalSource(
+        source_id="week-10",
+        label="S2",
+        title="Week 10 Storytelling.pdf",
+        text="Storytelling and course schedule",
+        object_key="course/lectureNotes/Week 10 Storytelling.pdf",
+        virtual_course_source=True,
+    )
+    matched = prefer_session_matching_sources(
+        (week1, week10),
+        "what does week 1 material cover",
+    )
+    assert [source.source_id for source in matched] == ["week-1"]
+
+
+def test_prefer_session_matching_sources_fail_open_when_no_title_match():
+    """Unmatched session cues keep the selected set; they never search unselected files."""
+    week10 = RetrievalSource(
+        source_id="week-10",
+        label="S1",
+        title="Week 10 Storytelling.pdf",
+        text="Storytelling",
+        object_key="course/lectureNotes/Week 10 Storytelling.pdf",
+        virtual_course_source=True,
+    )
+    matched = prefer_session_matching_sources(
+        (week10,),
+        "what does week 1 material cover",
+    )
+    assert [source.source_id for source in matched] == ["week-10"]
 
 
 def test_local_retriever_lecture_one_prefers_week_one_title():
@@ -443,7 +610,7 @@ def test_application_virtual_course_gap_is_not_placeholder_evidence(tmp_path):
             local=LocalChunkRetriever(),
         ),
     )
-    service.submit(
+    turn = service.submit(
         CoachRequest(
             thread_id=notebook,
             student_message="what are the week 1 contents talking about?",
@@ -451,12 +618,16 @@ def test_application_virtual_course_gap_is_not_placeholder_evidence(tmp_path):
             response_detail="short",
         )
     )
-    assert provider.last_prepared_prompt is not None
-    prompt = provider.last_prepared_prompt.composed_text
-    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in prompt
-    assert "could not retrieve a validated excerpt" in prompt
-    assert "no readable text" in prompt
-    assert "Do not invent a summary" in prompt
+    assert provider.last_prepared_prompt is None
+    assert turn.response_text == QA_EVIDENCE_GAP_RESPONSE
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in turn.response_text
+    assert "[S1]" not in turn.response_text
+    assistants = [
+        message
+        for message in store.get_messages(notebook)
+        if message.get("role") == "assistant"
+    ]
+    assert assistants[-1]["content"] == QA_EVIDENCE_GAP_RESPONSE
 
 
 def test_application_retrieval_is_selected_notebook_scoped_and_audited(tmp_path):
@@ -552,7 +723,7 @@ def test_citation_preview_uses_retrieved_excerpt_not_document_beginning(
     turn = service.submit(
         CoachRequest(
             thread_id=notebook,
-            student_message="What quantified thermal degradation was reported?",
+            student_message="What does the selected source say about thermal degradation?",
             current_stage="problem_identification",
             response_detail="short",
         )
@@ -562,6 +733,141 @@ def test_citation_preview_uses_retrieved_excerpt_not_document_beginning(
     assert "18 percent capacity loss" in turn.assessment.citations[0].excerpt
     assert "18 percent capacity loss" in turn.response_text
     assert "[S1]" in turn.response_text
+
+
+def test_project_reasoning_skips_selected_source_retrieval(tmp_path):
+    class _CountingRetriever:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            del query
+            self.calls += 1
+            return RetrievalResult(context="", chunks=())
+
+    store = StudentStore(tmp_path / "skip-retriever.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, notebook, "Owned", "Owned selected source content")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    counting = _CountingRetriever()
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        retriever=counting,
+    )
+    service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="I think option B is stronger.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    assert counting.calls == 0
+
+
+def test_course_question_uses_selected_source_retrieval(tmp_path):
+    class _CountingRetriever:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            del query
+            self.calls += 1
+            return RetrievalResult(context="", chunks=())
+
+    store = StudentStore(tmp_path / "use-retriever.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, notebook, "Owned", "Owned selected lecture content")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    counting = _CountingRetriever()
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        retriever=counting,
+    )
+    service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="What does the selected lecture say about accessibility?",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    assert counting.calls == 1
+
+
+def test_private_attachment_question_does_not_broaden_to_course_sources(tmp_path):
+    """Current attachment questions retrieve only their private turn evidence."""
+
+    class _CapturingRetriever:
+        def __init__(self) -> None:
+            self.source_ids: list[str] = []
+
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            self.source_ids = [source.source_id for source in query.sources]
+            return RetrievalResult(context="", chunks=())
+
+    class _CourseKnowledgeBase(_CapturingRetriever):
+        pass
+
+    store = StudentStore(tmp_path / "attachment-scope.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _course_source_id = store.add_source(
+        notebook,
+        kind="file",
+        title="Lecture 4",
+        mime="application/pdf",
+        path="course/lectureNotes/week4.pdf",
+        selected=True,
+        metadata={
+            "origin": "course_sync",
+            "object_key": "course/lectureNotes/week4.pdf",
+            "course_material_group": "lectureNotes",
+            "course_material_id": "lecture_week4",
+        },
+    )
+    attachment = add_file_sources(
+        store,
+        notebook,
+        [("L2-Network Bootstrapping-ARP-DHCP.pdf", b"ARP and DHCP networking", "application/pdf")],
+        origin=CHAT_ATTACHMENT_ORIGIN,
+        selected=False,
+        extra_metadata={"hidden_from_sources": True},
+    )[0]
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    capturing = _CapturingRetriever()
+    course_kb = _CourseKnowledgeBase()
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        retriever=CompositeContextRetriever(
+            knowledge_base=course_kb,
+            local=capturing,
+        ),
+    )
+
+    service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="Could you outline the attached PDF",
+            current_stage="problem_identification",
+            response_detail="short",
+            attachment_source_ids=[attachment["id"]],
+        )
+    )
+
+    assert capturing.source_ids == [attachment["id"]]
+    assert course_kb.source_ids == []
 
 
 def test_application_rejects_out_of_scope_retriever_result(tmp_path):

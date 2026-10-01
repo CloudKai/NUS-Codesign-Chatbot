@@ -152,10 +152,10 @@ def test_compatibility_facade_exports_and_signatures_are_stable() -> None:
         "backend.student_journey": {
             "normalize_journey": "(value: 'Any') -> 'dict[str, Any]'",
             "complete_and_advance": "(journey: 'dict[str, Any]', *, note: 'str | None' = None) -> 'dict[str, Any]'",
-            "learning_review": "(messages: 'Iterable[dict[str, Any]]', journey: 'dict[str, Any]', *, detail: 'str | None' = None) -> 'dict[str, Any]'",
+            "learning_review": "(messages: 'Iterable[dict[str, Any]]', journey: 'dict[str, Any]', *, detail: 'str | None' = None, deep_review_snapshot: 'dict[str, Any] | None' = None, journey_stage_reviews: 'dict[str, Any] | None' = None) -> 'dict[str, Any]'",
         },
         "backend.source_library": {
-            "add_file_sources": "(store: 'StudentStore', thread_id: 'str', uploads: 'Iterable[tuple[str, bytes, str | None]]', *, origin: 'str' = 'source_panel', extra_metadata: 'dict[str, Any] | None' = None, max_file_size_mb: 'int | None' = None, preserve_display_names: 'bool' = False, compress: 'bool' = True) -> 'list[dict[str, Any]]'",
+            "add_file_sources": "(store: 'StudentStore', thread_id: 'str', uploads: 'Iterable[tuple[str, bytes, str | None]]', *, origin: 'str' = 'source_panel', extra_metadata: 'dict[str, Any] | None' = None, max_file_size_mb: 'int | None' = None, preserve_display_names: 'bool' = False, compress: 'bool' = True, selected: 'bool' = True) -> 'list[dict[str, Any]]'",
             "selected_source_context": "(sources: 'Iterable[dict[str, Any]]', *, limit: 'int' = 160000) -> 'tuple[str, list[dict[str, Any]]]'",
             "image_inputs_for_source_ids": "(store: 'StudentStore', thread_id: 'str', source_ids: 'Iterable[str]') -> 'list[dict[str, str]]'",
         },
@@ -170,6 +170,8 @@ def test_compatibility_facade_exports_and_signatures_are_stable() -> None:
             "local_api_client": "() -> 'LocalApiClient'",
             "rerun_app": "() -> 'None'",
             "rerun_fragment": "() -> 'None'",
+            "coach_turn_is_streaming": "() -> 'bool'",
+            "set_coach_turn_streaming": "(active: 'bool') -> 'None'",
         },
         "ui.chat": {
             "render_chat_panel": "(model_id: 'str', reasoning_effort: 'str | None') -> 'None'",
@@ -196,23 +198,37 @@ def test_student_store_public_and_dsql_occ_contracts_are_stable() -> None:
         "apply_phase_transition_decision",
         "claim_coach_request",
         "complete_coach_request",
+        "complete_deep_review_job",
+        "complete_stage_review_job",
         "consume_oauth_login_state",
+        "create_guest_session",
+        "create_guest_claim_preview",
+        "begin_guest_claim",
         "create_phase_transition",
         "create_thread",
         "delete_source",
         "delete_thread",
         "fail_coach_request",
+        "fail_deep_review_job",
+        "fail_stage_review_job",
         "find_source_by_path",
+        "get_message_metadata",
+        "get_message_page",
         "get_messages",
         "get_messages_at_revision",
+        "get_messages_page",
+        "get_oldest_user_messages",
         "get_pending_phase_transition",
         "get_research_observation",
         "get_source",
         "get_system_metadata",
         "get_thread",
+        "guest_claim_cleanup_info",
+        "guest_claim_transfer",
         "get_user_by_cognito_sub",
         "get_user_by_id",
         "get_user_preferences",
+        "has_messages",
         "list_research_adjudications",
         "list_research_observations",
         "list_research_reviews",
@@ -220,9 +236,13 @@ def test_student_store_public_and_dsql_occ_contracts_are_stable() -> None:
         "list_threads",
         "lookup_completed_coach_request",
         "lookup_completed_or_recorded_coach_request",
+        "mark_deep_review_job_running",
+        "mark_journey_stage_reviews_read",
+        "mark_stage_review_running",
         "persist_coach_turn",
         "ping",
         "record_research_access_event",
+        "requeue_stage_review_job",
         "rename_source",
         "research_workflow_contract_ready",
         "resolve_phase_transition",
@@ -233,11 +253,19 @@ def test_student_store_public_and_dsql_occ_contracts_are_stable() -> None:
         "set_all_sources_selected",
         "set_source_selected",
         "set_system_metadata",
+        "start_or_get_deep_review_job",
+        "start_or_get_stage_review_job",
+        "flush_stage_review_revisit",
         "try_resume_revision_result",
         "update_message",
         "update_thread",
         "update_user_preferences",
         "upsert_cognito_user",
+        "validate_guest_session",
+        "renew_guest_session",
+        "release_guest_claim",
+        "revoke_guest_session",
+        "validate_learning_stage_selection",
     }
     actual_public = {
         name
@@ -253,12 +281,23 @@ def test_student_store_public_and_dsql_occ_contracts_are_stable() -> None:
         "apply_phase_transition_decision",
         "claim_coach_request",
         "complete_coach_request",
+        "complete_deep_review_job",
+        "complete_stage_review_job",
         "consume_oauth_login_state",
+        "create_guest_session",
+        "create_guest_claim_preview",
+        "begin_guest_claim",
         "create_phase_transition",
         "create_thread",
         "fail_coach_request",
+        "fail_deep_review_job",
+        "fail_stage_review_job",
+        "mark_deep_review_job_running",
+        "mark_journey_stage_reviews_read",
+        "mark_stage_review_running",
         "persist_coach_turn",
         "record_research_access_event",
+        "requeue_stage_review_job",
         "rename_source",
         "resolve_phase_transition",
         "revise_conversation_from_user_message",
@@ -268,10 +307,17 @@ def test_student_store_public_and_dsql_occ_contracts_are_stable() -> None:
         "set_all_sources_selected",
         "set_source_selected",
         "set_system_metadata",
+        "start_or_get_deep_review_job",
+        "start_or_get_stage_review_job",
+        "flush_stage_review_revisit",
         "update_message",
         "update_thread",
         "update_user_preferences",
         "upsert_cognito_user",
+        "renew_guest_session",
+        "revoke_guest_session",
+        "release_guest_claim",
+        "guest_claim_transfer",
     }
 
 
@@ -294,6 +340,12 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
             ("GET", "/api/v1/auth/logout", "auth_logout"),
             ("POST", "/api/v1/auth/logout", "auth_logout"),
             ("GET", "/api/v1/auth/logout/callback", "auth_logout_callback"),
+            ("POST", "/api/v1/auth/guest/renew", "renew_guest_session"),
+            ("POST", "/api/v1/auth/guest/start", "start_guest_session"),
+            ("POST", "/api/v1/auth/guest/probe", "probe_guest_session"),
+            ("POST", "/api/v1/auth/guest/claim/preview", "preview_guest_claim"),
+            ("POST", "/api/v1/auth/guest/claim/confirm", "confirm_guest_claim"),
+            ("POST", "/api/v1/auth/guest/claim/cancel", "cancel_guest_claim"),
             ("GET", "/api/v1/health", "health"),
             ("GET", "/api/v1/ready", "ready"),
             ("GET", "/api/v1/preferences", "get_preferences"),
@@ -304,11 +356,20 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
             ("PATCH", "/api/v1/threads/{thread_id}", "update_thread"),
             ("DELETE", "/api/v1/threads/{thread_id}", "delete_thread"),
             ("GET", "/api/v1/threads/{thread_id}/messages", "list_messages"),
+            ("GET", "/api/v1/threads/{thread_id}/messages/exists", "has_messages"),
+            ("GET", "/api/v1/threads/{thread_id}/messages/page", "list_message_page"),
+            ("GET", "/api/v1/threads/{thread_id}/messages/title-context", "title_context"),
             ("POST", "/api/v1/threads/{thread_id}/messages", "create_message"),
+            ("POST", "/api/v1/threads/{thread_id}/attachments", "upload_attachments"),
             (
                 "GET",
                 "/api/v1/threads/{thread_id}/transcript.txt",
                 "download_transcript",
+            ),
+            (
+                "GET",
+                "/api/v1/threads/{thread_id}/deep-analysis.pdf",
+                "download_deep_analysis_pdf",
             ),
             (
                 "POST",
@@ -367,6 +428,26 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
             ("GET", "/api/v1/threads/{thread_id}/graph", "graph_inspection"),
             ("POST", "/api/v1/coach/turn", "coach_turn"),
             ("POST", "/api/v1/coach/turn/stream", "coach_turn_stream"),
+            (
+                "POST",
+                "/api/v1/threads/{thread_id}/deep-review",
+                "start_deep_review",
+            ),
+            (
+                "GET",
+                "/api/v1/threads/{thread_id}/deep-review",
+                "get_deep_review",
+            ),
+            (
+                "GET",
+                "/api/v1/threads/{thread_id}/journey-stage-reviews",
+                "get_journey_stage_reviews",
+            ),
+            (
+                "POST",
+                "/api/v1/threads/{thread_id}/journey-stage-reviews/read",
+                "mark_journey_stage_reviews_read",
+            ),
             ("GET", "/api/v1/professor/overview", "professor_overview"),
             ("GET", "/api/v1/professor/students", "professor_students"),
             (
@@ -378,6 +459,41 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
                 "GET",
                 "/api/v1/professor/students/{student_id}/conversations/{notebook_id}",
                 "professor_conversation_transcript",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+                "professor_notebook_workspace",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages",
+                "professor_notebook_messages",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources",
+                "professor_notebook_sources",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/journey",
+                "professor_notebook_journey",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/review",
+                "professor_notebook_review",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{source_id}",
+                "professor_notebook_source",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{attachment_id}",
+                "professor_conversation_attachment",
             ),
             (
                 "GET",
@@ -427,3 +543,40 @@ def test_fastapi_does_not_publish_openapi_docs(tmp_path: Path) -> None:
     client = TestClient(app)
     for path in ("/docs", "/docs/", "/redoc", "/redoc/", "/openapi.json"):
         assert client.get(path).status_code == 404
+
+
+def test_coaching_execution_does_not_import_automatic_deep_review() -> None:
+    """Live execution must not re-attach automatic Sonnet Deep Review helpers."""
+    tree = ast.parse(
+        (PROJECT_ROOT / "backend" / "coaching" / "execution.py").read_text(
+            encoding="utf-8"
+        ),
+        filename="backend/coaching/execution.py",
+    )
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+    assert "explicit_deep_review_available" in imported
+    assert "resolve_deep_review_trigger" not in imported
+    assert "should_run_deep_review" not in imported
+
+
+def test_ui_never_imports_student_chat_engine() -> None:
+    """Presentation must keep using the typed coach path, not StudentChatEngine."""
+    offenders: list[str] = []
+    for path in (PROJECT_ROOT / "ui").rglob("*.py"):
+        for target, _level in _top_level_imports(path):
+            if target in {"backend.chat_service", "chat_service"} or target.endswith(
+                ".chat_service"
+            ):
+                offenders.append(str(path.relative_to(PROJECT_ROOT)))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "StudentChatEngine":
+                        offenders.append(str(path.relative_to(PROJECT_ROOT)))
+    assert offenders == []

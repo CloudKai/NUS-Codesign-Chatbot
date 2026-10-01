@@ -14,6 +14,7 @@ import streamlit.components.v1 as components
 from backend.settings import settings
 from backend.source_library import COURSE_MATERIAL_GROUPS, is_locked_course_source
 from ui.components import empty_state_html
+from ui.html_embed import wrap_component_html
 from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.rename import (
     bump_rename_epoch,
@@ -21,7 +22,18 @@ from ui.rename import (
     render_enter_to_apply_rename,
     sync_rename_select_all,
 )
-from ui.runtime import rerun_app, rerun_fragment, store
+from ui.runtime import (
+    coach_turn_is_streaming,
+    discard_source_upload,
+    enqueue_source_upload,
+    finalize_source_upload,
+    mark_source_upload_failed,
+    pending_source_uploads,
+    rerun_app,
+    rerun_fragment,
+    retry_source_upload,
+    store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +48,7 @@ _SOURCE_IMPORT_PARTIAL_ERROR = (
 )
 _SOURCE_RENAME_ERROR = "The source could not be renamed. Try again."
 _SOURCE_DOWNLOAD_ERROR = "The file could not be downloaded. Try again."
+_SOURCE_LOCAL_ACTION_DEFER_KEY = "_sources_defer_local_action_for_thread"
 
 
 def format_size(size: int) -> str:
@@ -66,8 +79,8 @@ def _source_has_downloadable_file(source: dict[str, Any]) -> bool:
     return bool(source.get("path"))
 
 
-def _import_uploaded_sources(uploads: list[Any]) -> None:
-    """Persist selected files into the active notebook and reset the picker.
+def _enqueue_uploaded_sources(uploads: list[Any]) -> None:
+    """Queue selected files and reset the picker without blocking the panel.
 
     Dedupes against the current uploader widget generation (``source_upload_nonce``)
     so the 1s Sources fragment cannot re-import the same selection, while a later
@@ -83,37 +96,28 @@ def _import_uploaded_sources(uploads: list[Any]) -> None:
     handled_key = f"source-upload-handled-{thread_id}-{nonce}"
     if st.session_state.get(handled_key) == fingerprint:
         return
-    # Claim this selection before the slow import so the fragment cannot start
-    # a second concurrent attempt while the first is still running.
+    # Claim this selection before enqueueing so the fragment cannot start a
+    # duplicate background import while the first is still running.
     st.session_state[handled_key] = fingerprint
     try:
-        added = store.upload_sources(
+        enqueue_source_upload(
             thread_id,
             [
                 (upload.name, upload.getvalue(), getattr(upload, "type", None))
                 for upload in uploads
             ],
-            origin="source_panel",
         )
     except Exception:
         logger.exception(
-            "Source panel upload failed for notebook %s",
+            "Source panel upload could not be queued for notebook %s",
             thread_id,
         )
         st.session_state["source_upload_error"] = _SOURCE_UPLOAD_ERROR
-        # Clear the picker so the fragment stops retrying the failed selection.
-        st.session_state["source_upload_nonce"] = nonce + 1
-        rerun_fragment()
-        return
-    st.session_state.pop("source_upload_error", None)
-    if added:
-        st.session_state.allow_model_knowledge = False
-        store.update_thread(
-            thread_id,
-            metadata={"allow_model_knowledge": False},
-        )
-        st.toast(f"Added {len(added)} source{'s' if len(added) != 1 else ''}.")
+    else:
+        st.session_state.pop("source_upload_error", None)
     st.session_state["source_upload_nonce"] = nonce + 1
+    # Remount immediately so the student sees the non-authoritative Uploading
+    # card while the worker persists and extracts the file.
     rerun_fragment()
 
 
@@ -217,7 +221,19 @@ def _sources_expander_widget_key(section: str) -> str:
     return f"sources_expander_{slug}"
 
 
-def _ensure_sources_expander_state(section: str, *, default: bool = True) -> str:
+def _sources_expander_prefs() -> dict[str, Any]:
+    """Return persisted expander open/closed flags for this student."""
+    prefs = store.get_user_preferences() or {}
+    saved = prefs.get("sources_expander_state")
+    return dict(saved) if isinstance(saved, dict) else {}
+
+
+def _ensure_sources_expander_state(
+    section: str,
+    *,
+    default: bool = True,
+    saved: dict[str, Any] | None = None,
+) -> str:
     """Seed expander open/closed state from preferences after a browser refresh.
 
     Returns:
@@ -225,10 +241,9 @@ def _ensure_sources_expander_state(section: str, *, default: bool = True) -> str
     """
     widget_key = _sources_expander_widget_key(section)
     if widget_key not in st.session_state:
-        prefs = store.get_user_preferences() or {}
-        saved = prefs.get("sources_expander_state")
-        if isinstance(saved, dict) and section in saved:
-            st.session_state[widget_key] = bool(saved[section])
+        stored = _sources_expander_prefs() if saved is None else saved
+        if section in stored:
+            st.session_state[widget_key] = bool(stored[section])
         else:
             st.session_state[widget_key] = default
     return widget_key
@@ -237,13 +252,31 @@ def _ensure_sources_expander_state(section: str, *, default: bool = True) -> str
 def _persist_sources_expander_state(section: str, widget_key: str) -> None:
     """Remember expander open/closed state across refreshes when it changes."""
     expanded = bool(st.session_state.get(widget_key, True))
-    prefs = store.get_user_preferences() or {}
-    saved_raw = prefs.get("sources_expander_state")
-    saved = dict(saved_raw) if isinstance(saved_raw, dict) else {}
+    saved = _sources_expander_prefs()
     if saved.get(section) is expanded:
         return
     saved[section] = expanded
     store.update_user_preferences({"sources_expander_state": saved})
+
+
+def _persist_sources_expander_states(
+    sections: list[tuple[str, str]],
+) -> None:
+    """Write every listed expander flag in one preference update.
+
+    Args:
+        sections: ``(section title, widget key)`` pairs rendered this run.
+    """
+    saved = _sources_expander_prefs()
+    changed = False
+    for section, widget_key in sections:
+        expanded = bool(st.session_state.get(widget_key, True))
+        if saved.get(section) is expanded:
+            continue
+        saved[section] = expanded
+        changed = True
+    if changed:
+        store.update_user_preferences({"sources_expander_state": saved})
 
 
 def _sources_expander_changed(section: str, widget_key: str) -> None:
@@ -274,7 +307,8 @@ def _set_select_all_checkbox_state(*, checked: bool, indeterminate: bool) -> Non
     state = "indeterminate" if indeterminate else "checked" if checked else "unchecked"
     aria_state = "mixed" if indeterminate else "true" if checked else "false"
     components.html(
-        f"""
+        wrap_component_html(
+            f"""
 <script>
 (() => {{
   const state = {state!r};
@@ -309,7 +343,8 @@ def _set_select_all_checkbox_state(*, checked: bool, indeterminate: bool) -> Non
   window.setTimeout(applyState, 0);
 }})();
 </script>
-""",
+            """
+        ),
         height=0,
     )
 
@@ -396,16 +431,112 @@ def _render_source_sort_dropdown(thread_id: str) -> str:
     return str(st.session_state[sort_key])
 
 
+def _consume_sources_sync_rerun_suppress(thread_id: str) -> bool:
+    """Return True once when New chat asked to skip the sync remount for ``thread_id``.
+
+    Notebook create already triggered a full script remount. Course-material sync
+    finishing would otherwise call ``rerun_app()`` again (stable↔polling swap).
+    Consuming the flag here drops that second flash without blocking later
+    user-upload remounts. Arms ``_sources_defer_stable_remount`` so polling
+    ticks keep skipping until the next full-script paint chooses stable.
+    """
+    suppressed = str(
+        st.session_state.get("_suppress_sources_sync_rerun_for_thread") or ""
+    ).strip()
+    current = str(thread_id or "").strip()
+    if not suppressed or not current or suppressed != current:
+        return False
+    st.session_state.pop("_suppress_sources_sync_rerun_for_thread", None)
+    st.session_state["_sources_defer_stable_remount"] = current
+    return True
+
+
+def _defer_sources_local_action(thread_id: str) -> None:
+    """Defer one polling completion remount after a local Sources action.
+
+    Args:
+        thread_id: Notebook whose local Sources fragment just handled an
+            action such as deleting a source.
+
+    Side effects:
+        Stores a one-shot, thread-scoped marker. The polling fragment consumes
+        it before its course-sync completion remount; stable mode clears any
+        leftover marker.
+    """
+    current = str(thread_id or "").strip()
+    if current:
+        st.session_state[_SOURCE_LOCAL_ACTION_DEFER_KEY] = current
+
+
+def _consume_sources_local_action_defer(thread_id: str) -> bool:
+    """Consume a matching local-action defer marker exactly once.
+
+    Args:
+        thread_id: Notebook currently rendered by the Sources polling fragment.
+
+    Returns:
+        True when a matching marker was removed; otherwise False.
+    """
+    deferred = str(
+        st.session_state.get(_SOURCE_LOCAL_ACTION_DEFER_KEY) or ""
+    ).strip()
+    current = str(thread_id or "").strip()
+    if not deferred or not current or deferred != current:
+        return False
+    st.session_state.pop(_SOURCE_LOCAL_ACTION_DEFER_KEY, None)
+    return True
+
+
+def _clear_sources_local_action_defer(thread_id: str) -> None:
+    """Clear a matching local-action marker when stable Sources mode renders.
+
+    Args:
+        thread_id: Notebook currently rendered by the stable Sources fragment.
+
+    Side effects:
+        Removes only a marker belonging to ``thread_id`` so a stale marker from
+        another notebook cannot alter its polling handoff.
+    """
+    deferred = str(
+        st.session_state.get(_SOURCE_LOCAL_ACTION_DEFER_KEY) or ""
+    ).strip()
+    if deferred and deferred == str(thread_id or "").strip():
+        st.session_state.pop(_SOURCE_LOCAL_ACTION_DEFER_KEY, None)
+
+
+def _sources_defer_stable_remount(thread_id: str) -> bool:
+    """True while a New-chat sync skip is waiting for the next full-script paint."""
+    deferred = str(
+        st.session_state.get("_sources_defer_stable_remount") or ""
+    ).strip()
+    return bool(deferred and deferred == str(thread_id or "").strip())
+
+
 def render_sources_panel() -> None:
-    """Render the Sources column.
+    """Render the Sources library center destination.
 
     Auto-refresh (``run_every``) runs only while course-material sync is in
     progress. A permanent 1s timer leaves stale fragment IDs after full-app
     reruns (auth gate, logout, notebook switches) and Streamlit logs
-    "The fragment with id … does not exist anymore".
+    "The fragment with id … does not exist anymore". While a coach turn is
+    streaming, keep the stable fragment so a sync-complete remount cannot
+    stack a second workspace under the in-flight run.
     """
-    sync_future = store.request_course_material_sync(st.session_state.thread_id)
-    if sync_future.done():
+    thread_id = st.session_state.thread_id
+    sync_future = store.request_course_material_sync(thread_id)
+    uploads_active = any(
+        not job.future.done() for job in pending_source_uploads(thread_id)
+    )
+    # Full-script paint after a deferred sync-complete: drop the 1s timer.
+    if (
+        _sources_defer_stable_remount(thread_id)
+        and sync_future.done()
+        and not uploads_active
+    ):
+        st.session_state.pop("_sources_defer_stable_remount", None)
+        _render_sources_panel_stable()
+        return
+    if coach_turn_is_streaming() or (sync_future.done() and not uploads_active):
         _render_sources_panel_stable()
     else:
         _render_sources_panel_polling()
@@ -414,8 +545,22 @@ def render_sources_panel() -> None:
 @st.fragment
 def _render_sources_panel_stable() -> None:
     """Sources UI without a client auto-refresh timer."""
+    _clear_sources_local_action_defer(str(st.session_state.thread_id))
     _render_sources_panel_body()
-    if not store.request_course_material_sync(st.session_state.thread_id).done():
+    if coach_turn_is_streaming():
+        return
+    thread_id = st.session_state.thread_id
+    uploads_active = any(not job.future.done() for job in pending_source_uploads(thread_id))
+    if uploads_active or not store.request_course_material_sync(thread_id).done():
+        # The enqueue callback used a fragment rerun to show its pending card.
+        # One guarded app rerun remounts the timed polling fragment without
+        # disrupting a simultaneous Coach stream. Skip after a local action or
+        # New chat — the current fragment already painted the latest state.
+        if uploads_active:
+            rerun_app()
+            return
+        if _consume_sources_sync_rerun_suppress(thread_id):
+            return
         rerun_app()
 
 
@@ -423,8 +568,21 @@ def _render_sources_panel_stable() -> None:
 def _render_sources_panel_polling() -> None:
     """Sources UI that refreshes every second until course sync finishes."""
     _render_sources_panel_body()
-    if store.request_course_material_sync(st.session_state.thread_id).done():
+    if coach_turn_is_streaming():
+        return
+    thread_id = st.session_state.thread_id
+    uploads_active = any(not job.future.done() for job in pending_source_uploads(thread_id))
+    if store.request_course_material_sync(thread_id).done() and not uploads_active:
         # Remount the stable fragment so the browser drops the 1s timer.
+        # After a local action or New chat, skip remounts until the next
+        # full-script paint. This prevents a delete-triggered fragment rerun
+        # from handing the browser directly to a second workspace shell.
+        if _consume_sources_local_action_defer(thread_id):
+            return
+        if _consume_sources_sync_rerun_suppress(thread_id):
+            return
+        if _sources_defer_stable_remount(thread_id):
+            return
         rerun_app()
 
 
@@ -433,8 +591,27 @@ def _render_sources_panel_body() -> None:
     st.session_state["_sources_fragment_runs"] = (
         int(st.session_state.get("_sources_fragment_runs") or 0) + 1
     )
-    store.backfill_legacy_sources(st.session_state.thread_id)
-    sync_future = store.request_course_material_sync(st.session_state.thread_id)
+    thread_id = st.session_state.thread_id
+    store.backfill_legacy_sources(thread_id)
+    for job in pending_source_uploads(thread_id):
+        if not job.future.done():
+            continue
+        try:
+            added = job.future.result()
+        except Exception:
+            logger.exception("Source panel upload failed for notebook %s", thread_id)
+            mark_source_upload_failed(job.upload_id)
+            continue
+        if added:
+            st.session_state.allow_model_knowledge = False
+            store.update_thread(thread_id, metadata={"allow_model_knowledge": False})
+            st.toast(f"Added {len(added)} source{'s' if len(added) != 1 else ''}.")
+        finalize_source_upload(job.upload_id, thread_id)
+        # This body can run during a full-page reload, when Streamlit rejects
+        # fragment-scoped reruns.  ``finalize_source_upload`` invalidates the
+        # cached source reads, so the authoritative card can render below now.
+    pending_uploads = pending_source_uploads(thread_id)
+    sync_future = store.request_course_material_sync(thread_id)
     sync_loading = not sync_future.done()
     lecture_sync = None
     sync_error = ""
@@ -491,7 +668,7 @@ def _render_sources_panel_body() -> None:
                     max_upload_size=settings.max_file_size_mb,
                 )
                 if uploads:
-                    _import_uploaded_sources(list(uploads))
+                    _enqueue_uploaded_sources(list(uploads))
             upload_error = st.session_state.pop("source_upload_error", None)
             if upload_error:
                 st.error(upload_error)
@@ -621,12 +798,12 @@ def _render_sources_panel_body() -> None:
                 )
             if locked:
                 menu_column.button(
-                    "Managed course material",
+                    "Course material",
                     icon=":material/lock:",
                     type="tertiary",
                     disabled=True,
                     key=f"locked-source-{source['id']}",
-                    help="Always included in coaching",
+                    help="Course material · View only",
                 )
             else:
                 # Icon in the label (not icon=) so Streamlit hides the expand chevron.
@@ -713,7 +890,28 @@ def _render_sources_panel_body() -> None:
                                 st.session_state.thread_id,
                                 source["id"],
                             )
+                            _defer_sources_local_action(
+                                str(st.session_state.thread_id)
+                            )
                             rerun_fragment()
+
+    def render_pending_upload_card(job: Any) -> None:
+        """Render a non-authoritative source card while its upload runs."""
+        safe_id = str(job.upload_id).replace("-", "_")
+        with st.container(key=f"source_upload_{safe_id}"):
+            names = ", ".join(str(item[0]) for item in job.uploads)
+            st.markdown(f"**{escape(names)}**")
+            if not job.future.done():
+                st.caption("Uploading…")
+                return
+            st.caption("The file could not be added.")
+            retry_column, remove_column = st.columns(2, gap="small")
+            if retry_column.button("Retry", key=f"retry-source-upload-{job.upload_id}"):
+                if retry_source_upload(job.upload_id, thread_id):
+                    rerun_fragment()
+            if remove_column.button("Remove", key=f"remove-source-upload-{job.upload_id}"):
+                discard_source_upload(job.upload_id)
+                rerun_fragment()
 
     with st.container(key="sources_scroll", height="stretch"):
         grouped_course_sources = {
@@ -730,7 +928,10 @@ def _render_sources_panel_body() -> None:
             for source in visible_sources
             if not is_locked_course_source(source)
         ]
-        my_sources_key = _ensure_sources_expander_state("My Sources", default=True)
+        expander_prefs = _sources_expander_prefs()
+        expander_sections: list[tuple[str, str]] = []
+        my_sources_key = _ensure_sources_expander_state("My Sources", default=True, saved=expander_prefs)
+        expander_sections.append(("My Sources", my_sources_key))
         with st.expander(
             f"My Sources · {len(personal_sources)}",
             expanded=bool(st.session_state.get(my_sources_key, True)),
@@ -738,10 +939,14 @@ def _render_sources_panel_body() -> None:
             on_change=_sources_expander_changed,
             args=("My Sources", my_sources_key),
         ):
+            for pending_upload in pending_uploads:
+                render_pending_upload_card(pending_upload)
             if personal_sources:
                 for source in personal_sources:
                     render_source_card(source)
-            elif not any(not is_locked_course_source(source) for source in sources):
+            elif not pending_uploads and not any(
+                not is_locked_course_source(source) for source in sources
+            ):
                 st.markdown(
                     empty_state_html(
                         title="Add your first source",
@@ -754,7 +959,6 @@ def _render_sources_panel_body() -> None:
                 )
             else:
                 st.caption("No matching personal sources.")
-        _persist_sources_expander_state("My Sources", my_sources_key)
         for group in COURSE_MATERIAL_GROUPS:
             # Keep empty course expanders visible when not filtering away the group.
             group_all = [
@@ -765,7 +969,8 @@ def _render_sources_panel_body() -> None:
             ]
             group_sources = _sort_course_sources_by_name(grouped_course_sources[group])
             # Collapsed by default; students open Lecture Notes / Readings as needed.
-            group_key = _ensure_sources_expander_state(group, default=False)
+            group_key = _ensure_sources_expander_state(group, default=False, saved=expander_prefs)
+            expander_sections.append((group, group_key))
             with st.expander(
                 f"{group} · {len(group_all)}",
                 expanded=bool(st.session_state.get(group_key, False)),
@@ -783,4 +988,4 @@ def _render_sources_panel_body() -> None:
                     st.caption("No materials available yet.")
                 else:
                     st.caption("No matching materials in this group.")
-            _persist_sources_expander_state(group, group_key)
+        _persist_sources_expander_states(expander_sections)

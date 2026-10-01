@@ -147,7 +147,10 @@ append-only review/adjudication, and formula-safe CSV. Every identifiable read
 or export writes an access audit first and fails closed when auditing fails.
 Students receive the established Review projection plus Facione behaviour
 occurrences and the provisional Reflection candidate; CLEAR and ethics labels
-remain research-review data.
+remain research-review data. The latest successful Deep Review snapshot, when
+present, also contributes its strengths and areas-to-develop onto the frozen
+reviewed Thinking Path stage; it does not replace historical incremental
+assessments.
 
 Only the student's explicit confirmation may apply an advancement in the safe
 default mode (`AUTO_ADVANCE_STAGES=false`). The system must persist the
@@ -158,6 +161,13 @@ Audited auto-advance (`AUTO_ADVANCE_STAGES=true`) is an explicit local demo
 override: the coach ADVANCE recommendation is applied immediately without the
 Next/confirm UI, but a transition row is still persisted for auditability. Do
 not treat auto-advance as the repository default.
+
+Production on `compose.prod.yaml` uses the stage-selection policy recorded on
+2026-08-28 (`AUTO_ADVANCE_STAGES=false`, `STUDENT_STAGE_SELECTION=true`).
+Students can explicitly select a Thinking Path stage; a coach ADVANCE
+recommendation does not automatically move them. This supersedes the earlier
+Month-1 auto-advance pilot override. Operator release steps:
+[`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md).
 
 ## Providers and retrieval
 
@@ -186,7 +196,8 @@ caches as chat history.
 
 Retrieval is notebook-isolated and source-first. The current local adapter
 creates sentence-aware overlapping chunks from extracted selected-source text
-at query time, ranks them against the current turn plus bounded continuity,
+(precomputed `derived/chunks.v1.json` when valid; otherwise at query time),
+ranks them against the current turn plus bounded continuity,
 and records stable source/chunk audit mappings on the assistant message. It
 retrieves only selected sources from the active notebook and returns citations
 that open the correct source. Student uploads remain private. Enforce existing

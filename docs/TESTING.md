@@ -30,7 +30,7 @@ Compile and shell/config checks:
 
 ```sh
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
-  .venv/bin/python -m compileall -q backend ui scripts tests streamlit_app.py
+  .venv/bin/python -m compileall -q backend ui scripts tests streamlit_app.py agentcore_runtime
 
 sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh \
   scripts/deploy_ecr.sh scripts/browser_e2e_smoke.sh

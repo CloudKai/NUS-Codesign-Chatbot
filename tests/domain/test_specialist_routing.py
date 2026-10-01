@@ -11,7 +11,22 @@ from backend.specialists.routing import (
 )
 
 
-def test_week_one_course_question_routes_to_qa() -> None:
+def test_mock_qa_labels_specialist_and_does_not_qualify() -> None:
+    """Offline Q&A must not count as a Deep Review coaching turn."""
+    from backend.domain import CoachRequest, StageDecision
+    from backend.mock_provider import DeterministicCoachProvider
+
+    result = DeterministicCoachProvider().assess(
+        CoachRequest(
+            thread_id="thread-qa",
+            student_message="What does week 1 say about stakeholders?",
+            current_stage="problem_identification",
+            response_detail="long",
+        )
+    )
+    assert result.specialist == SPECIALIST_QA
+    assert result.qualifying_coaching_turn is False
+    assert result.assessment.recommendation is StageDecision.STAY
     assert select_specialist("What is Week 1 about?") == SPECIALIST_QA
     assert select_specialist("What are the Week 1 contents talking about?") == SPECIALIST_QA
 

@@ -177,13 +177,12 @@ def extract_source_text_from_bytes(name: str, content: bytes) -> str:
 def _extract_text_from_bytes(name: str, content: bytes) -> str:
     """Extract readable text from in-memory upload bytes for compression checks."""
     suffix = Path(name).suffix.lower() or ".bin"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as handle:
-        handle.write(content)
-        handle.flush()
-        try:
-            return extract_text(Path(handle.name))
-        except Exception:
-            return ""
+    if suffix in TEXT_SUFFIXES:
+        return content.decode("utf-8", errors="replace")
+    try:
+        return extract_source_text_from_bytes(name, content)
+    except Exception:
+        return ""
 
 
 def _compress_image_bytes(name: str, content: bytes) -> bytes:

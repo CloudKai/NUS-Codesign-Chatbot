@@ -14,10 +14,11 @@ import threading
 import uuid
 import zlib
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -32,8 +33,10 @@ from ..retrieval import course_material_id_from_object_key
 from ..settings import settings
 from ..student_store import StudentStore
 from .context import selected_source_context as _selected_source_context
+from .kb_metadata import is_metadata_sidecar_key
 from .projection import (  # noqa: F401 - compatibility re-exports
     image_inputs_for_source_ids,
+    image_inputs_for_sources,
     read_source_bytes,
     safe_source_file_path,
     source_image_input,
@@ -50,6 +53,9 @@ SHARED_COURSE_FOLDERS = ("lectureNotes", "readings")
 _SHARED_CATALOG_UNAVAILABLE = (("__course_catalog_unavailable__", 0, 0),)
 _COURSE_MATERIAL_SYNC_LOCK = threading.RLock()
 _VIRTUAL_COURSE_NAMESPACE = uuid.UUID("6b1c9e20-4d8a-5f31-8c47-2e9a0b7d15c3")
+_catalog_memo: ContextVar["_SharedCatalogMemo | None"] = ContextVar(
+    "shared_course_catalog_memo", default=None
+)
 
 
 class SourceImportError(ValueError):
@@ -81,6 +87,45 @@ class SharedCourseItem:
     fingerprint_token: int
 
 
+@dataclass
+class _SharedCatalogMemo:
+    """Mutable request-local memo for one shared-catalog listing."""
+
+    items: list[SharedCourseItem] | None = None
+    error: BaseException | None = None
+    loaded: bool = False
+    load_count: int = 0
+
+
+class shared_course_catalog_scope:
+    """Memoize shared course-catalog listings for the current request.
+
+    The memo does not outlive the ``with`` block and is not process-global.
+    Listing failures are remembered for the same request only so a catalog
+    outage is not retried once per source id.
+    """
+
+    def __init__(self) -> None:
+        self._token: Token[_SharedCatalogMemo | None] | None = None
+
+    def __enter__(self) -> "shared_course_catalog_scope":
+        self._token = _catalog_memo.set(_SharedCatalogMemo())
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        scope = _catalog_memo.get()
+        # Reset before recording so a telemetry failure cannot strand the memo
+        # on a pooled worker thread and leak it into the next request.
+        if self._token is not None:
+            _catalog_memo.reset(self._token)
+            self._token = None
+        if scope is not None:
+            from backend.turn_perf import record_field
+
+            record_field("source_catalog_load_count", int(scope.load_count))
+        return False
+
+
 def course_material_fingerprint() -> tuple[tuple[str, int, int], ...]:
     """Return the stable file signature used to coordinate background imports."""
     if settings.uses_shared_course_materials:
@@ -95,6 +140,8 @@ def course_material_fingerprint() -> tuple[tuple[str, int, int], ...]:
         if path.name == LECTURE_NOTES_README or any(
             part.startswith(".") for part in relative.parts
         ):
+            continue
+        if is_metadata_sidecar_key(relative.as_posix()):
             continue
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             continue
@@ -241,8 +288,12 @@ def course_material_group(relative_path: str) -> str:
     return "Lecture Notes"
 
 
-def _iter_shared_course_items() -> list[SharedCourseItem]:
-    """List shared Lecture Notes and Readings objects for locked source sync.
+def _list_shared_course_items_from_storage() -> list[SharedCourseItem]:
+    """List shared Lecture Notes and Readings objects without request memoisation.
+
+    Bedrock ``*.metadata.json`` sidecars are indexing artifacts and are skipped
+    before suffix eligibility or ``max_lecture_notes`` so they cannot occupy a
+    course-material slot or become student-visible sources.
 
     Raises:
         Exception: Listing failures propagate so callers can avoid treating an
@@ -257,6 +308,8 @@ def _iter_shared_course_items() -> list[SharedCourseItem]:
     for folder in SHARED_COURSE_FOLDERS:
         for obj in storage.list_prefix(f"{prefix}{folder}/"):
             if "/derived/" in obj.key or obj.key.endswith("/"):
+                continue
+            if is_metadata_sidecar_key(obj.key):
                 continue
             relative = obj.key[len(prefix) :] if obj.key.startswith(prefix) else obj.key
             filename = Path(relative).name
@@ -280,6 +333,40 @@ def _iter_shared_course_items() -> list[SharedCourseItem]:
             )
             if len(items) >= settings.max_lecture_notes:
                 return items
+    return items
+
+
+def _iter_shared_course_items() -> list[SharedCourseItem]:
+    """List shared Lecture Notes and Readings objects for locked source sync.
+
+    When a :class:`shared_course_catalog_scope` is active, the listing result
+    or failure is reused for the rest of the request.
+
+    Raises:
+        Exception: Listing failures propagate so callers can avoid treating an
+            outage as an empty catalog (which would delete locked sources).
+    """
+    scope = _catalog_memo.get()
+    if scope is not None and scope.loaded:
+        if scope.error is not None:
+            raise scope.error
+        return list(scope.items or [])
+    try:
+        items = _list_shared_course_items_from_storage()
+    except Exception as error:
+        if scope is not None:
+            scope.loaded = True
+            scope.error = error
+            scope.load_count += 1
+        raise
+    if scope is not None:
+        scope.loaded = True
+        scope.items = list(items)
+        scope.load_count += 1
+    else:
+        from backend.turn_perf import record_count
+
+        record_count("source_catalog_load_count")
     return items
 
 
@@ -311,6 +398,9 @@ def project_shared_course_item(item: SharedCourseItem) -> dict[str, Any]:
     """Project one shared catalog object into a locked source dict.
 
     The dict is UI/retrieval shaped. It is not a ``sources`` row.
+    ``selected`` is always false: Lecture Notes / Readings are view-only in
+    Sources and never enter personal selected Chat context. Course Q&A uses
+    the Bedrock Knowledge Base over the catalog instead.
     """
     mime = mimetypes.guess_type(item.filename)[0] or "application/octet-stream"
     kind = (
@@ -324,7 +414,7 @@ def project_shared_course_item(item: SharedCourseItem) -> dict[str, Any]:
         "title": item.filename,
         "mime": mime,
         "size": item.size,
-        "selected": True,
+        "selected": False,
         "path": item.object_key,
         "object_key": item.object_key,
         "extractedText": "",
@@ -363,13 +453,36 @@ def list_visible_sources(
     thread_id: str,
     *,
     selected_only: bool = False,
+    include_extracted_text: bool = True,
 ) -> list[dict[str, Any]]:
     """List personal notebook sources plus the shared Lecture Notes catalog.
 
     Shared ``course/`` objects are not inserted per notebook. Notebooks that
     already persisted locked course rows keep those rows and skip duplicates.
+
+    Args:
+        store: Owner-scoped student store.
+        thread_id: Notebook id whose personal sources are listed.
+        selected_only: When True, return only personal selected My Sources.
+            Locked Lecture Notes / Readings are never included, even when a
+            stale row still has ``selected=True``.
+        include_extracted_text: When False, skip object-storage reads of
+            extracted text on persisted rows.
+
+    Returns:
+        Merged personal and shared-catalog source dictionaries, or personal
+        selected sources only when ``selected_only`` is True.
     """
-    persisted = store.list_sources(thread_id, selected_only=False)
+    persisted = store.list_sources(
+        thread_id,
+        selected_only=False,
+        include_extracted_text=include_extracted_text,
+    )
+    persisted = [
+        source
+        for source in persisted
+        if not is_chat_attachment_source(source)
+    ]
     persisted_course_paths = {
         str((source.get("metadata") or {}).get("lecture_note_relative_path") or "")
         for source in persisted
@@ -383,17 +496,78 @@ def list_visible_sources(
     ]
     merged = persisted + catalog
     if selected_only:
-        return [source for source in merged if source.get("selected")]
+        return [
+            source
+            for source in merged
+            if source.get("selected") and not is_locked_course_source(source)
+        ]
     return merged
+
+
+def list_course_library_sources(
+    store: StudentStore,
+    thread_id: str,
+    *,
+    include_extracted_text: bool = False,
+) -> list[dict[str, Any]]:
+    """Return view-only Lecture Notes / Readings for catalog-scoped course Q&A.
+
+    These rows are never Chat-selected context. Callers use them only as
+    Knowledge Base retrieval / citation authorization against the official
+    course pack.
+
+    Args:
+        store: Owner-scoped student store.
+        thread_id: Notebook id whose visible catalog is merged.
+        include_extracted_text: Forwarded to :func:`list_visible_sources`.
+
+    Returns:
+        Locked course-library source dictionaries (local and/or virtual).
+    """
+    return [
+        source
+        for source in list_visible_sources(
+            store,
+            thread_id,
+            selected_only=False,
+            include_extracted_text=include_extracted_text,
+        )
+        if is_locked_course_source(source)
+    ]
+
+
+CHAT_ATTACHMENT_ORIGIN = "chat_attachment"
+
+
+def is_chat_attachment_source(source: Mapping[str, Any]) -> bool:
+    """Return whether a private source belongs only to one chat turn."""
+    metadata = source.get("metadata") or {}
+    return str(metadata.get("origin") or "").strip() == CHAT_ATTACHMENT_ORIGIN
 
 
 def get_visible_source(
     store: StudentStore,
     thread_id: str,
     source_id: str,
+    *,
+    include_extracted_text: bool = True,
 ) -> dict[str, Any] | None:
-    """Return a persisted source or a shared-catalog course source."""
-    found = store.get_source(thread_id, source_id)
+    """Return a persisted source or a shared-catalog course source.
+
+    Args:
+        store: Owner-scoped student store.
+        thread_id: Notebook id used for the persisted lookup.
+        source_id: Source id to load.
+        include_extracted_text: When False, skip object-storage reads of
+            extracted text on persisted rows. Shared-catalog rows never
+            carry extracted text.
+
+    Returns:
+        The visible source dictionary, or ``None`` when unknown.
+    """
+    found = store.get_source(
+        thread_id, source_id, include_extracted_text=include_extracted_text
+    )
     if found:
         return found
     wanted = str(source_id or "").strip()
@@ -587,8 +761,8 @@ def _add_source_with_extracted_text(
     """Store extracted text before the retryable source-metadata DB write.
 
     Object storage is deliberately outside ``StudentStore.add_source`` so an
-    Aurora DSQL OCC retry never repeats S3 writes. On metadata failure, both the
-    raw upload key and extracted-text key are cleaned up.
+    Aurora DSQL OCC retry never repeats S3 writes. On metadata failure, the raw
+    upload key, extracted-text key, and chunk-artifact key are cleaned up.
     """
     source_id = str(source_values.pop("source_id", "") or uuid.uuid4())
     cleaned = (extracted_text or "")[:MAX_SOURCE_TEXT]
@@ -598,10 +772,14 @@ def _add_source_with_extracted_text(
         metadata_dict.get("object_key") or source_values.get("path")
     )
     extracted_text_key: str | None = None
-    storage = None
+    chunks_key: str | None = None
     if cleaned:
         from backend.persistence.factory import get_file_storage
-        from backend.persistence.object_keys import build_extracted_text_object_key
+        from backend.persistence.object_keys import (
+            build_extracted_text_object_key,
+            build_source_chunks_object_key,
+        )
+        from backend.sources import chunk_artifacts
 
         storage = get_file_storage()
         extracted_text_key = build_extracted_text_object_key(
@@ -614,6 +792,22 @@ def _add_source_with_extracted_text(
             data=cleaned.encode("utf-8"),
             content_type="text/plain; charset=utf-8",
         )
+        digest = chunk_artifacts.extracted_text_digest(cleaned)
+        metadata_dict["extracted_text_sha256"] = digest
+        source_values["metadata"] = metadata_dict
+        chunks_key = build_source_chunks_object_key(
+            user_id=store.owner_id,
+            notebook_id=notebook_id,
+            source_id=source_id,
+        )
+        chunk_artifacts.write_chunk_artifact_best_effort(
+            storage=storage,
+            user_id=store.owner_id,
+            notebook_id=notebook_id,
+            source_id=source_id,
+            text=cleaned,
+            digest=digest,
+        )
     try:
         return store.add_source(
             notebook_id,
@@ -623,7 +817,7 @@ def _add_source_with_extracted_text(
         )
     except Exception as database_error:
         try:
-            _cleanup_object_keys(extracted_text_key, raw_object_key)
+            _cleanup_object_keys(extracted_text_key, chunks_key, raw_object_key)
         except Exception as cleanup_error:
             raise cleanup_error from database_error
         raise
@@ -639,6 +833,7 @@ def add_file_sources(
     max_file_size_mb: int | None = None,
     preserve_display_names: bool = False,
     compress: bool = True,
+    selected: bool = True,
 ) -> list[dict[str, Any]]:
     upload_items = list(uploads)
     # Generate source ids server-side before object storage so keys include them.
@@ -674,7 +869,7 @@ def add_file_sources(
                 path=upload.storage_key or str(upload.path),
                 extracted_text=upload.extracted_text,
                 size=upload.size,
-                selected=True,
+                selected=selected,
                 source_id=upload.source_id or source_ids[index],
                 metadata={
                     **(extra_metadata or {}),
@@ -779,6 +974,8 @@ def _sync_lecture_notes_folder(
         relative_text = relative.as_posix()
         if path.name == LECTURE_NOTES_README or any(part.startswith(".") for part in relative.parts):
             continue
+        if is_metadata_sidecar_key(relative_text):
+            continue
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             skipped += 1
             continue
@@ -829,6 +1026,8 @@ def _sync_lecture_notes_folder(
                 # Shared lecture files are prepared offline; skip MuPDF/Pillow
                 # rewrite so new-notebook sync stays a fast copy + extract.
                 compress=False,
+                # Course library is view-only; never Chat-selected context.
+                selected=False,
             )
         except (OSError, ValueError) as exc:
             errors.append(f"{relative_text}: {exc}")
@@ -907,7 +1106,10 @@ def add_url_source(
 def backfill_legacy_sources(store: StudentStore, thread_id: str) -> int:
     created = 0
     files_root = settings.files_dir.resolve()
-    for message in store.get_messages(thread_id):
+    # Notebook opening must not hydrate the entire transcript just to discover
+    # legacy upload descriptors.  StudentStore returns an owner/revision-bound
+    # metadata projection with message bodies deliberately omitted.
+    for message in store.get_message_metadata(thread_id):
         for upload in (message.get("metadata") or {}).get("uploads") or []:
             path_value = str(upload.get("path") or "")
             if not path_value:

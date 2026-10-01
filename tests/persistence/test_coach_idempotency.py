@@ -7,6 +7,8 @@ import json
 import sqlite3
 import threading
 import time
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -134,6 +136,53 @@ def test_completed_key_replays_exact_turn_after_service_restart(tmp_path):
     ]
 
 
+def test_completed_key_replays_full_assessment_fields(tmp_path):
+    """Replay must return the durable marker turn, not a slim message reconstruction."""
+    store = StudentStore(tmp_path / "idempotent-assessment-replay.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    provider = CountingProvider()
+    request = _request(thread_id, key="assessment-replay-key")
+
+    first = _service(store, provider).submit(request)
+    replay = _service(store, provider).submit(request)
+
+    assert replay.assessment.confidence == first.assessment.confidence
+    assert (
+        replay.assessment.contribution_summary
+        == first.assessment.contribution_summary
+    )
+    assert provider.calls == 1
+
+
+def test_waiter_lookup_preserves_exact_turn_between_persist_and_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A waiter sees the atomic marker payload before completion is marked."""
+    store = StudentStore(tmp_path / "idempotent-persist-window.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    provider = CountingProvider()
+    request = _request(thread_id, key="persist-window-key")
+    complete = store.complete_coach_request
+    observed: list[dict[str, Any] | None] = []
+
+    def inspect_before_complete(*args: Any, **kwargs: Any) -> None:
+        """Emulate a waiter lookup after persist and before lease completion."""
+        observed.append(
+            store.lookup_completed_coach_request(
+                thread_id, idempotency_key="persist-window-key"
+            )
+        )
+        return complete(*args, **kwargs)
+
+    monkeypatch.setattr(store, "complete_coach_request", inspect_before_complete)
+    first = _service(store, provider).submit(request)
+    replay = _service(store, provider).submit(request)
+
+    assert observed == [first.model_dump(mode="json")]
+    assert replay == first
+    assert provider.calls == 1
+
+
 def test_reused_key_with_different_payload_fails_closed(tmp_path):
     """A key cannot silently return an answer for a different student message."""
     store = StudentStore(tmp_path / "idempotent-conflict.sqlite3")
@@ -193,7 +242,7 @@ def test_api_maps_an_active_duplicate_to_retryable_conflict(tmp_path, monkeypatc
     store = StudentStore(tmp_path / "idempotent-in-progress-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
 
-    def in_progress(self, request):
+    def in_progress(self, request, **_kwargs):
         raise CoachRequestInProgressError("Retry this request with the same key")
 
     monkeypatch.setattr(CoachApplicationService, "submit", in_progress)
@@ -718,7 +767,11 @@ def test_revise_retry_replays_when_persist_committed_before_marker_complete(tmp_
         idempotency_key=revise_key,
     )
 
-    assert replay == first
+    assert replay.response_text == first.response_text
+    assert replay.pending_transition == first.pending_transition
+    assert replay.auto_advanced_to == first.auto_advanced_to
+    assert replay.assessment.recommendation == first.assessment.recommendation
+    assert replay.assessment.response_mode == first.assessment.response_mode
     assert provider.calls == 1
     assert revise_calls == []
     assert int(

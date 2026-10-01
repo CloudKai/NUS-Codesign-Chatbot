@@ -68,6 +68,9 @@ class ResearchRepository(Protocol):
     ) -> ResearchAccessEvent:
         """Persist an attributable access audit or raise."""
 
+    def resolve_notebook_owner(self, notebook_id: str) -> str | None:
+        """Resolve a notebook's current internal owner for audit targeting."""
+
 
 class CoOccurrencePair(BaseModel):
     """One post-hoc count of two research codes appearing on the same utterance."""
@@ -309,8 +312,14 @@ def _safe_csv_cell(value: Any) -> str:
 class ProfessorResearchService:
     """Coordinate research reads, validation writes, audit, and CSV export."""
 
-    def __init__(self, repository: ResearchRepository) -> None:
+    def __init__(
+        self,
+        repository: ResearchRepository,
+        *,
+        actor_id_projector: Callable[[str], str | None] | None = None,
+    ) -> None:
         self._repository = repository
+        self._actor_id_projector = actor_id_projector
 
     def summary(self) -> ResearchSummaryResponse:
         """Return aggregate observation counts without exposing identities."""
@@ -411,6 +420,7 @@ class ProfessorResearchService:
         actor_user_id: str,
         actor_role: str,
         request_id: str,
+        target_user_id: str | None = None,
         transcript_loader: Callable[[str, str], Any],
         observation_limit: int = 100,
         observation_offset: int = 0,
@@ -424,6 +434,7 @@ class ProfessorResearchService:
             actor_role=actor_role,
             action="research.detail",
             scope="notebook",
+            target_user_id=target_user_id,
             notebook_id=clean_id,
             metadata={
                 "request_id": request_id,
@@ -461,16 +472,39 @@ class ProfessorResearchService:
         if transcript is None:
             return None
         transcript_data = _record_dict(transcript)
+        from .guest_identity import guest_public_id
+
+        is_guest = bool(
+            getattr(anchor, "is_guest", _field(first, "is_guest", default=False))
+        )
+        public_student_id = guest_public_id(student_id) if is_guest else student_id
+        public_student_name = (
+            f"Guest {public_student_id.removeprefix('guest_')[-10:].upper()}"
+            if is_guest
+            else str(
+                _field(
+                    first,
+                    "student_display_name",
+                    "student_name",
+                    "display_name",
+                    default="Student",
+                )
+            )
+        )
         enriched: list[dict[str, Any]] = []
         for observation in observations:
             row = _record_dict(observation)
+            row.pop("student_user_id", None)
+            row.pop("student_display_name", None)
+            row.pop("student_email", None)
+            row.pop("is_guest", None)
             observation_id = str(_field(row, "id", "observation_id", default=""))
             row["reviews"] = [
-                _record_dict(value)
+                self._project_history_actor(value, "reviewer_user_id")
                 for value in self._repository.list_reviews(observation_id)
             ]
             row["adjudications"] = [
-                _record_dict(value)
+                self._project_history_actor(value, "adjudicator_user_id")
                 for value in self._repository.list_adjudications(observation_id)
             ]
             enriched.append(row)
@@ -478,17 +512,9 @@ class ProfessorResearchService:
             notebook_id=clean_id,
             title=str(transcript_data.get("title") or "Research notebook"),
             student={
-                "id": student_id,
-                "name": str(
-                    _field(
-                        first,
-                        "student_display_name",
-                        "student_name",
-                        "display_name",
-                        default="Student",
-                    )
-                ),
-                "email": _field(first, "student_email", "email"),
+                "id": public_student_id,
+                "name": public_student_name,
+                "email": None if is_guest else _field(first, "student_email", "email"),
             },
             transcript=list(transcript_data.get("messages") or []),
             observations=enriched,
@@ -496,6 +522,20 @@ class ProfessorResearchService:
             observation_offset=safe_offset,
             has_more_observations=has_more,
         )
+
+    def _project_history_actor(self, value: Any, actor_field: str) -> dict[str, Any]:
+        """Project nested review attribution without exposing a guest owner ID."""
+        row = _record_dict(value)
+        actor_id = str(row.get(actor_field) or "").strip()
+        if not actor_id or self._actor_id_projector is None:
+            row.pop(actor_field, None)
+            return row
+        projected_id = self._actor_id_projector(actor_id)
+        if projected_id:
+            row[actor_field] = projected_id
+        else:
+            row.pop(actor_field, None)
+        return row
 
     def submit_review(
         self, request: ResearchReviewRequest, *, reviewer_user_id: str
@@ -584,13 +624,20 @@ class ProfessorResearchService:
     def _queue_item(self, observation: ResearchObservation) -> ResearchQueueItem:
         """Project one persistence record onto the minimal queue contract."""
         row = _record_dict(observation)
-        return ResearchQueueItem(
-            observation_id=str(_field(row, "id", "observation_id", default="")),
-            notebook_id=str(row.get("notebook_id") or ""),
-            student_id=str(
-                _field(row, "student_user_id", "student_id", "user_id", default="")
-            ),
-            student_name=str(
+        internal_student_id = str(
+            _field(row, "student_user_id", "student_id", "user_id", default="")
+        )
+        is_guest = bool(getattr(observation, "is_guest", row.get("is_guest", False)))
+        if is_guest:
+            from .guest_identity import guest_public_id
+
+            public_student_id = guest_public_id(internal_student_id)
+            public_student_name = (
+                f"Guest {public_student_id.removeprefix('guest_')[-10:].upper()}"
+            )
+        else:
+            public_student_id = internal_student_id
+            public_student_name = str(
                 _field(
                     row,
                     "student_display_name",
@@ -598,8 +645,14 @@ class ProfessorResearchService:
                     "display_name",
                     default="Student",
                 )
-            ),
-            student_email=_field(row, "student_email", "email"),
+            )
+        return ResearchQueueItem(
+            observation_id=str(_field(row, "id", "observation_id", default="")),
+            notebook_id=str(row.get("notebook_id") or ""),
+            student_id=public_student_id,
+            student_name=public_student_name,
+            student_email=None if is_guest else _field(row, "student_email", "email"),
+            is_guest=is_guest,
             phase=str(_field(row, "phase_id", "phase", "stage", default="Unknown")),
             coding_status=str(
                 _field(row, "coding_status", "status", default="uncoded")
@@ -643,6 +696,7 @@ class ProfessorResearchService:
         actor_role: str,
         action: str,
         scope: str,
+        target_user_id: str | None = None,
         notebook_id: str | None = None,
         observation_id: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -654,6 +708,7 @@ class ProfessorResearchService:
                 action=action,
                 scope=scope,
                 request_id=str((metadata or {}).get("request_id") or "unknown"),
+                target_user_id=target_user_id,
                 notebook_id=notebook_id,
                 observation_id=observation_id,
                 filters={

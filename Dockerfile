@@ -3,10 +3,14 @@
 #   docker buildx build --platform linux/arm64 -t <ECR_IMAGE_URI>:<tag> --push .
 FROM python:3.12-slim
 
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    APP_GIT_SHA="${GIT_SHA}"
 
 WORKDIR /app
 

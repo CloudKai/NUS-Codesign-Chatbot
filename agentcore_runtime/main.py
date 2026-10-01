@@ -5,9 +5,9 @@ Copy this package onto the existing runtime
 READY version. Do not change ``AGENTCORE_RUNTIME_ARN``. Do not create a second
 student-facing runtime.
 
-One runtime hosts the Haiku router, Q&A, Coaching, Incremental Review, and
-Deep Review. The caller sends ``phase`` / ``output_contract`` and
-``review_mode`` for Review. Specialists use ``tools=[]`` plus Strands
+Normal student chat uses one Haiku ``phase=fast_chat`` invoke. Legacy router,
+Q&A, Coaching, Incremental Review, and Deep Review phases remain for
+compatibility. Specialists use ``tools=[]`` plus Strands
 ``structured_output_model`` and a shared ``structured_output_prompt``. The
 harness never parses ``str(AgentResult)`` as JSON. DSQL history is passed
 as Strands ``messages``; AgentCore Memory is not the transcript. Models are
@@ -17,6 +17,7 @@ loaded per role from explicit environment configuration.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Mapping
 from typing import Any, Callable
@@ -25,6 +26,7 @@ try:
     from guardrails import enforce_mantle_guardrail
     from model import (
         MODEL_ROLE_COACHING,
+        MODEL_ROLE_FAST_CHAT,
         MODEL_ROLE_QA,
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
@@ -34,7 +36,14 @@ try:
         get_role_model,
         validate_all_role_configs,
     )
-    from models import CoachTurnOutput, QATurnOutput, ReviewTurnOutput, RouterOutput
+    from models import (
+        CoachTurnOutput,
+        DeepReviewTurnOutput,
+        FastChatTurnOutput,
+        QATurnOutput,
+        ReviewTurnOutput,
+        RouterOutput,
+    )
     from router import (
         router_output_from_agent_result,
         router_output_text,
@@ -42,9 +51,11 @@ try:
         router_user_prompt,
     )
     from specialists.routing import (
+        PHASE_FAST_CHAT,
         PHASE_QA,
         PHASE_REVIEW,
         PHASE_ROUTER,
+        REVIEW_MODE_DEEP,
         REVIEW_MODE_INCREMENTAL,
         invoke_kind,
         payload_phase,
@@ -56,6 +67,8 @@ try:
         conversation_for_invoke,
         coach_turn_from_agent_result,
         elapsed_ms_since,
+        event_loop_cycle_count_from_agent_result,
+        fast_chat_turn_from_agent_result,
         harness_error_payload,
         invoke_failure_category,
         log_coach_turn_outcome,
@@ -64,13 +77,21 @@ try:
         payload_stage,
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
-        specialist_system_prompt,
+        agent_system_prompt,
+        first_cycle_tool_choice_decision,
+        model_retry_policy_for_role,
+        record_first_cycle_apply,
+        runtime_model_provenance_fields,
+        sanitize_stop_reason,
+        stamp_structured_output_telemetry,
+        structured_output_limits_for_role,
         structured_wire_payload,
     )
 except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
     from agentcore_runtime.guardrails import enforce_mantle_guardrail
     from agentcore_runtime.model import (
         MODEL_ROLE_COACHING,
+        MODEL_ROLE_FAST_CHAT,
         MODEL_ROLE_QA,
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
@@ -82,6 +103,8 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
     )
     from agentcore_runtime.models import (
         CoachTurnOutput,
+        DeepReviewTurnOutput,
+        FastChatTurnOutput,
         QATurnOutput,
         ReviewTurnOutput,
         RouterOutput,
@@ -93,9 +116,11 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         router_user_prompt,
     )
     from agentcore_runtime.specialists.routing import (
+        PHASE_FAST_CHAT,
         PHASE_QA,
         PHASE_REVIEW,
         PHASE_ROUTER,
+        REVIEW_MODE_DEEP,
         REVIEW_MODE_INCREMENTAL,
         invoke_kind,
         payload_phase,
@@ -107,6 +132,8 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         conversation_for_invoke,
         coach_turn_from_agent_result,
         elapsed_ms_since,
+        event_loop_cycle_count_from_agent_result,
+        fast_chat_turn_from_agent_result,
         harness_error_payload,
         invoke_failure_category,
         log_coach_turn_outcome,
@@ -115,7 +142,14 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         payload_stage,
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
-        specialist_system_prompt,
+        agent_system_prompt,
+        first_cycle_tool_choice_decision,
+        model_retry_policy_for_role,
+        record_first_cycle_apply,
+        runtime_model_provenance_fields,
+        sanitize_stop_reason,
+        stamp_structured_output_telemetry,
+        structured_output_limits_for_role,
         structured_wire_payload,
     )
 
@@ -129,6 +163,96 @@ except ImportError:  # pragma: no cover - companion tests never import this modu
 app = BedrockAgentCoreApp() if BedrockAgentCoreApp is not None else None
 
 _ROLE_CONFIGS_READY = False
+_REPLY_TEXT_START = re.compile(r'"response_text"\s*:\s*"(?:[^"\\]|\\.)')
+
+
+def _first_text_timing_callback(started: float) -> tuple[Callable[..., None], dict[str, int]]:
+    """Measure first model content and first reply character without logging text.
+
+    Strands emits structured output as tool-input JSON, so its first content
+    event is not necessarily the first character of the student-facing reply.
+    The bounded buffer is used only to locate the ``response_text`` property.
+    """
+    timings: dict[str, int] = {}
+    tool_prefix = ""
+    tool_id = ""
+
+    def capture(**event: Any) -> None:
+        nonlocal tool_prefix, tool_id
+        delta = event.get("delta")
+        tool = delta.get("toolUse") if isinstance(delta, Mapping) else None
+        fragment = tool.get("input") if isinstance(tool, Mapping) else None
+        prose = event.get("data")
+        if not isinstance(fragment, str) or not fragment:
+            fragment = prose if isinstance(prose, str) else ""
+        if not fragment:
+            return
+        elapsed = max(0, int((time.monotonic() - started) * 1000))
+        timings.setdefault("model_first_content_ms", elapsed)
+        if isinstance(tool, Mapping) and "model_first_reply_text_ms" not in timings:
+            current_tool = event.get("current_tool_use")
+            current_id = (
+                str(current_tool.get("toolUseId") or "")
+                if isinstance(current_tool, Mapping)
+                else ""
+            )
+            if current_id and current_id != tool_id:
+                tool_prefix = ""
+                tool_id = current_id
+            tool_prefix = (tool_prefix + fragment)[:4096]
+            if _REPLY_TEXT_START.search(tool_prefix):
+                timings["model_first_reply_text_ms"] = elapsed
+
+    return capture, timings
+
+
+def _with_cache_telemetry(
+    payload: dict[str, Any],
+    result: Any,
+    system_prompt: str | list[dict[str, Any]],
+    model_config: Any = None,
+    first_cycle_stop_reason: str = "",
+    first_cycle_tool_choice_installed: bool | None = None,
+    first_cycle_tool_choice_applied: bool | None = None,
+    first_cycle_tool_choice_decision: str | None = None,
+    first_text_timings: Mapping[str, int] | None = None,
+) -> dict[str, Any]:
+    """Attach numeric cache, cycle, and safe model provenance without student text.
+
+    ``prompt_cache_enabled`` is true only when this invoke actually sent a
+    SystemContentBlock cachePoint. Cache token counts and event-loop cycle
+    count are copied only when AgentResult metrics expose them. Repair count
+    is not stamped: 1.52.0 has no such field. Loaded-model identifiers come
+    from the already-resolved runtime config and omit secrets.
+    """
+    enabled = isinstance(system_prompt, list) and any(
+        isinstance(block, Mapping) and "cachePoint" in block for block in system_prompt
+    )
+    payload["prompt_cache_enabled"] = bool(enabled)
+    try:
+        from prompt_cache import cache_usage_from_agent_result
+    except ImportError:  # pragma: no cover - companion package import
+        from agentcore_runtime.prompt_cache import cache_usage_from_agent_result
+    payload.update(cache_usage_from_agent_result(result))
+    stamp_structured_output_telemetry(
+        payload,
+        cycle_count=event_loop_cycle_count_from_agent_result(result),
+        first_cycle_stop_reason=first_cycle_stop_reason,
+        first_cycle_tool_choice_installed=first_cycle_tool_choice_installed,
+        first_cycle_tool_choice_applied=first_cycle_tool_choice_applied,
+        first_cycle_tool_choice_decision=first_cycle_tool_choice_decision,
+    )
+    payload.update(runtime_model_provenance_fields(model_config))
+    if first_text_timings:
+        payload.update(first_text_timings)
+    if enabled:
+        logger.info(
+            "prompt_cache_enabled=true cache_read_input_tokens=%s "
+            "cache_write_input_tokens=%s",
+            payload.get("cache_read_input_tokens", "absent"),
+            payload.get("cache_write_input_tokens", "absent"),
+        )
+    return payload
 
 
 def _ensure_role_configs() -> None:
@@ -142,6 +266,13 @@ def _ensure_role_configs() -> None:
 
 def _role_for_payload(payload: Mapping[str, Any] | None) -> str:
     """Map a specialist payload onto a model role."""
+    raw_phase = ""
+    contract = ""
+    if isinstance(payload, Mapping):
+        raw_phase = str(payload.get("phase") or "").strip().lower()
+        contract = str(payload.get("output_contract") or "").strip().lower()
+    if raw_phase == PHASE_FAST_CHAT or contract == "fast_chat_turn":
+        return MODEL_ROLE_FAST_CHAT
     phase = payload_phase(payload)
     if phase == PHASE_QA:
         return MODEL_ROLE_QA
@@ -152,24 +283,59 @@ def _role_for_payload(payload: Mapping[str, Any] | None) -> str:
     return MODEL_ROLE_COACHING
 
 
-def _output_model_for(phase: str, output_contract: str) -> type[Any]:
+def _output_model_for(
+    phase: str, output_contract: str, review_mode: str = ""
+) -> type[Any]:
     """Return the Pydantic structured-output class for one specialist invoke."""
     contract = str(output_contract or "").strip().lower()
-    if contract == "qa_turn" or phase == PHASE_QA:
+    cleaned_phase = str(phase or "").strip().lower()
+    if contract == "fast_chat_turn" or cleaned_phase == PHASE_FAST_CHAT:
+        return FastChatTurnOutput
+    if contract == "qa_turn" or cleaned_phase == PHASE_QA:
         return QATurnOutput
-    if contract == "review_turn" or phase == PHASE_REVIEW:
+    if contract == "review_turn" or cleaned_phase == PHASE_REVIEW:
+        if str(review_mode or "").strip().lower() == REVIEW_MODE_DEEP:
+            return DeepReviewTurnOutput
         return ReviewTurnOutput
     return CoachTurnOutput
 
 
-def _parse_result(phase: str, output_contract: str, result: Any) -> Any:
+def _parse_result(
+    phase: str, output_contract: str, result: Any, review_mode: str = ""
+) -> Any:
     """Validate AgentResult against the specialist contract."""
-    model = _output_model_for(phase, output_contract)
+    model = _output_model_for(phase, output_contract, review_mode)
+    if model is FastChatTurnOutput:
+        return fast_chat_turn_from_agent_result(result)
     if model is QATurnOutput:
         return qa_turn_from_agent_result(result)
-    if model is ReviewTurnOutput:
+    if model is ReviewTurnOutput or model is DeepReviewTurnOutput:
         return review_turn_from_agent_result(result)
     return coach_turn_from_agent_result(result)
+
+
+def _retry_strategy_for_role(role: str) -> Any:
+    """Return a new Strands ``ModelRetryStrategy`` for one invoke.
+
+    The SDK object is stateful. Never reuse it across Agent instances.
+
+    Args:
+        role: Runtime model role id.
+
+    Returns:
+        A ``ModelRetryStrategy`` constructed from
+        :func:`model_retry_policy_for_role`.
+    """
+    policy = model_retry_policy_for_role(role)
+    try:
+        from strands import ModelRetryStrategy
+    except ImportError:  # pragma: no cover - 1.52.0 fallback path
+        from strands.event_loop._retry import ModelRetryStrategy
+    return ModelRetryStrategy(
+        max_attempts=policy.max_attempts,
+        initial_delay=policy.initial_delay,
+        max_delay=policy.max_delay,
+    )
 
 
 def _log_role(
@@ -180,6 +346,9 @@ def _log_role(
     failure_category: str = "",
 ) -> None:
     """Emit safe per-role provenance without reading student content."""
+    limits = structured_output_limits_for_role(role)
+    retry = model_retry_policy_for_role(role)
+    event_loop_limit_turns = None if limits is None else int(limits.get("turns") or 0) or None
     try:
         config = get_role_config(role)
     except RuntimeModelError:
@@ -191,6 +360,8 @@ def _log_role(
             success=success,
             failure_category=failure_category or "unavailable",
             guardrail_configured=False,
+            event_loop_limit_turns=event_loop_limit_turns,
+            model_retry_max_attempts=retry.max_attempts,
         )
         return
     log_role_invocation(
@@ -201,7 +372,127 @@ def _log_role(
         success=success,
         failure_category=failure_category,
         guardrail_configured=bool(config.guardrail_id and config.guardrail_version),
+        event_loop_limit_turns=event_loop_limit_turns,
+        model_retry_max_attempts=retry.max_attempts,
     )
+
+
+def _install_first_cycle_structured_output(
+    agent: Any,
+    *,
+    role: str = "",
+    cycle_state: dict[str, Any] | None = None,
+) -> bool:
+    """Force Fast Chat cycle-1 tool use via Strands 1.52.0 InvokeModel middleware.
+
+    First-party 1.52.0 plugins register on ``InvokeModelStage.Input``. This
+    helper sets ``tool_choice={"any": {}}`` before the first Converse call
+    when the role is ``fast_chat``, Strands has not already entered forced
+    mode, and exactly one tool spec is present. Deep Review is never
+    modified. ``turns=2`` recovery remains for schema-invalid output.
+    Middleware failure is fail-open: invoke still proceeds.
+
+    ``installed`` means the callback was registered. ``applied`` (on
+    ``cycle_state``) means the first InvokeModel cycle actually changed
+    an unset ``tool_choice`` to ``{"any": {}}``.
+
+    Args:
+        agent: A Strands ``Agent`` instance.
+        role: Runtime model role. Only ``fast_chat`` registers middleware.
+        cycle_state: Optional Fast Chat sink for applied/decision telemetry.
+
+    Returns:
+        True when middleware was registered. False when the role is not
+        Fast Chat or Strands middleware is unavailable. Invoke still
+        proceeds with voluntary tool use and bounded recovery.
+    """
+    if str(role or "").strip().lower() != MODEL_ROLE_FAST_CHAT:
+        return False
+    registry = getattr(agent, "_middleware_registry", None)
+    adder = getattr(registry, "add_middleware", None)
+    if not callable(adder):
+        logger.info("first_cycle_tool_choice_installed=false reason=middleware_unavailable")
+        record_first_cycle_apply(
+            cycle_state, category="middleware_unavailable", applied=False
+        )
+        return False
+    try:
+        from strands._middleware.stages import InvokeModelStage
+    except ImportError:
+        logger.info("first_cycle_tool_choice_installed=false reason=middleware_unavailable")
+        record_first_cycle_apply(
+            cycle_state, category="middleware_unavailable", applied=False
+        )
+        return False
+
+    def _apply_tool_choice(context: Any) -> Any:
+        try:
+            choice, category = first_cycle_tool_choice_decision(
+                getattr(context, "tool_choice", None),
+                getattr(context, "tool_specs", None),
+                role=MODEL_ROLE_FAST_CHAT,
+            )
+            record_first_cycle_apply(
+                cycle_state,
+                category=category,
+                applied=category == "applied",
+            )
+            if category == "unexpected_tool_count":
+                logger.info(
+                    "first_cycle_tool_choice_skipped reason=unexpected_tool_count"
+                )
+            elif category == "applied":
+                logger.info("first_cycle_tool_choice_applied=true")
+            context.tool_choice = choice
+        except Exception:
+            record_first_cycle_apply(
+                cycle_state, category="apply_failed", applied=False
+            )
+            logger.info("first_cycle_tool_choice_apply_failed")
+        return context
+
+    try:
+        adder(InvokeModelStage.Input, _apply_tool_choice)
+    except Exception:
+        logger.info("first_cycle_tool_choice_installed=false reason=middleware_unavailable")
+        record_first_cycle_apply(
+            cycle_state, category="middleware_unavailable", applied=False
+        )
+        return False
+    logger.info("first_cycle_tool_choice_installed=true")
+    return True
+
+
+def _attach_first_cycle_stop_reason_hook(agent: Any, sink: list[str]) -> bool:
+    """Record the first model stop_reason without student text.
+
+    Args:
+        agent: A Strands ``Agent`` instance.
+        sink: Mutable list that receives at most one allow-listed reason.
+
+    Returns:
+        True when the AfterModelCall hook was registered.
+    """
+    add_hook = getattr(agent, "add_hook", None)
+    if not callable(add_hook):
+        return False
+    try:
+        from strands.hooks import AfterModelCallEvent
+    except ImportError:
+        return False
+
+    def _capture(event: Any) -> None:
+        if sink:
+            return
+        stop = getattr(event, "stop_response", None)
+        reason = sanitize_stop_reason(
+            getattr(stop, "stop_reason", None) if stop is not None else None
+        )
+        if reason:
+            sink.append(reason)
+
+    add_hook(_capture, AfterModelCallEvent)
+    return True
 
 
 async def _structured_role_invoke(
@@ -214,11 +505,20 @@ async def _structured_role_invoke(
     parse: Callable[[Any], Any],
     output_text: Callable[[Any], str],
     include_history: bool,
+    prior_messages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one tools-free structured invoke for a named model role.
 
     Every Bedrock role passes ``STRUCTURED_OUTPUT_REPAIR_PROMPT`` so Strands'
     structured-output recovery turn is not classified as PROMPT_ATTACK.
+    Fast Chat / router / legacy Haiku roles pass ``limits={"turns": 2}``
+    (verified 1.52.0: initial generation plus at most one recovery). Deep
+    Review passes ``limits={"turns": 3}``. Fast Chat cycle 1 also sets
+    ``tool_choice={"any": {}}`` via ``InvokeModelStage.Input`` when exactly
+    one structured-output tool is present. Deep Review is not modified.
+    Recovery remains if that call still returns ``end_turn`` or invalid schema.
+    Model retries are a separate ``ModelRetryStrategy`` on the Agent, not
+    the event-loop cap.
     """
     from strands import Agent
 
@@ -296,37 +596,70 @@ async def _structured_role_invoke(
         )
         logger.exception("runtime_model_load_failed")
         return harness_error_payload("unavailable")
+    fast_chat = str(role).strip().lower() == MODEL_ROLE_FAST_CHAT
+    first_text_callback, first_text_timings = _first_text_timing_callback(started)
     agent_kwargs: dict[str, Any] = {
         "model": model,
         "system_prompt": system_prompt,
         "tools": [],
-        "callback_handler": None,
+        "callback_handler": first_text_callback if fast_chat else None,
+        "retry_strategy": _retry_strategy_for_role(role),
     }
     if include_history:
-        prior, _current = conversation_for_invoke(payload)
-        if prior:
-            agent_kwargs["messages"] = prior
+        if prior_messages:
+            agent_kwargs["messages"] = prior_messages
     agent = Agent(**agent_kwargs)
+    first_cycle_stop: list[str] = []
+    cycle_state: dict[str, Any] = {}
+    first_cycle_installed = _install_first_cycle_structured_output(
+        agent, role=role, cycle_state=cycle_state if fast_chat else None
+    )
+    if first_cycle_installed:
+        try:
+            _attach_first_cycle_stop_reason_hook(agent, first_cycle_stop)
+        except Exception:
+            logger.info("first_cycle_stop_reason_hook_unavailable")
     result = None
     try:
         result = await agent.invoke_async(
             user_prompt,
             structured_output_model=output_model,
             structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT,
+            limits=structured_output_limits_for_role(role),
         )
         output = parse(result)
         enforce_mantle_guardrail(
             output_text(output), config=model_config, source="OUTPUT"
         )
+        first_stop = first_cycle_stop[0] if first_cycle_stop else ""
         _log_role(role=role, started=started, success=True)
         log_coach_turn_outcome(
             ok=True,
             stage=stage,
             result=result,
             elapsed_ms=elapsed_ms_since(started),
+            first_cycle_stop_reason=first_stop,
         )
-        return structured_wire_payload(output)
+        payload_out = structured_wire_payload(output)
+        return _with_cache_telemetry(
+            payload_out,
+            result,
+            system_prompt,
+            model_config,
+            first_cycle_stop_reason=first_stop,
+            first_cycle_tool_choice_installed=first_cycle_installed
+            if fast_chat
+            else None,
+            first_cycle_tool_choice_applied=(
+                cycle_state.get("applied") if fast_chat else None
+            ),
+            first_cycle_tool_choice_decision=(
+                cycle_state.get("decision") if fast_chat else None
+            ),
+            first_text_timings=first_text_timings if fast_chat else None,
+        )
     except CoachTurnExtractionError as error:
+        first_stop = first_cycle_stop[0] if first_cycle_stop else ""
         _log_role(
             role=role,
             started=started,
@@ -339,9 +672,24 @@ async def _structured_role_invoke(
             stage=stage,
             result=result,
             elapsed_ms=elapsed_ms_since(started),
+            first_cycle_stop_reason=first_stop,
         )
-        return harness_error_payload(error.category)
+        error_payload = harness_error_payload(error.category)
+        if fast_chat:
+            error_payload["first_cycle_tool_choice_installed"] = (
+                first_cycle_installed
+            )
+            if "applied" in cycle_state:
+                error_payload["first_cycle_tool_choice_applied"] = bool(
+                    cycle_state.get("applied")
+                )
+            if cycle_state.get("decision"):
+                error_payload["first_cycle_tool_choice_decision"] = cycle_state[
+                    "decision"
+                ]
+        return error_payload
     except Exception as error:
+        first_stop = first_cycle_stop[0] if first_cycle_stop else ""
         category = invoke_failure_category(error)
         _log_role(
             role=role,
@@ -355,9 +703,23 @@ async def _structured_role_invoke(
             stage=stage,
             result=result,
             elapsed_ms=elapsed_ms_since(started),
+            first_cycle_stop_reason=first_stop,
         )
         logger.exception("specialist_invoke_unhandled")
-        return harness_error_payload(category)
+        error_payload = harness_error_payload(category)
+        if fast_chat:
+            error_payload["first_cycle_tool_choice_installed"] = (
+                first_cycle_installed
+            )
+            if "applied" in cycle_state:
+                error_payload["first_cycle_tool_choice_applied"] = bool(
+                    cycle_state.get("applied")
+                )
+            if cycle_state.get("decision"):
+                error_payload["first_cycle_tool_choice_decision"] = cycle_state[
+                    "decision"
+                ]
+        return error_payload
 
 
 async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -371,22 +733,52 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
         A validated specialist object, or a category-only error envelope.
         Never returns an empty string, fenced markdown, or ``str(AgentResult)``.
     """
+    try:
+        prior, prompt = conversation_for_invoke(payload)
+    except CoachTurnExtractionError as error:
+        return harness_error_payload(error.category)
     phase = payload_phase(payload)
     contract = ""
     if isinstance(payload, Mapping):
         contract = str(payload.get("output_contract") or "").strip().lower()
-    system_prompt = specialist_system_prompt(payload)
-    prior, prompt = conversation_for_invoke(payload)
-    del prior
+    review_mode = ""
+    if phase == PHASE_REVIEW or contract == "review_turn":
+        review_mode = payload_review_mode(payload)
+    system_prompt = agent_system_prompt(payload)
     return await _structured_role_invoke(
         role=_role_for_payload(payload),
         payload=payload,
         system_prompt=system_prompt,
         user_prompt=prompt,
-        output_model=_output_model_for(phase, contract),
-        parse=lambda result: _parse_result(phase, contract, result),
+        output_model=_output_model_for(phase, contract, review_mode),
+        parse=lambda result: _parse_result(phase, contract, result, review_mode),
         output_text=lambda output: str(getattr(output, "response_text", "") or ""),
         include_history=True,
+        prior_messages=prior,
+    )
+
+
+async def fast_chat_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Invoke one Haiku fast-chat generation for Coaching or Q&A.
+
+    The runtime must not call another AgentCore phase internally. Application
+    code issues one ``invoke_agent``. Whether Strands performs one event-loop
+    cycle is a live-trace concern, not a unit-test invariant.
+    """
+    try:
+        prior, prompt = conversation_for_invoke(payload)
+    except CoachTurnExtractionError as error:
+        return harness_error_payload(error.category)
+    return await _structured_role_invoke(
+        role=MODEL_ROLE_FAST_CHAT,
+        payload=payload,
+        system_prompt=agent_system_prompt(payload),
+        user_prompt=prompt,
+        output_model=FastChatTurnOutput,
+        parse=fast_chat_turn_from_agent_result,
+        output_text=lambda output: str(getattr(output, "response_text", "") or ""),
+        include_history=True,
+        prior_messages=prior,
     )
 
 
@@ -426,6 +818,8 @@ if app is not None:
     async def invoke(payload: Any, context: Any) -> Any:
         """Route companion structured specialists to JSON return; never ``yield``."""
         kind = invoke_kind(payload if isinstance(payload, dict) else None)
+        if kind == PHASE_FAST_CHAT:
+            return await fast_chat_invoke(payload)
         if kind == PHASE_ROUTER:
             return await router_invoke(payload)
         if kind == "specialist":

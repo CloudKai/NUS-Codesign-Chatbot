@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
@@ -12,9 +14,14 @@ from backend.auth_oidc import CognitoIdentity, CognitoOIDCClient, CognitoOIDCErr
 from backend.cognito_config import CognitoAuthConfig
 from backend.persistence.factory import reset_file_storage_cache
 from backend.professor_analytics.repository import ProfessorAnalyticsRepository
+from backend.professor_analytics.guest_identity import guest_public_id
 from backend.professor_analytics.service import ProfessorAnalyticsService
 from backend.settings import settings
 from backend.student_store import StudentStore
+from backend.workspace_service import WorkspaceService
+from backend.research.models import ResearchEvidenceSpan, ResearchObservationCreate
+from backend.source_library import add_text_source
+from backend.specialists.review_orchestration import JOURNEY_STAGE_REVIEWS_KEY
 
 
 class FakeOIDC(CognitoOIDCClient):
@@ -73,6 +80,27 @@ def _seed_student_activity(store: StudentStore, *, sub: str, now: datetime, mess
     return str(profile["id"])
 
 
+_FORBIDDEN_WORKSPACE_KEYS = frozenset({
+    "extractedText",
+    "extracted_text",
+    "path",
+    "object_key",
+    "local_path",
+    "extracted_text_key",
+})
+
+
+def _assert_no_forbidden_workspace_fields(value: object, *, path: str = "workspace") -> None:
+    """Recursively reject data-minimization leaks in professor workspace JSON."""
+    if isinstance(value, dict):
+        for key, child in value.items():
+            assert key not in _FORBIDDEN_WORKSPACE_KEYS, f"{path}.{key}"
+            _assert_no_forbidden_workspace_fields(child, path=f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _assert_no_forbidden_workspace_fields(child, path=f"{path}[{index}]")
+
+
 def _setup(tmp_path):
     db = tmp_path / "analytics.sqlite3"
     bootstrap = StudentStore(db, identifier="local-student")
@@ -94,6 +122,212 @@ def test_professor_routes_enforce_authentication_and_persisted_role(tmp_path, mo
     response = client.get("/api/v1/professor/overview", cookies={settings.cognito_id_token_cookie_name: professor_token})
     assert response.status_code == 200
     assert response.json()["students"] == 1
+
+
+def test_guest_students_use_stable_public_ids_and_resolve_drilldown(tmp_path, monkeypatch):
+    """Lecturer projections hide owner IDs while preserving scoped drill-down."""
+    store = StudentStore(tmp_path / "guest-analytics.sqlite3", identifier="local-student")
+    lecturer = _seed_user(store, "guest-analytics-prof", "lecturer")
+    owner_ids: list[str] = []
+    owner_identifiers: list[str] = []
+    guest_secrets: list[str] = []
+    notebook_ids: list[str] = []
+    source_ids: list[str] = []
+    for ordinal in range(2):
+        owner_id, secret = store.create_guest_session()
+        owner_ids.append(owner_id)
+        guest_secrets.append(secret)
+        profile = store.get_user_by_id(owner_id) or {}
+        owner_identifiers.append(str(profile["identifier"]))
+        guest_store = StudentStore(
+            Path(store.path), identifier=str(profile["identifier"])
+        )
+        notebook_id = guest_store.create_thread(
+            name=f"Guest notebook {ordinal}",
+            model_id="mock",
+            support_mode="critical-thinking",
+        )
+        guest_store.add_message(notebook_id, "user", "A private guest idea")
+        guest_store.add_message(notebook_id, "assistant", "A private coach response")
+        notebook_ids.append(notebook_id)
+        source_ids.append(
+            WorkspaceService(guest_store).upload_sources(
+                notebook_id,
+                [(f"guest-{ordinal}.txt", b"Private source body", "text/plain")],
+            )[0]["id"]
+        )
+
+    oidc = FakeOIDC(store)
+    lecturer_cookie = oidc.add("guest-analytics-prof")
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(store, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: lecturer_cookie}
+    roster_response = client.get("/api/v1/professor/students", cookies=cookies)
+    assert roster_response.status_code == 200
+    roster = roster_response.json()["students"]
+    public_ids = {row["id"] for row in roster if row["name"].startswith("Guest ")}
+    expected_ids = {guest_public_id(owner_id) for owner_id in owner_ids}
+    assert public_ids == expected_ids
+    assert len(public_ids) == 2
+    serialized = roster_response.text
+    overview_response = client.get("/api/v1/professor/overview", cookies=cookies)
+    assert overview_response.status_code == 200
+    for owner_id, identifier, secret in zip(owner_ids, owner_identifiers, guest_secrets):
+        assert owner_id not in serialized
+        assert identifier not in serialized
+        assert secret not in serialized
+        assert owner_id not in overview_response.text
+        assert identifier not in overview_response.text
+        assert secret not in overview_response.text
+    assert "@" not in " ".join(row["email"] or "" for row in roster if row["id"] in public_ids)
+
+    public_id = guest_public_id(owner_ids[0])
+    detail_response = client.get(
+        f"/api/v1/professor/students/{public_id}", cookies=cookies
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["student"]["id"] == public_id
+    assert detail["student"]["name"].startswith("Guest ")
+    assert detail["student"]["email"] is None
+    assert owner_ids[0] not in detail_response.text
+    assert owner_identifiers[0] not in detail_response.text
+    assert guest_secrets[0] not in detail_response.text
+
+    transcript = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[0]}",
+        cookies=cookies,
+    )
+    assert transcript.status_code == 200
+    assert "A private guest idea" in transcript.text
+    assert owner_ids[0] not in transcript.text
+    assert owner_identifiers[0] not in transcript.text
+    assert guest_secrets[0] not in transcript.text
+    journey = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[0]}/journey",
+        cookies=cookies,
+    )
+    assert journey.status_code == 200
+    source_response = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[0]}/sources/{source_ids[0]}",
+        cookies=cookies,
+    )
+    assert source_response.status_code == 200
+    cross_guest_source = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[1]}/sources/{source_ids[0]}",
+        cookies=cookies,
+    )
+    assert cross_guest_source.status_code == 404
+    cross_guest = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[1]}",
+        cookies=cookies,
+    )
+    assert cross_guest.status_code == 404
+    raw_owner_route = client.get(
+        f"/api/v1/professor/students/{owner_ids[0]}", cookies=cookies
+    )
+    assert raw_owner_route.status_code == 404
+    guest_cookie = {settings.guest_session_cookie_name: guest_secrets[0]}
+    assert client.get("/api/v1/professor/overview", cookies=guest_cookie).status_code == 401
+
+    signed_in_id = _seed_student_activity(
+        store, sub="guest-analytics-account", now=datetime.now(timezone.utc), messages=2
+    )
+    signed_roster = client.get("/api/v1/professor/students", cookies=cookies).json()["students"]
+    signed_item = next(row for row in signed_roster if row["id"] == signed_in_id)
+    assert signed_item["name"] == "Guest-Analytics-Account"
+    assert signed_item["email"] == "guest-analytics-account@example.edu"
+
+    recreated_store = StudentStore(Path(store.path), identifier="local-student")
+    assert owner_ids[0] == ProfessorAnalyticsRepository(
+        recreated_store
+    ).resolve_public_student_id(public_id)
+    assert lecturer["id"] not in roster_response.text
+
+
+def test_guest_research_queue_detail_and_csv_are_pseudonymous(tmp_path, monkeypatch):
+    """Research projections redact guest owner IDs and retain evidence records."""
+    from backend.persistence.guest_sessions import guest_secret_digest
+
+    store = StudentStore(tmp_path / "guest-research.sqlite3", identifier="local-student")
+    _seed_user(store, "guest-research-prof", "lecturer")
+    owner_id, secret = store.create_guest_session()
+    guest_profile = store.get_user_by_id(owner_id) or {}
+    guest_store = StudentStore(Path(store.path), identifier=str(guest_profile["identifier"]))
+    notebook_id = guest_store.create_thread(
+        name="Guest research notebook", model_id="mock", support_mode="critical-thinking"
+    )
+    thread = guest_store.get_thread(notebook_id) or {}
+    stage = str((thread.get("metadata") or {}).get("thinking_stage"))
+    evidence = ResearchObservationCreate(
+        coding_status="coded",
+        coding_version="research-v1",
+        prompt_version="prompt-v1",
+        provider="mock",
+        model_id="mock",
+        coaching_profile="quick",
+        phase_id=stage,
+        dominant_clear="explicit",
+        evidence=[ResearchEvidenceSpan(start_offset=0, end_offset=6, rationale="Claim evidence", confidence=0.8)],
+    )
+    guest_store.persist_coach_turn(
+        notebook_id,
+        expected_stage=stage,
+        expected_conversation_revision=0,
+        user_content="A claim with evidence.",
+        user_metadata={"thinking_stage": stage},
+        assistant_content="A coaching response.",
+        assistant_metadata={},
+        summary_metadata={},
+        research_observation=evidence,
+    )
+
+    oidc = FakeOIDC(store)
+    staff_cookie = oidc.add("guest-research-prof")
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(store, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: staff_cookie}
+    public_id = guest_public_id(owner_id)
+    queue_response = client.get("/api/v1/professor/research/queue", cookies=cookies)
+    assert queue_response.status_code == 200
+    queue_item = queue_response.json()["items"][0]
+    assert queue_item["student_id"] == public_id
+    assert queue_item["student_name"].startswith("Guest ")
+    assert queue_item["student_email"] is None
+    assert owner_id not in queue_response.text
+    assert secret not in queue_response.text
+    assert guest_secret_digest(secret) not in queue_response.text
+
+    detail_response = client.get(
+        f"/api/v1/professor/research/notebooks/{notebook_id}", cookies=cookies
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["student"]["id"] == public_id
+    assert detail["student"]["email"] is None
+    assert "student_user_id" not in detail_response.text
+    assert owner_id not in detail_response.text
+    assert secret not in detail_response.text
+    assert detail["observations"][0]["id"]
+
+    csv_response = client.get(
+        "/api/v1/professor/research/export.csv", cookies=cookies
+    )
+    assert csv_response.status_code == 200
+    assert public_id in csv_response.text
+    assert owner_id not in csv_response.text
+    assert secret not in csv_response.text
+    assert guest_secret_digest(secret) not in csv_response.text
+    assert guest_profile["identifier"] not in queue_response.text
+    assert guest_profile["identifier"] not in detail_response.text
+    assert guest_profile["identifier"] not in csv_response.text
+    with store._connect() as connection:
+        audit_target = connection.execute(
+            "SELECT target_user_id FROM research_access_events "
+            "WHERE notebook_id=? AND action='research.detail' ORDER BY created_at DESC LIMIT 1",
+            (notebook_id,),
+        ).fetchone()
+    assert audit_target is not None and audit_target["target_user_id"] == owner_id
 
 
 def test_analytics_uses_active_branch_assessments_and_session_boundaries(tmp_path):
@@ -240,3 +474,981 @@ def test_professor_endpoints_are_read_only(tmp_path, monkeypatch):
         }
     assert after == before
     reset_file_storage_cache()
+
+
+def test_identifiable_professor_reads_audit_before_returning_data(tmp_path, monkeypatch):
+    """Each ordinary identifiable analytics read writes an attributable event."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    headers = {"x-request-id": "analytics-read-1"}
+
+    requests = (
+        ("/api/v1/professor/overview", "professor.overview"),
+        ("/api/v1/professor/students?search=student", "professor.students"),
+        (f"/api/v1/professor/students/{student_id}", "professor.student_detail"),
+        (
+            f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}",
+            "professor.transcript",
+        ),
+        ("/api/v1/professor/engagement", "professor.engagement"),
+    )
+    for path, _action in requests:
+        assert client.get(path, cookies=cookies, headers=headers).status_code == 200
+
+    with bootstrap._connect() as connection:  # noqa: SLF001 - audit assertion
+        rows = connection.execute(
+            "SELECT action, actor_user_id, request_id, target_user_id, notebook_id, filters_text "
+            "FROM research_access_events ORDER BY created_at, id"
+        ).fetchall()
+    assert [row["action"] for row in rows] == [action for _, action in requests]
+    assert all(row["actor_user_id"] for row in rows)
+    assert all(row["request_id"] == "analytics-read-1" for row in rows)
+    assert rows[1]["filters_text"] and "student" in rows[1]["filters_text"]
+    assert rows[2]["target_user_id"] == student_id
+    assert rows[3]["target_user_id"] == student_id
+    assert rows[3]["notebook_id"] == notebook_id
+
+
+def test_professor_read_fails_closed_when_access_audit_fails(tmp_path, monkeypatch):
+    """An audit persistence error prevents the identifiable query."""
+    bootstrap, _professor, _student_id, oidc = _setup(tmp_path)
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+
+    def fail_audit(_value):
+        raise RuntimeError("audit database unavailable")
+
+    monkeypatch.setattr(StudentStore, "record_research_access_event", fail_audit)
+    monkeypatch.setattr(
+        ProfessorAnalyticsRepository,
+        "load_class_rows",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("analytics read occurred before audit")
+        ),
+    )
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    response = client.get(
+        "/api/v1/professor/overview",
+        cookies={settings.cognito_id_token_cookie_name: oidc.add("prof")},
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Professor analytics is temporarily unavailable"
+    }
+
+
+def test_selected_student_detail_uses_scoped_rows_and_compact_benchmark(tmp_path):
+    """Detail does not rebuild detailed notebook rows for the whole class."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+
+    class TrackingRepository(ProfessorAnalyticsRepository):
+        calls: list[tuple[str, dict]] = []
+
+        def load_student_roster_row(self, selected_id):
+            self.calls.append(("profile", {"student_id": selected_id}))
+            return super().load_student_roster_row(selected_id)
+
+        def load_student_notebook_summaries(self, selected_id):
+            self.calls.append(("notebooks", {"student_id": selected_id}))
+            return super().load_student_notebook_summaries(selected_id)
+
+        def load_student_activity_rows(self, selected_id):
+            self.calls.append(("activity", {"student_id": selected_id}))
+            return super().load_student_activity_rows(selected_id)
+
+        def load_class_benchmark_rows(self):
+            self.calls.append(("benchmark", {}))
+            return super().load_class_benchmark_rows()
+
+    repository = TrackingRepository(bootstrap)
+    detail = ProfessorAnalyticsService(repository).student_detail(student_id)
+    assert detail is not None
+    assert repository.calls[0] == ("profile", {"student_id": student_id})
+    assert ("notebooks", {"student_id": student_id}) in repository.calls
+    assert ("activity", {"student_id": student_id}) in repository.calls
+    assert ("benchmark", {}) in repository.calls
+
+
+def test_multiple_notebooks_detail_lists_all_but_transcript_scopes_one(tmp_path):
+    """Selecting notebook B never hydrates notebook A's transcript content."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_a = student_store.list_threads()[0]["id"]
+    notebook_b = student_store.create_thread(
+        name="Notebook B", model_id="mock", support_mode="critical-thinking"
+    )
+    student_store.add_message(notebook_b, "user", "Only notebook B")
+    detail = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).student_detail(student_id)
+    assert detail is not None
+    assert {item["id"] for item in detail.notebooks} == {notebook_a, notebook_b}
+    transcript = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).conversation_transcript(student_id, notebook_b)
+    assert transcript is not None
+    assert any(message["content"] == "Only notebook B" for message in transcript.messages)
+    assert all(message["content"] != "Student idea 1" for message in transcript.messages)
+
+
+def test_transcript_projection_includes_safe_message_attachment_metadata(tmp_path):
+    """Transcript attachment descriptors stay message-associated and path-free."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    student_store.add_message(
+        notebook_id,
+        "user",
+        "Here is my private file.",
+        metadata={"attachments": [attachment], "attachment_source_ids": [attachment["id"]]},
+    )
+    transcript = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).conversation_transcript(student_id, notebook_id)
+    assert transcript is not None
+    descriptor = transcript.messages[-1]["attachments"][0]
+    assert descriptor["title"] == "private.txt"
+    assert "path" not in descriptor
+    assert "object_key" not in descriptor
+
+
+def test_transcript_normalizes_and_authorizes_current_citation_refs(tmp_path):
+    """Current dict source refs and legacy ids are safe, notebook-scoped citations."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    source = add_text_source(student_store, notebook_id, "Lecture source", "Evidence")
+    with bootstrap._connect() as connection:  # noqa: SLF001
+        assistant = connection.execute(
+            "SELECT id FROM messages WHERE notebook_id=? AND role='assistant' ORDER BY created_at DESC LIMIT 1",
+            (notebook_id,),
+        ).fetchone()
+        connection.execute(
+            "UPDATE messages SET cited_source_ids_text=? WHERE id=?",
+            (
+                json.dumps([
+                    {"id": source["id"], "label": "S1", "title": "Lecture source"},
+                    {"id": "foreign-source", "label": "S9", "title": "Private"},
+                    "legacy-source",
+                ]),
+                assistant["id"],
+            ),
+        )
+    transcript = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).conversation_transcript(student_id, notebook_id)
+    assert transcript is not None
+    citations = transcript.messages[-1]["citations"]
+    assert citations == [{"id": source["id"], "label": "S1", "title": "Lecture source"}]
+
+
+def test_professor_attachment_route_requires_message_association(tmp_path, monkeypatch):
+    """Lecturers can open only the selected student's message attachment."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    student_store.add_message(
+        notebook_id,
+        "user",
+        "Attached.",
+        metadata={"attachments": [attachment]},
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    token = oidc.add("prof")
+    cookies = {settings.cognito_id_token_cookie_name: token}
+    response = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{attachment['id']}",
+        cookies=cookies,
+    )
+    assert response.status_code == 200
+    assert response.content == b"private"
+    with bootstrap._connect() as connection:  # noqa: SLF001 - audit assertion
+        audit = connection.execute(
+            "SELECT action, target_user_id, notebook_id, metadata_text FROM research_access_events "
+            "ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+    assert audit["action"] == "professor.attachment"
+    assert audit["target_user_id"] == student_id
+    assert audit["notebook_id"] == notebook_id
+    assert attachment["id"] in audit["metadata_text"]
+    ordinary = add_text_source(student_store, notebook_id, "Reusable source", "Not an attachment")
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{ordinary['id']}",
+        cookies=cookies,
+    ).status_code == 404
+    other_student_id = _seed_student_activity(
+        bootstrap, sub="student-b", now=datetime.now(timezone.utc), messages=1
+    )
+    other_notebook_id = StudentStore(
+        Path(bootstrap.path), identifier="cognito:student-b"
+    ).list_threads()[0]["id"]
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{other_notebook_id}/attachments/{attachment['id']}",
+        cookies=cookies,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/professor/students/{other_student_id}/conversations/{notebook_id}/attachments/{attachment['id']}",
+        cookies=cookies,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/not-related",
+        cookies=cookies,
+    ).status_code == 404
+
+
+def test_professor_workspace_returns_read_only_payload(tmp_path, monkeypatch):
+    """Workspace bundles transcript, library sources, and learning projections."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    library_source = WorkspaceService(student_store).upload_sources(
+        notebook_id, [("lecture.txt", b"Evidence", "text/plain")]
+    )[0]
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    student_store.add_message(
+        notebook_id,
+        "user",
+        "Attached.",
+        metadata={"attachments": [attachment]},
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    token = oidc.add("prof")
+    cookies = {settings.cognito_id_token_cookie_name: token}
+    response = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+        cookies=cookies,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["notebook"]["id"] == notebook_id
+    assert payload["transcript"]["messages"]
+    source_ids = {item["id"] for item in payload["sources"]}
+    assert library_source["id"] in source_ids
+    assert attachment["id"] not in source_ids
+    for source in payload["sources"]:
+        assert set(source) <= {
+            "id",
+            "title",
+            "kind",
+            "mime",
+            "size",
+            "group",
+            "selected",
+            "origin",
+            "locked",
+            "has_file",
+        }
+    assert "journey" in payload["learning"]
+    assert "hmw_scaffold" in payload["learning"]
+    assert "review" in payload["learning"]
+    _assert_no_forbidden_workspace_fields(payload)
+    with bootstrap._connect() as connection:  # noqa: SLF001
+        audit = connection.execute(
+            "SELECT action FROM research_access_events ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+    assert audit["action"] == "professor.workspace"
+
+
+def test_professor_review_projects_settings_checkpoints_on_both_routes(
+    tmp_path, monkeypatch
+):
+    """Dedicated Review and legacy workspace expose the same safe checkpoint evidence."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    student_store.update_thread(
+        notebook_id,
+        metadata={
+            JOURNEY_STAGE_REVIEWS_KEY: {
+                "jobs": {
+                    "problem_identification": {
+                        "status": "complete",
+                        "job_id": "worker-secret",
+                        "lease_token": "lease-secret",
+                    }
+                },
+                "reviews": {
+                    "problem_identification": {
+                        "stage": "problem_identification",
+                        "summary": "Checkpoint summary.",
+                        "strengths": ["Names the affected people."],
+                        "areas_to_revisit": ["Clarify the success outcome."],
+                        "reasoning_progress": "The focus is becoming testable.",
+                        "important_message_ids": ["message-secret"],
+                        "facione_scores": {"analysis": 4},
+                        "conversation_revision": 9,
+                    }
+                },
+                "unread": True,
+                "revisit_dirty": {"problem_identification": {"token": "dirty-secret"}},
+            }
+        },
+    )
+    service = ProfessorAnalyticsService(ProfessorAnalyticsRepository(bootstrap))
+    direct = service.notebook_review(student_id, notebook_id)
+    assert direct is not None
+    assert direct.summary == "Checkpoint summary."
+    assert direct.facione_scores["analysis"] == 4
+    assert direct.has_personalized_assessment is True
+    assert direct.stage_reviews["problem_identification"].strengths == [
+        "Names the affected people."
+    ]
+    assert not hasattr(
+        direct.stage_reviews["problem_identification"], "conversation_revision"
+    )
+    problem_strengths = next(
+        section["items"]
+        for section in direct.strength_sections
+        if section["stage_id"] == "problem_identification"
+    )
+    assert problem_strengths == ["Names the affected people."]
+
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    base = f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}"
+    review_response = client.get(f"{base}/review", cookies=cookies)
+    workspace_response = client.get(f"{base}/workspace", cookies=cookies)
+    assert review_response.status_code == 200
+    assert workspace_response.status_code == 200
+    dedicated = review_response.json()
+    legacy = workspace_response.json()["learning"]["review"]
+    assert dedicated["summary"] == legacy["summary"] == "Checkpoint summary."
+    assert dedicated["strength_sections"] == legacy["strength_sections"]
+    assert dedicated["improvement_sections"] == legacy["improvement_sections"]
+    assert dedicated["stage_reviews"] == legacy["stage_reviews"]
+    assert {
+        "detail",
+        "current_stage",
+        "progress",
+        "understanding_level",
+        "understanding_description",
+        "completed_stages",
+        "contributions",
+        "summary",
+        "facione_scores",
+        "facione_behavior_counts",
+        "facione_holistic_candidate",
+        "stage_notes",
+        "conclusion",
+        "critical_reflection",
+        "strength_sections",
+        "improvement_sections",
+        "strengths",
+        "improvement_areas",
+        "next_question",
+        "turn_count",
+        "has_personalized_assessment",
+        "stage_reviews",
+    } <= set(legacy)
+    assert "notebook" not in legacy
+    checkpoint = dedicated["stage_reviews"]["problem_identification"]
+    assert "conversation_revision" not in checkpoint
+    assert "important_message_ids" not in checkpoint
+    assert "jobs" not in dedicated["stage_reviews"]
+
+
+@pytest.mark.parametrize("job_status", ["queued", "running", "failed", "missing"])
+def test_professor_review_ignores_unfinished_or_unmatched_checkpoints(
+    tmp_path, monkeypatch, job_status
+):
+    """Only a matching completed stage-review job can feed lecturer Review."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    jobs = {} if job_status == "missing" else {
+        "problem_identification": {"status": job_status}
+    }
+    student_store.update_thread(
+        notebook_id,
+        metadata={
+            JOURNEY_STAGE_REVIEWS_KEY: {
+                "jobs": jobs,
+                "reviews": {
+                    "problem_identification": {
+                        "stage": "problem_identification",
+                        "summary": "Stale checkpoint summary.",
+                        "strengths": ["Stale checkpoint strength."],
+                        "areas_to_revisit": ["Stale checkpoint improvement."],
+                        "facione_scores": {"analysis": 4},
+                        "conversation_revision": 9,
+                    }
+                },
+            }
+        },
+    )
+    service = ProfessorAnalyticsService(ProfessorAnalyticsRepository(bootstrap))
+    direct = service.notebook_review(student_id, notebook_id)
+    assert direct is not None
+    assert direct.stage_reviews == {}
+    assert direct.has_personalized_assessment is False
+    assert direct.facione_scores["analysis"] == 0
+    assert direct.summary != "Stale checkpoint summary."
+    assert all(not section["items"] for section in direct.strength_sections)
+    assert all(not section["items"] for section in direct.improvement_sections)
+
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    base = f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}"
+    dedicated = client.get(f"{base}/review", cookies=cookies)
+    legacy = client.get(f"{base}/workspace", cookies=cookies)
+    assert dedicated.status_code == 200
+    assert legacy.status_code == 200
+    assert dedicated.json()["stage_reviews"] == {}
+    assert legacy.json()["learning"]["review"]["stage_reviews"] == {}
+
+
+def test_professor_review_summary_prefers_latest_coaching_summary(
+    tmp_path,
+):
+    """A meaningful persisted coaching summary wins over checkpoint fallback copy."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    assessment = _assessment(analysis=2)
+    assessment.update(
+        {
+            "recommendation": "stay",
+            "learning_summary": "Latest coaching summary.",
+            "review_strengths": ["Incremental coaching strength."],
+        }
+    )
+    student_store.add_message(
+        notebook_id,
+        "assistant",
+        "Keep refining the focus.",
+        metadata={"assessment": assessment},
+    )
+    student_store.update_thread(
+        notebook_id,
+        metadata={
+            JOURNEY_STAGE_REVIEWS_KEY: {
+                "jobs": {"problem_identification": {"status": "complete"}},
+                "reviews": {
+                    "problem_identification": {
+                        "stage": "problem_identification",
+                        "summary": "Newer checkpoint summary.",
+                        "strengths": ["Completed checkpoint strength."],
+                        "areas_to_revisit": [],
+                        "conversation_revision": 11,
+                    }
+                },
+            }
+        },
+    )
+    review = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).notebook_review(student_id, notebook_id)
+    assert review is not None
+    assert review.summary == "Latest coaching summary."
+    assert review.strength_sections[0]["items"] == [
+        "Completed checkpoint strength."
+    ]
+    assert review.strength_sections[1]["items"] == [
+        "Incremental coaching strength."
+    ]
+
+
+def test_professor_workspace_enforces_ownership_and_role(tmp_path, monkeypatch):
+    """Workspace and library source routes reject cross-student and student callers."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    library_source = WorkspaceService(student_store).upload_sources(
+        notebook_id, [("lecture.txt", b"Evidence", "text/plain")]
+    )[0]
+    other_student_id = _seed_student_activity(
+        bootstrap, sub="student-b", now=datetime.now(timezone.utc), messages=1
+    )
+    other_notebook_id = StudentStore(
+        Path(bootstrap.path), identifier="cognito:student-b"
+    ).list_threads()[0]["id"]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    professor_token = oidc.add("prof")
+    student_token = oidc.add("student-a")
+    professor_cookies = {settings.cognito_id_token_cookie_name: professor_token}
+    student_cookies = {settings.cognito_id_token_cookie_name: student_token}
+    workspace_url = (
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace"
+    )
+    source_url = (
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}"
+        f"/sources/{library_source['id']}"
+    )
+    assert client.get(workspace_url, cookies=student_cookies).status_code == 403
+    assert client.get(source_url, cookies=student_cookies).status_code == 403
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{other_notebook_id}/workspace",
+        cookies=professor_cookies,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/professor/students/{other_student_id}/conversations/{notebook_id}/workspace",
+        cookies=professor_cookies,
+    ).status_code == 404
+    source_response = client.get(source_url, cookies=professor_cookies)
+    assert source_response.status_code == 200
+    assert source_response.content
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{attachment['id']}",
+        cookies=professor_cookies,
+    ).status_code == 404
+
+
+def test_student_roster_sql_is_dsql_portable():
+    """Roster SQL must not use SQLite-only NOT-integer predicates."""
+    from backend.persistence.dsql_connection import adapt_sqlite_sql
+    from backend.professor_analytics.repository import _STUDENT_ROSTER_SQL
+
+    sql = _STUDENT_ROSTER_SQL.lower()
+    assert "not message_is_error" not in sql
+    assert "not am.message_is_error" not in sql
+    assert "coalesce(message_is_error, 0) = 0" in sql
+    adapted = adapt_sqlite_sql(_STUDENT_ROSTER_SQL)
+    assert adapted.count("%s") == 0
+
+
+def test_student_detail_sql_is_dsql_portable():
+    """Selected-student SQL must stay parameterized and avoid ORDER BY aliases."""
+    from backend.persistence.dsql_connection import adapt_sqlite_sql
+    from backend.professor_analytics.repository import (
+        _STUDENT_NOTEBOOK_SUMMARIES_SQL,
+        _STUDENT_ROSTER_ROW_SQL,
+    )
+
+    summaries = _STUDENT_NOTEBOOK_SUMMARIES_SQL.lower()
+    assert "order by coalesce(last_active" not in summaries
+    assert "not m.is_error" not in summaries
+    assert "coalesce(m.is_error, 0) = 0" in summaries
+    assert adapt_sqlite_sql(_STUDENT_NOTEBOOK_SUMMARIES_SQL).count("%s") == 1
+    assert "where u.id = ?" in _STUDENT_ROSTER_ROW_SQL.lower()
+    assert adapt_sqlite_sql(_STUDENT_ROSTER_ROW_SQL).count("%s") == 1
+
+
+def test_student_roster_projection_is_one_row_per_student(tmp_path):
+    """Roster SQL returns compact student aggregates without message bodies."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    rows = ProfessorAnalyticsRepository(bootstrap).load_student_roster()
+    assert rows
+    for row in rows:
+        assert "message_content" not in row
+        assert "messages" not in row
+    assert sum(1 for row in rows if str(row["user_id"]) == student_id) == 1
+    service_rows = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).students().students
+    assert len(service_rows) == len(rows)
+
+
+def test_professor_workspace_chat_reflects_active_branch_revision(tmp_path, monkeypatch):
+    """Workspace chat includes revised user turns and drops superseded suffixes."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    original = student_store.get_messages(notebook_id)[0]
+    student_store.revise_conversation_from_user_message(
+        notebook_id, original["id"], "Revised workspace thought"
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    payload = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+        cookies=cookies,
+    ).json()
+    contents = [message["content"] for message in payload["transcript"]["messages"]]
+    assert "Revised workspace thought" in contents
+    assert original["content"] not in contents
+
+
+def test_professor_library_source_rejects_other_notebook_scope(tmp_path, monkeypatch):
+    """A library source uploaded to notebook B cannot be read via notebook A."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_a = student_store.list_threads()[0]["id"]
+    notebook_b = student_store.create_thread(
+        name="Notebook B", model_id="mock", support_mode="critical-thinking"
+    )
+    library_source = WorkspaceService(student_store).upload_sources(
+        notebook_b, [("other.txt", b"scoped", "text/plain")]
+    )[0]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_a}"
+        f"/sources/{library_source['id']}",
+        cookies=cookies,
+    ).status_code == 404
+
+
+def test_professor_attachment_route_rejects_superseded_only_association(tmp_path, monkeypatch):
+    """Attachments referenced only on superseded turns stay unavailable."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    student_store.add_message(
+        notebook_id,
+        "user",
+        "Attached on superseded turn.",
+        metadata={"attachments": [attachment]},
+    )
+    original = student_store.get_messages(notebook_id)[0]
+    student_store.revise_conversation_from_user_message(
+        notebook_id, original["id"], "Revision without attachment"
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}"
+        f"/attachments/{attachment['id']}",
+        cookies=cookies,
+    ).status_code == 404
+
+
+def test_professor_workspace_includes_virtual_course_source(tmp_path, monkeypatch):
+    """Virtual course sources appear in workspace lists and can be opened."""
+    from backend.source_library import virtual_course_source_id
+
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    object_key = "course/lectureNotes/week1.pdf"
+    virtual_id = virtual_course_source_id(object_key)
+    virtual_source = {
+        "id": virtual_id,
+        "title": "Week 1 lecture",
+        "kind": "file",
+        "mime": "application/pdf",
+        "size": 1200,
+        "selected": True,
+        "path": "/secret/local.pdf",
+        "extractedText": "secret",
+        "metadata": {
+            "virtual_course_source": True,
+            "course_material_group": "Lecture Notes",
+            "shared_course_object": True,
+            "origin": "lecture_notes_folder",
+            "locked_source": True,
+            "object_key": object_key,
+        },
+    }
+
+    uploaded = WorkspaceService(student_store).upload_sources(
+        notebook_id, [("lecture.txt", b"Evidence", "text/plain")]
+    )
+    library_sources = uploaded
+
+    def _visible_sources(_store, _notebook_id, *, include_extracted_text=False):
+        return [*library_sources, virtual_source]
+
+    monkeypatch.setattr(
+        "backend.sources.library.list_visible_sources",
+        _visible_sources,
+    )
+    monkeypatch.setattr(
+        "backend.professor_analytics.repository.get_visible_source",
+        lambda _store, _notebook_id, source_id, **kwargs: virtual_source
+        if source_id == virtual_id
+        else next((item for item in library_sources if item["id"] == source_id), None),
+    )
+
+    def _read_bytes(source):
+        if str(source.get("id")) == virtual_id:
+            return b"virtual-bytes"
+        from backend.source_library import read_source_bytes as original_read
+
+        return original_read(source)
+
+    monkeypatch.setattr("backend.http.app.read_source_bytes", _read_bytes)
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    workspace = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+        cookies=cookies,
+    )
+    assert workspace.status_code == 200
+    payload = workspace.json()
+    virtual = next(item for item in payload["sources"] if item["id"] == virtual_id)
+    assert virtual["group"] == "Lecture Notes"
+    assert virtual["locked"] is True
+    _assert_no_forbidden_workspace_fields(payload)
+    source_response = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{virtual_id}",
+        cookies=cookies,
+    )
+    assert source_response.status_code == 200
+    assert source_response.content == b"virtual-bytes"
+
+
+def test_professor_student_store_preserves_pathless_provider(
+    tmp_path, monkeypatch
+) -> None:
+    """Lecturer reads must not force SQLite via Path(None) on DSQL-shaped stores."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    captured: dict[str, object] = {}
+
+    class PathlessAnalyticsStore:
+        """Analytics repository view with ``path is None`` like production DSQL."""
+
+        path = None
+
+        def __init__(self, inner: StudentStore) -> None:
+            self._inner = inner
+
+        def get_user_by_id(self, user_id: str):
+            return self._inner.get_user_by_id(user_id)
+
+    def _create_student_store(*, path=None, identifier="local-student", **kwargs):
+        captured["path"] = path
+        captured["identifier"] = identifier
+        captured["ensure_owner"] = kwargs.get("ensure_owner")
+        captured["ensure_user_called"] = False
+        store = StudentStore(
+            tmp_path / "owner.sqlite3",
+            identifier=identifier,
+            ensure_owner=bool(kwargs.get("ensure_owner", True)),
+        )
+        store.path = None
+
+        def _tracked_ensure_user() -> str:
+            captured["ensure_user_called"] = True
+            raise AssertionError("_ensure_user must not run for lecturer reads")
+
+        store._ensure_user = _tracked_ensure_user  # noqa: SLF001
+        return store
+
+    monkeypatch.setattr(
+        "backend.professor_analytics.repository.create_student_store",
+        _create_student_store,
+    )
+    repository = ProfessorAnalyticsRepository(PathlessAnalyticsStore(bootstrap))
+    store = repository.student_store(student_id)
+    assert captured["path"] is None
+    assert captured["ensure_owner"] is False
+    assert captured["ensure_user_called"] is False
+    assert store is not None
+    assert getattr(store, "path", "missing") is None
+    assert store.owner_id == student_id
+
+
+def test_professor_workspace_keeps_virtual_course_citations(tmp_path, monkeypatch):
+    """Shared Lecture Notes citations stay visible in lecturer workspace chat."""
+    from backend.source_library import virtual_course_source_id
+
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    object_key = "course/lectureNotes/week1.pdf"
+    virtual_id = virtual_course_source_id(object_key)
+    virtual_source = {
+        "id": virtual_id,
+        "title": "Week 1 lecture",
+        "kind": "file",
+        "mime": "application/pdf",
+        "size": 1200,
+        "selected": True,
+        "metadata": {
+            "virtual_course_source": True,
+            "course_material_group": "Lecture Notes",
+            "shared_course_object": True,
+            "origin": "lecture_notes_folder",
+            "locked_source": True,
+            "object_key": object_key,
+        },
+    }
+    student_store.add_message(
+        notebook_id,
+        "assistant",
+        "Coach cites the lecture.",
+        metadata={
+            "source_refs": [
+                {"id": virtual_id, "label": "S1", "title": "Week 1 lecture"},
+                {"id": "random-virtual-looking-id", "label": "S9", "title": "Foreign"},
+            ]
+        },
+    )
+
+    def _visible_sources(_store, _notebook_id, *, include_extracted_text=False):
+        return [virtual_source]
+
+    monkeypatch.setattr("backend.sources.library.list_visible_sources", _visible_sources)
+    service = ProfessorAnalyticsService(ProfessorAnalyticsRepository(bootstrap))
+    workspace = service.notebook_workspace(student_id, notebook_id)
+    assert workspace is not None
+    coach_messages = [
+        message
+        for message in workspace.transcript.messages
+        if message.get("role") == "assistant"
+    ]
+    citations = coach_messages[-1]["citations"]
+    assert citations == [
+        {"id": virtual_id, "label": "S1", "title": "Week 1 lecture"}
+    ]
+
+
+def test_professor_citation_auth_rejects_other_notebook_source(tmp_path):
+    """Personal sources from another notebook are not authorized citations."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_a = student_store.list_threads()[0]["id"]
+    notebook_b = student_store.create_thread(
+        name="Notebook B", model_id="mock", support_mode="critical-thinking"
+    )
+    foreign_source = add_text_source(student_store, notebook_b, "Other notebook", "Evidence")
+    student_store.add_message(
+        notebook_a,
+        "assistant",
+        "Coach reply",
+        metadata={
+            "source_refs": [
+                {"id": foreign_source["id"], "label": "S2", "title": "Other notebook"}
+            ]
+        },
+    )
+    workspace = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).notebook_workspace(student_id, notebook_a)
+    assert workspace is not None
+    citations = workspace.transcript.messages[-1]["citations"]
+    assert citations == []
+
+
+def test_professor_tab_routes_enforce_auth_and_ownership(tmp_path, monkeypatch):
+    """New tab-scoped routes reject students, foreign notebooks, and unauthenticated callers."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    other_student_id = _seed_student_activity(
+        bootstrap, sub="student-b", now=datetime.now(timezone.utc), messages=1
+    )
+    other_notebook_id = StudentStore(
+        Path(bootstrap.path), identifier="cognito:student-b"
+    ).list_threads()[0]["id"]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    professor_cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    student_cookies = {settings.cognito_id_token_cookie_name: oidc.add("student-a")}
+    routes = (
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages",
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources",
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/journey",
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/review",
+    )
+    for route in routes:
+        assert client.get(route).status_code == 401
+        assert client.get(route, cookies=student_cookies).status_code == 403
+        assert client.get(route, cookies=professor_cookies).status_code == 200
+        assert client.get(
+            route.replace(student_id, other_student_id),
+            cookies=professor_cookies,
+        ).status_code == 404
+        assert client.get(
+            route.replace(notebook_id, other_notebook_id),
+            cookies=professor_cookies,
+        ).status_code == 404
+
+
+def test_professor_messages_pagination_and_cursor(tmp_path, monkeypatch):
+    """Messages endpoint paginates newest-first and rejects malformed cursors."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    for index in range(40):
+        student_store.add_message(notebook_id, "user", f"Turn {index}")
+    messages = student_store.get_messages(notebook_id)
+    last = messages[-1]
+    original_content = str(last["content"])
+    student_store.revise_conversation_from_user_message(
+        notebook_id, last["id"], "Revised last turn"
+    )
+    assert len(student_store.get_messages(notebook_id)) > 30
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    base = f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages"
+    first = client.get(base, cookies=cookies)
+    assert first.status_code == 200
+    payload = first.json()
+    assert len(payload["messages"]) <= 30
+    assert payload["next_cursor"]
+    assert all("extracted_text" not in message for message in payload["messages"])
+    assert all(message["content"] != original_content for message in payload["messages"])
+    first_ids = {message["id"] for message in payload["messages"]}
+    first_oldest = payload["messages"][0]["created_at"]
+    second = client.get(
+        base, cookies=cookies, params={"cursor": payload["next_cursor"]}
+    )
+    assert second.status_code == 200
+    older_page = second.json()["messages"]
+    assert older_page
+    assert not first_ids & {message["id"] for message in older_page}
+    assert older_page[-1]["created_at"] <= first_oldest
+    assert all(message["content"] != original_content for message in older_page)
+    clamped = client.get(base, cookies=cookies, params={"limit": 1_000_000}).json()
+    assert len(clamped["messages"]) <= 50
+    assert client.get(base, cookies=cookies, params={"cursor": "not-valid"}).status_code == 400
+
+
+def test_professor_sources_list_has_no_forbidden_fields(tmp_path, monkeypatch):
+    """Source list responses remain allow-listed and path-free."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    WorkspaceService(student_store).upload_sources(
+        notebook_id, [("lecture.txt", b"Evidence", "text/plain")]
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    response = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources",
+        cookies=cookies,
+    )
+    assert response.status_code == 200
+    _assert_no_forbidden_workspace_fields(response.json())
+
+
+def test_professor_tab_routes_record_audit_actions(tmp_path, monkeypatch):
+    """Tab-scoped reads write attributable audit events."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    requests = (
+        (f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages", "professor.transcript"),
+        (f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources", "professor.sources"),
+        (f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/journey", "professor.journey"),
+        (f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/review", "professor.review"),
+    )
+    for path, _action in requests:
+        assert client.get(path, cookies=cookies).status_code == 200
+    with bootstrap._connect() as connection:  # noqa: SLF001
+        rows = connection.execute(
+            "SELECT action FROM research_access_events ORDER BY created_at, id"
+        ).fetchall()
+    assert [row["action"] for row in rows][-4:] == [action for _, action in requests]

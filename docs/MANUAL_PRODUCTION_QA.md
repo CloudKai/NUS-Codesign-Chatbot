@@ -33,7 +33,7 @@ those historical observations as release evidence.
 
 **READY FOR CONTROLLED PILOT**
 
-Not **READY FOR PRODUCTION**: live host currently auto-advances stages (skips confirmation-gated **Next**), full six-stage pedagogy and live RAG upload/isolation passes were incomplete, and ARM64 image rebuild was not executed in this pass.
+Not **READY FOR PRODUCTION**: live host currently auto-advances stages (skips confirmation-gated **Next**), full pedagogy-ladder and live RAG upload/isolation passes were incomplete (this run used then-live six-stage labels; current `THINKING_STAGES` is five-phase), and ARM64 image rebuild was not executed in this pass.
 
 ---
 
@@ -43,15 +43,18 @@ Live Cognito login, HTTPS, the public API boundary, session refresh, logout, and
 
 **Product progression policy (owner decision, 2026-08-10):**
 - **Month 1 (current pilot):** `AUTO_ADVANCE_STAGES=true` — coach ADVANCE auto-applies; no Next confirmation. Live already behaved this way; repo now matches via `compose.prod.yaml`.
-- **After month 1:** switch to **student stage selection** (students choose which Thinking Path stage to work on). That UI/API is **not built yet**; flipping auto-advance off alone only restores Next/confirm, not free stage picking.
+- **After month 1:** switch to **student stage selection** (students choose which Thinking Path stage to work on). That UI/API **now exists** (`STUDENT_STAGE_SELECTION`, `POST .../learning-state/select-stage`) and is **off** in production Compose. Flipping auto-advance off alone restores Next/confirm; turn selection on only when Month-2 is authorised.
 
 Health `mode` now follows `APP_ENV` (local fix). Login-start throttle + allow-listed Cognito callback error logs added. Full mock pytest: **344 passed**.
 
-Authoritative stage order from code (`THINKING_STAGES` / `docs/LOCAL_DEMO_IMPLEMENTATION.md`):
+Authoritative stage order from current code (`THINKING_STAGES` /
+`docs/LOCAL_DEMO_IMPLEMENTATION.md`):
 
-**Focus → Evidence → Assumptions → Perspectives → Synthesis → Conclusion**
+**Problem identification → Concept generation → Design specification → Ethics & Critical Thinking → Reflection**
 
-(Not Focus→Assumptions→Evidence.)
+(Five research-aligned phases. The 2026-08-10 live probes below used the
+then-deployed six-stage labels Focus → Evidence → …; those rows are historical
+observations, not the current Thinking Path.)
 
 ---
 
@@ -271,7 +274,7 @@ None observed that expose other students’ data or bypass auth on the public ed
 ### P1
 
 1. Login-start throttle exists in repo only until redeploy (**CODE**; do not flood live to verify).
-2. Month-2 student stage-selection feature not built yet (auto-advance-off alone is not enough).
+2. Month-2 student stage-selection is implemented and gated off in production (`STUDENT_STAGE_SELECTION=false`). Auto-advance-off alone is Next/confirm, not free stage picking.
 
 ### P2
 

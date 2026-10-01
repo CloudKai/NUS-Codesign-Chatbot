@@ -11,9 +11,12 @@ from backend.learning.stages import (
     THINKING_STAGES,
     ThinkingStage,
 )
+from backend.specialists.review_orchestration import (
+    normalize_deep_review_stage_reviews,
+)
 
 RESPONSE_DETAILS = ("short", "long")
-DEFAULT_RESPONSE_DETAIL = "long"
+DEFAULT_RESPONSE_DETAIL = "short"
 _STAGE_DECISION = re.compile(
     r"<!--\s*stage\s*:\s*(advance|stay)\s*-->",
     re.IGNORECASE,
@@ -33,6 +36,9 @@ _SELECTED_LECTURE_BOILERPLATE = re.compile(
 _IMAGE_EVIDENCE_BOILERPLATE = re.compile(
     r"(?m)^I can see \d+ selected image source\(s\) and will treat them as notebook "
     r"evidence\.?\s*(?:\n\n|$)"
+)
+_BEFORE_STAGE_MOVE = re.compile(
+    r"(?is)\bBefore we (?:move|proceed|advance) to [^.?\n]+[.?]?\s*"
 )
 _STAGE_SIGNALS: dict[str, tuple[str, ...]] = {
     "problem_identification": (
@@ -112,11 +118,11 @@ _STAGE_GUIDANCE: dict[str, tuple[str, str, str]] = {
 
 
 def default_journey() -> dict[str, Any]:
-    """Return a Focus-stage journey with Strict coaching as the default style.
+    """Return a Focus-stage journey with Guide coaching as the default style.
 
     Returns:
-        A normalized learning-journey dict. ``response_detail`` is ``long``
-        (student-facing Strict). Persisted Quick notebooks keep ``short``.
+        A normalized learning-journey dict. ``response_detail`` is ``short``
+        (student-facing Guide). Persisted Free notebooks keep ``long``.
     """
     return {
         "current_stage": DEFAULT_STAGE,
@@ -129,6 +135,13 @@ def default_journey() -> dict[str, Any]:
 
 
 def normalize_journey(value: Any) -> dict[str, Any]:
+    """Return canonical journey metadata without changing the active focus.
+
+    ``current_stage`` is the student's present focus, while
+    ``completed_stages`` records historical progress.  They intentionally stay
+    independent so selecting a completed phase for a revisit survives every
+    normalization and does not discard the unlocked frontier.
+    """
     raw = value if isinstance(value, dict) else {}
     journey = default_journey()
     current_stage = raw.get("current_stage")
@@ -138,23 +151,6 @@ def normalize_journey(value: Any) -> dict[str, Any]:
         journey["completed_stages"] = [
             stage.id for stage in THINKING_STAGES if stage.id in set(completed)
         ]
-    if (
-        journey["current_stage"] in journey["completed_stages"]
-        and journey["current_stage"] != THINKING_STAGES[-1].id
-    ):
-        current_index = next(
-            index
-            for index, stage in enumerate(THINKING_STAGES)
-            if stage.id == journey["current_stage"]
-        )
-        journey["current_stage"] = next(
-            (
-                stage.id
-                for stage in THINKING_STAGES[current_index + 1 :]
-                if stage.id not in journey["completed_stages"]
-            ),
-            THINKING_STAGES[-1].id,
-        )
     notes = raw.get("stage_notes")
     if isinstance(notes, dict):
         journey["stage_notes"] = {
@@ -169,6 +165,80 @@ def normalize_journey(value: Any) -> dict[str, Any]:
         detail if detail in RESPONSE_DETAILS else DEFAULT_RESPONSE_DETAIL
     )
     return journey
+
+
+def selectable_stage_ids(journey: dict[str, Any]) -> tuple[str, ...]:
+    """Return stages unlocked by the contiguous validated-completion prefix.
+
+    A current focus is always selectable, as are canonical stages through the
+    first stage after the contiguous completed prefix.  The next stage is only
+    exposed when its predecessor is actually completed; current focus and
+    already-completed stages do not create a shortcut over a missing prefix.
+    Corrupt or non-contiguous completion metadata therefore fails closed and
+    cannot unlock a later stage through a gap.
+
+    Args:
+        journey: Raw or normalized learning-journey metadata.
+
+    Returns:
+        Ordered canonical stage ids through the unlocked frontier.  The result
+        is a tuple and this helper never mutates the supplied journey.
+    """
+    normalized = normalize_journey(journey)
+    stage_ids = [stage.id for stage in THINKING_STAGES]
+    completed = set(normalized["completed_stages"])
+    prefix_end = -1
+    for index, stage_id in enumerate(stage_ids):
+        if stage_id not in completed:
+            break
+        prefix_end = index
+
+    current_id = normalized["current_stage"]
+    allowed = set(stage_ids[: prefix_end + 1])
+    if prefix_end + 1 < len(stage_ids) and prefix_end >= 0:
+        allowed.add(stage_ids[prefix_end + 1])
+    # A corrupt later focus remains selectable, but it cannot unlock the
+    # missing stages between that focus and the contiguous completion prefix.
+    allowed.add(current_id)
+    return tuple(stage_id for stage_id in stage_ids if stage_id in allowed)
+
+
+def mark_stage_completed(
+    journey: dict[str, Any], stage_id: str, *, note: str = ""
+) -> dict[str, Any]:
+    """Record one validated stage completion without changing the focus.
+
+    Args:
+        journey: Raw or normalized learning-journey metadata.
+        stage_id: The stage completed by the validated Coaching turn.
+        note: Optional contribution summary to retain on that stage.
+
+    Returns:
+        A normalized journey with ``stage_id`` added to
+        ``completed_stages``. ``current_stage`` is intentionally unchanged.
+
+    Raises:
+        ValueError: If ``stage_id`` is unknown, is not the current focus, or
+            prerequisites are incomplete. Reflection may be completed
+            in-place (no later stage); focus stays on Reflection.
+    """
+    normalized = normalize_journey(journey)
+    cleaned_stage = str(stage_id or "").strip()
+    if cleaned_stage not in STAGE_BY_ID:
+        raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+    if normalized["current_stage"] != cleaned_stage:
+        raise ValueError("Only the current stage can be completed")
+    stage_ids = [stage.id for stage in THINKING_STAGES]
+    current_index = stage_ids.index(cleaned_stage)
+    completed = set(normalized["completed_stages"])
+    if any(stage_id not in completed for stage_id in stage_ids[:current_index]):
+        raise ValueError("Stage prerequisites are incomplete")
+    if cleaned_stage not in normalized["completed_stages"]:
+        normalized["completed_stages"].append(cleaned_stage)
+    cleaned_note = str(note or "").strip()
+    if cleaned_note:
+        normalized.setdefault("stage_notes", {})[cleaned_stage] = cleaned_note
+    return normalized
 
 
 def current_stage(journey: dict[str, Any]) -> ThinkingStage:
@@ -244,34 +314,121 @@ def personalized_stage_questions(
     return stage_guidance_questions(stage_id)[:2]
 
 
+def selection_pending_move_footer(next_stage_id: str) -> str:
+    """Return how-to-move copy for a selection-mode pending ADVANCE.
+
+    Args:
+        next_stage_id: Canonical destination Thinking Path stage id.
+
+    Returns:
+        Markdown telling the student to enter ``Move to <label>`` or open
+        Analytics → Progression and click ``Work on this stage``.
+    """
+    next_stage_value = STAGE_BY_ID[next_stage_id]
+    return (
+        f"Enter `Move to {next_stage_value.label}` or Go to Analytics -> "
+        "Progression and click `Work on this stage`."
+    )
+
+
+def selection_pending_ready_response(
+    *,
+    from_stage_id: str,
+    to_stage_id: str,
+    response_text: str = "",
+    stay_guidance: str = "",
+) -> str:
+    """Format a selection-mode pending ADVANCE as Ready plus how to move.
+
+    Keeps focus unchanged. Does not claim the stage already moved.
+
+    Args:
+        from_stage_id: Stage that just became ready to leave.
+        to_stage_id: Recommended destination stage.
+        response_text: Optional coach body to keep under the Ready heading.
+        stay_guidance: Optional current-stage refinement to present as
+            non-blocking work when the student chooses not to move yet.
+
+    Returns:
+        Markdown starting with ``**[from] -> [to] is Ready.**`` and ending
+        with the selection how-to-move footer.
+    """
+    current_stage_value = STAGE_BY_ID[from_stage_id]
+    next_stage_value = STAGE_BY_ID[to_stage_id]
+    transition_heading = (
+        f"**[{current_stage_value.label}] -> "
+        f"[{next_stage_value.label}] is Ready.**"
+    )
+    legacy_transition_heading = (
+        f"**[{current_stage_value.label}] -> [{next_stage_value.label}] Ready**"
+    )
+    footer = selection_pending_move_footer(to_stage_id)
+    response_body = concise_coach_response(str(response_text or "").strip())
+    current_heading = f"**{current_stage_value.label}**"
+    next_heading = f"**{next_stage_value.label}**"
+    for heading in (
+        transition_heading,
+        legacy_transition_heading,
+        next_heading,
+        current_heading,
+    ):
+        if response_body.startswith(heading):
+            response_body = response_body[len(heading) :].strip()
+            break
+    # Drop explore-question blocks; selection mode points to Progression.
+    if "**Questions to explore**" in response_body:
+        response_body = response_body.split("**Questions to explore**", 1)[0].strip()
+    cleaned_guidance = " ".join(str(stay_guidance or "").split()).strip()
+    stay_copy = (
+        f"You can also stay in **{current_stage_value.label}** and refine it "
+        "further."
+    )
+    if cleaned_guidance:
+        stay_copy += f" If you stay, focus on: {cleaned_guidance}"
+    parts = [transition_heading]
+    if response_body:
+        parts.append(response_body)
+    parts.extend((stay_copy, footer))
+    return "\n\n".join(parts).strip()
+
+
 def advanced_stage_response(
     response_text: str,
     current_stage_id: str,
     next_stage_id: str,
     questions: Iterable[str],
 ) -> str:
-    """Present an automatic transition as the new stage plus useful questions."""
+    """Present an automatic transition as prev -> next Ready plus questions."""
     current_stage_value = STAGE_BY_ID[current_stage_id]
     next_stage_value = STAGE_BY_ID[next_stage_id]
     response_body = concise_coach_response(response_text.strip())
+    transition_heading = (
+        f"**[{current_stage_value.label}] -> [{next_stage_value.label}] Ready**"
+    )
     current_heading = f"**{current_stage_value.label}**"
-    if response_body.startswith(current_heading):
-        response_body = response_body[len(current_heading) :].strip()
     next_heading = f"**{next_stage_value.label}**"
-    if response_body.startswith(next_heading):
-        # Mock/provider already wrote the destination-stage reply.
-        return response_body
+    started_as_destination = response_body.startswith(next_heading) or response_body.startswith(
+        transition_heading
+    )
+    for heading in (transition_heading, next_heading, current_heading):
+        if response_body.startswith(heading):
+            response_body = response_body[len(heading) :].strip()
+            break
     legacy_notice = (
         f"**Thinking Path:** I’ve moved you to {next_stage_value.short_label}."
     )
     response_body = response_body.replace(legacy_notice, "").strip()
+    if started_as_destination:
+        # Provider/promote already wrote the destination-stage reply.
+        body = response_body or next_stage_value.description
+        return f"{transition_heading}\n\n{body}".strip()
     normalized_questions = [question.strip() for question in questions if question.strip()]
     question_list = "\n".join(f"- {question}" for question in normalized_questions)
     body = response_body
     if not body:
         body = next_stage_value.description
     return (
-        f"**{next_stage_value.label}**\n\n"
+        f"{transition_heading}\n\n"
         f"{body}\n\n"
         f"**Questions to explore**\n\n{question_list}"
     ).strip()
@@ -284,6 +441,7 @@ def concise_coach_response(response_text: str) -> str:
     cleaned = _READY_NEXT_PART.sub("", cleaned)
     cleaned = _SELECTED_LECTURE_BOILERPLATE.sub("", cleaned)
     cleaned = _IMAGE_EVIDENCE_BOILERPLATE.sub("", cleaned)
+    cleaned = _BEFORE_STAGE_MOVE.sub("", cleaned)
     return cleaned.strip()
 
 
@@ -439,15 +597,40 @@ def _normalize_facione_scores(raw: Any) -> dict[str, int]:
     return normalized
 
 
+def _max_facione_scores(*maps: Any) -> dict[str, int]:
+    """Return the per-dimension max across one or more Facione score maps."""
+    cumulative = _normalize_facione_scores(None)
+    for raw in maps:
+        scores = _normalize_facione_scores(raw)
+        for key, _label in FACIONE_DIMENSIONS:
+            cumulative[key] = max(cumulative[key], scores[key])
+    return cumulative
+
+
 def _cumulative_facione_scores(
     messages: Iterable[dict[str, Any]],
 ) -> dict[str, int]:
     """Keep the strongest numeric Facione evidence across active assessments."""
     cumulative = _normalize_facione_scores(None)
     for assessment in _assessments(messages):
-        scores = _normalize_facione_scores(assessment.get("facione_scores"))
-        for key, _label in FACIONE_DIMENSIONS:
-            cumulative[key] = max(cumulative[key], scores[key])
+        cumulative = _max_facione_scores(
+            cumulative, assessment.get("facione_scores")
+        )
+    return cumulative
+
+
+def _facione_from_stage_checkpoints(blob: Any) -> dict[str, int]:
+    """Max Facione scores across Journey Haiku stage checkpoints."""
+    reviews = blob.get("reviews") if isinstance(blob, dict) else None
+    if not isinstance(reviews, dict):
+        return _normalize_facione_scores(None)
+    cumulative = _normalize_facione_scores(None)
+    for review in reviews.values():
+        if not isinstance(review, dict):
+            continue
+        cumulative = _max_facione_scores(
+            cumulative, review.get("facione_scores")
+        )
     return cumulative
 
 
@@ -641,18 +824,176 @@ def _stage_feedback_history(
     return strength_sections, improvement_sections
 
 
+def _reviewed_stage_id_from_snapshot(snapshot: dict[str, Any] | None) -> str | None:
+    """Return the frozen Thinking Path stage for one Deep Review snapshot.
+
+    Prefers ``reviewed_stage_id``, then a snapshot-local ``stage_at_start``
+    alias from older job copies. Missing or unknown ids return ``None`` so
+    stale feedback is never assigned to the student's current stage.
+
+    Args:
+        snapshot: Durable ``deep_review_snapshot`` mapping, if any.
+
+    Returns:
+        A valid stage id, or ``None`` when provenance is absent.
+    """
+    if not isinstance(snapshot, dict):
+        return None
+    for key in ("reviewed_stage_id", "stage_at_start"):
+        stage_id = str(snapshot.get(key) or "").strip()
+        if stage_id in STAGE_BY_ID:
+            return stage_id
+    return None
+
+
+def _merge_stage_section_items(
+    sections: list[dict[str, Any]],
+    *,
+    stage_id: str,
+    extra_items: list[str],
+) -> list[dict[str, Any]]:
+    """Prepend *extra_items* into one stage section with case-insensitive dedupe.
+
+    Args:
+        sections: Stage-grouped feedback sections.
+        stage_id: Thinking Path stage that received Deep Review.
+        extra_items: Deep Review strengths or areas, already cleaned.
+
+    Returns:
+        New section list. Other stages are unchanged.
+    """
+    merged: list[dict[str, Any]] = []
+    for section in sections:
+        if str(section.get("stage_id") or "") != stage_id:
+            merged.append(section)
+            continue
+        existing = [
+            str(item) for item in (section.get("items") or []) if str(item).strip()
+        ]
+        merged.append(
+            {
+                **section,
+                "items": _clean_feedback_items([*extra_items, *existing]),
+            }
+        )
+    return merged
+
+
+def _authoritative_stage_reviews(
+    snapshot: dict[str, Any] | None,
+) -> list[dict[str, Any]] | None:
+    """Return validated ``stage_reviews`` when they should drive projection.
+
+    A marked stage-aware list is authoritative, including an explicit empty
+    list. Missing or unmarked ``stage_reviews`` uses the legacy frozen-stage
+    lists so older snapshots keep working.
+
+    Args:
+        snapshot: Durable ``deep_review_snapshot`` mapping, if any.
+
+    Returns:
+        Ordered stage-review dicts, or ``None`` to use legacy merge.
+    """
+    if not isinstance(snapshot, dict):
+        return None
+    if snapshot.get("stage_reviews_contract") != "v1":
+        return None
+    raw = snapshot.get("stage_reviews")
+    if not isinstance(raw, list):
+        return []
+    return normalize_deep_review_stage_reviews(raw)
+
+
+def _merge_deep_review_feedback(
+    strength_sections: list[dict[str, Any]],
+    improvement_sections: list[dict[str, Any]],
+    snapshot: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Merge the latest Deep Review snapshot into Review-tab stage sections.
+
+    When the snapshot has validated ``stage_reviews``, those lists are
+    prepended onto matching stages and the holistic ``strengths`` /
+    ``areas_to_develop`` lists are not also merged (no duplicate). Older
+    snapshots without ``stage_reviews`` keep the legacy behaviour: prepend
+    the flat lists onto ``reviewed_stage_id`` only.
+
+    Incremental Haiku ``review_strengths`` / ``review_improvements`` stay
+    under their assessment stages. Duplicate strings (case-insensitive)
+    are dropped. A legacy snapshot without a valid stage id is left out of
+    these sections.
+
+    Args:
+        strength_sections: History-derived strength groups.
+        improvement_sections: History-derived improvement groups.
+        snapshot: Latest successful Deep Review snapshot, if any.
+
+    Returns:
+        Updated ``(strength_sections, improvement_sections)``.
+    """
+    if not isinstance(snapshot, dict):
+        return strength_sections, improvement_sections
+    reviews = _authoritative_stage_reviews(snapshot)
+    if reviews is not None:
+        merged_strengths = strength_sections
+        merged_improvements = improvement_sections
+        for review in reviews:
+            stage_id = str(review.get("stage_id") or "").strip()
+            if stage_id not in STAGE_BY_ID:
+                continue
+            merged_strengths = _merge_stage_section_items(
+                merged_strengths,
+                stage_id=stage_id,
+                extra_items=_clean_feedback_items(review.get("strengths") or []),
+            )
+            merged_improvements = _merge_stage_section_items(
+                merged_improvements,
+                stage_id=stage_id,
+                extra_items=_clean_feedback_items(
+                    review.get("areas_to_develop") or []
+                ),
+            )
+        return merged_strengths, merged_improvements
+    stage_id = _reviewed_stage_id_from_snapshot(snapshot)
+    if stage_id is None:
+        return strength_sections, improvement_sections
+    raw_strengths = snapshot.get("strengths")
+    raw_improvements = snapshot.get("areas_to_develop")
+    deep_strengths = _clean_feedback_items(
+        raw_strengths if isinstance(raw_strengths, list) else []
+    )
+    deep_improvements = _clean_feedback_items(
+        raw_improvements if isinstance(raw_improvements, list) else []
+    )
+    if not deep_strengths and not deep_improvements:
+        return strength_sections, improvement_sections
+    return (
+        _merge_stage_section_items(
+            strength_sections, stage_id=stage_id, extra_items=deep_strengths
+        ),
+        _merge_stage_section_items(
+            improvement_sections, stage_id=stage_id, extra_items=deep_improvements
+        ),
+    )
+
+
 def learning_review(
     messages: Iterable[dict[str, Any]],
     journey: dict[str, Any],
     *,
     detail: str | None = None,
+    deep_review_snapshot: dict[str, Any] | None = None,
+    journey_stage_reviews: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the Review-tab payload for the current notebook.
 
-    Summary and Facione scores come from the newest assessment. Strengths and
-    areas for improvement are aggregated by Thinking Path stage across the full
-    conversation so past feedback is preserved. Empty notebooks stay empty
-    instead of showing generic filler.
+    Facione and working conclusion prefer the latest successful Deep Review
+    snapshot when one exists. Otherwise Facione is the max of message
+    assessments and optional Haiku ``journey_stage_reviews`` checkpoints.
+    Strengths and areas for improvement start from Thinking Path stage history
+    across the full conversation, then merge the latest snapshot's
+    ``stage_reviews`` onto matching stages (or the legacy flat lists onto
+    ``reviewed_stage_id``). Empty notebooks stay empty instead of showing
+    generic filler.
 
     Returns:
         A dict consumed by ``ui.studio.render_learning_review``, including
@@ -668,7 +1009,17 @@ def learning_review(
     contributions = student_messages[-contribution_limit:]
     level, level_description = understanding_level(normalized)
     assessment = _latest_assessment(message_list)
-    if assessment:
+    snapshot = deep_review_snapshot if isinstance(deep_review_snapshot, dict) else None
+    if snapshot:
+        assessed_level = str(snapshot.get("critical_understanding_level") or "").strip()
+        if assessed_level:
+            level = assessed_level
+        snapshot_description = " ".join(
+            str(snapshot.get("synthesis") or snapshot.get("summary") or "").split()
+        ).strip()
+        if snapshot_description:
+            level_description = snapshot_description
+    elif assessment:
         assessed_level = str(
             assessment.get("critical_understanding_level") or ""
         ).strip()
@@ -679,6 +1030,11 @@ def learning_review(
                 or level_description
             )
     strength_sections, improvement_sections = _stage_feedback_history(message_list)
+    strength_sections, improvement_sections = _merge_deep_review_feedback(
+        strength_sections,
+        improvement_sections,
+        snapshot,
+    )
     current_strengths = next(
         (
             section["items"]
@@ -695,11 +1051,32 @@ def learning_review(
         ),
         [],
     )
-    facione_scores = _cumulative_facione_scores(message_list)
+    facione_scores = _max_facione_scores(
+        _cumulative_facione_scores(message_list),
+        _facione_from_stage_checkpoints(journey_stage_reviews),
+    )
     facione_behavior_counts, facione_holistic_candidate = (
         _research_facione_projection(message_list)
     )
     summary = _review_summary(assessment)
+    if snapshot:
+        snapshot_summary = " ".join(
+            str(snapshot.get("synthesis") or snapshot.get("summary") or "").split()
+        ).strip()
+        if snapshot_summary:
+            summary = snapshot_summary
+        raw_facione = snapshot.get("facione_scores")
+        if isinstance(raw_facione, dict) and raw_facione:
+            facione_scores = _normalize_facione_scores(raw_facione)
+        snapshot_conclusion = " ".join(
+            str(snapshot.get("working_conclusion") or "").split()
+        ).strip()
+        if snapshot_conclusion:
+            conclusion_override = snapshot_conclusion
+        else:
+            conclusion_override = None
+    else:
+        conclusion_override = None
     completed_labels = [
         STAGE_BY_ID[stage_id].label for stage_id in normalized["completed_stages"]
     ]
@@ -712,7 +1089,8 @@ def learning_review(
         if normalized["stage_notes"].get(stage_id)
     ]
     conclusion = (
-        (
+        conclusion_override
+        or (
             " ".join(str(assessment.get("working_conclusion") or "").split()).strip()
             if assessment
             else ""
@@ -750,5 +1128,5 @@ def learning_review(
         "improvement_areas": list(current_improvements),
         "next_question": stage.reflection_prompt,
         "turn_count": len(student_messages),
-        "has_personalized_assessment": assessment is not None,
+        "has_personalized_assessment": assessment is not None or snapshot is not None,
     }

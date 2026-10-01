@@ -21,26 +21,39 @@ the Knowledge Base or student S3.
                             │
                    selected sources only
                             │
+              deterministic retrieval gate
+                            │
                 ┌───────────┴───────────┐
-                │                       │
+                │ skip                  │ retrieve
                 ▼                       ▼
-        Course materials          Student uploads
-                │                       │
-                ▼                       ▼
-       Bedrock KB Retrieve       S3 extracted text
-       + metadata filter         scoped retrieval
-       + object-key validation          │
-                │                       │
-                └───────────┬───────────┘
-                            ▼
-                  Unified [S#] evidence
+        conversation memory     Course materials
+        + <=6 recent turns              │
+        + <=3000 hist tokens            │
+                                Bedrock KB Retrieve
+                                + student-source retrieve
+                                + ownership / selected-source checks
+                                        │
+                                        ▼
+                              Unified [S#] excerpts (≤4, ~8k chars)
                             │
                             ▼
               FastAPI runtime rules + untrusted evidence
                             │
                             ▼
-         AgentCore Q&A / Coaching / Review specialists
+              AgentCore fast_chat (one FastAPI invoke; Haiku span count
+              needs live traces)
+                            │
+              rare: needs_source_retrieval after skip
+                            │
+                            ▼
+              FastAPI retrieves once, one FastAPI Haiku retry
+              (provisional first result is not persisted)
 ```
+
+A rare accuracy fallback runs only when the deterministic gate skipped
+retrieval, selected sources exist, and Haiku sets
+`needs_source_retrieval=true`. FastAPI owns that retrieve. AgentCore still
+has `tools=[]` and cannot search KB, S3, or DSQL. Maximum two Haiku calls.
 
 ## Authority
 
@@ -51,7 +64,7 @@ the Knowledge Base or student S3.
 | S3 | File bytes (canonical course objects and owner-scoped student objects) |
 | Bedrock Knowledge Base | Semantic retrieve over official course material only |
 | Local student retriever | Notebook-scoped chunks of extracted student text |
-| AgentCore / Strands | Pedagogical reasoning over authorized `[S#]` evidence. No KB or S3 tools. |
+| AgentCore / Strands | Pedagogical reasoning over authorized `[S#]` evidence. No KB or S3 tools. One FastAPI `fast_chat` invoke for normal chat. Live traces must confirm event-loop/Haiku span count. |
 
 The coach cannot choose sources. Prompt instructions are not authorization.
 
@@ -103,16 +116,45 @@ in two folders cannot collide (`course/readings/archive/week1.pdf` →
 `course_material_id_collisions`. Course sync stores the same id on locked
 source metadata.
 
-If the live Knowledge Base does not yet contain that attribute, a filtered
-Retrieve can return no hits **or raise `ValidationException`**. The adapter
-then retries **without** the filter and still drops unselected or foreign S3
-keys, unless `KNOWLEDGE_BASE_STRICT_METADATA_FILTER=true`. Post-retrieval
-object-key validation is always applied. Strict filter stays off until live
-KB metadata is verified.
+If the live Knowledge Base does not yet contain that attribute, operators must
+set `KNOWLEDGE_BASE_METADATA_FILTER_MODE` explicitly:
 
-Sidecar metadata files are optional until you turn strict mode on. For the
-S3 data source, Bedrock expects a sibling file named
-`<filename.ext>.metadata.json` in the same prefix, for example:
+- `required` (code default, production target after sidecar ingest): send
+  `equals` for one selected `course_material_id` or `in` for several. A
+  `ValidationException` or timeout is an evidence gap. There is **no**
+  automatic unfiltered retry.
+- `degraded_unfiltered`: one unfiltered Retrieve, then exact selected
+  bucket/object-key validation. Temporary operator fallback until sidecars
+  exist in the index.
+- `disabled`: do not call Retrieve.
+
+`KNOWLEDGE_BASE_STRICT_METADATA_FILTER=true` still maps to `required`. False
+no longer skips the MANAGED filter.
+
+Retrieve is optional evidence gathering: the adapter uses a wall-clock timeout
+(`KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS`, default 10s, justified as twice
+the previous 5s fail-closed cap and far below the 120s UI timeout),
+`total_max_attempts=1`, and `numberOfResults` equal to
+`FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4). A Python future timeout does not
+cancel boto; abandoned calls reuse a shared executor
+(`KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS`, default 4). The executor queue is
+not used as a backlog: admission is a semaphore sized to the worker count, so
+excess calls fail closed immediately as `unavailable` /
+`capacity_exhausted` instead of queueing ghost Retrieves.
+
+Post-retrieval object-key **and bucket** validation is always applied. A hit
+whose bucket cannot be positively confirmed against `COURSE_MATERIALS_BUCKET`
+is dropped, including empty configured buckets and empty-bucket URIs such as
+`s3:///course/lectureNotes/week1.pdf`. Production startup fails if a
+Knowledge Base is configured without `COURSE_MATERIALS_BUCKET`. The metadata
+filter is retrieval precision only. FastAPI maps surviving chunks to
+request-local `[S#]` labels.
+
+Sidecar metadata files use the Bedrock S3 data-source format. Generate them
+with `scripts/sync_course_kb_metadata.py` (dry-run by default; `--confirm`
+uploads). Verify local identity with
+`scripts/diagnostics/check_course_kb_metadata.py`. For the S3 data source,
+Bedrock expects a sibling file named `<filename.ext>.metadata.json`:
 
 ```text
 s3://<COURSE_MATERIALS_BUCKET>/course/lectureNotes/Week 1 Introduction to innovation v3.pdf
@@ -122,26 +164,35 @@ s3://<COURSE_MATERIALS_BUCKET>/course/lectureNotes/Week 1 Introduction to innova
 ```json
 {
   "metadataAttributes": {
-    "course_material_id": "lecture_week_1_introduction_to_innovation_v3"
+    "course_material_id": {
+      "value": {
+        "type": "STRING",
+        "stringValue": "lecture_week_1_introduction_to_innovation_v3"
+      },
+      "includeForEmbedding": false
+    }
   }
 }
 ```
 
-After uploading sidecars, sync the Knowledge Base data source. Do not enable
-strict metadata filtering until a live Retrieve with the filter returns
-validated hits. Exact S3 key matching is never relaxed to suffix matching.
+Live validation procedure is **documentation only** and lives in
+[`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md). Generate
+sidecars → upload (`--confirm`) → sync the data source → wait for
+`COMPLETE` → local metadata verification → one `equals` Retrieve → one
+`in` Retrieve → only then set
+`KNOWLEDGE_BASE_METADATA_FILTER_MODE=required`. Do not treat an unfiltered
+Retrieve as proof that filtered mode is live. Those live AWS steps are not
+executed by this repository's pytest.
 
-Live Knowledge Base `JUQNP8AZAZ` currently returns HTTPS S3 locations under
+Until sidecars are ingested, set `degraded_unfiltered` explicitly on the
+live env. Do not switch production off `required` as a code fix.
+
+Live Knowledge Base `JUQNP8AZAZ` previously returned HTTPS S3 locations under
 `CDE2300_course_files_export/Course_materials/...`. The student catalog
 selects `course/lectureNotes/...` and `course/readings/...`. Those keys do
 not match. Re-point the data source at `s3://<COURSE_MATERIALS_BUCKET>/course/`
 and complete ingestion/sync. Do not map the export prefix onto catalog keys
 in application code.
-
-Until the Knowledge Base is re-ingested with `course_material_id` metadata,
-the compatibility fallback is the production path. After re-ingestion, the
-filter constrains semantic search; validation remains defense in depth. Do
-not treat an unfiltered retry as proof that strict metadata mode is live.
 
 Production with `COURSE_MATERIAL_SYNC_ENABLED=true` requires
 `KNOWLEDGE_BASE_ID`, `KNOWLEDGE_BASE_REGION` (or `AWS_REGION`), and
@@ -159,9 +210,11 @@ users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/raw|derived
 
 `LocalChunkRetriever` searches only authenticated user + current notebook +
 currently selected source IDs. There is no global student vector namespace.
-Chunking is deterministic (~1,800 characters, overlap, per-source diversity,
-bounded context). Student uploads keep extracted text; they do not use the
-shared course Knowledge Base.
+Chunking is deterministic (~1,800 characters, overlap, per-source diversity).
+Selected student sources are hydrated from `derived/chunks.v1.json` when that
+artifact is valid; otherwise extracted text is chunked at query time.
+Normal fast chat then keeps at most 4 chunks / 8,000 characters. Student
+uploads keep extracted text; they do not use the shared course Knowledge Base.
 
 ## Unified evidence
 
@@ -176,6 +229,13 @@ are audit metadata, not student-facing citations.
 
 `retrieval_refs` record what was supplied to the model. `source_refs` record
 what the model actually cited after application validation.
+
+Citation resolution after the model call uses the request-scoped turn
+snapshot (`TurnSnapshot.sources_by_id`) plus the selected `source_ids`
+already on the `CoachRequest`. It does not list the S3 course catalog
+again and does not call `get_source` per cited id. Course-catalog
+`list_prefix` still runs once per folder when the snapshot is built
+(Lecture Notes and Readings), before the model call.
 
 ## Untrusted evidence
 

@@ -12,6 +12,11 @@ from backend.student_store import StudentStore
 
 
 def _advance_message(stage_id: str) -> str:
+    if stage_id == "problem_identification":
+        return (
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
+        )
     return (
         f"For the {stage_id} step I will compare signal timing and curb cuts so "
         "older pedestrians near schools can cross safely with enough time."
@@ -19,7 +24,7 @@ def _advance_message(stage_id: str) -> str:
 
 
 def _use_quick_style(store: StudentStore, thread_id: str) -> None:
-    """Pin Quick so two-turn mock ADVANCE stays independent of the Strict default."""
+    """Pin Guide so two-turn mock ADVANCE stays independent of Free first-idea ADVANCE."""
     store.update_thread(thread_id, metadata={"response_detail": "short"})
 
 

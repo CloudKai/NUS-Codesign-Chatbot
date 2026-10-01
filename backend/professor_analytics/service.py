@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -14,7 +15,19 @@ from .models import (
     ConversationTranscriptResponse,
     CriticalThinkingResponse,
     EngagementResponse,
+    NotebookWorkspaceResponse,
     OverviewResponse,
+    ProfessorJourneyProjection,
+    ProfessorJourneyStage,
+    ProfessorLearningState,
+    ProfessorMessagePage,
+    ProfessorNotebookSummary,
+    ProfessorReviewProjection,
+    ProfessorReviewStage,
+    ProfessorSourcesResponse,
+    ProfessorSourceSummary,
+    ProfessorTranscriptMessage,
+    ProfessorWorkspaceTranscript,
     ScoreValue,
     StageDistributionItem,
     StudentDetailResponse,
@@ -22,6 +35,7 @@ from .models import (
     StudentsResponse,
 )
 from .repository import ProfessorAnalyticsRepository
+from .guest_identity import project_student_identity
 
 STAGES = (
     "problem_identification",
@@ -76,6 +90,58 @@ def _label(stage: str | None) -> str | None:
     if spec is not None:
         return spec.label
     return str(stage).replace("_", " ").title()
+
+
+def _stage_id_from_label(label: str | None) -> str | None:
+    """Resolve a student-facing stage label back to its authoritative id."""
+    if not label:
+        return None
+    normalized = str(label).strip().casefold()
+    from backend.learning.stages import STAGE_BY_ID
+
+    for stage_id, spec in STAGE_BY_ID.items():
+        if spec.label.casefold() == normalized or stage_id == normalized:
+            return stage_id
+    return normalized.replace(" ", "_")
+
+
+def _encode_message_cursor(created_at: str, message_id: str) -> str:
+    """Encode a keyset cursor for lecturer transcript pagination."""
+    payload = json.dumps({"t": created_at, "i": message_id}, separators=(",", ":"))
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def _decode_message_cursor(cursor: str) -> tuple[str, str]:
+    """Decode one lecturer transcript cursor or raise ``ValueError``."""
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        payload = json.loads(decoded.decode("utf-8"))
+        created_at = str(payload["t"])
+        message_id = str(payload["i"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("Invalid cursor") from error
+    if not created_at or not message_id:
+        raise ValueError("Invalid cursor")
+    return created_at, message_id
+
+
+def _completed_stage_count(progress_text: Any) -> int:
+    """Return the number of persisted completed stages from notebook metadata."""
+    if not isinstance(progress_text, dict):
+        try:
+            progress_text = json.loads(str(progress_text or "{}"))
+        except (TypeError, ValueError):
+            return 0
+    completed = progress_text.get("completed_stages") if isinstance(progress_text, dict) else []
+    if not isinstance(completed, list):
+        return 0
+    return len(
+        [
+            str(item).lower()
+            for item in completed
+            if str(item).lower() in STAGES
+        ]
+    )
 
 
 def _score(values: Iterable[float]) -> ScoreValue:
@@ -137,6 +203,7 @@ class ProfessorAnalyticsService:
             facione_profile=profile,
             weekly_activity=self._weekly_activity(students.values()),
             attention_students=attention[:8],
+            attention_students_count=len(attention),
             summary=self._summary(students.values(), profile, attention),
         )
 
@@ -150,7 +217,12 @@ class ProfessorAnalyticsService:
         max_score: float | None = None,
     ) -> StudentsResponse:
         """Return a searchable/filterable roster without message contents."""
-        rows = [self._student_item(value) for value in self._build_students(self._repository.load_class_rows()).values()]
+        rows = [
+            self._student_item(value)
+            for value in self._build_students_from_roster(
+                self._repository.load_student_roster()
+            ).values()
+        ]
         needle = search.strip().lower()
         selected_stage = stage.strip().lower() if stage else ""
         filtered = [
@@ -165,32 +237,34 @@ class ProfessorAnalyticsService:
         return StudentsResponse(students=filtered, total=len(filtered))
 
     def student_detail(self, student_id: str) -> StudentDetailResponse | None:
-        """Return one authorised learner's journey and active transcript only."""
-        class_students = self._build_students(self._repository.load_class_rows())
-        value = class_students.get(student_id)
-        if value is None:
+        """Return one authorised learner snapshot without transcript bodies."""
+        profile = self._repository.load_student_roster_row(student_id)
+        if profile is None:
             return None
+        notebook_rows = self._repository.load_student_notebook_summaries(student_id)
+        activity_rows = self._repository.load_student_activity_rows(student_id)
+        value = self._build_student_from_bounded_rows(profile, notebook_rows, activity_rows)
+        benchmark = self._build_benchmark_students(
+            self._repository.load_class_benchmark_rows()
+        )
         trend = [
             {"at": item["at"], "overall": item["overall"], "stage": _label(item["stage"])}
             for item in value["assessments"] if item["overall"] is not None
         ]
         notebooks = [
-            {"id": notebook["id"], "title": notebook["title"], "stage": _label(notebook["stage"]),
-             "messages": len(notebook["messages"]), "student_messages": sum(1 for message in notebook["messages"] if message["role"] == "user"),
-             "last_active": notebook["last_activity"]}
-            for notebook in value["notebooks"].values()
+            self._notebook_summary_item(row)
+            for row in notebook_rows
         ]
-        notebooks.sort(key=lambda item: item["last_active"] or "", reverse=True)
         latest = value["latest_assessment"] or {}
         dimensions = {label: latest.get("dimensions", {}).get(key) for key, label in DIMENSIONS}
         return StudentDetailResponse(
             student=self._student_item(value),
             completed_stages=[_label(stage) or stage for stage in value["completed_stages"]],
             facione_profile=dimensions,
-            class_facione_profile=self._dimension_profile(class_students.values()),
+            class_facione_profile=self._dimension_profile(benchmark.values()),
             class_median_facione=_score(
                 student["overall"]
-                for student in class_students.values()
+                for student in benchmark.values()
                 if student["overall"] is not None
             ),
             facione_trend=trend,
@@ -210,7 +284,7 @@ class ProfessorAnalyticsService:
     ) -> ConversationTranscriptResponse | None:
         """Return one selected active transcript without loading other students' text."""
         students = self._build_students(
-            self._repository.load_class_rows(
+            self._repository.load_student_rows(
                 include_content=True,
                 student_id=student_id,
                 notebook_id=notebook_id,
@@ -220,24 +294,873 @@ class ProfessorAnalyticsService:
         notebook = student["notebooks"].get(notebook_id) if student else None
         if notebook is None:
             return None
+        citation_ids = [
+            str(source_id)
+            for message in notebook["messages"]
+            for source_id in message.get("cited_source_ids", [])
+        ]
+        authorized_citations = self._repository.authorized_citation_ids(
+            student_id, notebook_id, citation_ids
+        )
         return ConversationTranscriptResponse(
             notebook_id=notebook_id,
             title=notebook["title"],
+            stage=_label(notebook.get("stage")),
+            last_active=notebook.get("last_activity"),
             messages=[
                 {
+                    "id": message["id"],
                     "role": message["role"],
                     "content": message["content"],
                     "created_at": message["created_at"],
+                    "attachments": message.get("attachments", []),
+                    "citations": [
+                        citation
+                        for citation in message.get("citations", [])
+                        if str(citation.get("id")) in authorized_citations
+                    ],
                 }
                 for message in notebook["messages"]
             ],
         )
+
+    def notebook_messages(
+        self,
+        student_id: str,
+        notebook_id: str,
+        *,
+        limit: int = 30,
+        cursor: str | None = None,
+    ) -> ProfessorMessagePage | None:
+        """Return one paginated active-branch transcript page for lecturers."""
+        header_row = self._repository.load_notebook_header(student_id, notebook_id)
+        if header_row is None:
+            return None
+        clamped_limit = max(1, min(int(limit), 50))
+        cursor_created_at: str | None = None
+        cursor_id: str | None = None
+        if cursor:
+            try:
+                cursor_created_at, cursor_id = _decode_message_cursor(cursor)
+            except ValueError:
+                raise
+        rows = self._repository.load_notebook_message_page(
+            student_id,
+            notebook_id,
+            limit=clamped_limit + 1,
+            cursor_created_at=cursor_created_at,
+            cursor_id=cursor_id,
+        )
+        has_more = len(rows) > clamped_limit
+        page_rows_desc = rows[:clamped_limit]
+        page_rows = list(reversed(page_rows_desc))
+        citation_ids = [
+            str(source_id)
+            for row in page_rows
+            for source_id in self._row_citation_ids(row)
+        ]
+        authorized_citations = self._repository.authorized_citation_ids(
+            student_id, notebook_id, citation_ids
+        )
+        messages = [
+            self._project_message_row(row, authorized_citations)
+            for row in page_rows
+        ]
+        next_cursor = None
+        if has_more and page_rows_desc:
+            oldest = page_rows_desc[-1]
+            next_cursor = _encode_message_cursor(
+                str(oldest.get("message_created_at") or ""),
+                str(oldest.get("message_id") or ""),
+            )
+        return ProfessorMessagePage(
+            notebook=self._notebook_summary_from_row(header_row),
+            messages=messages,
+            next_cursor=next_cursor,
+        )
+
+    def notebook_sources(
+        self, student_id: str, notebook_id: str
+    ) -> ProfessorSourcesResponse | None:
+        """Return allow-listed library sources for one owned notebook."""
+        header_row = self._repository.load_notebook_header(student_id, notebook_id)
+        if header_row is None:
+            return None
+        store = self._repository.student_store(student_id)
+        if store is None:
+            return None
+        from backend.sources.library import list_visible_sources
+
+        sources = [
+            self._professor_source_summary(source)
+            for source in list_visible_sources(
+                store,
+                notebook_id,
+                include_extracted_text=False,
+            )
+        ]
+        return ProfessorSourcesResponse(
+            notebook=self._notebook_summary_from_row(header_row),
+            sources=sources,
+        )
+
+    def notebook_journey(
+        self, student_id: str, notebook_id: str
+    ) -> ProfessorJourneyProjection | None:
+        """Return persisted journey state without transcript bodies."""
+        header_row = self._repository.load_notebook_header(student_id, notebook_id)
+        if header_row is None:
+            return None
+        store = self._repository.student_store(student_id)
+        if store is None:
+            return None
+        thread = store.get_thread(notebook_id)
+        if thread is None:
+            return None
+        from backend.learning.hmw import hmw_scaffold_projection
+        from backend.settings import settings
+        from backend.student_journey import DEFAULT_STAGE, normalize_journey
+
+        metadata = dict(thread.get("metadata") or {})
+        journey = normalize_journey(metadata.get("learning_journey"))
+        messages = store.get_messages(notebook_id)
+        current_stage = str(journey.get("current_stage") or DEFAULT_STAGE)
+        completed = [
+            str(item).lower()
+            for item in (journey.get("completed_stages") or [])
+            if str(item).lower() in STAGES
+        ]
+        stages = []
+        for stage in STAGES:
+            if stage in completed and stage != current_stage:
+                state = "completed"
+            elif stage == current_stage:
+                state = "current"
+            elif stage in completed:
+                state = "completed"
+            else:
+                state = "not_completed"
+            stages.append(
+                ProfessorJourneyStage(
+                    id=stage,
+                    label=_label(stage) or stage,
+                    state=state,
+                )
+            )
+        return ProfessorJourneyProjection(
+            notebook=self._notebook_summary_from_row(header_row),
+            current_stage=_label(current_stage),
+            completed_stages=[_label(stage) or stage for stage in completed],
+            stages=stages,
+            hmw_scaffold=hmw_scaffold_projection(
+                current_stage,
+                messages,
+                enabled=settings.hmw_scaffold_enabled,
+                response_detail=str(journey.get("response_detail") or ""),
+            ),
+        )
+
+    def notebook_review(
+        self, student_id: str, notebook_id: str
+    ) -> ProfessorReviewProjection | None:
+        """Return persisted review projection without regeneration."""
+        header_row = self._repository.load_notebook_header(student_id, notebook_id)
+        if header_row is None:
+            return None
+        store = self._repository.student_store(student_id)
+        if store is None:
+            return None
+        thread = store.get_thread(notebook_id)
+        if thread is None:
+            return None
+        metadata = dict(thread.get("metadata") or {})
+        projection, _legacy_review = self._project_notebook_review(
+            header_row=header_row,
+            metadata=metadata,
+            messages=store.get_messages(notebook_id),
+        )
+        return projection
+
+    @staticmethod
+    def _completed_journey_stage_reviews(value: Any) -> dict[str, Any]:
+        """Keep only checkpoints backed by a matching completed job.
+
+        A persisted review row can outlive a queued, failed, or replaced job.
+        Treating that row as current would show stale evidence in the lecturer
+        dashboard, so the job status is an explicit part of this read-time
+        projection contract. Missing jobs are intentionally excluded too.
+        """
+        from backend.specialists.review_orchestration import (
+            STAGE_REVIEW_COMPLETE,
+            parse_journey_stage_reviews,
+        )
+
+        parsed = parse_journey_stage_reviews(value)
+        jobs = parsed.get("jobs") or {}
+        reviews = parsed.get("reviews") or {}
+        completed_reviews = {
+            stage_id: review
+            for stage_id, review in reviews.items()
+            if isinstance(jobs.get(stage_id), dict)
+            and str(jobs[stage_id].get("status") or "") == STAGE_REVIEW_COMPLETE
+        }
+        return {**parsed, "reviews": completed_reviews}
+
+    @staticmethod
+    def _project_journey_stage_reviews(
+        value: Any,
+    ) -> dict[str, ProfessorReviewStage]:
+        """Return safe checkpoint copy from the notebook settings blob.
+
+        Journey checkpoint jobs retain worker leases, queue ids, and frozen
+        message ids in ``notebooks.settings_text``.  Those fields are useful
+        to the student workflow but are not lecturer Review data.  Normalize
+        once at this boundary and keep only pedagogical checkpoint fields.
+        """
+        from backend.specialists.review_orchestration import parse_journey_stage_reviews
+
+        parsed = parse_journey_stage_reviews(value)
+        projected: dict[str, ProfessorReviewStage] = {}
+        for stage_id, checkpoint in (parsed.get("reviews") or {}).items():
+            if not isinstance(checkpoint, dict):
+                continue
+            cleaned_stage_id = str(stage_id or checkpoint.get("stage") or "").strip()
+            if not cleaned_stage_id:
+                continue
+            projected[cleaned_stage_id] = ProfessorReviewStage(
+                stage_id=cleaned_stage_id,
+                stage=_label(cleaned_stage_id) or cleaned_stage_id,
+                summary=str(checkpoint.get("summary") or ""),
+                strengths=[
+                    str(item) for item in (checkpoint.get("strengths") or [])
+                ],
+                areas_to_revisit=[
+                    str(item)
+                    for item in (checkpoint.get("areas_to_revisit") or [])
+                ],
+                reasoning_progress=str(
+                    checkpoint.get("reasoning_progress") or ""
+                ),
+                facione_scores=dict(checkpoint.get("facione_scores") or {}),
+            )
+        return projected
+
+    @staticmethod
+    def _merge_checkpoint_feedback(
+        sections: Any,
+        checkpoints: dict[str, ProfessorReviewStage],
+        checkpoint_key: str,
+    ) -> list[dict[str, Any]]:
+        """Prepend checkpoint feedback to stage sections with safe dedupe."""
+        merged: list[dict[str, Any]] = []
+        for raw_section in sections or []:
+            if not isinstance(raw_section, dict):
+                continue
+            section = dict(raw_section)
+            stage_id = str(section.get("stage_id") or "").strip()
+            checkpoint = checkpoints.get(stage_id)
+            checkpoint_items = getattr(checkpoint, checkpoint_key, [])
+            values: list[str] = []
+            for value in [
+                *checkpoint_items,
+                *(section.get("items") or []),
+            ]:
+                cleaned = " ".join(str(value).split()).strip()
+                if cleaned and cleaned.casefold() not in {
+                    item.casefold() for item in values
+                }:
+                    values.append(cleaned)
+            section["items"] = values
+            merged.append(section)
+        return merged
+
+    def _project_notebook_review(
+        self,
+        *,
+        header_row: dict[str, Any],
+        metadata: dict[str, Any],
+        messages: list[dict[str, Any]],
+    ) -> tuple[ProfessorReviewProjection, dict[str, Any]]:
+        """Build the shared dedicated/legacy lecturer Review projection.
+
+        ``journey_stage_reviews`` is read from the already-owned notebook's
+        settings projection.  This method has no provider or persistence
+        writes and is intentionally shared so ``/review`` and the historical
+        ``/workspace`` response cannot drift apart. It returns the compact
+        dedicated projection plus the full legacy ``learning_review`` mapping
+        augmented with safe stage checkpoints.
+        """
+        from backend.learning.journey import learning_review
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_SNAPSHOT_KEY,
+            JOURNEY_STAGE_REVIEWS_KEY,
+        )
+        from backend.student_journey import normalize_journey
+
+        journey = normalize_journey(metadata.get("learning_journey"))
+        checkpoint_blob = self._completed_journey_stage_reviews(
+            metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+        )
+        checkpoints = self._project_journey_stage_reviews(checkpoint_blob)
+        snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+        review = learning_review(
+            messages,
+            journey,
+            detail=journey.get("response_detail"),
+            deep_review_snapshot=snapshot if isinstance(snapshot, dict) else None,
+            journey_stage_reviews=checkpoint_blob,
+        )
+        # ``learning_review`` keeps checkpoint scoring provider-neutral.  The
+        # lecturer projection also needs the checkpoint's stage-level copy so
+        # staff can understand the evidence behind that score when no Deep
+        # Review snapshot exists.
+        strength_sections = self._merge_checkpoint_feedback(
+            review.get("strength_sections"), checkpoints, "strengths"
+        )
+        improvement_sections = self._merge_checkpoint_feedback(
+            review.get("improvement_sections"), checkpoints, "areas_to_revisit"
+        )
+        summary = str(review.get("summary") or "").strip()
+        meaningful_summary = bool(
+            summary
+            and summary != "Your discussion will be summarized here after you start chatting."
+        )
+        if checkpoints and not meaningful_summary:
+            raw_checkpoints = checkpoint_blob.get("reviews") or {}
+            latest_checkpoint = max(
+                (
+                    item
+                    for item in raw_checkpoints.values()
+                    if isinstance(item, dict)
+                ),
+                key=lambda item: int(item.get("conversation_revision") or 0),
+                default={},
+            )
+            summary = str(latest_checkpoint.get("summary") or "").strip() or summary
+        has_personalized_assessment = bool(
+            review.get("has_personalized_assessment") or checkpoints
+        )
+        legacy_review = dict(review)
+        legacy_review["summary"] = summary
+        legacy_review["strength_sections"] = strength_sections
+        legacy_review["improvement_sections"] = improvement_sections
+        legacy_review["has_personalized_assessment"] = has_personalized_assessment
+        legacy_review["stage_reviews"] = {
+            stage_id: checkpoint.model_dump(mode="json")
+            for stage_id, checkpoint in checkpoints.items()
+        }
+        projection = ProfessorReviewProjection(
+            notebook=self._notebook_summary_from_row(header_row),
+            summary=summary,
+            facione_scores=dict(review.get("facione_scores") or {}),
+            strength_sections=strength_sections,
+            improvement_sections=improvement_sections,
+            conclusion=str(review.get("conclusion") or ""),
+            stage_reviews=checkpoints,
+            has_personalized_assessment=has_personalized_assessment,
+        )
+        return projection, legacy_review
+
+    def notebook_workspace(
+        self, student_id: str, notebook_id: str
+    ) -> NotebookWorkspaceResponse | None:
+        """Return one authorised read-only notebook workspace for lecturers."""
+        header_row = self._repository.load_notebook_header(student_id, notebook_id)
+        if header_row is None:
+            return None
+        store = self._repository.student_store(student_id)
+        if store is None:
+            return None
+        thread = store.get_thread(notebook_id)
+        if thread is None:
+            return None
+
+        from backend.learning.hmw import hmw_scaffold_projection
+        from backend.settings import settings
+        from backend.sources.library import list_visible_sources
+        from backend.student_journey import DEFAULT_STAGE, normalize_journey
+
+        messages = store.get_messages(notebook_id)
+        transcript_messages = self._project_transcript_messages(
+            student_id, notebook_id, messages
+        )
+        metadata = dict(thread.get("metadata") or {})
+        journey = normalize_journey(metadata.get("learning_journey"))
+        _review_projection, legacy_review = self._project_notebook_review(
+            header_row=header_row,
+            metadata=metadata,
+            messages=messages,
+        )
+        last_active = None
+        for message in reversed(messages):
+            if str(message.get("role") or "") == "user" and not message.get("is_error"):
+                last_active = message.get("created_at")
+                break
+        sources = [
+            self._professor_source_summary(source)
+            for source in list_visible_sources(
+                store,
+                notebook_id,
+                include_extracted_text=False,
+            )
+        ]
+        title = str(thread.get("title") or "Untitled notebook")
+        stage = _label(str(thread.get("current_stage") or ""))
+        return NotebookWorkspaceResponse(
+            notebook=ProfessorNotebookSummary(
+                id=notebook_id,
+                title=title,
+                current_stage=stage,
+                last_active=last_active,
+            ),
+            transcript=ProfessorWorkspaceTranscript(messages=transcript_messages),
+            sources=sources,
+            learning=ProfessorLearningState(
+                journey=journey,
+                hmw_scaffold=hmw_scaffold_projection(
+                    str(journey.get("current_stage") or DEFAULT_STAGE),
+                    messages,
+                    enabled=settings.hmw_scaffold_enabled,
+                    response_detail=str(journey.get("response_detail") or ""),
+                ),
+                review=legacy_review,
+            ),
+        )
+
+    @staticmethod
+    def _professor_source_summary(source: dict[str, Any]) -> ProfessorSourceSummary:
+        """Project one visible source into the lecturer allow-listed summary."""
+        from backend.source_library import is_locked_course_source
+
+        metadata = source.get("metadata") or {}
+        group = str(metadata.get("course_material_group") or "").strip() or None
+        if group is None and not is_locked_course_source(source):
+            group = "My Sources"
+        has_file = bool(
+            source.get("path")
+            or source.get("object_key")
+            or metadata.get("local_path")
+            or metadata.get("shared_course_object")
+        )
+        return ProfessorSourceSummary(
+            id=str(source.get("id") or ""),
+            title=str(source.get("title") or "Source"),
+            kind=str(source.get("kind") or "file") or None,
+            mime=str(source.get("mime") or source.get("content_type") or "") or None,
+            size=max(0, int(source.get("size") or source.get("byte_size") or 0)),
+            group=group,
+            selected=bool(source.get("selected")),
+            origin=str(metadata.get("origin") or "").strip() or None,
+            locked=is_locked_course_source(source),
+            has_file=has_file,
+        )
+
+    def _project_transcript_messages(
+        self, student_id: str, notebook_id: str, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Build professor-safe transcript rows from one active message list."""
+        citation_ids = [
+            str(source_id)
+            for message in messages
+            for source_id in self._message_citation_ids(message)
+        ]
+        authorized_citations = self._repository.authorized_citation_ids(
+            student_id, notebook_id, citation_ids
+        )
+        projected: list[dict[str, Any]] = []
+        for message in messages:
+            metadata = message.get("metadata") or {}
+            attachments = [
+                {
+                    "id": str(item.get("id") or ""),
+                    "title": str(item.get("title") or "Attachment"),
+                    "mime": str(item.get("mime") or "application/octet-stream"),
+                    "kind": str(item.get("kind") or "file"),
+                    "size": max(0, int(item.get("size") or 0)),
+                }
+                for item in metadata.get("attachments", [])
+                if isinstance(item, dict) and str(item.get("id") or "").strip()
+            ]
+            citations = [
+                citation
+                for citation in self._message_citations(message)
+                if str(citation.get("id")) in authorized_citations
+            ]
+            projected.append(
+                {
+                    "id": str(message.get("id") or ""),
+                    "role": str(message.get("role") or ""),
+                    "content": str(message.get("content") or ""),
+                    "created_at": message.get("created_at"),
+                    "attachments": attachments,
+                    "citations": citations,
+                }
+            )
+        return projected
+
+    @staticmethod
+    def _message_citation_ids(message: dict[str, Any]) -> list[str]:
+        """Return citation ids from one persisted message metadata blob."""
+        metadata = message.get("metadata") or {}
+        raw_refs = metadata.get("source_refs") or metadata.get("cited_source_ids") or []
+        ids: list[str] = []
+        if not isinstance(raw_refs, list):
+            return ids
+        for raw_citation in raw_refs:
+            if isinstance(raw_citation, dict):
+                citation_id = str(
+                    raw_citation.get("id")
+                    or raw_citation.get("source_id")
+                    or raw_citation.get("sourceId")
+                    or ""
+                ).strip()
+            else:
+                citation_id = str(raw_citation or "").strip()
+            if citation_id:
+                ids.append(citation_id)
+        return ids
+
+    @staticmethod
+    def _message_citations(message: dict[str, Any]) -> list[dict[str, str]]:
+        """Return citation descriptors from one persisted message metadata blob."""
+        metadata = message.get("metadata") or {}
+        raw_refs = metadata.get("source_refs") or metadata.get("cited_source_ids") or []
+        citations: list[dict[str, str]] = []
+        if not isinstance(raw_refs, list):
+            return citations
+        for raw_citation in raw_refs:
+            if isinstance(raw_citation, dict):
+                citation_id = str(
+                    raw_citation.get("id")
+                    or raw_citation.get("source_id")
+                    or raw_citation.get("sourceId")
+                    or ""
+                ).strip()
+                label = str(raw_citation.get("label") or "").strip()
+                title = str(
+                    raw_citation.get("title")
+                    or raw_citation.get("source_title")
+                    or raw_citation.get("sourceTitle")
+                    or ""
+                ).strip()
+            else:
+                citation_id = str(raw_citation or "").strip()
+                label = ""
+                title = ""
+            if not citation_id:
+                continue
+            citations.append(
+                {
+                    "id": citation_id,
+                    **({"label": label} if label else {}),
+                    **({"title": title} if title else {}),
+                }
+            )
+        return citations
+
+    @staticmethod
+    def _notebook_summary_item(row: dict[str, Any]) -> dict[str, Any]:
+        """Project one notebook aggregate row into the student-detail shape."""
+        coach_messages = int(row.get("coach_messages") or 0)
+        student_messages = int(row.get("student_messages") or 0)
+        progress = ProfessorAnalyticsService._json(row.get("progress_text"))
+        return {
+            "id": str(row.get("notebook_id") or ""),
+            "title": str(row.get("title") or "Untitled notebook"),
+            "stage": _label(str(row.get("current_stage") or "")),
+            "current_stage": _label(str(row.get("current_stage") or "")),
+            "student_messages": student_messages,
+            "coach_messages": coach_messages,
+            "assistant_messages": coach_messages,
+            "messages": student_messages + coach_messages,
+            "last_active": row.get("last_active"),
+            "completed_stage_count": _completed_stage_count(progress),
+        }
+
+    def _notebook_summary_from_row(self, row: dict[str, Any]) -> ProfessorNotebookSummary:
+        """Project one notebook aggregate row into the API summary model."""
+        coach_messages = int(row.get("coach_messages") or 0)
+        return ProfessorNotebookSummary(
+            id=str(row.get("notebook_id") or ""),
+            title=str(row.get("title") or "Untitled notebook"),
+            current_stage=_label(str(row.get("current_stage") or "")),
+            last_active=row.get("last_active"),
+            student_messages=int(row.get("student_messages") or 0),
+            coach_messages=coach_messages,
+            assistant_messages=coach_messages,
+            completed_stage_count=_completed_stage_count(row.get("progress_text")),
+        )
+
+    def _build_student_from_bounded_rows(
+        self,
+        profile: dict[str, Any],
+        notebook_rows: list[dict[str, Any]],
+        activity_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Build one student aggregate from compact roster and activity rows."""
+        value = self._build_students_from_roster([profile])[str(profile["user_id"])]
+        assessments: list[dict[str, Any]] = []
+        cited_assessment_ids: set[str] = set()
+        user_timestamps: list[datetime] = []
+        session_timestamps: list[datetime] = []
+        for row in activity_rows:
+            role = str(row.get("message_role") or "")
+            if row.get("message_is_error"):
+                continue
+            timestamp = _parse_time(row.get("message_created_at"))
+            if role == "user" and timestamp is not None:
+                user_timestamps.append(timestamp)
+                session_timestamps.append(timestamp)
+            if role != "assistant":
+                continue
+            assessment = self._json(row.get("assessment_text"))
+            if not assessment:
+                continue
+            raw_scores = assessment.get("facione_scores")
+            dimensions = {
+                key: self._dimension_score(raw_scores, key) for key, _ in DIMENSIONS
+            }
+            valid = [score for score in dimensions.values() if score > 0]
+            assessments.append(
+                {
+                    "id": str(row.get("message_id") or ""),
+                    "at": row.get("message_created_at"),
+                    "dimensions": dimensions,
+                    "overall": round(sum(valid) / len(valid), 2) if valid else None,
+                    "stage": assessment.get("current_stage"),
+                }
+            )
+            cited_assessment_ids.add(str(row.get("message_id") or ""))
+        assessments.sort(key=lambda item: (str(item["at"] or ""), item["id"]))
+        value["assessments"] = assessments
+        value["latest_assessment"] = assessments[-1] if assessments else value.get("latest_assessment")
+        value["overall"] = value["latest_assessment"]["overall"] if value["latest_assessment"] else None
+        value["assistant_messages"] = sum(
+            1
+            for row in activity_rows
+            if str(row.get("message_role") or "") == "assistant"
+            and not row.get("message_is_error")
+        )
+        value["student_messages"] = int(profile.get("student_messages") or 0)
+        value["active_days"] = {
+            item.date().isoformat() for item in sorted(user_timestamps)
+        }
+        value["active_days_count"] = int(profile.get("active_days") or len(value["active_days"]))
+        timestamps = sorted(user_timestamps)
+        value["first_activity"] = timestamps[0].isoformat() if timestamps else None
+        value["last_activity"] = timestamps[-1].isoformat() if timestamps else profile.get("last_activity")
+        sessions, minutes = self._sessions(sorted(session_timestamps))
+        value["sessions"] = sessions
+        value["estimated_active_minutes"] = minutes
+        value["started_conversations"] = sum(
+            1 for row in notebook_rows if int(row.get("student_messages") or 0) > 0
+        )
+        value["assessed_responses"] = len(cited_assessment_ids)
+        value["source_grounded_responses"] = sum(
+            1
+            for row in activity_rows
+            if str(row.get("message_role") or "") == "assistant"
+            and not row.get("message_is_error")
+            and str(row.get("message_id") or "") in cited_assessment_ids
+            and bool(self._json_list(row.get("cited_source_ids_text")))
+        )
+        value["notebooks"] = {
+            str(row.get("notebook_id") or ""): {
+                "id": str(row.get("notebook_id") or ""),
+                "messages": [],
+            }
+            for row in notebook_rows
+        }
+        return value
+
+    def _row_citation_ids(self, row: dict[str, Any]) -> list[str]:
+        """Return citation ids from one compact message row."""
+        citations: list[str] = []
+        for raw_citation in self._json_list(row.get("cited_source_ids_text")):
+            if isinstance(raw_citation, dict):
+                citation_id = str(
+                    raw_citation.get("id")
+                    or raw_citation.get("source_id")
+                    or raw_citation.get("sourceId")
+                    or ""
+                ).strip()
+            else:
+                citation_id = str(raw_citation or "").strip()
+            if citation_id:
+                citations.append(citation_id)
+        return citations
+
+    def _project_message_row(
+        self,
+        row: dict[str, Any],
+        authorized_citations: set[str],
+    ) -> ProfessorTranscriptMessage:
+        """Project one SQL message row into the lecturer transcript model."""
+        metadata = self._json(row.get("message_metadata"))
+        attachments = [
+            {
+                "id": str(item.get("id") or ""),
+                "title": str(item.get("title") or "Attachment"),
+                "mime": str(item.get("mime") or "application/octet-stream"),
+                "kind": str(item.get("kind") or "file"),
+                "size": max(0, int(item.get("size") or 0)),
+            }
+            for item in metadata.get("attachments", [])
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        ]
+        message = {
+            "id": str(row.get("message_id") or ""),
+            "role": str(row.get("message_role") or ""),
+            "content": str(row.get("message_content") or ""),
+            "created_at": row.get("message_created_at"),
+            "metadata": metadata,
+        }
+        citations = [
+            citation
+            for citation in self._message_citations(message)
+            if str(citation.get("id")) in authorized_citations
+        ]
+        return ProfessorTranscriptMessage(
+            id=str(row.get("message_id") or ""),
+            role=str(row.get("message_role") or ""),
+            content=str(row.get("message_content") or ""),
+            created_at=row.get("message_created_at"),
+            attachments=attachments,
+            citations=citations,
+        )
+
+    def _build_students_from_roster(
+        self, rows: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Convert compact roster rows into the internal student aggregate shape."""
+        students: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            user_id = str(row["user_id"])
+            identity = project_student_identity(
+                owner_id=user_id,
+                identifier=row.get("identifier"),
+                cognito_sub=row.get("cognito_sub"),
+                display_name=row.get("display_name"),
+                email=row.get("email"),
+            )
+            progress = self._json(row.get("progress_text"))
+            completed = progress.get("completed_stages") if isinstance(progress, dict) else []
+            if not isinstance(completed, list):
+                completed = []
+            stage = str(row.get("current_stage") or "").lower() or None
+            assessment = self._json(row.get("latest_assessment_text"))
+            dimensions: dict[str, float] = {}
+            overall: float | None = None
+            if assessment:
+                raw_scores = assessment.get("facione_scores")
+                dimensions = {
+                    key: self._dimension_score(raw_scores, key) for key, _ in DIMENSIONS
+                }
+                valid = [score for score in dimensions.values() if score > 0]
+                overall = round(sum(valid) / len(valid), 2) if valid else None
+            last_activity = row.get("last_activity")
+            active_days_count = int(row.get("active_days") or 0)
+            students[user_id] = {
+                "id": identity.id,
+                "name": identity.name,
+                "email": identity.email,
+                "is_guest": identity.is_guest,
+                "created_at": row.get("user_created_at"),
+                "stage": stage,
+                "completed_stages": [
+                    str(item).lower() for item in completed if str(item).lower() in STAGES
+                ],
+                "primary_student_messages": int(row.get("primary_student_messages") or 0),
+                "student_messages": int(row.get("student_messages") or 0),
+                "active_days_count": active_days_count,
+                "active_days": set(),
+                "last_activity": last_activity,
+                "latest_assessment": (
+                    {"dimensions": dimensions, "overall": overall} if assessment else None
+                ),
+                "overall": overall,
+                "notebooks": {},
+                "assessments": [],
+            }
+        return students
+
+    def _build_benchmark_students(
+        self, rows: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Build latest assessment summaries from compact benchmark rows."""
+        values: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if str(row.get("message_role") or "") != "assistant" or row.get("message_is_error"):
+                continue
+            assessment = self._json(row.get("assessment_text"))
+            if not assessment:
+                continue
+            user_id = str(row.get("user_id") or "")
+            if not user_id:
+                continue
+            raw_scores = assessment.get("facione_scores")
+            dimensions = {
+                key: self._dimension_score(raw_scores, key) for key, _ in DIMENSIONS
+            }
+            valid = [score for score in dimensions.values() if score > 0]
+            value = values.setdefault(
+                user_id,
+                {
+                    "id": user_id,
+                    "name": str(row.get("display_name") or "Student"),
+                    "email": row.get("email"),
+                    "assessments": [],
+                    "latest_assessment": None,
+                    "overall": None,
+                    "notebooks": {},
+                },
+            )
+            value["assessments"].append(
+                {
+                    "id": str(row.get("message_id") or ""),
+                    "at": row.get("message_created_at"),
+                    "dimensions": dimensions,
+                    "overall": round(sum(valid) / len(valid), 2) if valid else None,
+                    "stage": assessment.get("current_stage"),
+                }
+            )
+        for value in values.values():
+            value["assessments"].sort(
+                key=lambda item: (str(item["at"] or ""), item["id"])
+            )
+            value["latest_assessment"] = value["assessments"][-1]
+            value["overall"] = value["latest_assessment"]["overall"]
+        return values
 
     def critical_thinking(self) -> CriticalThinkingResponse:
         """Return assessment aggregates that support teaching intervention."""
         students = self._build_students(self._repository.load_class_rows())
         values = list(students.values())
         scores = [student["overall"] for student in values if student["overall"] is not None]
+        stage_counts = Counter(student["stage"] for student in values if student["stage"])
+        total_students = len(values)
+        stage_distribution = [
+            StageDistributionItem(
+                stage=_label(stage) or stage,
+                count=stage_counts[stage],
+                percentage=round(stage_counts[stage] / total_students * 100, 1)
+                if total_students
+                else 0,
+            )
+            for stage in STAGES
+        ]
+        stage_distribution.append(
+            StageDistributionItem(
+                stage="Not started",
+                count=total_students - sum(stage_counts.values()),
+                percentage=round(
+                    (total_students - sum(stage_counts.values())) / total_students * 100,
+                    1,
+                )
+                if total_students
+                else 0,
+            )
+        )
         bands = [(1.0, 1.5), (1.5, 2.0), (2.0, 2.5), (2.5, 3.0), (3.0, 3.5), (3.5, 4.01)]
         distribution = [{"band": f"{low:.1f}–{high if high < 4 else 4.0:.1f}", "count": sum(low <= score < high for score in scores)} for low, high in bands]
         comparisons = []
@@ -257,7 +1180,9 @@ class ProfessorAnalyticsService:
             for week, assessment in latest_by_week.items():
                 trend_groups[week].append(assessment["overall"])
         return CriticalThinkingResponse(
-            dimensions=self._dimension_profile(values), distribution=distribution,
+            dimensions=self._dimension_profile(values),
+            stage_distribution=stage_distribution,
+            distribution=distribution,
             stage_comparison=comparisons,
             trend=[{"date": date, "median": round(float(median(group)), 2), "sample_size": len(group)} for date, group in sorted(trend_groups.items())],
         )
@@ -292,12 +1217,20 @@ class ProfessorAnalyticsService:
         students: dict[str, dict[str, Any]] = {}
         for row in rows:
             user_id = str(row["user_id"])
+            identity = project_student_identity(
+                owner_id=user_id,
+                identifier=row.get("identifier"),
+                cognito_sub=row.get("cognito_sub"),
+                display_name=row.get("display_name"),
+                email=row.get("email"),
+            )
             value = students.setdefault(
                 user_id,
                 {
-                    "id": user_id,
-                    "name": str(row.get("display_name") or "Student"),
-                    "email": row.get("email"),
+                    "id": identity.id,
+                    "name": identity.name,
+                    "email": identity.email,
+                    "is_guest": identity.is_guest,
                     "created_at": row.get("user_created_at"),
                     "notebooks": {},
                     "assessments": [],
@@ -313,14 +1246,59 @@ class ProfessorAnalyticsService:
             })
             if not row.get("message_id"):
                 continue
+            raw_citations = self._json_list(row.get("cited_source_ids_text"))
+            citations: list[dict[str, str]] = []
+            citation_ids: list[str] = []
+            for raw_citation in raw_citations:
+                if isinstance(raw_citation, dict):
+                    citation_id = str(
+                        raw_citation.get("id")
+                        or raw_citation.get("source_id")
+                        or raw_citation.get("sourceId")
+                        or ""
+                    ).strip()
+                    label = str(raw_citation.get("label") or "").strip()
+                    title = str(
+                        raw_citation.get("title")
+                        or raw_citation.get("source_title")
+                        or raw_citation.get("sourceTitle")
+                        or ""
+                    ).strip()
+                else:
+                    citation_id = str(raw_citation or "").strip()
+                    label = ""
+                    title = ""
+                if not citation_id:
+                    continue
+                citation_ids.append(citation_id)
+                citations.append(
+                    {
+                        "id": citation_id,
+                        **({"label": label} if label else {}),
+                        **({"title": title} if title else {}),
+                    }
+                )
             message = {
                 "id": str(row["message_id"]),
                 "role": str(row.get("message_role") or ""),
                 "created_at": row.get("message_created_at"),
                 "content": str(row.get("message_content") or ""),
                 "is_error": bool(row.get("message_is_error")),
-                "cited_source_ids": self._json_list(row.get("cited_source_ids_text")),
+                "cited_source_ids": citation_ids,
+                "citations": citations,
             }
+            metadata = self._json(row.get("message_metadata"))
+            message["attachments"] = [
+                {
+                    "id": str(item.get("id") or ""),
+                    "title": str(item.get("title") or "Attachment"),
+                    "mime": str(item.get("mime") or "application/octet-stream"),
+                    "kind": str(item.get("kind") or "file"),
+                    "size": max(0, int(item.get("size") or 0)),
+                }
+                for item in metadata.get("attachments", [])
+                if isinstance(item, dict) and str(item.get("id") or "").strip()
+            ]
             notebook["messages"].append(message)
             if not message["is_error"] and (
                 not notebook["last_activity"]
@@ -503,7 +1481,21 @@ class ProfessorAnalyticsService:
         return signals
 
     def _student_item(self, value: dict[str, Any]) -> StudentListItem:
-        return StudentListItem(id=value["id"], name=value["name"], email=value["email"], current_stage=_label(value["stage"]), stage_progress=len(value["completed_stages"]), facione_overall=value["overall"], student_messages=value["student_messages"], active_days=len(value["active_days"]), last_active=value["last_activity"], needs_attention=self._attention(value))
+        active_days = value.get("active_days_count")
+        if active_days is None:
+            active_days = len(value.get("active_days") or [])
+        return StudentListItem(
+            id=value["id"],
+            name=value["name"],
+            email=value["email"],
+            current_stage=_label(value["stage"]),
+            stage_progress=len(value["completed_stages"]),
+            facione_overall=value["overall"],
+            student_messages=value["student_messages"],
+            active_days=int(active_days),
+            last_active=value["last_activity"],
+            needs_attention=self._attention(value),
+        )
 
     def _dimension_profile(self, values: Iterable[dict[str, Any]]) -> dict[str, ScoreValue]:
         result: dict[str, list[float]] = {label: [] for _, label in DIMENSIONS}

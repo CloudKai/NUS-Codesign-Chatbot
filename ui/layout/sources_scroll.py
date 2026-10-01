@@ -1,6 +1,6 @@
-"""Keep the Sources folder list scrollable inside the side panel.
+"""Keep the Sources folder list scrollable inside the Library destination.
 
-``sync_sources_scroll`` measures the Sources column and assigns a max height to
+``sync_sources_scroll`` measures the Library panel and assigns a max height to
 ``.st-key-sources_scroll`` so long libraries scroll without stretching the page.
 Prefer ``ui.layout.sources_scroll``.
 """
@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import streamlit.components.v1 as components
 
+from ui.html_embed import wrap_component_html
+
 
 def sync_sources_scroll() -> None:
     """Size the sources list region and enable vertical scrolling."""
     components.html(
-        """
+        wrap_component_html(
+            """
 <script>
 (() => {
   const doc = window.parent.document;
   const win = window.parent;
+  const isNode = (value) => Boolean(value) && typeof value.nodeType === "number";
 
   function panel() {
     return doc.querySelector(".st-key-sources_panel");
@@ -148,14 +152,16 @@ def sync_sources_scroll() -> None:
     const sourcesColumn = column(sourcesPanel);
     if (typeof win.ResizeObserver === "function") {
       const observer = new win.ResizeObserver(schedule);
-      observer.observe(sourcesPanel);
-      if (sourcesColumn) observer.observe(sourcesColumn);
+      if (isNode(sourcesPanel)) observer.observe(sourcesPanel);
+      if (isNode(sourcesColumn)) observer.observe(sourcesColumn);
       const workspace = sourcesPanel.closest(".st-key-notebook_workspace");
-      if (workspace) observer.observe(workspace);
+      if (isNode(workspace)) observer.observe(workspace);
       sourcesPanel.__cdSourcesResizeObserver = observer;
     } else {
       const observer = new win.MutationObserver(schedule);
-      observer.observe(sourcesPanel, { childList: true, subtree: true });
+      if (isNode(sourcesPanel)) {
+        observer.observe(sourcesPanel, { childList: true, subtree: true });
+      }
     }
 
     schedule();
@@ -174,6 +180,7 @@ def sync_sources_scroll() -> None:
   boot();
 })();
 </script>
-        """,
+            """
+        ),
         height=0,
     )

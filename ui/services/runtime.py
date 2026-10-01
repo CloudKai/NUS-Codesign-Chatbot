@@ -9,15 +9,29 @@ Student turns go through ``submit_coach_turn`` / ``stream_coach_turn_events``
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+import logging
+import queue
+import sys
+import threading
+import time
+import uuid
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Any, Iterator, TypeVar
 
+import httpx
 import streamlit as st
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 from backend.api_client import LocalApiClient
+from ui.run_memo import invalidate_memo, memoized
 from backend.application import CoachApplicationService
+from backend.coaching.progress import PROGRESS_LABELS
 from backend.domain import (
     CoachRequest,
     CoachTurn,
+    DeepReviewJob,
     MessageCreateRequest,
     NotebookCreateRequest,
     NotebookUpdateRequest,
@@ -31,7 +45,131 @@ from backend.settings import settings
 from backend.source_library import CourseMaterialSyncCoordinator, LectureNotesSyncResult
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
-from backend.workspace_service import SourceContent, TranscriptExport, WorkspaceService
+from backend.workspace_service import (
+    DeepAnalysisPdfExport,
+    SourceContent,
+    TranscriptExport,
+    WorkspaceService,
+)
+
+
+_T = TypeVar("_T")
+_UI_PERF_LOGGER_NAME = "co_design.ui_perf"
+_UI_PERF_HANDLER_FLAG = "_co_design_ui_perf_stream"
+_OPERATIONAL_HANDLER_FLAG = "_co_design_operational_stream"
+_ui_perf_logger = logging.getLogger(_UI_PERF_LOGGER_NAME)
+
+
+@dataclass
+class PendingSourceUpload:
+    """One process-local Sources-panel upload, keyed by owner and notebook."""
+
+    upload_id: str
+    owner_id: str
+    thread_id: str
+    uploads: list[tuple[str, bytes, str | None]]
+    future: Future[list[dict[str, Any]]]
+    failed: bool = False
+
+
+class SourceUploadCoordinator:
+    """Run reusable Sources uploads without blocking a Streamlit fragment."""
+
+    def __init__(self) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=2)
+        self._jobs: dict[str, PendingSourceUpload] = {}
+        self._lock = threading.Lock()
+
+    def submit(
+        self,
+        *,
+        owner_id: str,
+        thread_id: str,
+        uploads: list[tuple[str, bytes, str | None]],
+        upload: Callable[[], list[dict[str, Any]]],
+    ) -> str:
+        """Start one background upload and return its opaque identifier."""
+        upload_id = str(uuid.uuid4())
+        job = PendingSourceUpload(
+            upload_id=upload_id,
+            owner_id=owner_id,
+            thread_id=thread_id,
+            uploads=uploads,
+            future=self._executor.submit(upload),
+        )
+        with self._lock:
+            self._jobs[upload_id] = job
+        return upload_id
+
+    def jobs_for(self, owner_id: str, thread_id: str) -> list[PendingSourceUpload]:
+        """Return only this owner's notebook jobs, newest first."""
+        with self._lock:
+            return [
+                job
+                for job in self._jobs.values()
+                if job.owner_id == owner_id and job.thread_id == thread_id
+            ]
+
+    def retry(self, upload_id: str, upload: Callable[[], list[dict[str, Any]]]) -> bool:
+        """Restart a failed job with its original file batch."""
+        with self._lock:
+            job = self._jobs.get(upload_id)
+            if job is None or not job.future.done() or not job.failed:
+                return False
+            job.future = self._executor.submit(upload)
+            job.failed = False
+            return True
+
+    def mark_failed(self, upload_id: str) -> None:
+        """Remember that the UI observed a terminal upload failure."""
+        with self._lock:
+            job = self._jobs.get(upload_id)
+            if job is not None:
+                job.failed = True
+
+    def discard(self, upload_id: str) -> None:
+        """Remove a terminal job from the local UI coordinator."""
+        with self._lock:
+            self._jobs.pop(upload_id, None)
+
+
+@st.cache_resource
+def source_upload_coordinator() -> SourceUploadCoordinator:
+    """Return the process-local coordinator for Sources-panel file work."""
+    return SourceUploadCoordinator()
+
+
+class _NonPersistentCookies(httpx.Cookies):
+    """Cookie jar that never stores ``Set-Cookie`` values from responses.
+
+    ``local_api_client()`` is process-wide. Auth still forwards the current
+    browser ID cookie on each request via ``cookie_provider``; persisting
+    response cookies on the shared client would mix sessions across students.
+    """
+
+    def extract_cookies(self, response: httpx.Response) -> None:
+        """Ignore ``Set-Cookie`` headers so the shared jar stays empty."""
+        del response
+        return
+
+
+def _memo_read(key: tuple[Any, ...], loader: Callable[[], _T]) -> _T:
+    """Return a run-scoped cached workspace read."""
+    return memoized(key, loader)
+
+
+def _forget_reads(*prefixes: tuple[Any, ...]) -> None:
+    """Drop run-scoped reads that match ``prefixes`` (or all, if empty)."""
+    invalidate_memo(*prefixes)
+
+
+def _invalidate_legacy_backfill(thread_id: str) -> None:
+    """Allow a fresh legacy attachment scan after a relevant local mutation."""
+    if get_script_run_ctx() is not None:
+        done = st.session_state.get("_legacy_backfill_done")
+        if isinstance(done, set):
+            done.discard(thread_id)
+    _forget_reads(("backfill_legacy_sources", thread_id))
 
 
 @st.cache_resource
@@ -65,8 +203,21 @@ def resources(
 
 
 def owner_identifier() -> str:
-    """Return the active StudentStore owner identifier for this browser session."""
-    return str(st.session_state.get("_auth_store_identifier") or "local-student")
+    """Return the active StudentStore owner identifier for this browser session.
+
+    Cognito sessions bind ``cognito:{sub}`` before any store use. The
+    unauthenticated demo owner ``local-student`` cannot equal that prefixed
+    form, so the two cache keys cannot collide.
+    """
+    bound = str(st.session_state.get("_auth_store_identifier") or "").strip()
+    if bound:
+        return bound
+    cognito_sub = str(st.session_state.get("_auth_bound_sub") or "").strip()
+    if cognito_sub:
+        repaired = f"cognito:{cognito_sub}"
+        bind_owner_identifier(repaired)
+        return repaired
+    return "local-student"
 
 
 def bind_owner_identifier(identifier: str) -> None:
@@ -109,20 +260,33 @@ def local_api_client() -> LocalApiClient:
     Streamlit and is not forwarded here.
     """
 
-    def _id_cookie() -> dict[str, str]:
+    def _session_cookies() -> dict[str, str]:
         try:
             from ui.auth_gate import _cookie_value
         except Exception:
             return {}
-        token = _cookie_value(str(settings.cognito_id_token_cookie_name))
-        if not token:
-            return {}
-        return {str(settings.cognito_id_token_cookie_name): token}
+        cookies: dict[str, str] = {}
+        for name in (
+            settings.cognito_id_token_cookie_name,
+            settings.guest_session_cookie_name,
+        ):
+            value = _cookie_value(str(name))
+            if value:
+                cookies[str(name)] = value
+        return cookies
 
-    return LocalApiClient(
+    timeout_seconds = 120.0
+    client = LocalApiClient(
         str(getattr(settings, "api_base_url", "http://127.0.0.1:8000")),
-        cookie_provider=_id_cookie,
+        timeout_seconds=timeout_seconds,
+        cookie_provider=_session_cookies,
     )
+    http = getattr(client, "_http", None)
+    if isinstance(http, httpx.Client):
+        # Client.cookies.setter wraps values in a generic Cookies jar and
+        # would re-enable Set-Cookie persistence. Assign the private jar.
+        http._cookies = _NonPersistentCookies()
+    return client
 
 
 def local_api_enabled() -> bool:
@@ -135,6 +299,76 @@ def local_api_enabled() -> bool:
     return bool(getattr(settings, "use_local_api", False))
 
 
+def _source_upload_callable(
+    thread_id: str,
+    uploads: list[tuple[str, bytes, str | None]],
+) -> Callable[[], list[dict[str, Any]]]:
+    """Build a background-safe Sources upload without reading session state later."""
+    if local_api_enabled():
+        client = local_api_client()
+        auth_cookies = client.auth_cookies_snapshot()
+
+        def _upload() -> list[dict[str, Any]]:
+            return client.upload_sources(
+                thread_id,
+                uploads,
+                auth_cookies=auth_cookies,
+            )
+
+        return _upload
+    _, service, _, _ = _resolve_resources()
+
+    def _upload() -> list[dict[str, Any]]:
+        return service.upload_sources(thread_id, uploads, origin="source_panel")
+
+    return _upload
+
+
+def enqueue_source_upload(
+    thread_id: str,
+    uploads: list[tuple[str, bytes, str | None]],
+) -> str:
+    """Start a reusable Sources upload and return its opaque local job id."""
+    return source_upload_coordinator().submit(
+        owner_id=owner_identifier(),
+        thread_id=thread_id,
+        uploads=uploads,
+        upload=_source_upload_callable(thread_id, uploads),
+    )
+
+
+def pending_source_uploads(thread_id: str) -> list[PendingSourceUpload]:
+    """Return current-session uploads for the active authenticated notebook."""
+    return source_upload_coordinator().jobs_for(owner_identifier(), thread_id)
+
+
+def retry_source_upload(upload_id: str, thread_id: str) -> bool:
+    """Retry a failed Sources upload using its original immutable batch."""
+    for job in pending_source_uploads(thread_id):
+        if job.upload_id == upload_id:
+            return source_upload_coordinator().retry(
+                upload_id,
+                _source_upload_callable(thread_id, job.uploads),
+            )
+    return False
+
+
+def discard_source_upload(upload_id: str) -> None:
+    """Forget one terminal local Sources upload card."""
+    source_upload_coordinator().discard(upload_id)
+
+
+def finalize_source_upload(upload_id: str, thread_id: str) -> None:
+    """Drop cached reads once a successful background upload is observed."""
+    discard_source_upload(upload_id)
+    _forget_reads(("list_sources", thread_id), ("get_thread", thread_id))
+
+
+def mark_source_upload_failed(upload_id: str) -> None:
+    """Mark a background upload retryable after its safe error is rendered."""
+    source_upload_coordinator().mark_failed(upload_id)
+
+
 def submit_coach_turn(request: CoachRequest) -> CoachTurn:
     """Run one student coaching turn via the local API or in-process service."""
     if local_api_enabled():
@@ -143,28 +377,206 @@ def submit_coach_turn(request: CoachRequest) -> CoachTurn:
     return coach.submit(request)
 
 
-def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:
-    """Yield progress/token/done events for one coaching turn.
+def start_deep_review(
+    thread_id: str, *, idempotency_key: str | None = None
+) -> DeepReviewJob:
+    """Enqueue one server-owned explicit Deep Review via API or in-process service."""
+    if local_api_enabled():
+        return local_api_client().start_deep_review(
+            thread_id, idempotency_key=idempotency_key
+        )
+    _, _, coach, _ = _resolve_resources()
+    return coach.enqueue_deep_review(thread_id, idempotency_key=idempotency_key)
+
+
+def mark_journey_stage_reviews_read(thread_id: str) -> dict:
+    """Clear the Journey unread flag after the student views Journey."""
+    if local_api_enabled():
+        return local_api_client().mark_journey_stage_reviews_read(thread_id)
+    _, _, coach, _ = _resolve_resources()
+    return coach.mark_journey_stage_reviews_read(thread_id)
+
+
+def get_journey_stage_reviews(thread_id: str) -> dict:
+    """Return the durable Journey stage-review blob for one notebook."""
+    if local_api_enabled():
+        return local_api_client().get_journey_stage_reviews(thread_id)
+    _, _, coach, _ = _resolve_resources()
+    return coach.get_journey_stage_reviews(thread_id)
+
+
+def get_deep_review_job(thread_id: str) -> DeepReviewJob | None:
+    """Return the owner-scoped Deep Review job, or ``None`` when none exists."""
+    if local_api_enabled():
+        try:
+            return local_api_client().get_deep_review(thread_id)
+        except httpx.HTTPStatusError as error:
+            if error.response is not None and error.response.status_code == 404:
+                return None
+            raise
+    _, _, coach, _ = _resolve_resources()
+    try:
+        return coach.get_deep_review_job(thread_id)
+    except ValueError:
+        return None
+
+
+def configure_ui_perf_logger() -> None:
+    """Attach one INFO stderr handler so Streamlit ``UI TIMING`` reaches Docker logs.
+
+    FastAPI already enables ``co_design.ui_perf`` in the API process. Streamlit
+    is a separate process: this logger has no handlers, parents are unset, and
+    Python's lastResort handler is WARNING, so INFO lines never appear in
+    ``docker logs``. This configures only ``co_design.ui_perf``; it does not
+    change the root logger or third-party log levels.
+
+    Returns:
+        None. Side effect: at most one flagged StreamHandler on the logger.
+        Repeated Streamlit reruns and imports are idempotent.
+    """
+    log = logging.getLogger(_UI_PERF_LOGGER_NAME)
+    log.setLevel(logging.INFO)
+    if any(
+        getattr(existing, _UI_PERF_HANDLER_FLAG, False)
+        or getattr(existing, _OPERATIONAL_HANDLER_FLAG, False)
+        for existing in log.handlers
+    ):
+        return
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    setattr(handler, _UI_PERF_HANDLER_FLAG, True)
+    # Same-process FastAPI tests also call configure_operational_loggers();
+    # sharing this flag prevents a second stderr handler on ui_perf.
+    setattr(handler, _OPERATIONAL_HANDLER_FLAG, True)
+    log.addHandler(handler)
+
+
+def _duration_ms(started: float) -> float:
+    """Return milliseconds elapsed since a ``perf_counter`` mark."""
+    return round(max(0.0, (time.perf_counter() - started) * 1000.0), 1)
+
+
+def log_ui_timing(**fields: Any) -> None:
+    """Emit a privacy-safe UI TIMING line. Values must not include student text.
+
+    Args:
+        **fields: Short tokens or numbers. Strings with whitespace are dropped.
+    """
+    configure_ui_perf_logger()
+    parts = ["UI TIMING"]
+    for key, value in fields.items():
+        if value is None:
+            continue
+        cleaned_key = str(key).strip().replace(" ", "_")[:40]
+        if not cleaned_key.replace("_", "").isalnum():
+            continue
+        if isinstance(value, bool):
+            parts.append(f"{cleaned_key}={'true' if value else 'false'}")
+        elif isinstance(value, int):
+            parts.append(f"{cleaned_key}={value}")
+        elif isinstance(value, float):
+            parts.append(f"{cleaned_key}={value:.1f}")
+        else:
+            token = str(value).strip()[:80]
+            if not token or any(ch.isspace() for ch in token):
+                continue
+            parts.append(f"{cleaned_key}={token}")
+    if len(parts) > 1:
+        _ui_perf_logger.info(" ".join(parts))
+
+
+def stream_coach_turn_events(
+    request: CoachRequest,
+    *,
+    request_id: str | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Yield progress, validated reply preview, and done events for a turn.
 
     Uses the NDJSON streaming API when ``USE_LOCAL_API`` is enabled; otherwise
-    runs the in-process coach service and emits a compact token stream.
+    runs the in-process coach service and emits the same progress phases.
+    This helper does not invent token slices from a completed reply.
+    A UUID ``X-Request-ID`` correlates Streamlit, FastAPI, and TIMING lines.
     """
-    if local_api_enabled():
-        yield from local_api_client().stream_coach_turn(request)
-        return
-    _, _, coach, _ = _resolve_resources()
-    yield {
-        "event": "started",
-        "thread_id": request.thread_id,
-        "stage": request.current_stage,
-    }
-    yield {"event": "status", "phase": "thinking"}
-    turn = coach.submit(request)
-    text = turn.response_text
-    chunk_size = 32
-    for index in range(0, len(text), chunk_size):
-        yield {"event": "token", "text": text[index : index + chunk_size]}
-    yield {"event": "done", "turn": turn.model_dump(mode="json")}
+    configure_ui_perf_logger()
+    request_id = str(request_id or "").strip() or str(uuid.uuid4())
+    started = time.perf_counter()
+    api_to_first_event_ms: float | None = None
+    api_to_started_ms: float | None = None
+    api_to_first_status_ms: float | None = None
+    api_to_reply_ready_ms: float | None = None
+
+    def _iter_events() -> Iterator[dict[str, Any]]:
+        if local_api_enabled():
+            yield from local_api_client().stream_coach_turn(
+                request, request_id=request_id
+            )
+            return
+        _, _, coach, _ = _resolve_resources()
+        yield {
+            "event": "started",
+            "thread_id": request.thread_id,
+            "stage": request.current_stage,
+        }
+        bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = queue.SimpleQueue()
+
+        def _progress(phase: str) -> None:
+            bus.put(
+                {
+                    "event": "status",
+                    "phase": phase,
+                    "label": PROGRESS_LABELS.get(phase, ""),
+                }
+            )
+
+        def _reply_ready(response_text: str) -> None:
+            bus.put({"event": "reply_ready", "text": response_text})
+
+        def _worker() -> None:
+            try:
+                completed = coach.submit(request, progress=_progress, reply=_reply_ready)
+                bus.put({"event": "done", "turn": completed.model_dump(mode="json")})
+            except BaseException as error:
+                bus.put(error)
+            finally:
+                bus.put(None)
+
+        worker = threading.Thread(target=_worker, name="in-process-coach-stream", daemon=True)
+        worker.start()
+        try:
+            while True:
+                item = bus.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            worker.join(timeout=1.0)
+
+    try:
+        for event in _iter_events():
+            elapsed = _duration_ms(started)
+            if api_to_first_event_ms is None:
+                api_to_first_event_ms = elapsed
+            kind = str(event.get("event") or "")
+            if kind == "started" and api_to_started_ms is None:
+                api_to_started_ms = elapsed
+            elif kind == "status" and api_to_first_status_ms is None:
+                api_to_first_status_ms = elapsed
+            elif kind == "reply_ready" and api_to_reply_ready_ms is None:
+                api_to_reply_ready_ms = elapsed
+            yield event
+    finally:
+        log_ui_timing(
+            request_id=request_id,
+            stream_ms=_duration_ms(started),
+            api_to_first_event_ms=api_to_first_event_ms,
+            api_to_started_ms=api_to_started_ms,
+            api_to_first_status_ms=api_to_first_status_ms,
+            api_to_reply_ready_ms=api_to_reply_ready_ms,
+            api_dispatch_ms=api_to_first_event_ms,
+        )
 
 
 class WorkspaceFacade:
@@ -178,31 +590,93 @@ class WorkspaceFacade:
         store, _, _, _ = _resolve_resources()
         return store
 
+    def forget_run_reads(self, thread_id: str | None = None) -> None:
+        """Drop memoized notebook reads after a coach or workspace mutation.
+
+        Args:
+            thread_id: When set, drop only that notebook's thread, messages,
+                sources, pending-transition, and backfill entries. When omitted,
+                clear the entire run memo.
+        """
+        if not thread_id:
+            _forget_reads()
+            return
+        _forget_reads(
+            ("get_thread", thread_id),
+            ("get_messages", thread_id),
+            ("has_messages", thread_id),
+            ("get_message_page", thread_id),
+            ("get_oldest_user_messages", thread_id),
+            ("list_sources", thread_id),
+            ("pending_transition", thread_id),
+            ("backfill_legacy_sources", thread_id),
+            ("request_course_material_sync", thread_id),
+        )
+
+    def forget_source_reads(self, thread_id: str) -> None:
+        """Drop the source-list memo after the run added or removed library rows.
+
+        Args:
+            thread_id: Notebook whose source list is now stale.
+        """
+        _forget_reads(
+            ("list_sources", thread_id),
+            ("backfill_legacy_sources", thread_id),
+        )
+
+    def forget_turn_reads(self, thread_id: str) -> None:
+        """Drop thread, messages, and pending-transition memos after a coach turn.
+
+        Source list, backfill, and course-sync memos stay valid: a completed
+        turn does not add library rows, and the Sources panel often renders
+        after chat in the same script run.
+        """
+        _forget_reads(
+            ("get_thread", thread_id),
+            ("get_messages", thread_id),
+            ("has_messages", thread_id),
+            ("get_message_page", thread_id),
+            ("pending_transition", thread_id),
+        )
+
     def get_user_preferences(self) -> dict[str, Any]:
         """Return local user preferences."""
-        if local_api_enabled():
-            return local_api_client().get_preferences()
-        return self._service().get_preferences()
+
+        def load() -> dict[str, Any]:
+            if local_api_enabled():
+                return local_api_client().get_preferences()
+            return self._service().get_preferences()
+
+        return _memo_read(("get_user_preferences",), load)
 
     def update_user_preferences(self, patch: dict[str, Any]) -> None:
         """Merge preference keys."""
         if local_api_enabled():
             local_api_client().update_preferences(patch)
-            return
-        self._service().update_preferences(patch)
+        else:
+            self._service().update_preferences(patch)
+        _forget_reads(("get_user_preferences",))
 
     def list_threads(self, search: str = "", folder_id: str | None = None) -> list[dict]:
         """List notebooks (folder filter retained for store compatibility; unused)."""
         del folder_id
-        if local_api_enabled():
-            return local_api_client().list_threads(search)
-        return self._service().list_threads(search)
+
+        def load() -> list[dict]:
+            if local_api_enabled():
+                return local_api_client().list_threads(search)
+            return self._service().list_threads(search)
+
+        return _memo_read(("list_threads", search), load)
 
     def get_thread(self, thread_id: str) -> dict | None:
         """Return one notebook."""
-        if local_api_enabled():
-            return local_api_client().get_thread(thread_id)
-        return self._service().get_thread(thread_id)
+
+        def load() -> dict | None:
+            if local_api_enabled():
+                return local_api_client().get_thread(thread_id)
+            return self._service().get_thread(thread_id)
+
+        return _memo_read(("get_thread", thread_id), load)
 
     def create_thread(
         self,
@@ -222,14 +696,17 @@ class WorkspaceFacade:
                     assignment=assignment or {},
                 )
             )
-            return str(thread["id"])
-        thread = self._service().create_thread(
-            name=name,
-            model_id=model_id,
-            support_mode=support_mode,
-            assignment=assignment,
-        )
-        return str(thread["id"])
+            thread_id = str(thread["id"])
+        else:
+            thread = self._service().create_thread(
+                name=name,
+                model_id=model_id,
+                support_mode=support_mode,
+                assignment=assignment,
+            )
+            thread_id = str(thread["id"])
+        _forget_reads(("list_threads",))
+        return thread_id
 
     def update_thread(
         self,
@@ -243,27 +720,94 @@ class WorkspaceFacade:
             local_api_client().update_thread(
                 thread_id, NotebookUpdateRequest(name=name, metadata=metadata)
             )
-            return
-        self._service().update_thread(thread_id, name=name, metadata=metadata)
+        else:
+            self._service().update_thread(thread_id, name=name, metadata=metadata)
+        _forget_reads(("get_thread", thread_id), ("list_threads",))
 
     def delete_thread(self, thread_id: str) -> None:
         """Delete a notebook."""
         if local_api_enabled():
             local_api_client().delete_thread(thread_id)
-            return
-        self._service().delete_thread(thread_id)
+        else:
+            self._service().delete_thread(thread_id)
+        self.forget_run_reads(thread_id)
+        _forget_reads(("list_threads",))
 
     def get_messages(self, thread_id: str) -> list[dict]:
         """Return chat history."""
-        if local_api_enabled():
-            return local_api_client().get_messages(thread_id)
-        return self._service().get_messages(thread_id)
+
+        def load() -> list[dict]:
+            if local_api_enabled():
+                return local_api_client().get_messages(thread_id)
+            return self._service().get_messages(thread_id)
+
+        return _memo_read(("get_messages", thread_id), load)
+
+    def has_messages(self, thread_id: str) -> bool:
+        """Return the bounded owner-scoped visible-message existence flag."""
+
+        def load() -> bool:
+            if local_api_enabled():
+                return local_api_client().has_messages(thread_id)
+            return self._service().has_messages(thread_id)
+
+        return bool(_memo_read(("has_messages", thread_id), load))
+
+    def get_message_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 6,
+        cursor: str | None = None,
+    ) -> Any:
+        """Return one bounded transcript page through the active backend."""
+
+        def load() -> Any:
+            if local_api_enabled():
+                return local_api_client().get_message_page(
+                    thread_id, limit=limit, cursor=cursor
+                )
+            return self._service().get_message_page(
+                thread_id, limit=limit, cursor=cursor
+            )
+
+        return _memo_read(("get_message_page", thread_id, limit, cursor), load)
+
+    def get_messages_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 6,
+        cursor: str | None = None,
+    ) -> Any:
+        """Compatibility alias for :meth:`get_message_page`."""
+        return self.get_message_page(thread_id, limit=limit, cursor=cursor)
+
+    def get_oldest_user_messages(
+        self, thread_id: str, *, limit: int = 2
+    ) -> list[str]:
+        """Return a bounded oldest-user projection for title compatibility."""
+
+        def load() -> list[str]:
+            if local_api_enabled():
+                return local_api_client().get_oldest_user_messages(
+                    thread_id, limit=limit
+                )
+            return self._service().get_oldest_user_messages(thread_id, limit=limit)
+
+        return _memo_read(("get_oldest_user_messages", thread_id, limit), load)
 
     def download_transcript(self, thread_id: str) -> TranscriptExport:
         """Return a ``.txt`` transcript projected from persisted messages."""
         if local_api_enabled():
             return local_api_client().download_transcript(thread_id)
         return self._service().export_transcript(thread_id)
+
+    def download_deep_analysis_pdf(self, thread_id: str) -> DeepAnalysisPdfExport:
+        """Return a PDF built from the notebook's completed Sonnet Deep Review."""
+        if local_api_enabled():
+            return local_api_client().download_deep_analysis_pdf(thread_id)
+        return self._service().export_deep_analysis_pdf(thread_id)
 
     def add_message(
         self,
@@ -279,25 +823,41 @@ class WorkspaceFacade:
         """Persist one chat message."""
         del model_id, message_id, is_error
         if local_api_enabled():
-            return local_api_client().add_message(
+            added = local_api_client().add_message(
                 thread_id,
                 MessageCreateRequest(
                     role=role, content=content, metadata=metadata or {}
                 ),
             )
-        return self._service().add_message(
-            thread_id, role, content, metadata=metadata
+        else:
+            added = self._service().add_message(
+                thread_id, role, content, metadata=metadata
+            )
+        _forget_reads(
+            ("get_messages", thread_id),
+            ("has_messages", thread_id),
+            ("get_message_page", thread_id),
+            ("get_thread", thread_id),
         )
+        if (metadata or {}).get("uploads"):
+            _invalidate_legacy_backfill(thread_id)
+        return added
 
     def list_sources(
         self, thread_id: str, *, selected_only: bool = False
     ) -> list[dict]:
         """List notebook sources without filesystem paths."""
-        if local_api_enabled():
-            return local_api_client().list_sources(
+
+        def load() -> list[dict]:
+            if local_api_enabled():
+                return local_api_client().list_sources(
+                    thread_id, selected_only=selected_only
+                )
+            return self._service().list_sources(
                 thread_id, selected_only=selected_only
             )
-        return self._service().list_sources(thread_id, selected_only=selected_only)
+
+        return _memo_read(("list_sources", thread_id, selected_only), load)
 
     def get_source(self, thread_id: str, source_id: str) -> dict | None:
         """Return one source without a filesystem path."""
@@ -313,15 +873,17 @@ class WorkspaceFacade:
             local_api_client().update_source(
                 thread_id, source_id, SourceUpdateRequest(selected=selected)
             )
-            return
-        self._service().set_source_selected(thread_id, source_id, selected)
+        else:
+            self._service().set_source_selected(thread_id, source_id, selected)
+        _forget_reads(("list_sources", thread_id))
 
     def set_all_sources_selected(self, thread_id: str, selected: bool) -> None:
         """Select or deselect every source."""
         if local_api_enabled():
             local_api_client().select_all_sources(thread_id, selected)
-            return
-        self._service().set_all_sources_selected(thread_id, selected)
+        else:
+            self._service().set_all_sources_selected(thread_id, selected)
+        _forget_reads(("list_sources", thread_id))
 
     def rename_source(self, thread_id: str, source_id: str, title: str) -> None:
         """Rename a non-locked source."""
@@ -329,8 +891,9 @@ class WorkspaceFacade:
             local_api_client().update_source(
                 thread_id, source_id, SourceUpdateRequest(title=title)
             )
-            return
-        self._service().rename_source(thread_id, source_id, title)
+        else:
+            self._service().rename_source(thread_id, source_id, title)
+        _forget_reads(("list_sources", thread_id))
 
     def delete_source(
         self, thread_id: str, source_id: str, *, force: bool = False
@@ -339,8 +902,10 @@ class WorkspaceFacade:
         del force
         if local_api_enabled():
             local_api_client().delete_source(thread_id, source_id)
-            return
-        self._service().delete_source(thread_id, source_id)
+        else:
+            self._service().delete_source(thread_id, source_id)
+        _forget_reads(("list_sources", thread_id))
+        _invalidate_legacy_backfill(thread_id)
 
     def upload_sources(
         self,
@@ -351,8 +916,23 @@ class WorkspaceFacade:
     ) -> list[dict]:
         """Upload files into the source library."""
         if local_api_enabled():
-            return local_api_client().upload_sources(thread_id, uploads)
-        return self._service().upload_sources(thread_id, uploads, origin=origin)
+            added = local_api_client().upload_sources(thread_id, uploads)
+        else:
+            added = self._service().upload_sources(
+                thread_id, uploads, origin=origin
+            )
+        _forget_reads(("list_sources", thread_id), ("get_thread", thread_id))
+        return added
+
+    def upload_attachments(
+        self,
+        thread_id: str,
+        uploads: list[tuple[str, bytes, str | None]],
+    ) -> list[dict[str, Any]]:
+        """Upload private current-turn attachments without adding Sources rows."""
+        if local_api_enabled():
+            return local_api_client().upload_attachments(thread_id, uploads)
+        return self._service().upload_attachments(thread_id, uploads)
 
     def get_source_content(self, thread_id: str, source_id: str) -> SourceContent:
         """Read source bytes for preview/download."""
@@ -361,17 +941,45 @@ class WorkspaceFacade:
         return self._service().read_source_content(thread_id, source_id)
 
     def backfill_legacy_sources(self, thread_id: str) -> int:
-        """Import legacy message attachments."""
-        if local_api_enabled():
-            return local_api_client().backfill_legacy_sources(thread_id)
-        return self._service().backfill_legacy_sources(thread_id)
+        """Import legacy attachments once per notebook in a Streamlit session.
+
+        A new browser session still scans the persisted message metadata. Failed
+        scans are never marked complete, so the next render can retry.
+        """
+        done: set[str] | None = None
+        if get_script_run_ctx() is not None:
+            current = st.session_state.get("_legacy_backfill_done")
+            if not isinstance(current, set):
+                current = set()
+                st.session_state["_legacy_backfill_done"] = current
+            done = current
+            if thread_id in done:
+                return 0
+
+        def load() -> int:
+            if local_api_enabled():
+                added = local_api_client().backfill_legacy_sources(thread_id)
+            else:
+                added = self._service().backfill_legacy_sources(thread_id)
+            if added:
+                _forget_reads(("list_sources", thread_id), ("get_messages", thread_id))
+            return added
+
+        added = _memo_read(("backfill_legacy_sources", thread_id), load)
+        if done is not None:
+            done.add(thread_id)
+        return added
 
     def pending_transition(self, thread_id: str) -> PendingPhaseTransition | None:
         """Return the unresolved stage recommendation for the owned notebook."""
-        if local_api_enabled():
-            return local_api_client().pending_transition(thread_id)
-        _, _, _, learning = _resolve_resources()
-        return learning.get_pending(thread_id)
+
+        def load() -> PendingPhaseTransition | None:
+            if local_api_enabled():
+                return local_api_client().pending_transition(thread_id)
+            _, _, _, learning = _resolve_resources()
+            return learning.get_pending(thread_id)
+
+        return _memo_read(("pending_transition", thread_id), load)
 
     def resolve_transition(
         self,
@@ -382,20 +990,26 @@ class WorkspaceFacade:
     ) -> PendingPhaseTransition:
         """Persist the student's decision through the active application path."""
         if local_api_enabled():
-            return local_api_client().resolve_transition(
+            resolved = local_api_client().resolve_transition(
                 thread_id,
                 transition_id,
                 accepted,
             )
-        _, _, _, learning = _resolve_resources()
-        return learning.resolve(thread_id, transition_id, accepted)
+        else:
+            _, _, _, learning = _resolve_resources()
+            resolved = learning.resolve(thread_id, transition_id, accepted)
+        self.forget_run_reads(thread_id)
+        return resolved
 
     def select_stage(self, thread_id: str, stage_id: str) -> dict:
         """Move the notebook to a student-chosen Thinking Path stage."""
         if local_api_enabled():
-            return local_api_client().select_stage(thread_id, stage_id)
-        _, _, _, learning = _resolve_resources()
-        return learning.select_stage(thread_id, stage_id)
+            metadata = local_api_client().select_stage(thread_id, stage_id)
+        else:
+            _, _, _, learning = _resolve_resources()
+            metadata = learning.select_stage(thread_id, stage_id)
+        self.forget_run_reads(thread_id)
+        return metadata
 
     def revise_message(
         self,
@@ -411,7 +1025,7 @@ class WorkspaceFacade:
     ) -> CoachTurn:
         """Revise a user message through the FastAPI or in-process coach path."""
         if local_api_enabled():
-            return local_api_client().revise_message(
+            turn = local_api_client().revise_message(
                 thread_id,
                 message_id,
                 content,
@@ -421,17 +1035,21 @@ class WorkspaceFacade:
                 response_detail=response_detail,
                 response_language=response_language,
             )
-        _, _, coach, _ = _resolve_resources()
-        return coach.revise_and_resubmit(
-            thread_id,
-            message_id,
-            content,
-            idempotency_key=idempotency_key,
-            model_id=model_id,
-            reasoning_effort=reasoning_effort,
-            response_detail=response_detail,
-            response_language=response_language,
-        )
+        else:
+            _, _, coach, _ = _resolve_resources()
+            turn = coach.revise_and_resubmit(
+                thread_id,
+                message_id,
+                content,
+                idempotency_key=idempotency_key,
+                model_id=model_id,
+                reasoning_effort=reasoning_effort,
+                response_detail=response_detail,
+                response_language=response_language,
+            )
+        self.forget_run_reads(thread_id)
+        _invalidate_legacy_backfill(thread_id)
+        return turn
 
     def request_course_material_sync(self, thread_id: str):
         """Start or join course-material sync for the active notebook.
@@ -439,39 +1057,57 @@ class WorkspaceFacade:
         API-mode sessions (including Cognito) sync through FastAPI so ownership
         stays on the authenticated application user.
         """
-        if local_api_enabled():
-            api_base = str(getattr(settings, "api_base_url", "http://127.0.0.1:8000"))
-            client = local_api_client()
-            # Streamlit's cookie context is script-thread local. Capture the
-            # short-lived ID cookie before handing work to the sync executor;
-            # reading it inside that worker resolves the fallback owner and
-            # causes an endless authenticated-notebook 404 retry loop.
-            auth_cookies = client.auth_cookie_snapshot()
 
-            def _sync_via_api() -> LectureNotesSyncResult:
-                payload = client.sync_course_materials(
+        def load():
+            if local_api_enabled():
+                api_base = str(
+                    getattr(settings, "api_base_url", "http://127.0.0.1:8000")
+                )
+                client = local_api_client()
+                # Streamlit's cookie context is script-thread local. Capture the
+                # short-lived ID cookie before handing work to the sync executor;
+                # reading it inside that worker resolves the fallback owner and
+                # causes an endless authenticated-notebook 404 retry loop.
+                auth_cookies = client.auth_cookie_snapshot()
+
+                def _sync_via_api() -> LectureNotesSyncResult:
+                    payload = client.sync_course_materials(
+                        thread_id,
+                        auth_cookies=auth_cookies,
+                    )
+                    errors = payload.get("errors") or []
+                    return LectureNotesSyncResult(
+                        added=int(payload.get("added") or 0),
+                        updated=int(payload.get("updated") or 0),
+                        removed=int(payload.get("removed") or 0),
+                        unchanged=int(payload.get("unchanged") or 0),
+                        skipped=int(payload.get("skipped") or 0),
+                        errors=tuple(str(item) for item in errors),
+                    )
+
+                return course_material_sync().request_api(
+                    api_base,
                     thread_id,
-                    auth_cookies=auth_cookies,
+                    _sync_via_api,
                 )
-                errors = payload.get("errors") or []
-                return LectureNotesSyncResult(
-                    added=int(payload.get("added") or 0),
-                    updated=int(payload.get("updated") or 0),
-                    removed=int(payload.get("removed") or 0),
-                    unchanged=int(payload.get("unchanged") or 0),
-                    skipped=int(payload.get("skipped") or 0),
-                    errors=tuple(str(item) for item in errors),
-                )
+            return course_material_sync().request(self._backend_store(), thread_id)
 
-            return course_material_sync().request_api(
-                api_base,
-                thread_id,
-                _sync_via_api,
-            )
-        return course_material_sync().request(self._backend_store(), thread_id)
+        return _memo_read(("request_course_material_sync", thread_id), load)
 
 
 store = WorkspaceFacade()
+
+# Fragment ticks from a prior script may not see in-flight session_state.
+# Session ids let Sources/Deep Review skip ``rerun_app()`` in the same process.
+_streaming_session_ids: set[str] = set()
+
+
+def _script_session_id() -> str:
+    """Return the current Streamlit session id, or empty when no script context."""
+    ctx = get_script_run_ctx(suppress_warning=True)
+    if ctx is None:
+        return ""
+    return str(getattr(ctx, "session_id", "") or "")
 
 
 def rerun_app() -> None:
@@ -482,3 +1118,37 @@ def rerun_app() -> None:
 def rerun_fragment() -> None:
     """Request a fragment-scoped rerun for panel-local UI updates."""
     st.rerun(scope="fragment")
+
+
+def set_coach_turn_streaming(active: bool) -> None:
+    """Record whether this session is blocked in a coach send or revise.
+
+    Writes ``_coach_turn_streaming`` and an in-process set keyed by Streamlit
+    session id so a Sources ``run_every`` fragment from a prior script can
+    still skip ``rerun_app()`` while ``handle_prompt`` holds the main run.
+
+    Args:
+        active: True while the send/revise call is in flight.
+    """
+    flagged = bool(active)
+    st.session_state["_coach_turn_streaming"] = flagged
+    session_id = _script_session_id()
+    if not session_id:
+        return
+    if flagged:
+        _streaming_session_ids.add(session_id)
+    else:
+        _streaming_session_ids.discard(session_id)
+
+
+def coach_turn_is_streaming() -> bool:
+    """Return whether a coach send or revise is blocking this script run.
+
+    Sources and Deep Review fragments must not call ``rerun_app()`` while this
+    is true; a full remount during ``handle_prompt`` stacks a second workspace.
+    True if session state or the in-process session-id set says streaming.
+    """
+    if st.session_state.get("_coach_turn_streaming"):
+        return True
+    session_id = _script_session_id()
+    return bool(session_id and session_id in _streaming_session_ids)

@@ -1,15 +1,16 @@
 """Resolve the authenticated notebook owner for FastAPI application requests.
 
 Production application traffic must never trust a client-supplied ``user_id``.
-Ownership is derived only from a verified Cognito ID-token cookie (``sub`` →
-application user → owner-scoped ``StudentStore``). Local/mock demos without
-Cognito may fall back to the process default ``local-student`` store.
+Ownership comes from a verified Cognito ID-token cookie or, when explicitly
+enabled, a validated guest bearer cookie. Local/mock demos without either may
+fall back to the process default ``local-student`` store.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -81,22 +82,45 @@ class OwnerResolver:
         # Defense in depth: never consult spoofable identity inputs.
         _ignore_client_identity(request)
 
-        id_token = str(
-            request.cookies.get(settings.cognito_id_token_cookie_name) or ""
-        ).strip()
-        if id_token:
-            try:
-                identity = self._oidc.verify_id_token(id_token)
-            except CognitoOIDCError as error:
-                logger.info("Rejected application request with invalid ID token")
-                raise HTTPException(
-                    status_code=401, detail="Not authenticated"
-                ) from error
-            return self._services_for_identity(identity)
+        started = time.perf_counter()
+        try:
+            id_token = str(
+                request.cookies.get(settings.cognito_id_token_cookie_name) or ""
+            ).strip()
+            if id_token:
+                try:
+                    identity = self._oidc.verify_id_token(id_token)
+                except CognitoOIDCError as error:
+                    logger.info("Rejected application request with invalid ID token")
+                    raise HTTPException(
+                        status_code=401, detail="Not authenticated"
+                    ) from error
+                return self._services_for_identity(identity)
 
-        if self.requires_authenticated_owner():
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        return self._cached(self._default_store.identifier)
+            guest_secret = str(
+                request.cookies.get(settings.guest_session_cookie_name) or ""
+            ).strip()
+            if settings.guest_access_enabled and guest_secret:
+                guest_owner_id = self._default_store.validate_guest_session(
+                    guest_secret
+                )
+                if guest_owner_id is None:
+                    logger.info(
+                        "Rejected application request with invalid guest session"
+                    )
+                    raise HTTPException(status_code=401, detail="Not authenticated")
+                return self._services_for_guest_owner(guest_owner_id)
+
+            if settings.guest_access_enabled:
+                raise HTTPException(status_code=401, detail="Not authenticated")
+
+            if self.requires_authenticated_owner():
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            return self._cached(self._default_store.identifier)
+        finally:
+            request.state.auth_context_ms = round(
+                max(0.0, (time.perf_counter() - started) * 1000.0), 1
+            )
 
     def requires_authenticated_owner(self) -> bool:
         """Return whether anonymous ``local-student`` fallback is forbidden.
@@ -132,6 +156,24 @@ class OwnerResolver:
             self._cache[identifier] = services
         return services
 
+    def _services_for_guest_owner(self, user_id: str) -> OwnerServices:
+        """Map a validated guest session to its isolated persisted owner store."""
+        user = self._default_store.get_user_by_id(user_id)
+        if user is None or str(user.get("role") or "student").lower() != "student":
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        identifier = str(user.get("identifier") or "")
+        if not identifier.startswith("guest:"):
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        with self._lock:
+            cached = self._cache.get(identifier)
+            if cached is not None:
+                return cached
+        store = self._store_for_identifier(identifier)
+        services = self._build_services(store, user_id=user_id)
+        with self._lock:
+            existing = self._cache.setdefault(identifier, services)
+            return existing
+
     def _store_for_identifier(self, identifier: str) -> StudentStore:
         """Return a StudentStore bound to *identifier*, sharing the default DB."""
         if identifier == self._default_store.identifier:
@@ -163,6 +205,13 @@ class OwnerResolver:
             and not settings.student_stage_selection,
             retriever=configured_context_retriever(),
         )
+
+        def _enqueue_stage_review(thread_id: str, stage_id: str) -> None:
+            from backend.coaching.stage_review_jobs import submit_stage_review_job
+
+            submit_stage_review_job(coach, thread_id, stage_id)
+
+        learning.set_stage_review_enqueue(_enqueue_stage_review)
         resolved_user_id = str(user_id or getattr(store, "owner_id", "") or "")
         return OwnerServices(
             store=store,

@@ -167,7 +167,8 @@ def test_harness_system_prompt_stays_thin_and_matches_runtime_patch_intent():
     patch = Path("agentcore_runtime/structured_coach.py").read_text(
         encoding="utf-8"
     )
-    assert "Do not call tools" in patch
+    assert "framework-provided structured-output mechanism" in patch
+    assert "Do not use application, retrieval, browsing, database" in patch
     assert "output_contract=coach_turn" in patch or "coach_turn" in patch
     assert "trusted_instructions" in patch
 

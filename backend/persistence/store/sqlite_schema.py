@@ -23,6 +23,29 @@ CREATE TABLE IF NOT EXISTS oauth_login_states (
     expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS guest_sessions (
+    token_digest TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    claim_user_id TEXT,
+    claim_operation_id TEXT,
+    claim_result_text TEXT,
+    claim_expires_at TEXT,
+    preview_user_id TEXT,
+    preview_operation_id TEXT,
+    preview_fingerprint TEXT,
+    preview_expires_at TEXT,
+    FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_guest_sessions_owner_expires
+ON guest_sessions(owner_user_id, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_guest_sessions_expires
+ON guest_sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS notebooks (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -213,4 +236,3 @@ NOTEBOOK_CHILD_DELETE_PLAN = (
 NOTEBOOK_CHILD_TABLES = tuple(
     table for table, _predicate in NOTEBOOK_CHILD_DELETE_PLAN
 )
-

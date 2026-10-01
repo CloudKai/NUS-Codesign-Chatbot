@@ -222,7 +222,9 @@ def test_authenticated_production_critical_path_survives_restart_and_cleanup(
         "/api/v1/coach/turn",
         json=_turn(
             thread_id,
-            "I will compare signal timing and lighting at junctions so older pedestrians can cross safely.",
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing? I will compare signal timing "
+            "with the selected source.",
             source_id,
         ),
         cookies=cookies,
@@ -274,7 +276,11 @@ def test_authenticated_production_critical_path_survives_restart_and_cleanup(
     assert state.json()["learning_journey"]["current_stage"] == "concept_generation"
 
     storage = get_file_storage()
-    assert len(storage._objects) == 2  # raw upload plus extracted text
+    stored_keys = [str(key).replace("\\", "/") for key in storage._objects]
+    assert len(stored_keys) == 3
+    assert sum(key.endswith("/raw/crossing-notes.txt") for key in stored_keys) == 1
+    assert sum(key.endswith("/derived/extracted.txt") for key in stored_keys) == 1
+    assert sum(key.endswith("/derived/chunks.v1.json") for key in stored_keys) == 1
     deleted = restarted.delete(f"/api/v1/threads/{thread_id}", cookies=cookies)
     assert deleted.status_code == 200
     assert storage._objects == {}

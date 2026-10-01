@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from typing import Any
 
 import pytest
 
 from backend.bedrock_retrieve import (
     BedrockKnowledgeBaseRetriever,
+    RetrieveCapacityError,
     classify_retrieve_failure,
     configured_context_retriever,
+    reset_shared_retrieve_executor,
     sanitized_s3_uri,
 )
 from backend.retrieval import (
@@ -24,7 +28,7 @@ from backend.retrieval import (
     course_material_id_from_object_key,
     expand_session_query_text,
 )
-from backend.settings import settings
+from backend.settings import settings, validate_knowledge_base_bucket_binding
 
 
 class FakeRetrieveClient:
@@ -188,6 +192,39 @@ def test_retrieve_expands_lecture_number_to_week_phrasing():
     )
 
 
+def test_retrieve_uses_bounded_active_antecedent_for_anaphoric_course_question():
+    """The managed adapter sends one scoped contextual Retrieve query only."""
+    client = FakeRetrieveClient()
+    antecedent = "Reliability matters because a false negative leaves someone in the road."
+    BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        RetrievalQuery(
+            current_message="Which reading supports what I just said?",
+            current_stage="deep_analysis",
+            sources=(
+                _course_source(
+                    "src-week-1",
+                    "S1",
+                    object_key="course/lectureNotes/week1.pdf",
+                ),
+            ),
+            recent_messages=(
+                {"role": "user", "content": antecedent},
+                {"role": "user", "content": "Which source supports my previous point?"},
+            ),
+        )
+    )
+
+    assert len(client.calls) == 1
+    query_text = client.calls[0]["retrievalQuery"]["text"]
+    assert antecedent in query_text
+    assert "Which source supports my previous point?" not in query_text
+    assert len(query_text) <= settings.fast_chat_project_context_chars
+
+
 def test_retrieve_drops_foreign_and_unselected_course_keys():
     client = FakeRetrieveClient(
         results=[
@@ -323,13 +360,14 @@ def test_retrieve_sends_course_material_id_metadata_filter():
     )
     assert len(client.calls) == 1
     vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert vector["numberOfResults"] == 4
     assert vector["filter"] == {
         "equals": {"key": "course_material_id", "value": "lecture_crossing"}
     }
     assert result.chunks[0].retrieval_origin == "knowledge_base"
 
 
-def test_retrieve_falls_back_without_filter_then_post_validates():
+def test_required_mode_empty_filtered_result_does_not_retry_unfiltered():
     client = FakeRetrieveClient(
         results_sequence=[
             [],
@@ -349,6 +387,7 @@ def test_retrieve_falls_back_without_filter_then_post_validates():
         "JUQNP8AZAZ",
         course_bucket="cde2300-course-content-s3",
         client=client,
+        metadata_filter_mode="required",
     ).retrieve(
         _query(
             _course_source(
@@ -358,13 +397,45 @@ def test_retrieve_falls_back_without_filter_then_post_validates():
             )
         )
     )
-    assert len(client.calls) == 2
-    first_filter = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
-    second_filter = client.calls[1]["retrievalConfiguration"]["vectorSearchConfiguration"]
-    assert "filter" in first_filter
-    assert "filter" not in second_filter
+    assert len(client.calls) == 1
+    search = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert "filter" in search
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "empty"
+
+
+def test_degraded_unfiltered_post_validates_selected_keys():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/readings/unselected.pdf",
+                "Unselected reading excerpt.",
+            ),
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                "Selected lecture excerpt after degraded search.",
+            ),
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+        metadata_filter_mode="degraded_unfiltered",
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert len(client.calls) == 1
+    search = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert "filter" not in search
     assert [chunk.text for chunk in result.chunks] == [
-        "Selected lecture excerpt after fallback."
+        "Selected lecture excerpt after degraded search."
     ]
     assert "Unselected reading" not in result.context
 
@@ -540,6 +611,135 @@ def test_virtual_week1_kb_hit_reaches_context():
     assert "lecture 1" in query_text.casefold()
 
 
+def test_week_one_query_narrows_selected_lectures_before_kb_filter():
+    """Selected Week 10 must not enter the metadata filter for a Week 1 question."""
+    week10 = RetrievalSource(
+        source_id="virtual-week-10",
+        label="S2",
+        title="Week 10 Storytelling.pdf",
+        text="",
+        group="lectureNotes",
+        object_key="course/lectureNotes/Week 10 Storytelling.pdf",
+        course_material_id=course_material_id_from_object_key(
+            "course/lectureNotes/Week 10 Storytelling.pdf"
+        ),
+        virtual_course_source=True,
+        shared_course_object=True,
+    )
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                f"s3://cde2300-course-content-s3/{_WEEK1_KEY}",
+                "Week 1 covers an innovation-driven economy.",
+            )
+        ]
+    )
+    result = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what does week 1 material cover",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(), week10),
+        )
+    )
+    assert result.chunks
+    assert result.chunks[0].source_id == "virtual-week-1"
+    vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert vector["filter"] == {
+        "equals": {
+            "key": "course_material_id",
+            "value": "lecture_week_1_introduction_to_innovation_v3",
+        }
+    }
+
+
+def test_unselected_week1_is_never_searched_when_only_week10_is_selected() -> None:
+    """Unselected Week 1 never enters the metadata filter, even for a Week 1 question."""
+    week10_key = "course/lectureNotes/Week 10 Storytelling.pdf"
+    week10 = RetrievalSource(
+        source_id="virtual-week-10",
+        label="S1",
+        title="Week 10 Storytelling.pdf",
+        text="",
+        group="lectureNotes",
+        object_key=week10_key,
+        course_material_id=course_material_id_from_object_key(week10_key),
+        virtual_course_source=True,
+        shared_course_object=True,
+    )
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                f"s3://cde2300-course-content-s3/{_WEEK1_KEY}",
+                "Week 1 covers an innovation-driven economy.",
+            )
+        ]
+    )
+    result = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what does week 1 material cover",
+            current_stage="problem_identification",
+            sources=(week10,),
+        )
+    )
+    vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    week10_id = course_material_id_from_object_key(week10_key)
+    assert vector["filter"] == {
+        "equals": {"key": "course_material_id", "value": week10_id}
+    }
+    assert "lecture_week_1_introduction_to_innovation_v3" not in str(vector["filter"])
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "empty"
+
+
+def test_key_mismatch_records_drop_reason() -> None:
+    from backend.turn_perf import begin_coach_turn_perf, current_perf, reset_coach_turn_perf
+
+    begin_coach_turn_perf()
+    try:
+        client = FakeRetrieveClient(
+            results=[
+                _hit(
+                    "s3://cde2300-course-content-s3/course/lectureNotes/other.pdf",
+                    "Unrelated excerpt",
+                )
+            ]
+        )
+        result = BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ).retrieve(
+            RetrievalQuery(
+                current_message="what does week 1 material cover",
+                current_stage="problem_identification",
+                sources=(_virtual_week1_source(),),
+            )
+        )
+        assert result.chunks == ()
+        perf = current_perf()
+        assert perf is not None
+        assert perf.fields.get("kb_drop_key_mismatch") == 1
+        assert perf.fields.get("kb_raw_hit_count") == 1
+        assert perf.fields.get("kb_validated_hit_count") == 0
+        assert "kb_validate_ms" in perf.fields
+    finally:
+        reset_coach_turn_perf()
+
+
 def test_virtual_week1_without_kb_is_evidence_gap():
     result = CompositeContextRetriever(
         knowledge_base=None,
@@ -578,7 +778,7 @@ def test_virtual_week1_kb_zero_results_does_not_use_local_placeholder():
     assert result.course_retrieval_status == "empty"
     assert COURSE_RETRIEVAL_EMPTY_CONTEXT in result.context
     assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
-    assert len(client.calls) == 2
+    assert len(client.calls) == 1
 
 
 def test_virtual_week1_access_denied_does_not_use_local_placeholder():
@@ -745,6 +945,12 @@ def test_classify_retrieve_failure_categories():
     timeout = type("ReadTimeoutError", (Exception,), {})("timed out")
     assert classify_retrieve_failure(timeout) == "timeout"
     assert classify_retrieve_failure(RuntimeError("boom")) == "client_error"
+    assert (
+        classify_retrieve_failure(
+            RetrieveCapacityError("knowledge_base_retrieve_capacity_exhausted")
+        )
+        == "capacity_exhausted"
+    )
 
 
 def test_retrieve_missing_kb_id_is_config_missing():
@@ -777,6 +983,82 @@ def test_retrieve_boto_client_unavailable():
     assert result.chunks == ()
     assert result.course_retrieval_status == "unavailable"
     assert result.failure_category == "client_error"
+
+
+def test_runtime_client_bounds_retrieve_wait_and_disables_sdk_retries(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import boto3
+    import botocore.config
+
+    observed: dict[str, Any] = {}
+    sentinel = object()
+
+    class FakeConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            observed["config"] = kwargs
+
+    def fake_client(service: str, *, region_name: str, config: Any) -> object:
+        observed.update(
+            {"service": service, "region_name": region_name, "client_config": config}
+        )
+        return sentinel
+
+    monkeypatch.setattr(botocore.config, "Config", FakeConfig)
+    monkeypatch.setattr(boto3, "client", fake_client)
+
+    retriever = BedrockKnowledgeBaseRetriever("JUQNP8AZAZ", region="us-west-2")
+    assert retriever._runtime_client() is sentinel
+    assert observed["service"] == "bedrock-agent-runtime"
+    assert observed["region_name"] == "us-west-2"
+    assert observed["config"] == {
+        "retries": {"total_max_attempts": 1, "mode": "standard"},
+        "read_timeout": retriever._retrieve_timeout_seconds,
+        "connect_timeout": min(2.0, retriever._retrieve_timeout_seconds),
+    }
+
+
+def test_hung_retrieve_fails_closed_within_wall_clock_timeout(
+    caplog: pytest.LogCaptureFixture,
+):
+    class HungRetrieveClient:
+        """Injected client that blocks until the test releases it."""
+
+        def __init__(self) -> None:
+            self.release = threading.Event()
+
+        def retrieve(self, **kwargs: Any) -> Any:
+            self.release.wait(timeout=30)
+            return {"retrievalResults": []}
+
+    hung = HungRetrieveClient()
+    started = time.perf_counter()
+    try:
+        with caplog.at_level(logging.WARNING, logger="backend.bedrock_retrieve"):
+            result = BedrockKnowledgeBaseRetriever(
+                "JUQNP8AZAZ",
+                course_bucket="cde2300-course-content-s3",
+                client=hung,
+                retrieve_timeout_seconds=0.05,
+            ).retrieve(
+                _query(
+                    _course_source(
+                        "src-lecture",
+                        "S1",
+                        object_key="course/lectureNotes/crossing.pdf",
+                    )
+                )
+            )
+        elapsed = time.perf_counter() - started
+        assert elapsed < 0.5
+        assert result.chunks == ()
+        assert result.course_retrieval_status == "unavailable"
+        assert result.failure_category == "timeout"
+        assert "course_retrieval_timeout" in caplog.text
+        assert "course_retrieval_elapsed_ms=" in caplog.text
+    finally:
+        hung.release.set()
+        reset_shared_retrieve_executor()
 
 
 def test_retrieve_access_denied_is_unavailable(caplog: pytest.LogCaptureFixture):
@@ -854,7 +1136,7 @@ def test_retrieve_throttled_is_unavailable():
     assert result.failure_category == "throttled"
 
 
-def test_retrieve_validation_exception_retries_unfiltered():
+def test_required_mode_validation_exception_does_not_retry_unfiltered():
     client = FakeRetrieveClient(
         errors_sequence=[_aws_error("ValidationException"), None],
         results=[
@@ -868,7 +1150,7 @@ def test_retrieve_validation_exception_retries_unfiltered():
         "JUQNP8AZAZ",
         course_bucket="cde2300-course-content-s3",
         client=client,
-        strict_metadata_filter=False,
+        metadata_filter_mode="required",
     ).retrieve(
         _query(
             _course_source(
@@ -878,14 +1160,9 @@ def test_retrieve_validation_exception_retries_unfiltered():
             )
         )
     )
-    assert len(client.calls) == 2
-    first_filter = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
-    second_filter = client.calls[1]["retrievalConfiguration"]["vectorSearchConfiguration"]
-    assert "filter" in first_filter
-    assert "filter" not in second_filter
-    assert result.course_retrieval_status == "ok"
-    assert result.chunks[0].retrieval_origin == "knowledge_base"
-    assert "validation fallback" in result.chunks[0].text
+    assert len(client.calls) == 1
+    assert result.course_retrieval_status == "unavailable"
+    assert result.failure_category == "validation_error"
 
 
 def test_strict_metadata_filter_does_not_retry_validation_exception():
@@ -984,6 +1261,125 @@ def test_retrieve_wrong_bucket_is_discarded():
     assert result.chunks == ()
     assert result.course_retrieval_status == "empty"
     assert "Wrong bucket" not in result.context
+
+
+def test_retrieve_empty_configured_bucket_rejects_matching_key():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                "Cannot confirm bucket when COURSE_MATERIALS_BUCKET is empty.",
+            )
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="",
+        client=client,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "empty"
+    assert "Cannot confirm bucket" not in result.context
+
+
+def test_retrieve_empty_bucket_uri_is_rejected():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3:///course/lectureNotes/crossing.pdf",
+                "Empty-bucket URI must not match.",
+            )
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "empty"
+    assert "Empty-bucket URI" not in result.context
+
+
+def test_retrieve_correct_bucket_still_maps_selected_key():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                "Confirmed course bucket excerpt.",
+            )
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert [chunk.text for chunk in result.chunks] == ["Confirmed course bucket excerpt."]
+    assert result.course_retrieval_status == "ok"
+
+
+def test_retrieve_case_mismatched_object_key_is_rejected():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/Crossing.pdf",
+                "Case-mismatched key must not match crossing.pdf.",
+            )
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert result.chunks == ()
+    assert "Case-mismatched" not in result.context
+
+
+def test_knowledge_base_without_course_bucket_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "knowledge_base_id", "")
+    monkeypatch.setattr(settings, "course_materials_bucket", "")
+    validate_knowledge_base_bucket_binding()
+    monkeypatch.setattr(settings, "knowledge_base_id", "JUQNP8AZAZ")
+    with pytest.raises(ValueError, match="COURSE_MATERIALS_BUCKET"):
+        validate_knowledge_base_bucket_binding()
+    monkeypatch.setattr(settings, "course_materials_bucket", "cde2300-course-content-s3")
+    validate_knowledge_base_bucket_binding()
 
 
 def test_retrieve_unexpected_response_shape_is_empty():
@@ -1100,7 +1496,7 @@ def test_configured_live_retriever_uses_region_fallback(
     assert retriever._knowledge_base._knowledge_base_type == "vector"
 
 
-def test_managed_retrieve_uses_managed_search_configuration():
+def test_strict_managed_retrieve_uses_managed_search_configuration():
     client = FakeRetrieveClient(
         results=[
             _hit(
@@ -1133,24 +1529,14 @@ def test_managed_retrieve_uses_managed_search_configuration():
     assert result.chunks[0].retrieval_origin == "knowledge_base"
 
 
-def test_managed_retrieve_falls_back_without_filter():
-    client = FakeRetrieveClient(
-        results_sequence=[
-            [],
-            [
-                _hit(
-                    "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
-                    "Managed fallback excerpt.",
-                )
-            ],
-        ]
-    )
+def test_managed_retrieve_does_not_retry_empty_unfiltered_search():
+    client = FakeRetrieveClient(results=[])
     result = BedrockKnowledgeBaseRetriever(
         "JUQNP8AZAZ",
         course_bucket="cde2300-course-content-s3",
         client=client,
         knowledge_base_type="managed",
-        strict_metadata_filter=False,
+        metadata_filter_mode="degraded_unfiltered",
     ).retrieve(
         _query(
             _course_source(
@@ -1160,13 +1546,203 @@ def test_managed_retrieve_falls_back_without_filter():
             )
         )
     )
-    assert len(client.calls) == 2
-    first = client.calls[0]["retrievalConfiguration"]["managedSearchConfiguration"]
-    second = client.calls[1]["retrievalConfiguration"]["managedSearchConfiguration"]
-    assert "filter" in first
-    assert "filter" not in second
-    assert "vectorSearchConfiguration" not in client.calls[1]["retrievalConfiguration"]
-    assert result.chunks[0].text == "Managed fallback excerpt."
+    assert len(client.calls) == 1
+    search = client.calls[0]["retrievalConfiguration"]["managedSearchConfiguration"]
+    assert "filter" not in search
+    assert result.course_retrieval_status == "empty"
+
+
+def test_managed_required_empty_result_keeps_metadata_filter():
+    client = FakeRetrieveClient(results=[])
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+        knowledge_base_type="managed",
+        metadata_filter_mode="required",
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert len(client.calls) == 1
+    search = client.calls[0]["retrievalConfiguration"]["managedSearchConfiguration"]
+    assert search["numberOfResults"] == 4
+    assert search["filter"] == {
+        "equals": {"key": "course_material_id", "value": "lecture_crossing"}
+    }
+    assert result.course_retrieval_status == "empty"
+
+
+def test_managed_multiple_sources_use_in_filter():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                "Lecture excerpt.",
+            ),
+            _hit(
+                "s3://cde2300-course-content-s3/course/readings/pixar.pdf",
+                "Reading excerpt.",
+            ),
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+        knowledge_base_type="managed",
+        metadata_filter_mode="required",
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            ),
+            RetrievalSource(
+                source_id="src-reading",
+                label="S2",
+                title="Pixar",
+                text="",
+                group="readings",
+                object_key="course/readings/pixar.pdf",
+            ),
+        )
+    )
+    search = client.calls[0]["retrievalConfiguration"]["managedSearchConfiguration"]
+    assert search["filter"] == {
+        "in": {
+            "key": "course_material_id",
+            "value": ["lecture_crossing", "reading_pixar"],
+        }
+    }
+    assert [chunk.label for chunk in result.chunks] == ["S1", "S2"]
+
+
+def test_disabled_filter_mode_does_not_call_retrieve():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                "Should not be used.",
+            )
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+        metadata_filter_mode="disabled",
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert client.calls == []
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "unavailable"
+    assert result.failure_category == "disabled"
+
+
+def test_required_mode_without_material_ids_does_not_retrieve_unfiltered():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                "Must not leak without a material id.",
+            )
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+        metadata_filter_mode="required",
+    ).retrieve(
+        _query(
+            RetrievalSource(
+                source_id="src-lecture",
+                label="S1",
+                title="Lecture",
+                text="Local extracted course text should not be required for KB hits.",
+                group="lectureNotes",
+                object_key="",
+            )
+        )
+    )
+    assert client.calls == []
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "unavailable"
+    assert result.failure_category == "missing_material_id"
+
+
+def test_repeated_timeouts_reuse_shared_executor():
+    class HungRetrieveClient:
+        def __init__(self) -> None:
+            self.release = threading.Event()
+            self.started = 0
+
+        def retrieve(self, **kwargs: Any) -> Any:
+            del kwargs
+            self.started += 1
+            self.release.wait(timeout=30)
+            return {"retrievalResults": []}
+
+    hung = HungRetrieveClient()
+    retriever = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=hung,
+        retrieve_timeout_seconds=0.05,
+    )
+    try:
+        first = retriever.retrieve(
+            _query(
+                _course_source(
+                    "src-lecture",
+                    "S1",
+                    object_key="course/lectureNotes/crossing.pdf",
+                )
+            )
+        )
+        second = retriever.retrieve(
+            _query(
+                _course_source(
+                    "src-lecture",
+                    "S1",
+                    object_key="course/lectureNotes/crossing.pdf",
+                )
+            )
+        )
+        assert first.failure_category == "timeout"
+        assert second.failure_category == "timeout"
+        assert hung.started == 2
+    finally:
+        hung.release.set()
+        reset_shared_retrieve_executor()
+
+
+def test_settings_default_metadata_filter_mode_is_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "knowledge_base_metadata_filter_mode", "")
+    monkeypatch.setattr(settings, "knowledge_base_strict_metadata_filter", False)
+    assert settings.normalized_knowledge_base_metadata_filter_mode == "required"
+    monkeypatch.setattr(
+        settings, "knowledge_base_metadata_filter_mode", "degraded_unfiltered"
+    )
+    assert (
+        settings.normalized_knowledge_base_metadata_filter_mode == "degraded_unfiltered"
+    )
 
 
 def test_configured_live_retriever_uses_managed_type(
@@ -1180,4 +1756,3 @@ def test_configured_live_retriever_uses_managed_type(
     retriever = configured_context_retriever(client=FakeRetrieveClient(results=[]))
     assert retriever._knowledge_base is not None
     assert retriever._knowledge_base._knowledge_base_type == "managed"
-

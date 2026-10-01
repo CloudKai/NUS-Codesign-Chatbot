@@ -14,16 +14,17 @@ services:
       - .env
     environment:
       APP_ENV: "production"
-      # Month-1 pilot: coach ADVANCE auto-applies (no Next confirmation).
-      # Month-2+: set AUTO_ADVANCE_STAGES=false and STUDENT_STAGE_SELECTION=true
-      # so students pick stages in Journey. If both are true, selection wins.
-      AUTO_ADVANCE_STAGES: "true"
-      STUDENT_STAGE_SELECTION: "false"
+      # Match local demo stage policy: students choose stages (Journey Work on
+      # this stage / Move to). Coach ADVANCE opens Ready; it does not auto-move.
+      # AUTO_ADVANCE_STAGES is ignored while STUDENT_STAGE_SELECTION is true.
+      AUTO_ADVANCE_STAGES: "false"
+      STUDENT_STAGE_SELECTION: "true"
       USE_LOCAL_API: "true"
       CO_DESIGN_PUBLIC_API_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
       CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
       COGNITO_REDIRECT_URI: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}/api/v1/auth/callback"
       AUTH_COOKIE_SECURE: "true"
+      GUEST_ACCESS_ENABLED: "true"
       DSQL_SSLROOTCERT: "/etc/ssl/certs/ca-certificates.crt"
       DATABASE_PROVIDER: "dsql"
       FILE_STORAGE_PROVIDER: "s3"
@@ -40,9 +41,19 @@ services:
       MODEL_PROVIDER: "agentcore"
       MOCK_OPENAI: "false"
       AGENTCORE_QUALIFIER: "DEFAULT"
+      # Compute affinity is safe because production owner ids are unique
+      # Cognito subjects. DSQL remains the canonical transcript/state store.
+      AGENTCORE_SESSION_AFFINITY_ENABLED: "true"
+      # Bump when publishing a new AgentCore version or changing lifecycle
+      # settings so new requests cannot reuse older warm microVM sessions.
+      AGENTCORE_SESSION_GENERATION: "11"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
       AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"
+      # Fast Chat remains 110s; Deep Review uses a separate 200s client.
+      DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS: "200"
+      # Stale/acceptance deadline, not hard worker cancellation.
+      DEEP_REVIEW_JOB_TIMEOUT_SECONDS: "240"
       ROUTER_MODEL_PROVIDER: "bedrock"
       ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       QA_MODEL_PROVIDER: "bedrock"
@@ -55,10 +66,20 @@ services:
       REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"
       ROUTER_MIN_CONFIDENCE: "0.60"
       DEEP_REVIEW_INTERVAL_TURNS: "3"
-      GUARDRAIL_VERSION: "3"
+      FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"
+      FAST_CHAT_RECENT_HISTORY_MAX_TOKENS: "3000"
+      FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"
+      FAST_CHAT_SOFT_INPUT_TOKENS: "12000"
+      FAST_CHAT_MAX_INPUT_TOKENS: "16000"
+      # Mirrors the AgentCore runtime flag; the cache point is added there.
+      FAST_CHAT_PROMPT_CACHE_ENABLED: "true"
+      GUARDRAIL_VERSION: "4"
       # Process-local coach workflow capacity for ~100 concurrent students.
       # MAX_CONCURRENT_MODEL_CALLS is the historical name for active workflows,
       # not internal Haiku/Sonnet invokes inside one coaching turn.
+      # FastAPI is a single Uvicorn worker (start_prod.sh has no --workers).
+      # The DSQL coach idempotency lease is the durable mutex; this limiter
+      # is not sufficient if workers are added.
       MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK: "1"
       MAX_ACTIVE_COACH_REQUESTS_PER_USER: "2"
       COACH_REQUESTS_PER_MINUTE: "8"
@@ -70,8 +91,9 @@ services:
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
-      # AGENTCORE_QUALIFIER: DEFAULT (currently liveVersion 19, repair-prompt).
-      # GUARDRAIL_ID: set in host .env; also inject the same ID and version 3 on the runtime
+      # AGENTCORE_QUALIFIER: DEFAULT (query liveVersion before each release).
+      # AgentCore lifecycle: idle 30 minutes, max lifetime 8 hours.
+      # GUARDRAIL_ID: set in host .env; also inject the same ID and version 4 on the runtime
       # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
       # Lecture notes are not bundled into the production image.
     expose:

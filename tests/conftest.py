@@ -32,6 +32,7 @@ os.environ["OPENAI_MAX_RETRIES"] = "0"
 os.environ["USE_LOCAL_API"] = "false"
 os.environ["AUTO_ADVANCE_STAGES"] = "false"
 os.environ["STUDENT_STAGE_SELECTION"] = "false"
+os.environ["HMW_SCAFFOLD_ENABLED"] = "true"
 os.environ["DEFAULT_CHAT_MODEL"] = "gpt-5.6-luna"
 os.environ["OPENAI_CHAT_MODEL"] = "gpt-5.6-luna"
 os.environ["DEFAULT_REASONING_EFFORT"] = "low"
@@ -42,6 +43,12 @@ os.environ["APP_WORKSPACES_DIR"] = str(_BOOTSTRAP_ROOT / "workspaces")
 os.environ["LECTURE_NOTES_DIR"] = str(_BOOTSTRAP_ROOT / "lecture_notes")
 os.environ["DATABASE_PROVIDER"] = "sqlite"
 os.environ["FILE_STORAGE_PROVIDER"] = "local"
+os.environ["FAST_CHAT_RECENT_VERBATIM_MESSAGES"] = "6"
+os.environ["FAST_CHAT_RECENT_HISTORY_MAX_TOKENS"] = "3000"
+os.environ["FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS"] = "1500"
+os.environ["FAST_CHAT_SOFT_INPUT_TOKENS"] = "12000"
+os.environ["FAST_CHAT_MAX_INPUT_TOKENS"] = "16000"
+os.environ["FAST_CHAT_PROMPT_CACHE_ENABLED"] = "false"
 os.environ.pop("DSQL_SSLROOTCERT", None)
 os.environ.pop("COURSE_MATERIALS_BUCKET", None)
 os.environ.pop("AGENTCORE_RUNTIME_ARN", None)
@@ -82,6 +89,7 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("USE_LOCAL_API", "false")
     monkeypatch.setenv("AUTO_ADVANCE_STAGES", "false")
     monkeypatch.setenv("STUDENT_STAGE_SELECTION", "false")
+    monkeypatch.setenv("HMW_SCAFFOLD_ENABLED", "true")
     monkeypatch.setenv("APP_DATA_DIR", str(root))
     monkeypatch.setenv("APP_DATABASE_PATH", str(database))
     monkeypatch.setenv("APP_FILES_DIR", str(files_dir))
@@ -97,11 +105,15 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     from backend import settings as settings_module
     from backend.persistence.factory import reset_file_storage_cache
     from backend.rate_limit import reset_coach_rate_limiter_for_tests
+    from backend.rate_limit import reset_deep_review_limiter_for_tests
+    from backend.coaching.deep_review_jobs import reset_deep_review_jobs_for_tests
 
     reset_file_storage_cache()
     # Drop process-local limiter state between tests so burst windows do not
     # bleed across cases. Rate-limit tests inject their own ceilings.
     reset_coach_rate_limiter_for_tests()
+    reset_deep_review_limiter_for_tests()
+    reset_deep_review_jobs_for_tests()
     monkeypatch.setattr(settings_module.settings, "app_env", "development")
     monkeypatch.setattr(settings_module.settings, "data_dir", root.resolve())
     monkeypatch.setattr(settings_module.settings, "database_path", database.resolve())
@@ -128,6 +140,7 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings_module.settings, "use_local_api", False)
     monkeypatch.setattr(settings_module.settings, "auto_advance_stages", False)
     monkeypatch.setattr(settings_module.settings, "student_stage_selection", False)
+    monkeypatch.setattr(settings_module.settings, "hmw_scaffold_enabled", True)
     # Keep production defaults low; raise only in tests so multi-turn suites
     # are not blocked by the process-local burst window.
     monkeypatch.setattr(
@@ -142,6 +155,30 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         settings_module.settings, "max_active_coach_requests_per_notebook", 10_000
     )
+    monkeypatch.setenv("FAST_CHAT_RECENT_VERBATIM_MESSAGES", "6")
+    monkeypatch.setenv("FAST_CHAT_RECENT_HISTORY_MAX_TOKENS", "3000")
+    monkeypatch.setenv("FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS", "1500")
+    monkeypatch.setenv("FAST_CHAT_SOFT_INPUT_TOKENS", "12000")
+    monkeypatch.setenv("FAST_CHAT_MAX_INPUT_TOKENS", "16000")
+    monkeypatch.setenv("FAST_CHAT_PROMPT_CACHE_ENABLED", "false")
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_recent_verbatim_messages", 6
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_recent_history_max_tokens", 3_000
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_history_message_max_tokens", 1_500
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_soft_input_tokens", 12_000
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_max_input_tokens", 16_000
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_prompt_cache_enabled", False
+    )
 
     assert settings_module.settings.app_env == "development"
     assert settings_module.settings.model_provider == "mock"
@@ -152,7 +189,11 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     # Default UI tests run as an authenticated Cognito student so existing
     # AppTest suites keep exercising the full application. Auth-gate tests
     # override ``is_logged_in`` / ``authenticated_user`` explicitly.
-    from ui import auth_gate as auth_gate_module
+    # Runtime-only jobs (Strands pin, no Streamlit) skip this overlay.
+    try:
+        from ui import auth_gate as auth_gate_module
+    except ModuleNotFoundError:
+        auth_gate_module = None
 
     _default_user = {
         "id": "test-user-id",
@@ -162,18 +203,21 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         "role": "student",
     }
 
-    monkeypatch.setattr(auth_gate_module, "is_logged_in", lambda: True)
-    monkeypatch.setattr(auth_gate_module, "authenticated_user", lambda: dict(_default_user))
-    monkeypatch.setattr(
-        auth_gate_module,
-        "current_user_claims",
-        lambda _user=None: {
-            "sub": "test-cognito-sub",
-            "email": "test.student@example.edu",
-            "given_name": "Test",
-            "name": "Test Student",
-        },
-    )
+    if auth_gate_module is not None:
+        monkeypatch.setattr(auth_gate_module, "is_logged_in", lambda: True)
+        monkeypatch.setattr(
+            auth_gate_module, "authenticated_user", lambda: dict(_default_user)
+        )
+        monkeypatch.setattr(
+            auth_gate_module,
+            "current_user_claims",
+            lambda _user=None: {
+                "sub": "test-cognito-sub",
+                "email": "test.student@example.edu",
+                "given_name": "Test",
+                "name": "Test Student",
+            },
+        )
 
     # App data is scoped to cognito:{sub}; keep direct StudentStore() helpers
     # in tests on the same owner as the authenticated UI.
@@ -185,8 +229,9 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         self,
         path=None,
         identifier="cognito:test-cognito-sub",
+        **kwargs,
     ):
-        _student_store_init(self, path=path, identifier=identifier)
+        _student_store_init(self, path=path, identifier=identifier, **kwargs)
 
     monkeypatch.setattr(StudentStore, "__init__", _patched_student_store_init)
 

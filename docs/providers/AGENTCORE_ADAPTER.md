@@ -11,27 +11,34 @@ Base owner), not the student UI.
 
 ## Contract
 
-Free-text turns may make **more than one** `InvokeAgentRuntime` call on the
+Normal student chat makes **exactly one** `InvokeAgentRuntime` call on the
 same runtime ARN:
 
-1. A small Haiku **router** (`phase=router`, `output_contract=router_turn`)
-   unless FastAPI already stamped a server-owned specialist.
-2. The selected specialist (`qa` | `coaching` | explicit `review`).
-3. Incremental Haiku Review (`phase=review`, `review_mode=incremental`) after
-   a successful Coaching turn.
-4. Deep Sonnet Review (`phase=review`, `review_mode=deep`) on periodic or
-   event triggers (explicit Review, readiness candidate, Reflection
-   checkpoint, or every N successful new Coaching turns).
+1. FastAPI optionally retrieves validated excerpts (deterministic gate, no
+   extra LLM).
+2. One Haiku **fast chat** invoke (`phase=fast_chat`,
+   `output_contract=fast_chat_turn`, model
+   `global.anthropic.claude-haiku-4-5-20251001-v1:0`).
+3. Haiku chooses `mode=coaching` or `mode=qa` and generates the reply in
+   the same structured output.
 
-Q&A never advances the Thinking Path. Incremental Review cannot advance.
-Deep Review may recommend stay/advance; FastAPI still validates and
+The Haiku router, Incremental Review, and automatic Sonnet are **not** on
+this path. Deep Sonnet Review (`phase=review`, `review_mode=deep`) is a
+server-owned operation started by `POST /api/v1/threads/{thread_id}/deep-review`.
+The browser cannot select Sonnet by sending `specialist=review` on
+`POST /api/v1/coach/turn`. Opening Journey / Review / Summary performs zero
+model calls.
+
+The published runtime still dispatches leftover `phase` values. A principal
+with `bedrock-agentcore:InvokeAgentRuntime` on this ARN can request
+`phase=review` or `phase=router` directly and bypass FastAPI. That is an
+IAM boundary, not a browser bug. Documented in
+[`SECURITY_BOUNDARIES.md`](../SECURITY_BOUNDARIES.md). Do not try to close
+it in Streamlit.
+
+Q&A never advances the Thinking Path. Coaching may recommend stay or
+advance; the recommendation is advisory. FastAPI still validates and
 persists. AgentCore never writes DSQL.
-
-Periodic Deep Review means every N newly executed, successful Coaching
-turns since the previous successfully persisted Deep Review. It is
-turn-based rather than time-based because it represents new learning
-evidence, not elapsed time. Opening the Review tab does not invoke a
-model.
 
 The runtime execution role must allow `bedrock:InvokeModel` for Haiku 4.5
 and Sonnet 4.6. Historical Luna versions also needed
@@ -40,46 +47,51 @@ and Sonnet 4.6. Historical Luna versions also needed
 `bedrock-mantle:CallWithBearerToken`; keep those statements for rollback.
 Current DEFAULT does not use Mantle.
 
-Specialist payloads look like:
+Normal payloads look like:
 
 ```json
 {
-  "phase": "coaching",
+  "phase": "fast_chat",
   "topic": "problem_identification",
-  "output_contract": "coach_turn",
+  "output_contract": "fast_chat_turn",
   "student_id": "cognito:<sub>",
   "runtime_context": {
     "current_stage": "problem_identification",
-    "response_detail": "strict",
+    "response_detail": "guide",
     "language": "English",
     "allowed_citations": ["S1"],
-    "allow_model_knowledge": false
+    "allow_model_knowledge": false,
+    "specialist": "fast_chat"
   },
   "trusted_instructions": "<application runtime rules only>",
   "messages": [
-    {"role": "user", "content": [{"text": "<prior DSQL turn>"}]},
-    {"role": "assistant", "content": [{"text": "<prior coach reply>"}]},
+    {"role": "user", "content": [{"text": "<recent DSQL turn>"}]},
+    {"role": "assistant", "content": [{"text": "<recent coach reply>"}]},
     {"role": "user", "content": [{"text": "<untrusted current-turn content>"}]}
   ]
 }
 ```
 
-`phase` is `qa`, `coaching`, or `review` after routing. Canonical specialist
-and stage pedagogy live in `agentcore_runtime/prompts/`. FastAPI must not
-resend a second full curriculum in `trusted_instructions`. The router payload
-contains only the current student message plus optional current stage.
+Canonical pedagogy lives in `agentcore_runtime/prompts/`. FastAPI must not
+resend a second full curriculum in `trusted_instructions`. Legacy
+`phase=router` / `qa` / `coaching` / incremental Review remain in the
+runtime for compatibility and are unused by the active FastAPI path.
 
 `student_id` is the store owner identifier, never a notebook id. The
-token-aware planner sends the **full active DSQL transcript** when it fits
-the conservative Haiku-safe input budget. Only when that would overflow does
-the planner compress older turns into derived `conversation_memory` and keep
-a recent verbatim window (default 12). Application runtime rules travel in
-`trusted_instructions` and `runtime_context`. Canonical pedagogy is loaded
-inside `agentcore_runtime/`. The last user message is the untrusted product
-from `compose_coach_prompt(..., include_recent_messages=False)`
-(project context, retrieved evidence, summary/memory, current student
-contribution). Derived memory is model input only; DSQL remains the complete
-transcript. A fresh `runtimeSessionId` (`stateless-…`) is still used per invoke.
+fast-chat planner always sends derived `conversation_memory` plus a bounded
+recent verbatim window (at most **6** messages, **3,000** estimated
+recent-history tokens, **1,500** per historical message). The local total
+input estimate includes the AgentCore system prompt, with a **12,000** soft
+target and **16,000** hard ceiling. Deep Review uses a separate
+`full_history` policy. Application runtime rules travel in
+`trusted_instructions` and `runtime_context`. The last user message is the
+untrusted product from
+`compose_coach_prompt(..., include_recent_messages=False, context_policy="fast_chat")`.
+Derived memory is model input only; DSQL remains the complete transcript.
+By default each invoke uses a fresh `stateless-…` `runtimeSessionId`. When
+FastAPI-owned session affinity is enabled, the adapter may reuse an opaque
+per-owner/notebook/role id for warm compute; this never changes DSQL transcript
+authority or the bounded history sent on each turn.
 
 Invariants:
 
@@ -90,8 +102,10 @@ Invariants:
   fence fallback);
 - citations stay `[S#]` over selected notebook sources — no
   `RetrieveAndGenerate`;
-- invokes are **stateless** (`runtimeSessionId` is a fresh `stateless-…` value,
-  never a notebook id) so DSQL remains the only durable transcript;
+- invokes remain **transcript-stateless**: with affinity disabled,
+  `runtimeSessionId` is a fresh `stateless-…` value; with affinity enabled it
+  is an opaque compute-affinity id, never a notebook id. DSQL remains the only
+  durable transcript;
 - the coaching specialist must have **zero** Knowledge Base / MCP tools;
 - images map to Converse-style JSON blocks or the adapter fails closed;
 - provider exceptions map to category-only `ProviderUnavailableError`;
@@ -100,12 +114,26 @@ Invariants:
 - empty, fenced, or schema-invalid AgentCore bodies map to
   `structured_output_failure`, never `json.loads(str(AgentResult))`.
 
+Timeouts are role-specific. Fast Chat keeps the FastAPI AgentCore read timeout
+of 110 seconds. Deep Review uses a 200-second FastAPI AgentCore read timeout
+and the runtime-only `DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS` environment
+variable (default 180 seconds, bounded 30–600) for its Sonnet Bedrock client.
+The runtime setting is not an EC2 application setting. Deep Review's
+`DEEP_REVIEW_JOB_TIMEOUT_SECONDS` default is 240 seconds and is a stale/
+acceptance deadline; it does not forcibly cancel a running worker. Botocore
+still permits one total attempt and existing Strands retries are unchanged.
+
 The live DEFAULT harness source of truth is
-[`agentcore_runtime/`](../../agentcore_runtime/). It hosts Q&A, Coaching, and
-Formative Review with Strands `structured_output_model` plus a shared
+[`agentcore_runtime/`](../../agentcore_runtime/). It hosts one-call
+`fast_chat` plus legacy Q&A / Coaching / Formative Review specialists with
+Strands `structured_output_model` plus a shared
 `structured_output_prompt` (`Please use the output tool now.`) so Guardrail v3
 does not classify the Strands structured-output recovery turn as
-`PROMPT_ATTACK`. Guardrail ID, version, and PROMPT_ATTACK policy stay
+`PROMPT_ATTACK`. Fast Chat event-loop recovery is `limits={"turns": 2}`;
+Deep Review is `limits={"turns": 3}`. Transient Converse retries use a
+per-invoke `ModelRetryStrategy` (`max_attempts=2` Haiku / `3` Deep Review),
+which is not the event-loop cap. Fast Chat `runtime_context.specialist` is
+`fast_chat`, never `coaching`. Guardrail ID, version, and PROMPT_ATTACK policy stay
 unchanged. The harness returns validated JSON or a category-only error
 envelope. Publish a zip with `main.py` at the
 root, vendored linux/arm64 Python 3.14 site-packages (AgentCore does not
@@ -140,7 +168,7 @@ REVIEW_DEEP_MODEL_ID=global.anthropic.claude-sonnet-4-6
 ROUTER_MIN_CONFIDENCE=0.60
 DEEP_REVIEW_INTERVAL_TURNS=3
 GUARDRAIL_ID=<configured guardrail>
-GUARDRAIL_VERSION=3
+GUARDRAIL_VERSION=4
 KNOWLEDGE_BASE_ID=<configured KB>
 MOCK_OPENAI=false
 ```
@@ -149,22 +177,29 @@ The published AgentCore runtime reads per-role `*_MODEL_*` keys plus shared
 `AGENTCORE_MODEL_REGION` and `GUARDRAIL_*` from **its own** process
 environment. Legacy `AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` remain
 as a local/testing fallback only when no role keys are set. FastAPI
-production validation requires explicit role configuration. Missing model or
-guardrail config fails closed. There is no Haiku↔Sonnet fallback.
+production validation requires Coaching Haiku and Deep Review Sonnet.
+Router / Q&A / Incremental Review env keys are optional when unused.
+Missing required model or guardrail config fails closed. There is no
+Haiku↔Sonnet fallback.
 
 Roles:
 
-- ROUTER, Q&A, COACHING, INCREMENTAL REVIEW → Claude Haiku 4.5 (`bedrock`)
+- FAST CHAT / COACHING → Claude Haiku 4.5 (`bedrock`) via `COACHING_MODEL_*`
 - DEEP REVIEW → Claude Sonnet 4.6 (`bedrock`)
+- ROUTER, Q&A, INCREMENTAL REVIEW → optional legacy Haiku roles
 
 Changing model environment variables requires a new AgentCore Runtime
 **version** on the same ARN, not a new runtime resource.
 
 DEFAULT Haiku and Sonnet use
 `BedrockModel(model_id=..., region_name=..., guardrail_id=...,
-guardrail_version=..., guardrail_latest_message=True)`
-(`GUARDRAIL_VERSION=3`). Do not pass `openai.gpt-5.6-luna` into
-`BedrockModel`. Do not pass Haiku into Mantle. Historical Luna runtimes
+guardrail_version=..., guardrail_latest_message=True,
+boto_client_config=BotocoreConfig(retries={"total_max_attempts": 1, "mode": "standard"}))`
+(`GUARDRAIL_VERSION=4`). Botocore `total_max_attempts` counts the initial
+call, so `1` is a single Converse attempt. The legacy `max_attempts` key is
+normalised to `value + 1` and must not be used. Strands
+`ModelRetryStrategy` is the only Converse retry layer. Do not pass
+`openai.gpt-5.6-luna` into `BedrockModel`. Do not pass Haiku into Mantle. Historical Luna runtimes
 used `OpenAIResponsesModel(stateful=False, bedrock_mantle_config={"region": ...})`
 plus Bedrock `ApplyGuardrail` on untrusted input and model output.
 
@@ -200,10 +235,11 @@ Without those flags the script refuses.
 ## Not a database
 
 Aurora DSQL (and local SQLite) `messages` are the only durable transcript.
-This adapter must keep invoking with a fresh `stateless-…` session id. Do not
-wire AgentCore Runtime LRU, AgentCore Memory, DynamoDB, or a JSON file as chat
-history. Student `GET /api/v1/threads/{id}/transcript.txt` is a projection of
-`get_messages`.
+This adapter must keep DSQL/SQLite as the only durable transcript. A fresh
+`stateless-…` session is the default; optional FastAPI-owned affinity may reuse
+only an opaque compute id. Do not wire AgentCore Runtime LRU, AgentCore
+Memory, DynamoDB, or a JSON file as chat history. Student
+`GET /api/v1/threads/{id}/transcript.txt` is a projection of `get_messages`.
 
 ## Isolated InvokeHarness evaluation
 
@@ -227,6 +263,7 @@ Keep these off the Thinking Path unless a later phase explicitly adds them:
    stay aligned.
 2. Do not attach unrestricted KB/MCP tools to Q&A. Pre-retrieved `[S#]`
    evidence is the production path. Do not call `RetrieveAndGenerate`.
-3. Periodic Deep Review is already the N-turn checkpoint (not a grade).
-   Do **not** restore scoring-as-grade, a sixth `ethics_critical`
-   application stage, AgentCore Memory as transcript, or the CDK student UI.
+3. Deep Review is an explicit FastAPI route (not automatic Sonnet on Fast Chat).
+   `DEEP_REVIEW_INTERVAL_TURNS` still bounds eligibility. Do **not** restore
+   scoring-as-grade, a sixth `ethics_critical` application stage, AgentCore
+   Memory as transcript, or the CDK student UI.

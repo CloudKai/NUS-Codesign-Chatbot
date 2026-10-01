@@ -1,4 +1,8 @@
-"""Compatibility wrapper. Deep Review replaced the Stage Judge authority."""
+"""Compatibility wrapper. Deep Review replaced the Stage Judge authority.
+
+Nothing in ``main.py`` imports this module. Leftover ``phase=stage_judge``
+payloads are mapped to Deep Review in ``specialists/routing.py``.
+"""
 
 from __future__ import annotations
 

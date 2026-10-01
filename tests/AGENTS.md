@@ -46,7 +46,7 @@ modules.
 | `persistence/` | StudentStore, revisions, idempotency, research persistence, storage adapters |
 | `http/` | FastAPI, auth, ownership, API clients, professor analytics/research, production paths |
 | `ui/` | Streamlit AppTest, presentation state, themes, auth gate, professor UI |
-| `scripts/` | SQLite/DSQL administration and learning-data reset |
+| `scripts/` | SQLite/DSQL administration, learning-data reset, and mock load probe |
 
 ## Detailed test map
 
@@ -62,6 +62,7 @@ modules.
 | `ui/test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding |
 | `ui/test_professor_ui.py` | Professor workbench AppTest contracts |
 | `persistence/test_storage_providers.py` | SQLite/local defaults, DSQL/S3 provider selection, mocked DSQL auth + S3 |
+| `persistence/test_deep_review_dsql.py` | Fake DSQL-over-SQLite Deep Review OCC: frozen `reviewed_stage_id` vs live stage, SQLSTATE 40001 retry |
 | `http/test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
 | `http/test_workspace_api.py` | Notebook/source/preference CRUD API, path redaction, student transcript download |
 | `domain/test_agentcore_provider.py` | AgentCore Runtime adapter contract with an injected fake client; stateless session plus DSQL history as Converse messages |
@@ -74,13 +75,33 @@ modules.
 | `domain/test_runtime_model.py` | Explicit Sonnet/Luna factory, no BedrockModel(), ApplyGuardrail for Mantle, runtime pin sync |
 | `domain/test_agentcore_harness_provider.py` | Isolated Luna InvokeHarness eval adapter; trusted override; no AWS |
 | `domain/test_context_planner.py` | Full-history-first planner, compression, revision invalidation |
-| `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, classified Retrieve failures, metadata-filter fallback including ValidationException, composite factory without local course fallback |
+| `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, required/degraded/disabled filter modes, no silent unfiltered retry, shared-executor timeouts |
+| `domain/test_kb_metadata.py` | Canonical `course_material_id` and Bedrock sidecar payload |
+| `scripts/test_sync_course_kb_metadata.py` | Sidecar dry-run, idempotent bytes, local verify |
+| `domain/test_fast_chat_schema.py` | Slim FastChatTurnOutput; coaching/Q&A contract matrix; generated JSON Schema rejects coaching+null recommendation and citations=null; citations required as array |
+| `domain/test_coach_turn_perf.py` | Privacy-safe `coach_turn_perf` JSON and `TIMING` service-latency lines |
+| `domain/test_coach_progress.py` | retrieving/thinking/saving execution-boundary events; slim persist |
 | `domain/test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
 | `domain/test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding |
 | `persistence/test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |
 | `scripts/test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
-| `domain/test_workflow.py` | LangGraph workflow routing and structured output |
+| `domain/test_fast_chat_one_call.py` | One Haiku fast-chat invoke; no router/incremental/Sonnet on the normal path |
+| `domain/test_first_cycle_structured_output.py` | First-cycle `tool_choice={"any": {}}` helpers; applied vs installed telemetry; Fast Chat only; `Agent(tools=[])`; `turns=2` recovery kept; no Strands |
+| `domain/test_strands_first_cycle_middleware.py` | Real Strands 1.52.0 fake-model path; skipped unless `strands` is installed; FastChatTurnOutput object-schema + bounded recovery |
+| `domain/test_fast_chat_quality_matrix.py` | A–T quality-matrix inventory; does not invent live scores |
+| `domain/test_structured_output_limits.py` | Fast Chat `turns=2` / Deep Review `turns=3` actually passed to `invoke_async` |
+| `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |
+| `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
+| `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
+| `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, whole-history input, stage-aware `stage_reviews`, checkpoint persistence, counter, no transcript rows, cross-stage snapshot replacement, stale-worker completion guard |
+| `domain/test_deep_review_context.py` | Deep Review `full_history` vs `checkpoint_delta` planning, exposed-only `M#` validation, readiness-evidence compact body, absolute+ratio savings gates, revision/source invalidation, synthetic token comparison |
+| `domain/test_deep_review_review_projection.py` | Review-tab merge of `stage_reviews` onto matching stages, legacy `reviewed_stage_id` fallback, HMW attribution, latest-snapshot replacement |
+| `http/test_deep_review.py` | Deep Review job POST/GET, coaching overlap, duplicate/stale/owner isolation |
+| `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |
+| `domain/test_prompt_cache.py` | SystemContentBlock prefix cache; no CacheConfig auto on student text |
+| `scripts/test_evaluate_fast_chat_regression.py` | Dry-run and mocked live-candidate regression CLI; no live Claude |
 | `domain/test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection |
+| `domain/test_qa_grounding.py` | Failed Q&A authors the evidence-gap copy with zero AgentCore invokes; successful Q&A cites retrieved excerpts without coaching |
 | `domain/test_bedrock_provider.py` | Bedrock Converse adapter contract with an injected fake client |
 | `domain/test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |
 | `persistence/test_student_store.py` | Notebook, folder, message, source persistence |
@@ -91,10 +112,18 @@ modules.
 | `domain/test_models_and_support.py` | Model registry and support-mode helpers |
 | `ui/test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (in-process path) |
 | `ui/test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts |
+| `ui/test_chat_scroll.py` | Transcript scroll policy, inflight chrome, compact turn-error, fragment submit |
+| `ui/test_toasts.py` | Parent-window corner toast controller: delegated close, parent timers, iframe boot only |
+| `ui/test_review_stage_expanders.py` | Review Strengths/Areas stage expanders remount on notebook or current-stage change; same-stage keys stay stable |
+| `ui/test_hmw_scaffold.py` | Progressive How Might We card: hidden until 2/3 framing, one card after the first useful Coach turn, hidden after a valid student HMW or Concept Generation |
+| `domain/test_hmw_scaffold_gate.py` | Server-owned HMW eligibility from the latest stay+ready assessment, no minimum-turn gate, student HMW provenance guard, Q&A/Deep Review exclusion |
+| `domain/test_hmw_stage_completion.py` | HMW 0/1 → 2/3 → valid-HMW state machine in PI prompts, stay/advance via existing StageDecision, no regex evaluator |
+| `ui/test_ui_perf_logging.py` | Streamlit `co_design.ui_perf` INFO visibility, handler idempotency, privacy-safe UI TIMING, pre-API span contracts |
 | `ui/test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance |
 | `ui/test_rename.py` | Enter-only rename draft helpers and epochs |
 | `scripts/test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
 | `scripts/test_init_dsql.py` | Additive DSQL revision planning and five-phase/research bootstrap |
+| `scripts/test_load_probe.py` | Mock load probe: distinct owners, notebook caps, tiny-delay slow provider, fake-client KB pool; no AWS |
 
 ## Hard constraints
 

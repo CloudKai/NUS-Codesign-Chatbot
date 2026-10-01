@@ -9,7 +9,13 @@ from typing import Any
 
 import pytest
 
-from agentcore_runtime.models import QATurnOutput, ReviewTurnOutput
+from agentcore_runtime.models import (
+    DeepReviewTurnOutput,
+    FastChatTurnOutput,
+    QATurnOutput,
+    ReviewTurnOutput,
+    parse_review_turn_output,
+)
 from agentcore_runtime.prompts.loader import (
     COACHING_TOPICS,
     load_qa_prompt,
@@ -101,11 +107,11 @@ def test_specialist_system_prompt_does_not_need_application_stage_files() -> Non
         {
             "phase": "coaching",
             "topic": "concept_generation",
-            "trusted_instructions": "Guidance mode: Quick.",
+            "trusted_instructions": "Guidance mode: Guide.",
         }
     )
     assert "STAGE: CONCEPT GENERATION" in system
-    assert "Guidance mode: Quick." in system
+    assert "Guidance mode: Guide." in system
     assert "<shared_coaching>" not in system
 
 
@@ -139,17 +145,256 @@ def test_review_turn_from_structured_output() -> None:
     assert "grade" in parsed.synthesis
 
 
-def test_agentcore_payload_routes_week_question_to_qa() -> None:
+def test_deep_review_schema_requires_stage_reviews_array() -> None:
+    schema = DeepReviewTurnOutput.model_json_schema()
+    for field in (
+        "strengths",
+        "areas_to_develop",
+        "readiness_evidence",
+        "missing_requirements",
+        "stage_reviews",
+    ):
+        assert field in schema["required"]
+        node = schema["properties"][field]
+        assert node.get("type") == "array"
+        assert "null" not in str(node.get("type"))
+        assert "anyOf" not in node
+    incremental = ReviewTurnOutput.model_json_schema()
+    assert "stage_reviews" not in incremental.get("properties", {})
+    defs = schema.get("$defs") or schema.get("definitions") or {}
+    feedback = defs.get("DeepReviewStageFeedback") or {}
+    refs = (feedback.get("properties") or {}).get("supporting_message_refs") or {}
+    assert (feedback.get("required") or []) and "supporting_message_refs" in feedback["required"]
+    assert refs.get("type") == "array"
+    assert "anyOf" not in refs
+    fast = FastChatTurnOutput.model_json_schema()
+    assert "supporting_message_refs" not in fast.get("properties", {})
+    assert "stage_reviews" not in fast.get("properties", {})
+
+
+def test_parse_review_turn_output_keeps_stage_reviews() -> None:
+    parsed = parse_review_turn_output(
+        {
+            "response_text": "Formative deep review.",
+            "strengths": ["Holistic strength"],
+            "areas_to_develop": ["Holistic area"],
+            "synthesis": "Progress is formative.",
+            "readiness_evidence": [],
+            "missing_requirements": [],
+            "review_depth": "deep",
+            "current_stage": "concept_generation",
+            "recommendation": "stay",
+            "rationale_summary": "Stay.",
+            "stage_reviews": [
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Constructed a How Might We question"],
+                    "areas_to_develop": [],
+                    "supporting_message_refs": [],
+                },
+                {
+                    "stage_id": "not_a_stage",
+                    "strengths": ["Dropped"],
+                    "areas_to_develop": [],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": [],
+                    "areas_to_develop": [],
+                    "supporting_message_refs": [],
+                },
+            ],
+        }
+    )
+    assert isinstance(parsed, DeepReviewTurnOutput)
+    assert [item.stage_id for item in parsed.stage_reviews] == [
+        "problem_identification"
+    ]
+    assert parsed.stage_reviews[0].strengths == [
+        "Constructed a How Might We question"
+    ]
+    assert parsed.stage_reviews[0].supporting_message_refs == []
+
+
+def test_deep_review_legacy_shape_still_defaults_stage_reviews_to_empty() -> None:
+    """Old deep payloads remain parseable while new schema requires arrays."""
+    parsed = parse_review_turn_output(
+        {
+            "response_text": "Legacy formative review.",
+            "strengths": ["Named a setting"],
+            "areas_to_develop": ["Name affected users"],
+            "synthesis": "Legacy synthesis.",
+            "review_depth": "deep",
+            "current_stage": "problem_identification",
+            "recommendation": "stay",
+            "rationale_summary": "More evidence is needed.",
+        },
+        allow_legacy=True,
+    )
+    assert isinstance(parsed, ReviewTurnOutput)
+    assert not isinstance(parsed, DeepReviewTurnOutput)
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [None, "not-an-array", {"stage_id": "problem_identification"}],
+)
+def test_deep_review_stage_reviews_rejects_non_arrays(bad_value: Any) -> None:
+    """New Deep Review validation must not normalize malformed arrays."""
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(
+            {
+                "response_text": "Deep review.",
+                "synthesis": "Synthesis.",
+                "review_depth": "deep",
+                "stage_reviews": bad_value,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        (field, bad_value)
+        for field in (
+            "strengths",
+            "areas_to_develop",
+            "readiness_evidence",
+            "missing_requirements",
+        )
+        for bad_value in (None, "not-an-array", {"item": "not-an-array"})
+    ],
+)
+def test_deep_review_top_level_arrays_reject_null_and_flattened_shapes(
+    field: str, bad_value: Any
+) -> None:
+    """New Deep Review top-level arrays reject null and flattened values."""
+    base = {
+        "response_text": "Deep review.",
+        "synthesis": "Synthesis.",
+        "review_depth": "deep",
+        "strengths": [],
+        "areas_to_develop": [],
+        "readiness_evidence": [],
+        "missing_requirements": [],
+        "stage_reviews": [],
+    }
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate({**base, field: bad_value})
+
+    missing = dict(base)
+    del missing[field]
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(missing)
+
+
+def test_deep_review_top_level_arrays_accept_explicit_empty_arrays() -> None:
+    """An explicit [] is valid for every new Deep Review collection field."""
+    parsed = DeepReviewTurnOutput.model_validate(
+        {
+            "response_text": "Deep review.",
+            "synthesis": "Synthesis.",
+            "review_depth": "deep",
+            "strengths": [],
+            "areas_to_develop": [],
+            "readiness_evidence": [],
+            "missing_requirements": [],
+            "stage_reviews": [],
+        }
+    )
+    assert parsed.strengths == []
+    assert parsed.areas_to_develop == []
+    assert parsed.readiness_evidence == []
+    assert parsed.missing_requirements == []
+
+
+def test_deep_review_stage_feedback_requires_explicit_child_arrays() -> None:
+    """Child arrays reject omission/null/wrong shapes while [] remains valid."""
+    base = {
+        "response_text": "Deep review.",
+        "synthesis": "Synthesis.",
+        "review_depth": "deep",
+        "strengths": [],
+        "areas_to_develop": [],
+        "readiness_evidence": [],
+        "missing_requirements": [],
+        "stage_reviews": [],
+    }
+    assert DeepReviewTurnOutput.model_validate(base).stage_reviews == []
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(
+            {
+                **base,
+                "stage_reviews": [
+                    {
+                        "stage_id": "problem_identification",
+                        "strengths": None,
+                        "areas_to_develop": [],
+                        "supporting_message_refs": [],
+                    }
+                ],
+            }
+        )
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(
+            {
+                **base,
+                "stage_reviews": [
+                    {
+                        "stage_id": "problem_identification",
+                        "strengths": [],
+                        "areas_to_develop": "missing-array",
+                        "supporting_message_refs": [],
+                    }
+                ],
+            }
+        )
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(
+            {
+                **base,
+                "stage_reviews": [
+                    {
+                        "stage_id": "problem_identification",
+                        "strengths": [],
+                        "areas_to_develop": [],
+                        "supporting_message_refs": {"ref": "M1"},
+                    }
+                ],
+            }
+        )
+
+
+def test_review_turn_output_ignores_stage_reviews_field() -> None:
+    parsed = ReviewTurnOutput.model_validate(
+        {
+            "response_text": "Incremental review.",
+            "strengths": ["Setting"],
+            "areas_to_develop": ["Users"],
+            "synthesis": "Formative.",
+            "stage_reviews": [
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Should be ignored"],
+                    "areas_to_develop": [],
+                }
+            ],
+        }
+    )
+    assert not isinstance(parsed, DeepReviewTurnOutput)
+    assert not hasattr(parsed, "stage_reviews")
+
+
+def test_agentcore_payload_uses_fast_chat_for_week_question() -> None:
     client = FakeAgentCoreRuntime(
         payload={
+            "mode": "qa",
             "response_text": "Week 1 covers the course introduction [S1].",
             "citations": [],
-        },
-        router_payload={
-            "specialist": "qa",
-            "confidence": 0.95,
-            "rationale_category": "course_information",
-        },
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
+        }
     )
     result = _provider(client).assess(
         CoachRequest(
@@ -160,27 +405,25 @@ def test_agentcore_payload_routes_week_question_to_qa() -> None:
         )
     )
     payload = _specialist_payload(client)
-    assert payload["phase"] == "qa"
-    assert payload["output_contract"] == "qa_turn"
-    assert "STAGE: PROBLEM IDENTIFICATION" not in payload["trusted_instructions"]
-    assert result.assessment.recommendation is StageDecision.STAY
+    assert payload["phase"] == "fast_chat"
+    assert payload["output_contract"] == "fast_chat_turn"
+    assert result.assessment.recommendation is None
     assert "Week 1" in result.response_text
     assert "Socratic" not in result.response_text
 
 
-def test_agentcore_payload_routes_review_request() -> None:
+def test_agentcore_free_text_review_stays_on_fast_chat() -> None:
     client = FakeAgentCoreRuntime(
         payload={
-            "response_text": "You located a real street context.",
-            "strengths": ["Concrete setting"],
-            "areas_to_develop": ["Name who is affected"],
-            "synthesis": "Formative progress, not a grade.",
-        },
-        router_payload={
-            "specialist": "review",
-            "confidence": 0.92,
-            "rationale_category": "formative_review",
-        },
+            "mode": "coaching",
+            "response_text": "What trade-off still needs evidence?",
+            "recommendation": "stay",
+            "recommendation_rationale": "Stay and name who is affected.",
+            "citations": [],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
+        }
     )
     result = _provider(client).assess(
         CoachRequest(
@@ -191,11 +434,9 @@ def test_agentcore_payload_routes_review_request() -> None:
         )
     )
     payload = _specialist_payload(client)
-    assert payload["phase"] == "review"
-    assert payload["output_contract"] == "review_turn"
+    assert payload["phase"] == "fast_chat"
+    assert payload["output_contract"] == "fast_chat_turn"
     assert result.assessment.recommendation is StageDecision.STAY
-    assert "grade" in result.response_text.lower() or "grade" in result.assessment.stage_assessment.lower()
-    assert result.assessment.review_strengths
 
 
 def test_coaching_structured_output_still_required() -> None:
