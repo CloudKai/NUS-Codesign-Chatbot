@@ -252,7 +252,9 @@ class DeterministicCoachProvider:
         specialist = select_specialist(
             request.student_message, requested=request.specialist
         )
-        if specialist == SPECIALIST_QA:
+        if request.interaction_intent == "lecture_help" or (
+            request.interaction_intent is None and specialist == SPECIALIST_QA
+        ):
             return self._qa_result(request)
         if requested == SPECIALIST_REVIEW:
             return self._review_result(request)
@@ -362,7 +364,7 @@ class DeterministicCoachProvider:
         if evidence:
             excerpt, label = evidence
             response = (
-                f"Week 1 introduces the course framing using the selected materials. "
+                "From the selected materials: "
                 f"One retrieved excerpt is: “{excerpt}” [{label}]."
             )
         else:

@@ -2,6 +2,41 @@
 
 ## CURRENT STATUS
 
+### Ticket 02 / GitHub #15: lecture help and optional project application (2026-11-15)
+
+- **Outcome:** Existing composer exposes Ask about a lecture and Develop my
+  project. Additive typed interaction intent reuses authorized course-catalog
+  and selected-source retrieval; lecture replies answer directly with citations
+  or state missing evidence. Grounded replies offer Apply this to my project,
+  preserving the notebook and unsent draft without submitting generated work.
+- **Progress safety:** Explicit lecture intent blocks navigation (including
+  literal confirm), recommendations, completion awards, project summary changes,
+  stage-review dirtiness, and review counter increments/resets. Intent persists
+  with transcript rows and append-only edits. Omitted intent preserves inferred
+  routing and legacy retry fingerprints; refresh restores saved explicit intent.
+- **Validation:** Final mock suite **3332 passed, 2 skipped** (103.95s); focused
+  API/UI regressions, compileall, and whitespace checks passed. Nine new API
+  cases cover evidence gaps, selected/deselected evidence, shared course PDF
+  access without personal uploads, hostile provider awards/navigation, pending
+  preservation, exact restart recovery, and lecture edits. Desktop 1440px and
+  mobile 390px checks opened the correct cited PDF and preserved application
+  drafts in the same notebook; no page overflow or console errors. Restarted
+  the disposable stack with saved history; existing deprecation warnings remain.
+- **Review:** Separate Standards and Spec reviews and re-reviews found no
+  remaining definite defect. Standards noted optional future consolidation of
+  repeated policy guards. Spec evidence gaps were addressed by tests/browser QA.
+- **Compatibility / rollback:** No schema migration, data reset, or writes to
+  existing student data. Additive transcript metadata; revert the ticket-only
+  commit to roll back. Existing staged/untracked work and index patch preserved.
+  Mock evidence makes no real-model quality, cost, or capacity claim.
+- **Handoff:** [new_docs/ticket_handoffs/02.md](../new_docs/ticket_handoffs/02.md)
+  records commands, files, review, browser artifacts, limits, and cleanup. All
+  task demo processes and the QA browser were stopped after verification.
+- **Next exact action:** Publish acceptance evidence/commit on #15 and close it,
+  then start a fresh `gpt-6.1-sol` task for local ticket 03 / GitHub #16,
+  “Confirmed advancement and free stage revisits”; live blockers verified empty.
+  Read `new_docs/EXECUTION.md`, live #16, and handoff 02 before edits.
+
 ### Ticket 01 / GitHub #14: reliable turns and bounded graph memory (2026-11-15)
 
 - **Outcome:** Shared typed dispatch/preview/saved/error events across HTTP and

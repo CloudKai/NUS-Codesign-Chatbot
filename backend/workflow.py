@@ -90,6 +90,23 @@ def _provider_result(
     )
 
 
+def _lecture_assessment(
+    request: CoachRequest, assessment: EducationalAssessment
+) -> EducationalAssessment:
+    """Remove educational awards from explicit lecture help before graph guards.
+
+    Provider prose and citations remain available; project progress and readiness
+    cannot be inferred from lecture questions, even with a malformed mode choice.
+    """
+    if request.interaction_intent != "lecture_help":
+        return assessment
+    return EducationalAssessment(
+        current_stage=request.current_stage,
+        response_mode="qa",
+        citations=assessment.citations,
+    )
+
+
 def _next_stage(stage_id: str) -> str | None:
     """Return the following stage, or ``None`` for terminal Reflection."""
     stage_ids = [stage.id for stage in THINKING_STAGES]
@@ -417,6 +434,7 @@ class CoachWorkflow:
         """Portable non-graph path used when LangGraph is unavailable."""
         provider_result = _provider_result(self.provider.assess(request))
         response_text, assessment = provider_result
+        assessment = _lecture_assessment(request, assessment)
         assessment = _normalize_terminal_assessment(request, assessment)
         assessment = _formative_review_stays(request, assessment)
         hmw_guarded = _hmw_guard_applies(
@@ -586,6 +604,7 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         request = CoachRequest.model_validate(state["request"])
         provider_result = _provider_result(workflow.provider.assess(request))
         response_text, assessment = provider_result
+        assessment = _lecture_assessment(request, assessment)
         assessment = _normalize_terminal_assessment(request, assessment)
         assessment = _formative_review_stays(request, assessment)
         hmw_guarded = _hmw_guard_applies(

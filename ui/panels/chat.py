@@ -871,6 +871,14 @@ def render_message(
             )
         st.markdown(concise_coach_response(display_content))
         render_citations(message, visible_source_ids=visible_source_ids)
+        if metadata.get("interaction_intent") == "lecture_help" and metadata.get("source_refs"):
+            if st.button(
+                "Apply this to my project",
+                key=f"apply-lecture-{message['id']}",
+                disabled=coach_turn_is_streaming() or awaiting_coach_turn_for_thread() is not None,
+            ):
+                _choose_interaction("project_coaching")
+                rerun_fragment()
         web_sources = metadata.get("sources") or []
         if web_sources:
             with st.expander(f"Web sources ({len(web_sources)})"):
@@ -1306,6 +1314,7 @@ def handle_prompt(
     must be the in-flight sibling, never ``chat_log``: re-entering that
     keyed history container reuses the last assistant ``st.chat_message``.
     """
+    interaction_intent = _interaction_intent()
     cleaned_prompt = str(prompt or "").strip()
     if not cleaned_prompt and existing_user_message_id is None:
         return
@@ -1313,12 +1322,16 @@ def handle_prompt(
     if existing_user_message_id is None and not st.session_state.get("thread_id"):
         try:
             save_new_notebook()
+            if interaction_intent:
+                _choose_interaction(interaction_intent)
+                st.session_state.interaction_choices.pop("draft", None)
         except Exception:
             st.error("The new chat could not be saved. Please try sending again.")
             return
     # Feature-gated exact stage command: journey + assistant briefing only.
     if (
         existing_user_message_id is None
+        and interaction_intent != "lecture_help"
         and settings.student_stage_selection
         and cleaned_prompt
     ):
@@ -1400,7 +1413,7 @@ def handle_prompt(
             idempotency_key = get_retry_key(
                 st.session_state,
                 thread_id=st.session_state.thread_id,
-                stage=journey["current_stage"],
+                stage=_interaction_retry_stage(journey["current_stage"], interaction_intent),
                 prompt=prompt,
             )
             attachment_records = st.session_state.setdefault("coach_turn_attachments", {})
@@ -1456,6 +1469,7 @@ def handle_prompt(
             request = CoachRequest(
                 thread_id=st.session_state.thread_id,
                 student_message=prompt,
+                interaction_intent=interaction_intent,
                 current_stage=journey["current_stage"],
                 response_detail=journey["response_detail"],
                 allow_model_knowledge=allow_model_knowledge,
@@ -1597,7 +1611,7 @@ def handle_prompt(
                 remove_retry_key(
                     st.session_state,
                     thread_id=st.session_state.thread_id,
-                    stage=journey["current_stage"],
+                    stage=_interaction_retry_stage(journey["current_stage"], interaction_intent),
                     prompt=prompt,
                 )
                 attachment_records.pop(idempotency_key, None)
@@ -2254,6 +2268,46 @@ def _render_chat_history(
     return found
 
 
+def _interaction_intent() -> str | None:
+    """Return this notebook's explicit choice, retaining inferred legacy routing."""
+    key = str(st.session_state.get("thread_id") or "draft")
+    choices = st.session_state.get("interaction_choices") or {}
+    return choices.get(key)
+
+
+def _choose_interaction(intent: str) -> None:
+    """Switch the next turn's intent without sending or changing notebook data."""
+    key = str(st.session_state.get("thread_id") or "draft")
+    choices = dict(st.session_state.get("interaction_choices") or {})
+    choices[key] = intent
+    st.session_state.interaction_choices = choices
+
+
+def _interaction_retry_stage(stage: str, intent: str | None) -> str:
+    """Keep retries stable while distinguishing explicit interaction choices."""
+    return f"{stage}:{intent}" if intent else stage
+
+
+def _render_interaction_choices(locked: bool) -> None:
+    """Render two accessible entry actions and the active evidence scope."""
+    intent = _interaction_intent()
+    lecture, project = st.columns(2)
+    for column, value, label in (
+        (lecture, "lecture_help", "Ask about a lecture"),
+        (project, "project_coaching", "Develop my project"),
+    ):
+        if column.button(
+            label, key=f"choose-{value}", width="stretch",
+            type="primary" if intent == value else "secondary", disabled=locked,
+        ):
+            _choose_interaction(value)
+            rerun_fragment()
+    if intent == "lecture_help":
+        st.caption("Lecture help · Searches shared course materials and your selected sources. Your project progress stays unchanged.")
+    elif intent == "project_coaching":
+        st.caption("Project coaching · Describe how you would use the concept in your project. Your conversation and sources stay here.")
+
+
 @st.fragment
 def _render_composer_submit_fragment(
     messages: list[dict[str, Any]],
@@ -2298,6 +2352,12 @@ def _render_composer_submit_fragment(
             visible_source_ids.update(
                 _message_source_ids_for_render(loaded_message)
             )
+        if thread_id not in (st.session_state.get("interaction_choices") or {}):
+            for saved_message in reversed(messages):
+                intent = (saved_message.get("metadata") or {}).get("interaction_intent")
+                if intent in {"lecture_help", "project_coaching"}:
+                    _choose_interaction(intent)
+                    break
         hmw_available = _history_hmw_available(history_state)
     else:
         history_state = {
@@ -2423,6 +2483,7 @@ def _render_composer_submit_fragment(
                     st.error(str(edit_error))
 
         with st.container(key="chat_composer"):
+            _render_interaction_choices(awaiting_locked or coach_turn_is_streaming())
             fragment_enter_ms = _duration_ms(fragment_started)
             prompt_started = time.perf_counter()
             notice = str(st.session_state.get("stage_move_notice") or "").strip()

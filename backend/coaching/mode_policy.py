@@ -567,6 +567,8 @@ def should_author_qa_evidence_gap(request: object) -> bool:
     # fail-closing on an empty or unavailable Knowledge Base Retrieve.
     if gap_note:
         return True
+    if getattr(request, "interaction_intent", None) == "lecture_help" and not source_ids:
+        return True
     if not source_ids:
         return False
     # Image-only Q&A has selected sources but no textual retrieve. The model

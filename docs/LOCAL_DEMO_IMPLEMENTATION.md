@@ -85,6 +85,17 @@ transitions, and transition confirmation/rejection.
 The graph inspection route must not expose secrets, hidden prompts, or raw
 private filesystem paths.
 
+The existing coach-turn contract accepts an optional public `interaction_intent`:
+`lecture_help` or `project_coaching`. Omitting it preserves inferred routing and
+existing retry fingerprints. It grants no source, stage, or specialist authority.
+Lecture help uses authorized shared course material and selected personal sources,
+answers from validated evidence (or states an evidence gap), and cannot navigate,
+create recommendations, award completion, change project summaries, dirty stage
+reviews, or increment/reset review counters. Intent is saved with transcript rows
+and preserved by append-only edits. The optional UI application action selects
+project coaching for the next student-authored message in the same notebook;
+it does not send or award work on the student's behalf.
+
 ### Application and domain
 
 Introduce framework-independent services and typed domain objects for chat,

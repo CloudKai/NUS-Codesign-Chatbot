@@ -393,6 +393,9 @@ class CoachRequest(BaseModel):
 
     thread_id: str
     student_message: str = Field(min_length=1, max_length=12_000)
+    # Public interaction choice, distinct from server-owned specialist routing.
+    # None preserves inferred routing for existing clients.
+    interaction_intent: Literal["lecture_help", "project_coaching"] | None = None
     current_stage: str
     response_detail: str = Field(pattern="^(short|long)$")
     # Server-filled owner identifier for AgentCore harness compatibility.

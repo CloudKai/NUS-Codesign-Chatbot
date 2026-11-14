@@ -380,6 +380,9 @@ def _coach_request_fingerprint(
             "mode_policy_intent",
         },
     )
+    # Existing saved retry markers predate this additive public field.
+    if request.interaction_intent is None:
+        payload.pop("interaction_intent", None)
     cleaned = str(surface or IDEMPOTENCY_SURFACE_COACH_TURN).strip().lower()
     if cleaned and cleaned != IDEMPOTENCY_SURFACE_COACH_TURN:
         payload["idempotency_surface"] = cleaned
@@ -626,7 +629,11 @@ class CoachApplicationService:
         # Idempotency markers around this helper make a same-key retry replay
         # the result instead of attempting a second transition resolution.
         # Accept harmless casing/punctuation only; never treat yes/okay as confirm.
-        if is_exact_confirm_command(request.student_message) and self._progress is not None:
+        if (
+            request.interaction_intent != "lecture_help"
+            and is_exact_confirm_command(request.student_message)
+            and self._progress is not None
+        ):
             pending = self._progress.get_pending(request.thread_id)
             if pending is not None:
                 resolved = self._progress.resolve(request.thread_id, pending.id, accepted=True)
@@ -857,6 +864,7 @@ class CoachApplicationService:
                 )
                 if (
                     requested_manual_stage is not None
+                    and request.interaction_intent != "lecture_help"
                     and runtime_settings.student_stage_selection
                     and request.revise_user_message_id is None
                     and not completed_replay
@@ -1731,6 +1739,7 @@ class CoachApplicationService:
         )
         stage_status_request = (
             not owned_review
+            and prepared_request.interaction_intent != "lecture_help"
             and is_current_stage_status_request(prepared_request.student_message)
         )
         requested_manual_stage = manual_stage_selection_target(
@@ -1740,6 +1749,7 @@ class CoachApplicationService:
             requested_manual_stage
             if (
                 not owned_review
+                and prepared_request.interaction_intent != "lecture_help"
                 and runtime_settings.student_stage_selection
                 and prepared_request.revise_user_message_id is None
             )
@@ -1758,6 +1768,7 @@ class CoachApplicationService:
         existing_pending: dict[str, Any] | None = None
         if (
             not owned_review
+            and prepared_request.interaction_intent != "lecture_help"
             and runtime_settings.student_stage_selection
             and prepared_request.revise_user_message_id is None
         ):
@@ -1866,6 +1877,7 @@ class CoachApplicationService:
                 )
         if (
             not owned_review
+            and prepared_request.interaction_intent != "lecture_help"
             and not stage_status_request
             and is_compound_status_guidance_request(prepared_request.student_message)
         ):
@@ -2090,6 +2102,7 @@ class CoachApplicationService:
             user_content=prepared_request.student_message,
             user_metadata={
                 "thinking_stage": prepared_request.current_stage,
+                "interaction_intent": prepared_request.interaction_intent,
                 "source_ids": prepared_request.source_ids,
                 "attachment_source_ids": prepared_request.attachment_source_ids,
                 "attachments": [
@@ -2124,6 +2137,7 @@ class CoachApplicationService:
             assistant_content=turn.response_text,
             assistant_message_id=transition_id,
             assistant_metadata={
+                "interaction_intent": prepared_request.interaction_intent,
                 "thinking_stage": (
                     auto_advance.to_stage
                     if auto_advance is not None
@@ -2201,13 +2215,14 @@ class CoachApplicationService:
             manual_stage_selection_to=manual_stage_target,
             mark_stage_review_dirty=(
                 not server_owned_turn and manual_stage_target is None
+                and prepared_request.interaction_intent != "lecture_help"
             ),
             review_counter_qualifying=bool(
                 orchestration.get("qualifying_coaching_turn")
-            ),
+            ) and prepared_request.interaction_intent != "lecture_help",
             review_counter_deep_succeeded=bool(
                 orchestration.get("deep_review_succeeded")
-            ),
+            ) and prepared_request.interaction_intent != "lecture_help",
         )
         record_field("persist_turn_ms", elapsed_ms(persist_started))
         # Ordinary coaching turns—including substantive work while staying in
@@ -2272,6 +2287,8 @@ class CoachApplicationService:
                 prepared_request.thread_id
             )
         }
+        if prepared_request.interaction_intent == "lecture_help":
+            return summary
         progress_fields = {
             "learning_summary": turn.assessment.learning_summary,
             "working_conclusion": turn.assessment.working_conclusion,
@@ -2788,7 +2805,19 @@ class CoachApplicationService:
             ],
             has_selected_sources=bool(selected_sources),
         )
-        stage_status_request = is_current_stage_status_request(request.student_message)
+        lecture_help = request.interaction_intent == "lecture_help"
+        if lecture_help:
+            mode_policy = ModePolicy(
+                intent="high_confidence_source",
+                expected_mode="qa",
+                retrieve=True,
+                retrieval_intent=mode_policy.retrieval_intent,
+            )
+        elif request.interaction_intent == "project_coaching":
+            mode_policy = replace(mode_policy, expected_mode="coaching")
+        stage_status_request = not lecture_help and is_current_stage_status_request(
+            request.student_message
+        )
         if stage_status_request:
             # A current-stage lookup is sourced exclusively from the
             # authoritative notebook journey. Authorize supplied attachments
@@ -2805,13 +2834,14 @@ class CoachApplicationService:
             image_inputs = []
             unresolved_image_ids = set()
             record_field("current_stage_status_request", True)
-        progression_request = is_stage_progression_request(
-            request.student_message
-        ) or is_terminal_completion_request(
-            request.student_message,
-            current_stage=authoritative_stage,
+        progression_request = not lecture_help and (
+            is_stage_progression_request(request.student_message)
+            or is_terminal_completion_request(
+                request.student_message,
+                current_stage=authoritative_stage,
+            )
         )
-        workflow_no_retrieve = workflow_skips_retrieval(
+        workflow_no_retrieve = not lecture_help and workflow_skips_retrieval(
             request.student_message,
             current_stage=authoritative_stage,
         )
@@ -2927,9 +2957,11 @@ class CoachApplicationService:
             and not (
                 workflow_no_retrieve and not stage_status_request
             )
-            and _wants_course_catalog_retrieval(
-                request.student_message,
-                mode_retrieve=bool(mode_policy.retrieve) or force_retrieval,
+            and (
+                lecture_help or _wants_course_catalog_retrieval(
+                    request.student_message,
+                    mode_retrieve=bool(mode_policy.retrieve) or force_retrieval,
+                )
             )
         )
         if include_course_catalog:
@@ -3192,6 +3224,7 @@ class CoachApplicationService:
             request = CoachRequest(
                 thread_id=thread_id,
                 student_message=content.strip(),
+                interaction_intent=replacement_metadata.get("interaction_intent"),
                 current_stage=revision.current_stage,
                 response_detail=detail,
                 model_id=model_id,
