@@ -53,6 +53,7 @@ from backend.coaching.progress import (
 )
 from backend.coaching.progress_fields import meaningful_progress_fields
 from backend.coaching.turn_snapshot import TurnSnapshot
+from backend.coaching.stream_events import GraphSummary
 from backend.domain import (
     CitationReference,
     CoachImageInput,
@@ -738,6 +739,44 @@ class CoachApplicationService:
                 }
             )
         return None
+
+    def completed_turn(self, thread_id: str, idempotency_key: str) -> CoachTurn | None:
+        """Read an exact saved turn for recovery, without executing generation.
+
+        Missing, failed, or revoked requests return None. The owner-scoped
+        repository checks notebook ownership and active revision visibility.
+        """
+        return _coach_turn_from_payload(
+            self._store.lookup_completed_coach_request(
+                thread_id, idempotency_key=idempotency_key
+            )
+        )
+
+    def graph_summary(self, thread_id: str) -> GraphSummary:
+        """Return a bounded runtime summary, recovering saved output after restart."""
+        runtime_summary = self._workflow.inspect_thread(thread_id)
+        summary: dict[str, Any] = {"steps": [], "mode": None}
+        page = self._store.get_message_page(thread_id, limit=2)
+        for message in reversed(page["messages"]):
+            metadata = dict(message.get("metadata") or {})
+            if message.get("role") != "assistant" or not metadata.get("assessment"):
+                continue
+            key = str(metadata.get("coach_idempotency_key") or "")
+            turn = self.completed_turn(thread_id, key) if key else None
+            if turn is None:
+                turn = _coach_turn_from_payload({
+                    "response_text": message.get("content"),
+                    "assessment": metadata["assessment"],
+                    "auto_advanced_to": metadata.get("auto_advanced_to"),
+                })
+            if turn is not None:
+                summary = {
+                    "steps": ["load_context", "assess", "recommend", "format"],
+                    "mode": (runtime_summary or {}).get("mode") or "persisted",
+                    "turn": turn.model_dump(mode="json"),
+                }
+                break
+        return GraphSummary(thread_id=thread_id, **summary, retention=self._workflow.retention())
 
     def submit(
         self,
@@ -1641,6 +1680,30 @@ class CoachApplicationService:
         )
 
     def _submit_once(
+        self,
+        request: CoachRequest,
+        *,
+        idempotency_marker_id: str | None = None,
+        idempotency_lease_token: str | None = None,
+        idempotency_fingerprint: str | None = None,
+        server_owned_specialist: str | None = None,
+    ) -> CoachTurn:
+        """Clean up this execution's results before releasing its notebook lease."""
+        try:
+            return self._submit_once_body(
+                request,
+                idempotency_marker_id=idempotency_marker_id,
+                idempotency_lease_token=idempotency_lease_token,
+                idempotency_fingerprint=idempotency_fingerprint,
+                server_owned_specialist=server_owned_specialist,
+            )
+        except BaseException:
+            self._workflow.discard_thread(request.thread_id)
+            raise
+        finally:
+            self._workflow.release_results(request.thread_id)
+
+    def _submit_once_body(
         self,
         request: CoachRequest,
         *,

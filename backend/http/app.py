@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
 import re
-import threading
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -55,6 +53,8 @@ from backend.providers import (
     provider_error_category,
     provider_unavailable_outcome,
 )
+from backend.coaching.streaming import coach_events, stream_error
+from backend.coaching.stream_events import GraphEvent, GraphSummary
 from backend.rate_limit import RateLimitExceeded
 from backend.settings import settings, validate_production_configuration
 from backend.learning.hmw import hmw_scaffold_projection
@@ -2262,182 +2262,64 @@ def create_app(
             )
 
         def events():
-            yield json.dumps(
-                {
-                    "event": "started",
-                    "stage": request.current_stage,
-                }
-            ) + "\n"
-            bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = (
-                queue.SimpleQueue()
-            )
+            def initialize() -> None:
+                begin_coach_turn_perf()
+                record_field("request_id", stream_request_id)
+                auth_ms = getattr(http_request.state, "auth_context_ms", None)
+                if auth_ms is not None:
+                    record_field("auth_context_ms", auth_ms)
 
-            def _progress(phase: str) -> None:
-                label = PROGRESS_LABELS.get(phase, "")
-                bus.put(
-                    {
-                        "event": "status",
-                        "phase": phase,
-                        "label": label,
-                    }
-                )
-
-            def _reply_ready(response_text: str) -> None:
-                bus.put({"event": "reply_ready", "text": response_text})
-
-            def _worker() -> None:
-                try:
-                    begin_coach_turn_perf()
-                    record_field("request_id", stream_request_id)
-                    auth_ms = getattr(http_request.state, "auth_context_ms", None)
-                    if auth_ms is not None:
-                        record_field("auth_context_ms", auth_ms)
-                    completed = owner.coach.submit(
-                        request, progress=_progress, reply=_reply_ready
-                    )
-                    bus.put({"event": "_complete", "turn": completed})
-                except BaseException as error:
-                    bus.put(error)
-                finally:
-                    bus.put(None)
-
-            worker = threading.Thread(
-                target=_worker,
-                name="coach-turn-stream",
-                daemon=True,
-            )
-            worker.start()
-            turn = None
-            while True:
-                item = bus.get()
-                if item is None:
-                    break
+            for item in coach_events(owner.coach, request, before_submit=initialize):
                 if isinstance(item, BaseException):
-                    error = item
-                    if isinstance(error, RateLimitExceeded):
+                    if isinstance(item, RateLimitExceeded):
                         _record_coach_rate_limit(
-                            error,
-                            selected_source_count=selected_source_count,
-                            request_id=str(
-                                getattr(http_request.state, "request_id", None)
-                                or "-"
-                            ),
+                            item, selected_source_count=selected_source_count,
+                            request_id=stream_request_id,
                         )
-                        yield json.dumps(
-                            {
-                                "event": "error",
-                                "detail": error.detail,
-                                "status": 429,
-                                "category": str(
-                                    getattr(error, "category", "") or "throttled"
-                                ),
-                                "retry_after": max(1, int(error.retry_after_seconds)),
-                            }
-                        ) + "\n"
-                        return
-                    if isinstance(error, CoachIdempotencyConflictError):
-                        _emit_coach_metric(
-                            outcome="idempotency_conflict",
-                            selected_source_count=selected_source_count,
+                    else:
+                        _log_stream_failure("failed", item)
+                        outcome = (
+                            provider_unavailable_outcome(item)
+                            if isinstance(item, ProviderUnavailableError)
+                            else "idempotency_conflict"
+                            if isinstance(item, CoachIdempotencyConflictError)
+                            else "revision_conflict"
+                            if isinstance(item, ConversationRevisionConflictError)
+                            else "idempotency_in_progress"
+                            if isinstance(item, (CoachRequestInProgressError, CoachRequestLeaseLostError))
+                            else "rejected" if isinstance(item, ValueError) else "failed"
                         )
-                        yield json.dumps(
-                            {"event": "error", "detail": str(error), "status": 409}
-                        ) + "\n"
-                        return
-                    if isinstance(error, ConversationRevisionConflictError):
-                        _emit_coach_metric(
-                            outcome="revision_conflict",
-                            selected_source_count=selected_source_count,
-                        )
-                        yield json.dumps(
-                            {"event": "error", "detail": str(error), "status": 409}
-                        ) + "\n"
-                        return
-                    if isinstance(
-                        error,
-                        (CoachRequestInProgressError, CoachRequestLeaseLostError),
-                    ):
-                        _emit_coach_metric(
-                            outcome="idempotency_in_progress",
-                            selected_source_count=selected_source_count,
-                        )
-                        yield json.dumps(
-                            {"event": "error", "detail": str(error), "status": 409}
-                        ) + "\n"
-                        return
-                    if isinstance(error, ProviderUnavailableError):
-                        _log_stream_failure(
-                            provider_unavailable_outcome(error), error
-                        )
-                        _emit_coach_metric(
-                            outcome=provider_unavailable_outcome(error),
-                            selected_source_count=selected_source_count,
-                        )
-                        yield json.dumps(
-                            {
-                                "event": "error",
-                                "detail": str(error),
-                                "status": 503,
-                                "category": provider_error_category(error),
-                            }
-                        ) + "\n"
-                        return
-                    if isinstance(error, ValueError):
-                        _log_stream_failure("rejected", error)
-                        _emit_coach_metric(
-                            outcome="rejected",
-                            selected_source_count=selected_source_count,
-                        )
-                        yield json.dumps(
-                            {"event": "error", "detail": str(error), "status": 400}
-                        ) + "\n"
-                        return
-                    logger.exception(
-                        "coach_turn_stream unhandled request_id=%s",
-                        stream_request_id,
-                    )
-                    _emit_coach_metric(
-                        outcome="failed",
-                        selected_source_count=selected_source_count,
-                    )
-                    raise error
-                if item.get("event") == "_complete":
-                    turn = item["turn"]
-                    continue
+                        _emit_coach_metric(outcome=outcome, selected_source_count=selected_source_count)
+                    yield json.dumps(stream_error(item)) + "\n"
+                    return
+                if item.get("event") == "done":
+                    turn = CoachTurn.model_validate(item["turn"])
+                    _emit_coach_metric(outcome="ok", selected_source_count=selected_source_count, turn=turn)
+                    graph = owner.workflow.inspect_thread(request.thread_id) or {}
+                    yield GraphEvent(steps=graph.get("steps") or [], mode=graph.get("mode")).model_dump_json() + "\n"
                 yield json.dumps(item) + "\n"
-            worker.join(timeout=1.0)
-            if turn is None:
-                return
-            _emit_coach_metric(
-                outcome="ok",
-                selected_source_count=selected_source_count,
-                turn=turn,
-            )
-            graph = owner.workflow.inspect_thread(request.thread_id) or {}
-            yield json.dumps(
-                {
-                    "event": "graph",
-                    "steps": graph.get("steps") or [],
-                    "mode": graph.get("mode"),
-                }
-            ) + "\n"
-            yield json.dumps(
-                {"event": "done", "turn": turn.model_dump(mode="json")}
-            ) + "\n"
 
         return StreamingResponse(events(), media_type="application/x-ndjson")
-    @app.get("/api/v1/threads/{thread_id}/graph")
+    @app.get("/api/v1/threads/{thread_id}/coach-turn", response_model=CoachTurn | None)
+    def completed_coach_turn(
+        thread_id: str,
+        idempotency_key: str = Query(min_length=1, max_length=200),
+        owner: OwnerServices = Depends(current_owner),
+    ) -> CoachTurn | None:
+        """Recover only the saved turn identified by the owner's exact retry key."""
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        return owner.coach.completed_turn(thread_id, idempotency_key)
+
+    @app.get("/api/v1/threads/{thread_id}/graph", response_model=GraphSummary)
     def graph_inspection(
         thread_id: str,
         owner: OwnerServices = Depends(current_owner),
-    ) -> dict[str, Any]:
+    ) -> GraphSummary:
         """Return the latest inspectable coach-graph summary for a notebook."""
         if not owner.store.get_thread(thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
-        summary = owner.workflow.inspect_thread(thread_id)
-        if not summary:
-            return {"thread_id": thread_id, "steps": [], "mode": None}
-        return {"thread_id": thread_id, **summary}
+        return owner.coach.graph_summary(thread_id)
 
     @app.post(
         "/api/v1/threads/{thread_id}/phase-transitions/{transition_id}/resolve",

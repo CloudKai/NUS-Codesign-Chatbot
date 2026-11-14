@@ -107,7 +107,12 @@ into domain or application code.
 ## Educational workflow
 
 Build one LangGraph workflow, not one agent per phase. Give it explicit typed
-state and durable per-thread checkpoints.
+state and durable per-thread recovery through saved turns and learning state.
+The implemented graph has no interrupt/resume nodes: intermediate run checkpoints
+are ephemeral, and completed runs retain no LangGraph checkpoints. Keep at most
+64 latest runtime summaries per workflow; graph inspection reconstructs saved
+output from the transcript after eviction or restart. Provider handoff data stays
+available until the application persists or fails the leased execution.
 
 Its steps are:
 

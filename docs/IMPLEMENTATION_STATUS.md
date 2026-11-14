@@ -2,6 +2,38 @@
 
 ## CURRENT STATUS
 
+### Ticket 01 / GitHub #14: reliable turns and bounded graph memory (2026-11-15)
+
+- **Outcome:** Shared typed dispatch/preview/saved/error events across HTTP and
+  in-process clients. Dispatch starts the worker before acknowledgment. Recovery
+  uses the exact owner-scoped retry key, including after restart; unrelated
+  replies cannot unlock an interrupted send. Failed saves emit safe errors and
+  discard previews. Recovery outages retain a bounded timeout/unlock path.
+- **Resources:** Completed LangGraph checkpoints are disabled for the existing
+  non-interrupting graph. At most 64 latest notebook summaries remain cached;
+  graph inspection reads saved transcript output after eviction/restart. Active
+  provider handoff results survive cache eviction and rejected concurrent retries;
+  cleanup occurs within the executing notebook lease.
+- **Validation:** Final mock suite **3323 passed, 2 skipped** (104.61s); compileall
+  and whitespace checks passed. Deterministic tests cover both transports,
+  save failures, exact recovery, restart, 30 repeated turns, 70 notebooks, active
+  memory during conflicting retries/65-notebook eviction, and timeout recovery.
+  Real local HTTP reader disconnects after dispatch/preview saved exactly one
+  message pair. Mock Guest startup, desktop 1440px, mobile 390px, saved reload,
+  and server restart checked; browser console had zero errors (existing warnings).
+- **Review:** Standards and Spec reviews completed separately; material findings
+  fixed and re-reviewed. One earlier concurrent DSQL simulation equality failure
+  did not reproduce alone or in subsequent full suites; no live DSQL claim.
+- **Compatibility / rollback:** Additive typed recovery endpoint and graph
+  retention fields; no schema migration or student-data changes. Disposable demo
+  data only. Revert the ticket-only commit to roll back code; retain saved data.
+  Existing staged/untracked work and the original staged index content preserved.
+- **Handoff:** [new_docs/ticket_handoffs/01.md](../new_docs/ticket_handoffs/01.md)
+  records exact commands, files, review, evidence, limits, and process cleanup.
+- **Next exact action:** Fresh `gpt-6.1-sol` task for local ticket 02 / GitHub #15,
+  “Direct lecture help with optional project application”; live blockers verified
+  empty. Read `new_docs/EXECUTION.md`, the issue, and handoff 01 before edits.
+
 ### Hidden Guest startup interstitial (2026-09-27)
 
 - **Expected / actual:** On first visit or after sign-out, the browser still

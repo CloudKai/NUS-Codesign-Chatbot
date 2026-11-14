@@ -426,6 +426,7 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
                 "resolve_transition",
             ),
             ("GET", "/api/v1/threads/{thread_id}/graph", "graph_inspection"),
+            ("GET", "/api/v1/threads/{thread_id}/coach-turn", "completed_coach_turn"),
             ("POST", "/api/v1/coach/turn", "coach_turn"),
             ("POST", "/api/v1/coach/turn/stream", "coach_turn_stream"),
             (

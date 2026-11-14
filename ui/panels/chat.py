@@ -1002,27 +1002,6 @@ def apply_completed_turn_to_session(
     )
 
 
-def _awaiting_turn_has_assistant_reply(
-    messages: list[dict[str, Any]],
-    *,
-    baseline_message_count: int,
-    total_count: int | None = None,
-) -> bool:
-    """Return True when persisted history advanced with a new assistant row."""
-    if total_count is not None and int(total_count) <= int(baseline_message_count or 0):
-        return False
-    rows = [message for message in messages if isinstance(message, dict)]
-    # A bounded newest page is sufficient during recovery: any newly persisted
-    # coach reply is necessarily among the newest rows.
-    start = 0 if total_count is not None else max(0, int(baseline_message_count or 0))
-    for message in rows[start:]:
-        if str(message.get("role") or "").strip().lower() != "assistant":
-            continue
-        if str(message.get("content") or "").strip():
-            return True
-    return False
-
-
 def _sync_session_journey_from_thread(thread_id: str) -> None:
     """Refresh session journey fields from the authoritative notebook row."""
     updated_thread = store.get_thread(thread_id) or {}
@@ -1056,26 +1035,22 @@ def _try_complete_awaiting_coach_turn() -> bool:
     if not thread_id:
         clear_awaiting_coach_turn()
         return False
-    if awaiting_coach_turn_timed_out(pending):
-        _abandon_awaiting_coach_turn(
-            message=(
-                "The coach reply did not arrive after leaving Chat. "
-                "Send again if it is still missing."
-            )
-        )
-        return True
     store.forget_turn_reads(thread_id)
-    page = store.get_message_page(thread_id, limit=6)
-    messages = page.messages if hasattr(page, "messages") else (page or {}).get("messages", [])
-    total_count = (
-        int(page.total_count)
-        if hasattr(page, "total_count")
-        else int((page or {}).get("total_count", len(messages)))
-    )
-    baseline = int(pending.get("baseline_message_count") or 0)
-    if not _awaiting_turn_has_assistant_reply(
-        messages, baseline_message_count=baseline, total_count=total_count
-    ):
+    try:
+        completed = store.completed_turn(thread_id, str(pending.get("idempotency_key") or ""))
+    except Exception:
+        # Preserve the exact retry key; a sustained lookup outage still needs
+        # the bounded timeout path below so the composer can recover.
+        completed = None
+    if completed is None:
+        if awaiting_coach_turn_timed_out(pending):
+            _abandon_awaiting_coach_turn(
+                message=(
+                    "The coach reply did not arrive after leaving Chat. "
+                    "Send again if it is still missing."
+                )
+            )
+            return True
         return False
     _sync_session_journey_from_thread(thread_id)
     reset_chat_history_window(thread_id)

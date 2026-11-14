@@ -411,6 +411,73 @@ def test_failed_save_removes_ephemeral_reply_preview(monkeypatch) -> None:
     assert not _reply_visible(app, preview)
 
 
+def test_unrelated_saved_reply_does_not_unlock_interrupted_send() -> None:
+    """A remount must wait for its exact request rather than any later reply."""
+    import time
+
+    from backend.domain import CoachRequest
+    from backend.api import create_app
+    from backend.api_client import LocalApiClient
+    from backend.student_store import StudentStore
+    from fastapi.testclient import TestClient
+
+    app = saved_app()
+    thread_id = app.session_state["thread_id"]
+    client = LocalApiClient("http://testserver", session=TestClient(create_app(StudentStore())))
+    client.coach_turn(CoachRequest(
+        thread_id=thread_id,
+        student_message="Assess an unrelated design.",
+        current_stage="problem_identification",
+        response_detail="short",
+        idempotency_key="other-send",
+    ))
+    app.session_state["awaiting_coach_turn"] = {
+        "thread_id": thread_id,
+        "idempotency_key": "interrupted-send",
+        "prompt": "Assess my constraint.",
+        "baseline_message_count": 0,
+        "started_at": time.time(),
+    }
+    app.run()
+    assert not app.exception
+    assert app.session_state["awaiting_coach_turn"] is not None
+    assert app.chat_input[0].disabled
+    client.coach_turn(CoachRequest(
+        thread_id=thread_id,
+        student_message="Assess my constraint.",
+        current_stage="problem_identification",
+        response_detail="short",
+        idempotency_key="interrupted-send",
+    ))
+    app.run()
+    assert not app.exception
+    assert app.session_state["awaiting_coach_turn"] is None
+    assert not app.chat_input[0].disabled
+
+
+def test_expired_recovery_unlocks_when_lookup_stays_unavailable(monkeypatch) -> None:
+    """A persistent recovery outage cannot disable the composer indefinitely."""
+    from ui import chat
+
+    app = saved_app()
+    app.session_state["awaiting_coach_turn"] = {
+        "thread_id": app.session_state["thread_id"],
+        "idempotency_key": "unavailable-send",
+        "prompt": "Assess my constraint.",
+        "baseline_message_count": 0,
+        "started_at": 1.0,
+    }
+
+    def unavailable(*_args):
+        raise OSError("Recovery unavailable")
+
+    monkeypatch.setattr(chat.store, "completed_turn", unavailable)
+    app.run()
+    assert not app.exception
+    assert app.session_state["awaiting_coach_turn"] is None
+    assert not app.chat_input[0].disabled
+
+
 def test_citation_buttons_render_from_done_payload_without_get_source(
     monkeypatch,
 ) -> None:

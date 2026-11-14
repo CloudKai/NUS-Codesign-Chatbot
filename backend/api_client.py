@@ -911,6 +911,17 @@ class LocalApiClient:
                     headers[str(key)] = cleaned
         return self._request_kwargs(**({"headers": headers} if headers else {}))
 
+    def completed_turn(self, thread_id: str, idempotency_key: str) -> CoachTurn | None:
+        """Read an exact durable turn without submitting or regenerating it."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/coach-turn",
+            params={"idempotency_key": idempotency_key},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return CoachTurn.model_validate(payload) if payload is not None else None
+
     def coach_turn(self, request: CoachRequest) -> CoachTurn:
         """Submit one typed coaching turn to the local backend."""
         response = self._http.post(

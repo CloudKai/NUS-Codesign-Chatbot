@@ -10,7 +10,6 @@ Student turns go through ``submit_coach_turn`` / ``stream_coach_turn_events``
 from __future__ import annotations
 
 import logging
-import queue
 import sys
 import threading
 import time
@@ -27,7 +26,7 @@ from streamlit.runtime.scriptrunner import get_script_run_ctx
 from backend.api_client import LocalApiClient
 from ui.run_memo import invalidate_memo, memoized
 from backend.application import CoachApplicationService
-from backend.coaching.progress import PROGRESS_LABELS
+from backend.coaching.streaming import coach_events, stream_error
 from backend.domain import (
     CoachRequest,
     CoachTurn,
@@ -513,46 +512,11 @@ def stream_coach_turn_events(
             )
             return
         _, _, coach, _ = _resolve_resources()
-        yield {
-            "event": "started",
-            "thread_id": request.thread_id,
-            "stage": request.current_stage,
-        }
-        bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = queue.SimpleQueue()
-
-        def _progress(phase: str) -> None:
-            bus.put(
-                {
-                    "event": "status",
-                    "phase": phase,
-                    "label": PROGRESS_LABELS.get(phase, ""),
-                }
-            )
-
-        def _reply_ready(response_text: str) -> None:
-            bus.put({"event": "reply_ready", "text": response_text})
-
-        def _worker() -> None:
-            try:
-                completed = coach.submit(request, progress=_progress, reply=_reply_ready)
-                bus.put({"event": "done", "turn": completed.model_dump(mode="json")})
-            except BaseException as error:
-                bus.put(error)
-            finally:
-                bus.put(None)
-
-        worker = threading.Thread(target=_worker, name="in-process-coach-stream", daemon=True)
-        worker.start()
-        try:
-            while True:
-                item = bus.get()
-                if item is None:
-                    break
-                if isinstance(item, BaseException):
-                    raise item
-                yield item
-        finally:
-            worker.join(timeout=1.0)
+        for item in coach_events(coach, request):
+            if isinstance(item, BaseException):
+                yield stream_error(item)
+                return
+            yield item
 
     try:
         for event in _iter_events():
@@ -581,6 +545,13 @@ def stream_coach_turn_events(
 
 class WorkspaceFacade:
     """UI persistence facade over the typed API or in-process workspace service."""
+
+    def completed_turn(self, thread_id: str, idempotency_key: str) -> CoachTurn | None:
+        """Read the exact persisted reply for an interrupted send in either mode."""
+        if local_api_enabled():
+            return local_api_client().completed_turn(thread_id, idempotency_key)
+        _, _, coach, _ = _resolve_resources()
+        return coach.completed_turn(thread_id, idempotency_key)
 
     def _service(self) -> WorkspaceService:
         _, service, _, _ = _resolve_resources()

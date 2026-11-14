@@ -6,8 +6,8 @@ confirmation. The application persists the completed turn and recommendation
 together after provider work finishes.
 
 When LangGraph is available, ``run`` executes the documented multi-step graph
-(load → assess → recommend → format) with an in-memory checkpointer so graph
-state can be inspected per thread.
+(load → assess → recommend → format). Completed runs retain only a bounded
+latest summary; durable turn recovery belongs to the transcript repository.
 """
 
 from __future__ import annotations
@@ -344,7 +344,6 @@ class CoachWorkflow:
 
     provider: AssessmentProvider
     transitions: PhaseTransitionRepository
-    _checkpointer: Any = field(default=None, init=False, repr=False)
     _graph: Any = field(default=None, init=False, repr=False)
     _last_graph_state: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     _last_research_coding: dict[str, ProvisionalResearchCoding | None] = field(
@@ -381,12 +380,38 @@ class CoachWorkflow:
         back to the portable sequential implementation otherwise.
         """
         try:
-            self._ensure_graph()
-        except RuntimeError as error:
-            if not isinstance(error.__cause__, ImportError):
-                raise
-            return self._run_sequential(request)
-        return self._run_graph(request)
+            try:
+                self._ensure_graph()
+            except RuntimeError as error:
+                if not isinstance(error.__cause__, ImportError):
+                    raise
+                return self._run_sequential(request)
+            return self._run_graph(request)
+        except BaseException:
+            self.discard_thread(request.thread_id)
+            raise
+
+    def discard_thread(self, thread_id: str) -> None:
+        """Release transient results after a failed or evicted notebook run."""
+        self._last_graph_state.pop(thread_id, None)
+        self.release_results(thread_id)
+
+    def release_results(self, thread_id: str) -> None:
+        """Release provider handoff data while the caller holds the execution lease."""
+        self._last_research_coding.pop(thread_id, None)
+        self._last_conversation_memory.pop(thread_id, None)
+        self._last_review_orchestration.pop(thread_id, None)
+
+    def _remember_state(self, thread_id: str, summary: dict[str, Any]) -> None:
+        """Keep at most 64 latest notebook summaries, evicting oldest first."""
+        self._last_graph_state.pop(thread_id, None)
+        self._last_graph_state[thread_id] = summary
+        while len(self._last_graph_state) > 64:
+            self._last_graph_state.pop(next(iter(self._last_graph_state)))
+
+    def retention(self) -> dict[str, int]:
+        """Report retained completed checkpoints and bounded summary count."""
+        return {"completed_checkpoints": 0, "cached_threads": len(self._last_graph_state)}
 
     def _run_sequential(self, request: CoachRequest) -> CoachTurn:
         """Portable non-graph path used when LangGraph is unavailable."""
@@ -437,11 +462,11 @@ class CoachWorkflow:
             assessment=assessment,
             pending_transition=pending,
         )
-        self._last_graph_state[request.thread_id] = {
+        self._remember_state(request.thread_id, {
             "steps": ["load_context", "assess", "recommend", "format"],
             "turn": turn.model_dump(mode="json"),
             "mode": "sequential",
-        }
+        })
         self._last_research_coding[request.thread_id] = provider_result.research_coding
         self._last_conversation_memory[request.thread_id] = (
             provider_result.conversation_memory
@@ -455,17 +480,8 @@ class CoachWorkflow:
         return turn
 
     def _run_graph(self, request: CoachRequest) -> CoachTurn:
-        """Execute the multi-step LangGraph workflow with a durable checkpointer."""
+        """Execute a fresh graph; persisted transcript state supplies continuity."""
         graph = self._ensure_graph()
-        # Unique namespace per run so a RAG fallback retry cannot resume the
-        # first Haiku graph checkpoint for the same notebook thread_id.
-        run_ns = f"coach-{uuid4().hex}"
-        config = {
-            "configurable": {
-                "thread_id": request.thread_id,
-                "checkpoint_ns": run_ns,
-            }
-        }
         self._last_research_coding.pop(request.thread_id, None)
         self._last_conversation_memory.pop(request.thread_id, None)
         self._last_review_orchestration.pop(request.thread_id, None)
@@ -475,21 +491,16 @@ class CoachWorkflow:
                     "request": request.model_dump(mode="json"),
                     "steps_completed": [],
                 },
-                config=config,
             )
         except Exception:
             self._last_research_coding.pop(request.thread_id, None)
             raise
         turn = CoachTurn.model_validate(result["turn"])
-        self._last_graph_state[request.thread_id] = {
+        self._remember_state(request.thread_id, {
             "steps": list(result.get("steps_completed") or []),
             "turn": turn.model_dump(mode="json"),
             "mode": "langgraph",
-            "checkpoint": {
-                "thread_id": request.thread_id,
-                "checkpoint_ns": run_ns,
-            },
-        }
+        })
         return turn
 
     def inspect_thread(self, thread_id: str) -> dict[str, Any] | None:
@@ -550,11 +561,10 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
     Steps:
       load_context → assess → recommend → format
 
-    Uses an in-memory checkpointer so local demos can inspect per-thread state
-    without AWS. Does not create five agents.
+    The graph has no interrupts: transcript persistence owns restart recovery.
+    Avoid retaining completed request/source payloads in a redundant checkpointer.
     """
     try:
-        from langgraph.checkpoint.memory import MemorySaver
         from langgraph.graph import END, START, StateGraph
     except ImportError as error:  # pragma: no cover - exercised in local setup.
         raise RuntimeError(
@@ -685,6 +695,4 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
     graph.add_edge("assess", "recommend")
     graph.add_edge("recommend", "format")
     graph.add_edge("format", END)
-    checkpointer = MemorySaver()
-    workflow._checkpointer = checkpointer
-    return graph.compile(checkpointer=checkpointer)
+    return graph.compile()
