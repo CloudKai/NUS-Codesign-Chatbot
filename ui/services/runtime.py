@@ -941,6 +941,17 @@ class WorkspaceFacade:
             done.add(thread_id)
         return added
 
+    def project_resume(self, thread_id: str) -> dict[str, Any]:
+        """Read saved project work without starting coaching or review jobs."""
+        if local_api_enabled():
+            return dict(local_api_client().learning_state(thread_id).get("project_resume") or {})
+        from backend.learning.resume import project_resume
+
+        thread = self.get_thread(thread_id) or {}
+        return project_resume(
+            thread.get("metadata") or {}, self.get_messages(thread_id),
+        ).model_dump(mode="json")
+
     def pending_transition(self, thread_id: str) -> PendingPhaseTransition | None:
         """Return the unresolved stage recommendation for the owned notebook."""
 

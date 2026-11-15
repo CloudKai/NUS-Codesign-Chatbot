@@ -137,10 +137,12 @@ def test_run_scoped_memo_cuts_duplicate_workspace_reads() -> None:
         # Chat no longer mounts the Library destination, avoiding its three
         # source-list reads during a normal workspace load.
         assert load_total <= 13
-        assert send_total == 11
+        # Resume reads the canonical transcript once to project saved stage work.
+        assert after_send.get("get_messages", 0) <= 2
+        assert send_total == 12
         assert after_send.get("backfill_legacy_sources", 0) == 0
         assert after_send.get("get_source", 0) == 0
-        assert rerun_total == 6
+        assert rerun_total == 7
         assert after_rerun.get("get_messages", 0) <= 2
         assert after_rerun.get("has_messages", 0) <= 1
         assert after_rerun.get("get_message_page", 0) <= 2

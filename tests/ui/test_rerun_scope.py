@@ -662,7 +662,6 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert 'pending_mobile_panel"] = "Chat"' in select_block
     assert 'chat_follow_bottom"] = True' not in select_block
     assert "chat_reveal_coach_reply = True" in select_block
-    assert "composer_nonce" in select_block
     assert "chat_scroll_after_stage_select" not in select_block
     assert "store.select_stage" not in select_block
     fetch_block = source.split("def _fetch_pending_transition", 1)[1].split(

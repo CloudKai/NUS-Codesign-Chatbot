@@ -2,6 +2,42 @@
 
 ## CURRENT STATUS
 
+### Ticket 04 / GitHub #17: useful project resumption (2026-11-15)
+
+- **Outcome:** Learning-state now projects exact stage-tagged student contributions,
+  separately labelled saved coach feedback/completion summaries, saved decision
+  status, and one deterministic next action per stage. Thinking Path exposes
+  these on the active stage and expanded previews without load-time generation.
+- **Drafts:** Owner/notebook-scoped composer identity and browser-tab text recovery
+  preserve unsent text across reload, confirmation, revisits, and notebook switches.
+  Sends clear recovered text. Stage selection avoids unnecessary input remounts.
+- **Validation:** Five public API contracts cover exact authorship, decisions,
+  restart/revisit, canonical focus without inferred awards, edited active revisions,
+  all five stage actions, read purity/no model calls, and ownership. Final canonical
+  mock suite **2254 passed, 1 skipped** (80.83s); focused final **35 passed**.
+  Unfiltered workspace: 3319 passed, 2 skipped, 24 failures only in preserved
+  unmanaged ` 2.py` copies asserting superseded policy/read budgets.
+  Desktop 1440x960/mobile 390x844 checked saved restart state, independent A/B
+  drafts, new chat isolation, send/clear, confirmation, revisits and stage actions.
+  Width 390/390. Compileall and whitespace passed; Impeccable detector `[]`.
+- **Review:** Separate Standards/Spec reviews resolved draft-scope leakage,
+  legacy raw-metadata fallback, logging context and attribution. Astra diagnosed
+  an invalid legacy test seed and a Streamlit waveform teardown race. Final
+  repeated stage moves produced no new console errors; cold reload can still
+  emit the vendor waveform error despite audio being disabled. Existing iframe
+  and Streamlit deprecation warnings remain. No clean-cold-load-console claim.
+- **Compatibility / rollback:** No migration, reset, or existing student-data
+  write. Untagged legacy work remains in Chat; completion history/feedback stays
+  unchanged. Browser drafts are text only, local to this tab; closing the tab or
+  denied browser storage does not provide durable draft recovery. Revert only
+  the ticket commit to roll back. Existing index/user work preserved.
+- **Handoff:** [new_docs/ticket_handoffs/04.md](../new_docs/ticket_handoffs/04.md)
+  includes commands, unmanaged duplicate-suite qualification, browser evidence,
+  cleanup, risks, and the approved queue protocol. No paid calls/push/deployment.
+- **Next exact action:** Publish the ticket-only commit and acceptance evidence
+  on #17, close it, then create a new `gpt-6.1-sol` task for local 05 / #18,
+  “Safe Guest entry for classroom arrivals”; live native blockers are empty.
+
 ### Ticket 03 / GitHub #16: confirmed advancement and free stage revisits (2026-11-15)
 
 - **Outcome:** Nonterminal recommendations remain pending without completion or

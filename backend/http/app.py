@@ -58,6 +58,7 @@ from backend.coaching.stream_events import GraphEvent, GraphSummary
 from backend.rate_limit import RateLimitExceeded
 from backend.settings import settings, validate_production_configuration
 from backend.learning.hmw import hmw_scaffold_projection
+from backend.learning.resume import project_resume
 from backend.student_journey import DEFAULT_STAGE, normalize_journey
 from backend.source_library import (
     CourseMaterialSyncCoordinator,
@@ -1890,9 +1891,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="Notebook not found")
         payload = public_notebook_metadata(thread.get("metadata"))
         journey = normalize_journey(payload.get("learning_journey"))
+        messages = owner.store.get_messages(thread_id)
+        payload["project_resume"] = project_resume(payload, messages).model_dump(mode="json")
         payload["hmw_scaffold"] = hmw_scaffold_projection(
             str(journey.get("current_stage") or DEFAULT_STAGE),
-            owner.store.get_messages(thread_id),
+            messages,
             enabled=settings.hmw_scaffold_enabled,
             response_detail=str(journey.get("response_detail") or ""),
         )

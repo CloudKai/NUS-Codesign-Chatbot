@@ -200,6 +200,17 @@ informal ADVANCE nor promote a formal-looking STAY. Shared and stage prompts
 keep coaching in the current stage until confirmation. Deterministic mocks
 verify routing and persistence, not real-model semantic quality.
 
+Ticket 04 / #17 adds a read-only `project_resume` projection to learning-state.
+It uses active, stage-tagged transcript contributions as student work, labels
+completion summaries and historical replies as coach-generated feedback, and
+supplies one deterministic action for each stage (including pending decisions
+and completed-stage refinement). Untagged legacy text remains in Chat; no
+stage or authorship is guessed and no model/review job starts from this read.
+Thinking Path exposes this saved work in the active stage and opened previews.
+Unsent composer text is scoped by owner/notebook in browser-tab sessionStorage;
+reload and stage revisits restore it, and a text send clears it. File payloads
+are not copied into browser storage. Stage selection keeps the composer mounted.
+
 Audited auto-advance (`AUTO_ADVANCE_STAGES=true`) is an explicit local demo
 override: the coach ADVANCE recommendation is applied immediately without the
 Next/confirm UI, but a transition row is still persisted for auditability. Do

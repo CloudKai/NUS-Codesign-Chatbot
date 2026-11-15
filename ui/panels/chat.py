@@ -48,6 +48,7 @@ from ui.coach_welcome import (
 from ui.constants import DEFAULT_APPEARANCE
 from ui.layout.chat_scroll import sync_chat_scroll
 from ui.layout.composer_layout import sync_composer_layout
+from ui.layout.composer_draft import composer_scope, sync_composer_draft
 from ui.layout.user_message_edit_layout import (
     USER_MESSAGE_EDIT_HEIGHT_PX,
     sync_user_message_edit_layout,
@@ -55,6 +56,7 @@ from ui.layout.user_message_edit_layout import (
 from ui.runtime import (
     coach_turn_is_streaming,
     log_ui_timing,
+    owner_identifier,
     rerun_app,
     rerun_fragment,
     set_coach_turn_streaming,
@@ -2497,9 +2499,12 @@ def _render_composer_submit_fragment(
                     )
             if awaiting_locked and not coach_turn_is_streaming():
                 _render_awaiting_composer_controls()
+            draft_owner = owner_identifier()
+            draft_thread = str(st.session_state.get("thread_id") or "")
+            draft_scope = composer_scope(draft_owner, draft_thread)
             composer_value = st.chat_input(
                 "Ask a question or share your thinking",
-                key=f"composer-{st.session_state.composer_nonce}",
+                key=f"composer-{draft_scope}-{st.session_state.composer_nonce}",
                 accept_file="multiple",
                 accept_audio=False,
                 max_upload_size=settings.max_file_size_mb,
@@ -2509,6 +2514,10 @@ def _render_composer_submit_fragment(
             )
             prompt_accept_ms = _duration_ms(prompt_started)
             layout_started = time.perf_counter()
+            sync_composer_draft(
+                draft_owner, draft_thread,
+                submitted=bool(normalize_composer_value(composer_value)[0]),
+            )
             sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
             composer_layout_ms = _duration_ms(layout_started)
     # A stale cursor means the accumulated window was replaced with the

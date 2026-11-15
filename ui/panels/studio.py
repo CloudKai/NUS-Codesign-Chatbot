@@ -315,6 +315,35 @@ def _review_fingerprint(review: dict[str, Any]) -> str:
     )
 
 
+def _render_stage_resume(view: dict[str, Any]) -> None:
+    """Show exact saved student work and separately attributed coach feedback."""
+    st.markdown(f"**{view['artifact_label']}**")
+    work = view.get("student_work") or []
+    if work:
+        st.caption("Your latest saved contribution · your words")
+        st.text(work[-1]["text"])
+        if len(work) > 1:
+            with st.expander(f"Earlier contributions ({len(work) - 1})"):
+                for item in work[:-1]:
+                    st.text(item["text"])
+    else:
+        st.caption("No stage-tagged project contribution saved yet. Older work remains in Chat.")
+    if view.get("completed"):
+        st.caption("Completion recorded · revisiting keeps your history")
+    decision = view.get("decision")
+    if decision:
+        st.caption({"pending": "Recommendation awaiting your choice", "confirmed": "You confirmed the stage recommendation", "rejected": "Recommendation not applied"}.get(decision, ""))
+    if view.get("coach_summary") or view.get("feedback"):
+        with st.expander("Saved coach feedback"):
+            if view.get("coach_summary"):
+                st.caption("Coach-generated completion summary")
+                st.text(view["coach_summary"])
+            for item in view.get("feedback") or []:
+                st.text(item["text"])
+    st.markdown("**Next action**")
+    st.write(view["next_action"])
+
+
 def _render_stage_detail(stage: ThinkingStage) -> None:
     """Render the stage description under the full-name title."""
     st.markdown(
@@ -426,10 +455,8 @@ def _select_journey_stage(stage_id: str) -> None:
         # mobile_panel here — the radio widget is already instantiated.
         st.session_state["pending_mobile_panel"] = "Chat"
         st.session_state.nav_section = "Chat"
-        # Match typed Move to: remount the composer fragment with history.
-        st.session_state.composer_nonce = int(
-            st.session_state.get("composer_nonce") or 0
-        ) + 1
+        # The full rerun refreshes history; keep the input mounted so unsent
+        # text/files survive and Streamlit does not race its audio teardown.
         if moved:
             st.session_state.chat_reveal_coach_reply = True
         rerun_app()
@@ -508,6 +535,13 @@ def render_journey_track() -> None:
                 except Exception:
                     logger.exception("journey_deep_review_ui_failed")
                     st.error(_DEEP_REVIEW_ERROR)
+    resume_stages: dict[str, dict[str, Any]] = {}
+    if st.session_state.thread_id:
+        try:
+            resume_stages = {view["stage_id"]: view for view in store.project_resume(str(st.session_state.thread_id)).get("stages", [])}
+        except Exception:
+            logger.exception("project_resume_read_failed", extra={"thread_id": str(st.session_state.thread_id)})
+            st.caption("Saved work could not be loaded. Reopen Thinking Path to retry.")
     stage_icons = {
         "problem_identification": "problem",
         "concept_generation": "lightbulb",
@@ -569,6 +603,8 @@ def render_journey_track() -> None:
                             unsafe_allow_html=True,
                         )
                         _render_stage_detail(stage)
+                        if stage.id in resume_stages:
+                            _render_stage_resume(resume_stages[stage.id])
                     else:
                         chevron = "⌃" if is_preview_open else "⌵"
                         cta_label = (
@@ -589,6 +625,8 @@ def render_journey_track() -> None:
                         _render_journey_stage_title_row(stage, chevron=chevron)
                         if is_preview_open:
                             _render_stage_detail(stage)
+                            if stage.id in resume_stages:
+                                _render_stage_resume(resume_stages[stage.id])
                             if state == "locked":
                                 preceding = THINKING_STAGES[stage_indexes[stage.id] - 1]
                                 st.caption(
