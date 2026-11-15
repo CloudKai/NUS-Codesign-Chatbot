@@ -2,6 +2,50 @@
 
 ## CURRENT STATUS
 
+### Ticket 06 / GitHub #19: bounded uploads and independent cleanup (2026-11-15)
+
+- **Outcome:** Sources uploads atomically admit running, queued and retry-retained
+  batches under global/per-owner job and byte ceilings. Defaults per UI process:
+  32/4 batches, 200/50 MiB. Payload-free progress retains filenames only. Workers
+  release successful payloads before completion; a daemon expires abandoned failed
+  retries after 300 seconds from first failure, with at most three attempts.
+  Successful/exhausted receipts expire and are separately bounded (128 global,
+  eight per owner). Retry uses current credentials; retry/discard enforce ownership.
+- **UI / availability:** Admission messages remain visible per notebook with a
+  dismiss action and actionable recovery. Retry exhaustion explains reselecting
+  files. Fixed completion-during-render race that could strand an Uploading card.
+  Source completion persists grounding mode before a browser revisit; API files,
+  notebook isolation, saved conversations and independent drafts remain available.
+- **Validation:** Final canonical mock suite **2260 passed, 1 skipped** (79.22s);
+  focused API/source/UI/architecture **75 passed**. HTTP TDD red/green verifies
+  grounding without a browser revisit; additional HTTP coverage verifies rejection,
+  corrected retry, ownership, notebook isolation and restart availability. Separate
+  disposable queue/paint probes verify concurrent count/byte admission, independent
+  payload release, fixed retry expiry, attempt exhaustion and render-race guards.
+  Desktop 1440x960/mobile 390x844 checked admission, failed retry/exhaustion/recovery,
+  notebook switches/drafts, saved history/restart, and native tab closure during a
+  six-second local-proxy upload. Saved exact bytes were verified before app revisit.
+  Final mobile width 390/390; settled console zero errors, existing vendor warnings.
+  Compile, whitespace and Impeccable detector passed. No Ruff/typecheck claim.
+- **Review / limits:** Separate read-only Standards/Spec reviews and final
+  re-reviews: no actionable findings. Luna discovery and Astra stale-import /
+  progress-race diagnosis were read-only; Sol sole writer. Automated TDD stayed
+  at the previously agreed HTTP seam: no confirmation arrived for an additional
+  coordinator seam, so queue/paint checks remain disposable acceptance probes,
+  not retained automated regression tests. No unfiltered duplicate-suite claim.
+- **Compatibility / rollback:** No schema migration or existing-data edits. Revert
+  only this ticket commit. Queue admission is per Streamlit process, not a shared
+  deployment-wide upload quota; inbound HTTP/Streamlit upload buffering is outside
+  these retained-queue ceilings. Hung work holds its bounded allowance until it
+  finishes; retries are ephemeral across restart. No live capacity/cost/study claim.
+- **Handoff:** [new_docs/ticket_handoffs/06.md](../new_docs/ticket_handoffs/06.md)
+  records commands, evidence, limitations and preserved index. No paid calls,
+  push or deployment. Disposable demo/proxy/browser stopped at handoff.
+- **Next exact action:** Publish #19 ticket-only commit and acceptance evidence
+  before closure, then create a fresh gpt-6.1-sol task for local 07 / GitHub #20,
+  “Complete cost visibility before and after credits”; live OPEN, native blockers
+  empty. Read handoff 06 and new_docs/EXECUTION.md; do not implement #20 here.
+
 ### Ticket 05 / GitHub #18: safe classroom Guest arrivals (2026-11-15)
 
 - **Outcome:** Atomic, injected new-Guest admission precedes owner/session inserts.

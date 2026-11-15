@@ -404,6 +404,10 @@ class WorkspaceService:
         created = add_file_sources(
             self._store, thread_id, uploads, origin=origin
         )
+        if created:
+            # Complete the existing Library grounding switch even if the tab
+            # closes before its next progress poll.
+            self._store.update_thread(thread_id, metadata={"allow_model_knowledge": False})
         return [public_source(source) for source in created]
 
     def upload_attachments(

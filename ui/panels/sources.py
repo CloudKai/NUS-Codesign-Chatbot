@@ -24,6 +24,7 @@ from ui.rename import (
 )
 from ui.runtime import (
     coach_turn_is_streaming,
+    UploadAdmissionError,
     discard_source_upload,
     enqueue_source_upload,
     finalize_source_upload,
@@ -89,6 +90,7 @@ def _enqueue_uploaded_sources(uploads: list[Any]) -> None:
     if not uploads:
         return
     thread_id = st.session_state.thread_id
+    error_key = f"source_upload_error_{thread_id}"
     nonce = int(st.session_state.get("source_upload_nonce") or 0)
     fingerprint = tuple(
         (upload.name, int(getattr(upload, "size", 0) or 0)) for upload in uploads
@@ -100,6 +102,10 @@ def _enqueue_uploaded_sources(uploads: list[Any]) -> None:
     # duplicate background import while the first is still running.
     st.session_state[handled_key] = fingerprint
     try:
+        if len(uploads) > settings.max_files:
+            raise UploadAdmissionError(f"Choose at most {settings.max_files} files at a time.")
+        if sum(int(getattr(item, "size", 0) or 0) for item in uploads) > settings.source_upload_owner_bytes:
+            raise UploadAdmissionError("Choose fewer or smaller files, then try again.")
         enqueue_source_upload(
             thread_id,
             [
@@ -107,14 +113,16 @@ def _enqueue_uploaded_sources(uploads: list[Any]) -> None:
                 for upload in uploads
             ],
         )
+    except UploadAdmissionError as error:
+        st.session_state[error_key] = str(error)
     except Exception:
         logger.exception(
             "Source panel upload could not be queued for notebook %s",
             thread_id,
         )
-        st.session_state["source_upload_error"] = _SOURCE_UPLOAD_ERROR
+        st.session_state[error_key] = _SOURCE_UPLOAD_ERROR
     else:
-        st.session_state.pop("source_upload_error", None)
+        st.session_state.pop(error_key, None)
     st.session_state["source_upload_nonce"] = nonce + 1
     # Remount immediately so the student sees the non-authoritative Uploading
     # card while the worker persists and extracts the file.
@@ -546,11 +554,20 @@ def render_sources_panel() -> None:
 def _render_sources_panel_stable() -> None:
     """Sources UI without a client auto-refresh timer."""
     _clear_sources_local_action_defer(str(st.session_state.thread_id))
+    active_futures = [
+        job.future for job in pending_source_uploads(st.session_state.thread_id)
+        if not job.future.done()
+    ]
     _render_sources_panel_body()
     if coach_turn_is_streaming():
         return
     thread_id = st.session_state.thread_id
     uploads_active = any(not job.future.done() for job in pending_source_uploads(thread_id))
+    if not uploads_active and any(future.done() for future in active_futures):
+        # A worker can finish after the body paints Uploading but before the
+        # polling decision below. Repaint once so terminal progress isn't stuck.
+        rerun_fragment()
+        return
     if uploads_active or not store.request_course_material_sync(thread_id).done():
         # The enqueue callback used a fragment rerun to show its pending card.
         # One guarded app rerun remounts the timed polling fragment without
@@ -594,7 +611,7 @@ def _render_sources_panel_body() -> None:
     thread_id = st.session_state.thread_id
     store.backfill_legacy_sources(thread_id)
     for job in pending_source_uploads(thread_id):
-        if not job.future.done():
+        if not job.future.done() or job.failed:
             continue
         try:
             added = job.future.result()
@@ -669,9 +686,17 @@ def _render_sources_panel_body() -> None:
                 )
                 if uploads:
                     _enqueue_uploaded_sources(list(uploads))
-            upload_error = st.session_state.pop("source_upload_error", None)
-            if upload_error:
-                st.error(upload_error)
+        error_key = f"source_upload_error_{thread_id}"
+        upload_error = st.session_state.get(error_key)
+        if upload_error:
+            st.error(upload_error)
+            if st.button("Dismiss upload message", key=f"dismiss-upload-{thread_id}"):
+                st.session_state.pop(error_key, None)
+                rerun_fragment()
+        st.caption(
+            f"Failed files stay available to retry for {settings.source_upload_retry_seconds} seconds "
+            "(up to 3 attempts). After that, choose the files again."
+        )
         if lecture_sync and lecture_sync.errors:
             logger.warning(
                 "Course material import issues for notebook %s: %s",
@@ -899,16 +924,20 @@ def _render_sources_panel_body() -> None:
         """Render a non-authoritative source card while its upload runs."""
         safe_id = str(job.upload_id).replace("-", "_")
         with st.container(key=f"source_upload_{safe_id}"):
-            names = ", ".join(str(item[0]) for item in job.uploads)
+            names = ", ".join(job.filenames)
             st.markdown(f"**{escape(names)}**")
             if not job.future.done():
                 st.caption("Uploading…")
                 return
-            st.caption("The file could not be added.")
+            st.caption(
+                "The file could not be added. Retry below, or remove it and choose the file again."
+                if job.retryable else
+                "Retry limit reached. Remove this upload and choose the file again."
+            )
             retry_column, remove_column = st.columns(2, gap="small")
-            if retry_column.button("Retry", key=f"retry-source-upload-{job.upload_id}"):
-                if retry_source_upload(job.upload_id, thread_id):
-                    rerun_fragment()
+            if retry_column.button("Retry", key=f"retry-source-upload-{job.upload_id}", disabled=not job.retryable):
+                retry_source_upload(job.upload_id, thread_id)
+                rerun_fragment()
             if remove_column.button("Remove", key=f"remove-source-upload-{job.upload_id}"):
                 discard_source_upload(job.upload_id)
                 rerun_fragment()

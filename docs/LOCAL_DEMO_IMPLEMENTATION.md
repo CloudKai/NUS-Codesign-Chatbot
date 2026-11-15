@@ -60,6 +60,28 @@ deployment-wide bounds. It is not a lifetime identity quota, DDoS defense,
 generation budget, or evidence of live classroom capacity. No schema or Guest
 history migration is required.
 
+Ticket 06 / #19 bounds retained Sources uploads in `backend/upload_queue.py`,
+with owner-bound adapters in UI runtime. Per Streamlit process, running, queued
+and retry-retained payloads share atomic ceilings: 32 global/four per-owner
+batches, 200 MiB global/50 MiB per owner by default. Optional bounded
+`SOURCE_UPLOAD_GLOBAL_JOBS`, `SOURCE_UPLOAD_OWNER_JOBS`,
+`SOURCE_UPLOAD_GLOBAL_BYTES`, `SOURCE_UPLOAD_OWNER_BYTES` and
+`SOURCE_UPLOAD_RETRY_SECONDS` configure them. Success releases payloads before
+completion. Failed retries expire independently of browser polling after 300
+seconds from first failure, with three attempts maximum; retries never renew
+that deadline. Active operations keep their allowance until completion. Small
+payload-free terminal receipts are separately count/age bounded. Retry uses
+fresh credentials and owner/notebook guards; discard checks ownership.
+
+Library admission feedback remains visible until dismissed or superseded by a
+new successful admission. Terminal completion during rendering repaints locally,
+so Uploading cannot strand a completed batch without a polling timer. Successful
+source ingestion persists the existing source-grounding mode before a UI revisit.
+No schema/data migration is required. Queue retries are ephemeral across process
+restart; saved sources remain durable. These bounds exclude incoming HTTP/parser/
+widget buffering, chat attachments and disk quotas. Additional UI processes
+multiply limits; this is not shared deployment-wide upload admission.
+
 The layers above are the behavior contract. Current code ownership:
 
 | Concern | Implementation | Compatibility import |

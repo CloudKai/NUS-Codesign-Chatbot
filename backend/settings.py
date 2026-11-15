@@ -444,6 +444,16 @@ class Settings:
         "OAUTH_STATE_COOKIE_NAME", "co_design_oauth_state"
     ).strip() or "co_design_oauth_state"
     max_tool_iterations: int = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))
+    # Includes running, queued and retry-retained payloads in each UI process.
+    source_upload_global_jobs: int = _bounded_int("SOURCE_UPLOAD_GLOBAL_JOBS", 32, 1, 256)
+    source_upload_owner_jobs: int = _bounded_int("SOURCE_UPLOAD_OWNER_JOBS", 4, 1, 32)
+    source_upload_global_bytes: int = _bounded_int(
+        "SOURCE_UPLOAD_GLOBAL_BYTES", 209_715_200, 1, 1_073_741_824
+    )
+    source_upload_owner_bytes: int = _bounded_int(
+        "SOURCE_UPLOAD_OWNER_BYTES", 52_428_800, 1, 209_715_200
+    )
+    source_upload_retry_seconds: int = _bounded_int("SOURCE_UPLOAD_RETRY_SECONDS", 300, 1, 1800)
     max_files: int = int(os.getenv("MAX_FILES_PER_MESSAGE", "5"))
     max_lecture_notes: int = int(os.getenv("MAX_LECTURE_NOTES", "20"))
     max_course_material_size_mb: int = int(
