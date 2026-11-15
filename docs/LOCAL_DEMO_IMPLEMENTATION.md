@@ -44,6 +44,22 @@ require safe initialization, backup instructions, and tested rollback paths.
 
 ## Implemented package ownership
 
+Ticket 05 / #18 bounds new Guest workspace creation before inserting owner or
+session records. The injected, locked admission limiter allows 120 new starts
+per rolling minute and 480 per rolling hour by default, configurable through
+`GUEST_STARTS_PER_MINUTE` / `GUEST_STARTS_PER_HOUR`. It does not key on IP, so
+80 arrivals sharing a classroom network fit within the defaults. Registered
+identity precedence and origin validation run first; valid Guest sessions reuse
+their existing workspace without consuming admission. Rejections return 429,
+`Retry-After`, no cookie, and browser wait/retry/lecturer-help guidance.
+
+This is a single-worker, process-local creation bound; reservations reset on
+restart, and failed creation attempts conservatively consume a reservation.
+Multiple workers/containers require shared admission before claiming the same
+deployment-wide bounds. It is not a lifetime identity quota, DDoS defense,
+generation budget, or evidence of live classroom capacity. No schema or Guest
+history migration is required.
+
 The layers above are the behavior contract. Current code ownership:
 
 | Concern | Implementation | Compatibility import |

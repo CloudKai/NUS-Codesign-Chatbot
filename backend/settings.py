@@ -401,6 +401,8 @@ class Settings:
     # Guest ownership is an explicit opt-in. Keep production disabled until
     # the guest persistence migration and later release phases are approved.
     guest_access_enabled: bool = _boolean("GUEST_ACCESS_ENABLED", False)
+    guest_starts_per_minute: int = _bounded_int("GUEST_STARTS_PER_MINUTE", 120, 1, 10000)
+    guest_starts_per_hour: int = _bounded_int("GUEST_STARTS_PER_HOUR", 480, 1, 10000)
     guest_session_cookie_name: str = os.getenv(
         "GUEST_SESSION_COOKIE_NAME", "co_design_guest"
     ).strip() or "co_design_guest"

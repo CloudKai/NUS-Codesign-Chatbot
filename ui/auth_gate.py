@@ -514,6 +514,11 @@ def _start_guest_in_browser() -> None:
     credentials: 'same-origin'
   }).then((response) => {
     if (response.ok) window.location.replace('/');
+    else if (response.status === 429) {
+      const seconds = Number(response.headers.get('Retry-After'));
+      const wait = Number.isFinite(seconds) ? Math.min(3600, Math.max(1, Math.ceil(seconds))) : 60;
+      window.location.replace('/?guest_start_error=busy&guest_retry_after=' + wait);
+    }
     else window.location.replace('/?guest_start_error=1');
   }).catch(() => window.location.replace('/?guest_start_error=1'));
 })();
@@ -529,6 +534,20 @@ def render_guest_entry() -> None:
     A failed probe for an existing guest may be temporary, so creating a new
     credential requires an explicit choice in that recovery state.
     """
+    try:
+        busy = st.query_params.get("guest_start_error") == "busy"
+        retry_after = min(3600, max(1, int(st.query_params.get("guest_retry_after", "60"))))
+    except (TypeError, ValueError):
+        busy, retry_after = True, 60
+    if busy:
+        st.warning(
+            f"New guest workspaces are temporarily busy. Wait {retry_after} seconds, "
+            "then try again. If you still can't enter, ask your lecturer for help."
+        )
+        if st.button("Try again", key="guest-entry-retry"):
+            _start_guest_in_browser()
+        return
+
     if _guest_cookie_present():
         st.error(
             "We couldn't reopen this browser's guest workspace. Try again before "

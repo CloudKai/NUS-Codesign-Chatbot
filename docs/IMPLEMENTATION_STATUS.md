@@ -2,6 +2,40 @@
 
 ## CURRENT STATUS
 
+### Ticket 05 / GitHub #18: safe classroom Guest arrivals (2026-11-15)
+
+- **Outcome:** Atomic, injected new-Guest admission precedes owner/session inserts.
+  Global rolling limits default to 120/minute and 480/hour; no IP quota blocks an
+  80-person classroom. Valid saved sessions bypass creation limits after origin
+  and registered-identity precedence checks. Rejection returns 429, Retry-After,
+  no new cookie, and a wait/retry/lecturer-help screen.
+- **Validation:** Final canonical mock suite **2258 passed, 1 skipped** (77.99s);
+  focused Guest/API/persistence/UI/proxy/architecture checks **101 passed**.
+  Deterministic HTTP contracts cover saved-work reuse, minute/hour recovery,
+  80 shared-address arrivals plus concurrent excess, and identity guards.
+  Separate disposable DB probe: 100 rejections created zero extra owner/session
+  rows. Desktop 1440x960/mobile 390x844 journeys verified actual rejection/retry,
+  saved history under full admission and restart recovery. Mobile width 390/390;
+  settled screens console 0 errors, existing vendor warnings remain. Compile,
+  whitespace and Impeccable detector passed. Initial full run required updating
+  the intentional additive create_app injection signature contract.
+- **Review:** Separate Standards/Spec reviews found no actionable findings;
+  Standards re-reviewed signature/docstring changes. Luna discovery and Astra
+  stale-Streamlit-import diagnosis were read-only; Sol was the sole writer.
+- **Compatibility / risks:** No schema/data migration or existing history edits.
+  Limiter is per API process and resets on restart; shared admission is required
+  before multiple workers claim deployment-wide limits. Failed creations retain
+  reservations. No lifetime account quota, live capacity/cost or student-study
+  claim. Preserved unmanaged duplicate tests were excluded as in prior handoffs;
+  this ticket does not claim the unfiltered unmanaged workspace is green.
+- **Handoff / rollback:** [new_docs/ticket_handoffs/05.md](../new_docs/ticket_handoffs/05.md).
+  Revert only this ticket commit; data/schema stay compatible. Original staged
+  work and unrelated files preserved. Demo processes/browser stopped; no paid
+  app calls, push or deployment.
+- **Next exact action:** Publish #18 evidence and ticket-only commit before
+  closure; create a fresh gpt-6.1-sol task for local 06 / GitHub #19,
+  “Bounded uploads with independent cleanup” (live blockers empty), then stop.
+
 ### Ticket 04 / GitHub #17: useful project resumption (2026-11-15)
 
 - **Outcome:** Learning-state now projects exact stage-tagged student contributions,

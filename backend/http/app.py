@@ -56,6 +56,7 @@ from backend.providers import (
 from backend.coaching.streaming import coach_events, stream_error
 from backend.coaching.stream_events import GraphEvent, GraphSummary
 from backend.rate_limit import RateLimitExceeded
+from backend.guest_admission import GuestAdmissionLimiter
 from backend.settings import settings, validate_production_configuration
 from backend.learning.hmw import hmw_scaffold_projection
 from backend.learning.resume import project_resume
@@ -222,12 +223,15 @@ def create_app(
     auto_advance_stages: bool | None = None,
     workspace: WorkspaceService | None = None,
     oidc_client: CognitoOIDCClient | None = None,
+    guest_admission: GuestAdmissionLimiter | None = None,
 ) -> FastAPI:
-    """Create a local API application with injectable progression behavior.
+    """Create a local API with injectable progression and Guest admission.
 
     Application CRUD/coach routes resolve the owner from a verified Cognito
     ID-token cookie. Injected *store* / *workspace* remain the local-demo and
     test default when no Cognito cookie is present (SQLite + local/memory only).
+    ``guest_admission`` replaces the process-local new-workspace limiter for
+    deterministic clocks or a future shared adapter; valid sessions bypass it.
     """
     from backend.persistence.factory import (
         create_student_store,
@@ -261,6 +265,10 @@ def create_app(
         else bool(auto_advance_stages) and not settings.student_stage_selection
     )
     oidc = oidc_client or CognitoOIDCClient(store=active_store)
+    admission = guest_admission or GuestAdmissionLimiter(
+        per_minute=settings.guest_starts_per_minute,
+        per_hour=settings.guest_starts_per_hour,
+    )
     resolver = OwnerResolver(
         active_store,
         oidc=oidc,
@@ -608,6 +616,18 @@ def create_app(
             else None
         )
         if owner_user_id is None:
+            try:
+                admission.admit()
+            except RateLimitExceeded as error:
+                logger.info(
+                    "guest_start_rejected request_id=%s category=%s",
+                    request.state.request_id, error.category,
+                )
+                raise HTTPException(
+                    status_code=429, detail=error.detail,
+                    headers={"Retry-After": str(error.retry_after_seconds),
+                             "Cache-Control": "no-store"},
+                ) from error
             owner_user_id, existing_secret = active_store.create_guest_session()
         user = active_store.get_user_by_id(owner_user_id)
         if user is None:

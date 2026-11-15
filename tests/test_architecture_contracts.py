@@ -147,7 +147,7 @@ def test_compatibility_facade_exports_and_signatures_are_stable() -> None:
     """Existing import paths remain valid while implementations move."""
     expected: dict[str, dict[str, str | None]] = {
         "backend.api": {
-            "create_app": "(store: 'StudentStore | None' = None, *, auto_advance_stages: 'bool | None' = None, workspace: 'WorkspaceService | None' = None, oidc_client: 'CognitoOIDCClient | None' = None) -> 'FastAPI'",
+            "create_app": "(store: 'StudentStore | None' = None, *, auto_advance_stages: 'bool | None' = None, workspace: 'WorkspaceService | None' = None, oidc_client: 'CognitoOIDCClient | None' = None, guest_admission: 'GuestAdmissionLimiter | None' = None) -> 'FastAPI'",
         },
         "backend.student_journey": {
             "normalize_journey": "(value: 'Any') -> 'dict[str, Any]'",
