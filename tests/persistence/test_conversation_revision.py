@@ -1461,12 +1461,7 @@ def test_provider_failure_retry_same_key_does_not_double_bump(tmp_path, monkeypa
 
 
 def test_revise_advance_rerecords_validated_completion(tmp_path, monkeypatch):
-    """Replacement Ready after edit must restore completed_stages for Journey.
-
-    Revise rolls the completion prefix back to the restored focus. Selection-mode
-    ADVANCE must re-mark validated completion so Concept Generation stays
-    unlocked for Work on this stage and Review stays consistent with Ready.
-    """
+    """An edited recommendation awaits a new confirmation without completion."""
     monkeypatch.setattr(settings, "student_stage_selection", True)
     store = StudentStore(tmp_path / "revise-rerecord-complete.sqlite3")
     coach = _coach(store)
@@ -1499,7 +1494,7 @@ def test_revise_advance_rerecords_validated_completion(tmp_path, monkeypatch):
     journey = (store.get_thread(thread_id) or {}).get("metadata", {}).get(
         "learning_journey"
     ) or {}
-    assert "problem_identification" in list(journey.get("completed_stages") or [])
+    assert "problem_identification" not in list(journey.get("completed_stages") or [])
 
     user_id = next(
         message["id"]
@@ -1519,6 +1514,6 @@ def test_revise_advance_rerecords_validated_completion(tmp_path, monkeypatch):
         "learning_journey"
     ) or {}
     assert journey_after.get("current_stage") == "problem_identification"
-    assert "problem_identification" in list(
+    assert "problem_identification" not in list(
         journey_after.get("completed_stages") or []
     )

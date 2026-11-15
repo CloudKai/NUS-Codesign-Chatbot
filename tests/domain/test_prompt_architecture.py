@@ -434,15 +434,11 @@ def test_composer_selection_mode_points_to_analytics_progression_cta(monkeypatch
         )
     )
     text = prepared.runtime_instructions
-    assert "Analytics -> Progression" in text
-    assert "`Work on this stage`" in text
-    assert "Move to <next stage label>" in text
-    assert "] -> [" in text and "is Ready.**" in text
-    assert "one optional way" in text
-    assert "do not ask for Next or a confirm command" in text
-    assert "confirmation via Next" not in text
+    assert "Confirm next stage" in text
+    assert "Stay here rejects" in text
+    assert "does not complete the stage or unlock its destination" in text
+    assert "Do not begin next-stage coaching before confirmation" in text
     assert "automatically move" not in text
-
 
 def test_composer_course_evidence_gap_does_not_claim_unreadable_pdf():
     from backend.retrieval import COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT

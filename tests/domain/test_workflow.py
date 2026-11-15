@@ -220,7 +220,7 @@ def test_free_mode_pi_idea_without_hmw_recommends_advance(tmp_path):
 
 
 def test_free_mode_coerces_stay_to_advance_on_each_stage(tmp_path):
-    """Free promotes coaching STAY to ADVANCE without artifact checklists."""
+    """Later Free stages retain their existing no-artifact progression policy."""
     store = StudentStore(tmp_path / "free-stages.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     workflow = CoachWorkflow(
@@ -228,7 +228,6 @@ def test_free_mode_coerces_stay_to_advance_on_each_stage(tmp_path):
         SQLitePhaseTransitionRepository(store),
     )
     stages = (
-        "problem_identification",
         "concept_generation",
         "design_specification",
         "deep_analysis",

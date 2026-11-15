@@ -251,11 +251,11 @@ def test_strict_retains_clearer_hmw_articulation_bar() -> None:
     ).read_text(encoding="utf-8")
     collapsed = " ".join(prompt.split())
     assert "FREE MODE — CHECK THE IDEA, THEN NEXT" in collapsed
-    assert "checking an idea they already have" in collapsed
-    assert "Do not coach them through HMW formula" in collapsed
+    assert "same semantic A/B/C" in collapsed
+    assert "do not require HMW syntax" in collapsed
     assert "recommendation MUST be advance" in collapsed
     assert "hmw_scaffold_ready MUST be false" in collapsed
-    assert "Use STAY only for empty/off-topic" in collapsed
+    assert "vague or solution-locked draft remains STAY" in collapsed
     assert "solution-locked" in collapsed
     assert "Template filling" in collapsed
 
@@ -395,7 +395,7 @@ def test_legacy_keyword_fallback_is_not_an_hmw_evaluator() -> None:
 def test_incomplete_hmw_stays_in_problem_identification(
     tmp_path: Path, message: str
 ) -> None:
-    """Messages without both for and so that stay in Problem Identification."""
+    """Incomplete framing stays when the semantic assessor identifies a gap."""
     turn, store, thread_id = _submit(
         tmp_path,
         message,
@@ -412,62 +412,29 @@ def test_incomplete_hmw_stays_in_problem_identification(
 
 
 @pytest.mark.parametrize("message", _STRUCTURAL_HMW_STAY_CASES)
-def test_structural_hmw_promotes_even_when_model_stays(
+def test_structural_hmw_does_not_override_semantic_stay(
     tmp_path: Path, message: str
 ) -> None:
-    """Structural for/so that HMWs advance without semantic quality judging."""
-    turn, _, thread_id = _submit(
-        tmp_path,
-        message,
-        recommendation=StageDecision.STAY,
-        auto_advance=True,
+    """Template syntax cannot approve vague or solution-locked framing."""
+    turn, _, _ = _submit(
+        tmp_path, message, recommendation=StageDecision.STAY, auto_advance=True,
     )
-    assert turn.assessment.recommendation is StageDecision.ADVANCE
-    assert turn.auto_advanced_to == "concept_generation"
-
-
-def test_workable_hmw_promotes_model_stay_to_advance(
-    tmp_path: Path,
-) -> None:
-    """A structural HMW advances even when the model keeps probing in PI."""
-    turn, store, thread_id = _submit(
-        tmp_path,
-        _SATISFACTORY_HMW,
-        recommendation=StageDecision.STAY,
-        auto_advance=True,
-        hmw_scaffold_ready=True,
-    )
-    assert turn.assessment.recommendation is StageDecision.ADVANCE
-    assert turn.assessment.hmw_scaffold_ready is False
-    assert turn.auto_advanced_to == "concept_generation"
-    assert turn.response_text.startswith(
-        "**[Problem identification] -> [Concept generation] Ready**"
-    )
-    assert "workable How Might We" in turn.response_text
-    assert hmw_scaffold_available(
-        "problem_identification", store.get_messages(thread_id)
-    ) is False
-    metadata = (store.get_thread(thread_id) or {})["metadata"]
-    assert metadata.get("thinking_stage") == "concept_generation"
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.auto_advanced_to is None
+    assert turn.pending_transition is None
 
 
 @pytest.mark.parametrize("message", (_SATISFACTORY_HMW, _SCREENSHOT_HMW))
-def test_screenshot_hmw_promotes_when_model_stays(
+def test_semantic_assessment_remains_authoritative_with_formal_wording(
     tmp_path: Path, message: str
 ) -> None:
-    """Exact live-style HMW strings advance without model cooperation."""
-    turn, store, thread_id = _submit(
-        tmp_path,
-        message,
-        recommendation=StageDecision.STAY,
-        auto_advance=True,
-        hmw_scaffold_ready=True,
+    """Application syntax checks cannot silently overturn a model assessment."""
+    turn, _, _ = _submit(
+        tmp_path, message, recommendation=StageDecision.STAY,
+        auto_advance=True, hmw_scaffold_ready=True,
     )
-    assert turn.assessment.recommendation is StageDecision.ADVANCE
-    assert turn.auto_advanced_to == "concept_generation"
-    assert hmw_scaffold_available(
-        "problem_identification", store.get_messages(thread_id)
-    ) is False
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.auto_advanced_to is None
 
 
 def test_satisfactory_hmw_advances_with_feedback_via_existing_machinery(
@@ -484,9 +451,7 @@ def test_satisfactory_hmw_advances_with_feedback_via_existing_machinery(
     assert next_stage_id("problem_identification") == "concept_generation"
     assert turn.auto_advanced_to == "concept_generation"
     assert turn.pending_transition is None
-    assert "How Might We" in turn.response_text
-    assert "people you are designing for" in turn.response_text
-    assert "outcome you want to achieve" in turn.response_text
+    assert "workable for this stage" in turn.response_text
     assert "You have moved to Concept Generation" not in turn.response_text
     assert turn.response_text.startswith(
         "**[Problem identification] -> [Concept generation] Ready**"

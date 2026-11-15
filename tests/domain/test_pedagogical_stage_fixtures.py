@@ -86,7 +86,8 @@ def test_mock_provider_keeps_stage_identity_and_does_not_complete_assignment(
         )
     )
     assert result.assessment.current_stage == stage.id
-    assert result.response_text.count("?") >= 1
+    if result.assessment.recommendation is StageDecision.STAY:
+        assert result.response_text.count("?") >= 1
     lowered = result.response_text.lower()
     assert "here is your completed assignment" not in lowered
     assert "clear code" not in lowered

@@ -673,134 +673,22 @@ def test_student_hmw_candidate_accepts_active_framing_with_construction_words() 
     ) is True
 
 
-def test_hallucinated_advance_without_student_hmw_is_forced_stay(
-    tmp_path: Path,
-) -> None:
-    store = StudentStore(tmp_path / "hmw-guard.sqlite3")
+def test_semantic_advance_accepts_student_authored_prose(tmp_path: Path) -> None:
+    """A model's workable informal framing needs no HMW syntax override."""
+    store = StudentStore(tmp_path / "prose.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    notebooks = SQLiteNotebookRepository(store)
-    transitions = SQLitePhaseTransitionRepository(store)
-    prose = (
-        "Older pedestrians near a school cannot finish crossing before the "
-        "pedestrian signal changes. I want them to cross safely without rushing."
-    )
-    turn = CoachApplicationService(
-        store,
-        notebooks,
-        CoachWorkflow(
-            DeterministicCoachProvider(StageDecision.ADVANCE),
-            transitions,
-        ),
-        LearningProgressService(store, notebooks, transitions),
-        auto_advance_stages=True,
-    ).submit(
-        CoachRequest(
-            thread_id=thread_id,
-            student_message=prose,
-            current_stage="problem_identification",
-            response_detail="short",
-        )
-    )
-    assert student_hmw_candidate_present(prose) is False
-    assert turn.assessment.recommendation is StageDecision.STAY
-    assert turn.assessment.hmw_scaffold_ready is False
-    assert turn.assessment.readiness_candidate is False
-    assert turn.assessment.hmw_scaffold_guarded is True
-    assert turn.response_text.startswith("**Problem identification**")
-    assert "How Might We" in turn.response_text
-    assert hmw_scaffold_available(
-        "problem_identification", store.get_messages(thread_id)
-    ) is True
-    assert turn.auto_advanced_to is None
-    assert turn.pending_transition is None
-    metadata = (store.get_thread(thread_id) or {})["metadata"]
-    assert metadata.get("thinking_stage") == "problem_identification"
-
-
-def test_guarded_advance_keeps_useful_server_scaffold_visible(
-    tmp_path: Path,
-) -> None:
-    """A rejected model ADVANCE can keep a previously useful scaffold visible."""
-    store = StudentStore(tmp_path / "hmw-guard-visible.sqlite3")
-    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    notebooks = SQLiteNotebookRepository(store)
-    transitions = SQLitePhaseTransitionRepository(store)
-    turn = CoachApplicationService(
-        store,
-        notebooks,
-        CoachWorkflow(
-            DeterministicCoachProvider(
-                StageDecision.ADVANCE, hmw_scaffold_ready=False
-            ),
-            transitions,
-        ),
-        LearningProgressService(store, notebooks, transitions),
-        auto_advance_stages=True,
-    ).submit(
-        CoachRequest(
-            thread_id=thread_id,
-            student_message="Older pedestrians need more time at the crossing.",
-            current_stage="problem_identification",
-            response_detail="short",
-        )
-    )
-    assert turn.assessment.recommendation is StageDecision.STAY
-    assert turn.assessment.hmw_scaffold_ready is False
-    assert turn.assessment.hmw_scaffold_guarded is True
-    assert turn.auto_advanced_to is None
-    assert turn.response_text.startswith("**Problem identification**")
-    assert hmw_scaffold_available(
-        "problem_identification", store.get_messages(thread_id)
-    ) is True
-
-
-def test_guarded_advance_does_not_trigger_retrieval_retry(tmp_path: Path) -> None:
-    """The server-owned HMW response completes the turn in one provider call."""
-    store = StudentStore(tmp_path / "hmw-guard-one-call.sqlite3")
-    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    source = add_text_source(store, thread_id, "Lecture", "Crossing evidence")
-    payload = {
-        "mode": "coaching",
-        "response_text": "The model response must not be persisted.",
-        "citations": [],
-        "hmw_scaffold_ready": True,
-        "needs_source_retrieval": False,
-        "out_of_scope": False,
-        "recommendation": "advance",
-        "recommendation_rationale": "The model incorrectly marked the stage ready.",
-    }
-    client = FakeAgentCoreRuntime(payload=payload)
-    notebooks = SQLiteNotebookRepository(store)
-    transitions = SQLitePhaseTransitionRepository(store)
-    service = CoachApplicationService(
-        store,
-        notebooks,
-        CoachWorkflow(
-            AgentCoreCoachProvider(
-                _RUNTIME_ARN,
-                region="us-west-2",
-                qualifier="DEFAULT",
-                timeout_seconds=110.0,
-                max_retries=0,
-                client=client,
-            ),
-            transitions,
-        ),
-        LearningProgressService(store, notebooks, transitions),
-        auto_advance_stages=True,
-    )
-    turn = service.submit(
-        CoachRequest(
-            thread_id=thread_id,
-            student_message="Older pedestrians need more time at the crossing.",
-            current_stage="problem_identification",
-            response_detail="short",
-            source_ids=[str(source["id"])],
-        )
-    )
-    assert len(client.calls) == 1
-    assert turn.assessment.recommendation is StageDecision.STAY
-    assert turn.response_text.startswith("**Problem identification**")
+    turn = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.ADVANCE),
+        SQLitePhaseTransitionRepository(store),
+    ).run(CoachRequest(
+        thread_id=thread_id,
+        student_message=("Older pedestrians near school cannot finish crossing before "
+                         "the signal changes. They need to cross safely without rushing."),
+        current_stage="problem_identification", response_detail="short",
+    ))
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.pending_transition is not None
+    assert store.get_thread(thread_id)["metadata"]["thinking_stage"] == "problem_identification"
 
 
 def test_valid_first_message_hmw_can_advance_immediately(tmp_path: Path) -> None:
@@ -844,7 +732,7 @@ def test_source_and_assistant_hmw_text_cannot_complete(tmp_path: Path) -> None:
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     turn = CoachWorkflow(
         DeterministicCoachProvider(
-            StageDecision.ADVANCE, hmw_scaffold_ready=False
+            StageDecision.STAY, hmw_scaffold_ready=False
         ),
         SQLitePhaseTransitionRepository(store),
     ).run(
@@ -932,13 +820,12 @@ def test_revised_away_hmw_does_not_keep_completion(tmp_path: Path) -> None:
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
+    provider = DeterministicCoachProvider(StageDecision.ADVANCE)
     service = CoachApplicationService(
         store,
         notebooks,
         CoachWorkflow(
-            DeterministicCoachProvider(
-                StageDecision.ADVANCE, hmw_scaffold_ready=False
-            ),
+            provider,
             transitions,
         ),
         LearningProgressService(store, notebooks, transitions),
@@ -959,6 +846,7 @@ def test_revised_away_hmw_does_not_keep_completion(tmp_path: Path) -> None:
         for item in store.get_messages(thread_id)
         if item.get("role") == "user"
     )
+    provider.recommendation = StageDecision.STAY
     revised = service.revise_and_resubmit(
         thread_id,
         user_id,

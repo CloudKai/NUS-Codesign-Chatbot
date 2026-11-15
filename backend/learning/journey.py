@@ -173,9 +173,10 @@ def selectable_stage_ids(journey: dict[str, Any]) -> tuple[str, ...]:
     A current focus is always selectable, as are canonical stages through the
     first stage after the contiguous completed prefix.  The next stage is only
     exposed when its predecessor is actually completed; current focus and
-    already-completed stages do not create a shortcut over a missing prefix.
-    Corrupt or non-contiguous completion metadata therefore fails closed and
-    cannot unlock a later stage through a gap.
+    explicitly completed stages may be revisited even in legacy non-contiguous
+    records. Those records never unlock an uncompleted later stage through a
+    gap. The first uncompleted stage remains reachable to repair the gap through
+    new confirmed work, without inferring any historical completion.
 
     Args:
         journey: Raw or normalized learning-journey metadata.
@@ -194,11 +195,10 @@ def selectable_stage_ids(journey: dict[str, Any]) -> tuple[str, ...]:
         prefix_end = index
 
     current_id = normalized["current_stage"]
-    allowed = set(stage_ids[: prefix_end + 1])
-    if prefix_end + 1 < len(stage_ids) and prefix_end >= 0:
+    allowed = set(completed)
+    if prefix_end + 1 < len(stage_ids):
         allowed.add(stage_ids[prefix_end + 1])
-    # A corrupt later focus remains selectable, but it cannot unlock the
-    # missing stages between that focus and the contiguous completion prefix.
+    # Preserve an existing later focus without using it as completion evidence.
     allowed.add(current_id)
     return tuple(stage_id for stage_id in stage_ids if stage_id in allowed)
 
@@ -321,13 +321,14 @@ def selection_pending_move_footer(next_stage_id: str) -> str:
         next_stage_id: Canonical destination Thinking Path stage id.
 
     Returns:
-        Markdown telling the student to enter ``Move to <label>`` or open
-        Analytics → Progression and click ``Work on this stage``.
+        Markdown explaining the explicit confirmation or rejection choice,
+        with current focus unchanged until confirmation.
     """
     next_stage_value = STAGE_BY_ID[next_stage_id]
     return (
-        f"Enter `Move to {next_stage_value.label}` or Go to Analytics -> "
-        "Progression and click `Work on this stage`."
+        f"The stage has not changed. Confirm the recommendation in Thinking Path "
+        f"to continue to **{next_stage_value.label}**, or choose Stay here. "
+        "You can revisit completed stages later."
     )
 
 
@@ -476,11 +477,16 @@ def complete_and_advance(
     *,
     note: str | None = None,
 ) -> dict[str, Any]:
+    """Award first completion and move focus once, preserving historical notes.
+
+    Reapplying a legacy recommendation for an already completed stage changes
+    focus only; it cannot replace that stage's original completion note.
+    """
     normalized = normalize_journey(journey)
     stage = current_stage(normalized)
-    if note is not None and note.strip():
-        normalized["stage_notes"][stage.id] = note.strip()
     if stage.id not in normalized["completed_stages"]:
+        if note is not None and note.strip():
+            normalized["stage_notes"][stage.id] = note.strip()
         normalized["completed_stages"].append(stage.id)
     index = next(index for index, item in enumerate(THINKING_STAGES) if item.id == stage.id)
     if index < len(THINKING_STAGES) - 1:

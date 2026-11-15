@@ -146,7 +146,7 @@ def test_selectable_stage_ids_requires_contiguous_validated_completion():
             "current_stage": "problem_identification",
             "completed_stages": ["problem_identification", "design_specification"],
         }
-    ) == ("problem_identification", "concept_generation")
+    ) == ("problem_identification", "concept_generation", "design_specification")
 
 
 def test_revisiting_completed_stage_preserves_focus_and_unlocked_frontier():
@@ -263,8 +263,8 @@ def test_selection_pending_ready_response_is_heading_plus_how_to_move():
     assert "Your HMW is workable." in display
     assert "You can also stay in **Problem identification**" in display
     assert "Clarify the most consequential user outcome." in display
-    assert "Enter `Move to Concept generation`" in display
-    assert "Go to Analytics -> Progression and click `Work on this stage`" in display
+    assert "Confirm the recommendation" in display
+    assert "The stage has not changed" in display
     assert "**Questions to explore**" not in display
 
 

@@ -502,12 +502,12 @@ class FastChatTurnOutput(BaseModel):
             "Problem Identification only. Always return a boolean. Return true "
             "when at least two of identifiable user, understandable "
             "problem/context, and meaningful desired outcome are reasonably "
-            "clear AND the student has not yet authored a valid working How "
-            "Might We. Missing the third component, extra evidence, "
+            "clear AND the student has not yet authored a valid working problem "
+            "statement (formal HMW or equivalent prose). Missing the third component, extra evidence, "
             "root-cause certainty, perfect scope, or complete consequences "
             "does not prevent true. Return false for 0–1 signals, Q&A, "
             "stages outside Problem Identification, or after a valid working "
-            "How Might We."
+            "problem statement open to alternative solutions."
         ),
     )
     needs_source_retrieval: bool = False

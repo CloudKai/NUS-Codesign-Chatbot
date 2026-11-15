@@ -2723,21 +2723,6 @@ class StudentStore:
             metadata = self._thread_dict(row).get("metadata") or {}
             journey = normalize_journey(metadata.get("learning_journey"))
             allowed = set(selectable_stage_ids(journey))
-            active_revision = self._notebook_revision_value(row)
-            pending = connection.execute(
-                f"""
-                SELECT proposed_stage FROM messages
-                WHERE notebook_id=? AND decision_status='pending'
-                  AND {self._active_at_revision_sql()}
-                ORDER BY created_at DESC, id DESC
-                LIMIT 1
-                """,
-                (thread_id, active_revision, active_revision),
-            ).fetchone()
-            if pending is not None:
-                pending_to = str(pending["proposed_stage"] or "").strip()
-                if pending_to in STAGE_BY_ID:
-                    allowed.add(pending_to)
             if cleaned_stage not in allowed:
                 raise ValueError(f"Thinking stage is locked: {cleaned_stage}")
 
@@ -2758,8 +2743,8 @@ class StudentStore:
         helper so their journey and pending-transition semantics cannot drift.
         Stage authorization is validated before any pending-transition update
         or metadata mutation, so an illegal request is fail-closed and atomic.
-        A pending Ready destination remains selectable even when
-        ``completed_stages`` briefly lags after revise.
+        Pending recommendations grant no stage-selection authority. Only saved
+        completion history and the current focus determine navigation access.
         """
         from backend.student_journey import (
             STAGE_BY_ID,
@@ -2773,22 +2758,10 @@ class StudentStore:
             raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
         journey = normalize_journey(metadata.get("learning_journey"))
         allowed = set(selectable_stage_ids(journey))
-        pending = connection.execute(
-            f"""
-            SELECT proposed_stage FROM messages
-            WHERE notebook_id=? AND decision_status='pending'
-              AND {self._active_at_revision_sql()}
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1
-            """,
-            (thread_id, active_revision, active_revision),
-        ).fetchone()
-        if pending is not None:
-            pending_to = str(pending["proposed_stage"] or "").strip()
-            if pending_to in STAGE_BY_ID:
-                allowed.add(pending_to)
         if cleaned_stage not in allowed:
             raise ValueError(f"Thinking stage is locked: {cleaned_stage}")
+        if cleaned_stage == journey["current_stage"]:
+            return dict(metadata)
         selected = dict(metadata)
         selected["learning_journey"] = set_current_stage(journey, cleaned_stage)
         selected["thinking_stage"] = cleaned_stage
@@ -5504,8 +5477,14 @@ class StudentStore:
         accepted: bool,
         metadata_patch: dict[str, Any] | None = None,
         expected_from_stage: str | None = None,
+        expected_progress: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Confirm or reject a transition and optionally advance journey atomically."""
+        """Apply one pending decision and its completion in a single transaction.
+
+        ``expected_progress`` is the service's pre-decision progress snapshot.
+        Fields changed by another tab since that read take precedence over the
+        recommendation's older summaries; completion uses the latest journey.
+        """
         status = "confirmed" if accepted else "rejected"
         if accepted and not metadata_patch:
             raise ValueError("Accepted transitions require a journey metadata patch")
@@ -5544,12 +5523,35 @@ class StudentStore:
                         "The notebook stage changed; request a new recommendation"
                     )
             resolved_at = utc_now()
-            connection.execute(
-                "UPDATE messages SET decision_status=?, decision_at=? WHERE id=?",
+            decision = connection.execute(
+                "UPDATE messages SET decision_status=?, decision_at=? "
+                "WHERE id=? AND decision_status='pending'",
                 (status, resolved_at, transition_id),
             )
+            # Separate API processes have separate Python locks. The persisted
+            # pending predicate decides which tab wins, within this transaction.
+            if decision.rowcount != 1:
+                raise ValueError("Pending transition not found")
+            # Revisions may retain historical pending rows. A decision must
+            # still belong to the active branch after acquiring write authority.
+            notebook = connection.execute(
+                "SELECT current_stage, progress_text, settings_text, "
+                "conversation_revision FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if self._notebook_revision_value(notebook) != revision:
+                raise ValueError("Pending transition not found")
+            if (
+                accepted
+                and expected_from_stage is not None
+                and notebook["current_stage"] != expected_from_stage
+            ):
+                raise ValueError(
+                    "The notebook stage changed; request a new recommendation"
+                )
             if accepted and metadata_patch:
                 from backend.coaching.progress_fields import overlay_progress_fields
+                from backend.student_journey import complete_and_advance, normalize_journey
 
                 progress = _load(notebook["progress_text"], {})
                 if not isinstance(progress, dict):
@@ -5565,21 +5567,28 @@ class StudentStore:
                     },
                     "thinking_stage": notebook["current_stage"],
                 }
-                next_meta = {**current_meta, **metadata_patch}
-                if isinstance(metadata_patch.get("learning_journey"), dict):
-                    next_meta["learning_journey"] = dict(
-                        metadata_patch["learning_journey"]
-                    )
-                journey_blob = next_meta.get("learning_journey")
-                preserved = overlay_progress_fields(
-                    progress,
-                    journey_blob if isinstance(journey_blob, dict) else {},
-                    metadata_patch,
+                assessment = _load(row["assessment_text"], {})
+                journey_blob = complete_and_advance(
+                    normalize_journey(current_meta["learning_journey"]),
+                    note=str(assessment.get("contribution_summary") or ""),
                 )
-                if isinstance(journey_blob, dict):
-                    journey_blob.update(preserved)
-                    next_meta["learning_journey"] = journey_blob
-                next_meta.update(preserved)
+                if journey_blob["current_stage"] != metadata_patch.get("thinking_stage"):
+                    raise ValueError("Confirmed transition does not match the learning journey")
+                preserved = overlay_progress_fields(progress, metadata_patch)
+                if expected_progress is not None:
+                    # A newer same-stage contribution wins over an older
+                    # recommendation; unchanged fields retain normal confirm semantics.
+                    for key, expected_value in expected_progress.items():
+                        if progress.get(key) != expected_value:
+                            preserved.update(
+                                overlay_progress_fields({}, {key: progress.get(key)})
+                            )
+                journey_blob.update(preserved)
+                next_meta = {
+                    **current_meta, **preserved,
+                    "learning_journey": journey_blob,
+                    "thinking_stage": journey_blob["current_stage"],
+                }
                 source_stage = str(
                     notebook["current_stage"] or DEFAULT_STAGE
                 ).strip()

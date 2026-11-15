@@ -155,6 +155,11 @@ class LearningProgressService:
             accepted=accepted,
             metadata_patch=metadata_patch,
             expected_from_stage=pending.from_stage if accepted else None,
+            expected_progress={
+                key: metadata.get(key, journey.get(key))
+                for key in ("learning_summary", "working_conclusion",
+                            "understanding_change", "critical_understanding")
+            },
         )
         if accepted:
             try:

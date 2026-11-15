@@ -475,20 +475,6 @@ def render_journey_track() -> None:
         and THINKING_STAGES[frontier_candidate].id in selectable_ids
         else None
     )
-    # Pending Ready (Chat ADVANCE) should still expose Work on this stage even
-    # when completed_stages briefly lag after an edit/revise race.
-    if selection_enabled and frontier_next is None:
-        pending = _fetch_pending_transition()
-        pending_to = str(getattr(pending, "to_stage", "") or "").strip()
-        if (
-            pending is not None
-            and pending_to in STAGE_BY_ID
-            and pending_to != current_id
-        ):
-            frontier_next = pending_to
-            if frontier_progress_id is None:
-                frontier_progress_id = pending_to
-            selectable_ids.add(pending_to)
     thread_meta = dict(
         (store.get_thread(str(st.session_state.thread_id or "")) or {}).get(
             "metadata"
@@ -981,8 +967,9 @@ def render_pending_transition(
     if not pending:
         return
     st.info(
-        f"The coach recommends moving from {pending.from_stage.title()} to "
-        f"{pending.to_stage.title()}: {pending.assessment.recommendation_rationale}",
+        f"The coach recommends {STAGE_BY_ID[pending.to_stage].label}: "
+        f"{pending.assessment.recommendation_rationale} "
+        "Your current stage stays active until you confirm.",
         icon=":material/auto_awesome:",
     )
 
@@ -990,10 +977,9 @@ def render_pending_transition(
 def _fetch_pending_transition():
     """Return the pending transition through the active application path.
 
-    Selection mode and auto-advance hide Next/confirm, so do not surface a
-    stuck ADVANCE recommendation banner either.
+    Only the explicit auto-advance demo override hides confirmation controls.
     """
-    if settings.effective_auto_advance_stages or settings.student_stage_selection:
+    if settings.effective_auto_advance_stages:
         return None
     try:
         return store.pending_transition(st.session_state.thread_id)
@@ -1025,63 +1011,25 @@ def _resolve_pending_transition(transition_id: str, accepted: bool) -> None:
         st.error(_TRANSITION_RESOLVE_ERROR)
 
 
-@st.dialog("Move to the next stage?")
-def _confirm_next_stage_dialog() -> None:
-    """Warn that confirming Next can reduce thoroughness, then require confirm."""
-    transition_id = str(st.session_state.get("confirm_next_transition_id") or "")
-    to_stage = str(st.session_state.get("confirm_next_to_stage") or "next stage")
-    st.write(
-        "Confirming **Next** moves you forward without finishing more work on "
-        "this step. That usually makes the Thinking Path **less critical and "
-        "less thorough** than staying with the coach’s guidance."
-    )
-    st.caption(f"You are about to continue to {to_stage.title()}.")
-    cancel_column, confirm_column = st.columns(2)
-    if cancel_column.button("Cancel", use_container_width=True):
-        st.session_state.pop("confirm_next_transition_id", None)
-        st.session_state.pop("confirm_next_to_stage", None)
-        rerun_app()
-    if confirm_column.button(
-        "Next",
-        type="primary",
-        use_container_width=True,
-        key="confirm-next-stage",
-    ):
-        if transition_id:
-            _resolve_pending_transition(transition_id, accepted=True)
-        else:
-            st.session_state.pop("confirm_next_transition_id", None)
-            st.session_state.pop("confirm_next_to_stage", None)
-            rerun_app()
-
-
 def render_thinking_path_footer(pending: Any | None = None) -> None:
-    """Render the confirmation-gated Next control for Thinking Path."""
-    if settings.effective_auto_advance_stages or settings.student_stage_selection:
+    """Offer one explicit acceptance or rejection of the saved recommendation."""
+    if settings.effective_auto_advance_stages:
         return
 
     if pending is None:
         pending = _fetch_pending_transition()
-    _, next_column = st.columns([0.72, 0.28], gap="small")
-    next_disabled = pending is None
-    next_help = (
-        "Available when the coach recommends moving on."
-        if next_disabled
-        else "Review a warning, then confirm Next."
-    )
+    if pending is None:
+        return
+    stay_column, next_column = st.columns(2, gap="small")
+    with stay_column:
+        if st.button("Stay here", key="thinking-path-stay", use_container_width=True):
+            _resolve_pending_transition(pending.id, accepted=False)
     with next_column:
         if st.button(
-            "Next",
-            type="primary",
-            use_container_width=True,
-            disabled=next_disabled,
-            help=next_help,
+            "Confirm next stage", type="primary", use_container_width=True,
             key="thinking-path-next",
         ):
-            if pending is not None:
-                st.session_state.confirm_next_transition_id = pending.id
-                st.session_state.confirm_next_to_stage = pending.to_stage
-                rerun_app()
+            _resolve_pending_transition(pending.id, accepted=True)
 
 
 @st.fragment(run_every="2s")
@@ -1228,10 +1176,8 @@ def render_studio_panel() -> None:
         else:
             render_journey_track()
             render_pending_transition(pending)
-    with st.container(key="thinking_path_footer"):
-        render_thinking_path_footer(pending)
-    if st.session_state.get("confirm_next_transition_id"):
-        _confirm_next_stage_dialog()
+            with st.container(key="thinking_path_footer"):
+                render_thinking_path_footer(pending)
     # Progression/Review clicks remount only this fragment. Re-place the
     # body-hosted scroll-down control without stealing the chat viewport.
     sync_chat_scroll(mode="settle")

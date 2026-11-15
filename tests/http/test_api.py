@@ -124,7 +124,7 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
     assert payload["response_text"].startswith(
         "**[Problem identification] -> [Concept generation] Ready**"
     )
-    assert "That's a solid start" in payload["response_text"]
+    assert "Your contribution is workable" in payload["response_text"]
     assert "Which group of older adults" in payload["response_text"]
     assert "I’ve moved you" not in payload["response_text"]
 
@@ -371,7 +371,7 @@ def test_notebook_apis_hide_internal_stage_review_worker_metadata(
     _assert_public(selected.json())
 
 
-def test_guide_requires_student_hmw_before_recommending_advance(tmp_path):
+def test_guide_semantic_recommendation_keeps_stage_until_confirmation(tmp_path):
     store = StudentStore(tmp_path / "complex-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     store.update_thread(
@@ -405,7 +405,7 @@ def test_guide_requires_student_hmw_before_recommending_advance(tmp_path):
         },
     )
     assert second.status_code == 200
-    assert second.json()["pending_transition"] is None
+    assert second.json()["pending_transition"] is not None
 
     third = client.post(
         "/api/v1/coach/turn",
@@ -418,7 +418,9 @@ def test_guide_requires_student_hmw_before_recommending_advance(tmp_path):
         },
     )
     assert third.status_code == 200
-    assert third.json()["pending_transition"]["to_stage"] == "concept_generation"
+    assert third.json()["pending_transition"] is None
+    pending = client.get(f"/api/v1/threads/{thread_id}/phase-transitions/pending").json()
+    assert pending["id"] == second.json()["pending_transition"]["id"]
 
 
 def test_free_guidance_unlocks_next_after_usable_idea_without_moving_stage(tmp_path):

@@ -236,20 +236,22 @@ def _runtime_instructions(context: PromptContext) -> str:
                 "The student already has an idea and is checking it on the current "
                 "stage, not asking to be coached through a full structure-building "
                 "process. For ADVANCE/STAY in Free mode, recommend ADVANCE as soon "
-                "as they have shared a usable idea, draft, or check-in for this "
-                "stage. They should be able to press Next after that reply and "
-                "move on, including jumping to another Thinking Path stage they "
-                "want to work on.\n"
+                "as they have shared a usable idea or draft for this stage. For Problem Identification, "
+                "require meaningful affected people, problem/context, desired outcome, "
+                "and openness to alternative solutions, as in Guide; vague or "
+                "solution-locked wording remains STAY. They should be able to press Next after that reply and "
+                "move on after explicit confirmation. Revisit only unlocked stages.\n"
                 "Do not keep prompting them to improve HMW wording, formal "
                 "structure, completeness, extra evidence, or missing scaffold "
                 "steps. Do not run the usual Socratic structure ladder. Give a "
                 "brief, concrete check (what is workable, at most one optional "
                 "risk or gap) and let them proceed.\n"
-                "Use STAY only when the message is empty or off-topic, the idea is "
+                "For Problem Identification, also use STAY for vague or solution-locked "
+                "framing. Otherwise use STAY only when the message is empty or off-topic, the idea is "
                 "internally contradictory in a way that makes it unusable, or a "
                 "serious safety/ethics issue would make moving on irresponsible. "
                 "Do not write the work for them. Do not claim the stage already "
-                "changed; Next / Work on this stage remains the student's move."
+                "changed; confirmation remains the student's move."
             )
     if context.allow_model_knowledge:
         parts.append(
@@ -287,20 +289,18 @@ def _runtime_instructions(context: PromptContext) -> str:
             )
         elif settings.student_stage_selection:
             parts.append(
-                "The student controls when to move along the linear Thinking Path and "
-                "may select only the immediate unlocked next stage or revisit an "
-                "earlier unlocked stage. Recommend ADVANCE only when the current stage "
-                "purpose is adequately met. When recommending ADVANCE, explain briefly "
-                "why it is ready and name one optional way the student could improve "
-                "the current work if they choose to stay. The application will open "
-                "with `**[<current stage label>] -> [<next stage label>] is Ready.**`, "
-                "then tell the student to enter `Move to <next stage label>` or Go to "
-                "Analytics -> Progression and click `Work on this stage`. Do not claim "
-                "the stage already changed, and do not ask for Next or a confirm command."
+                "The student may revisit completed stages and return to unlocked "
+                "stages. Recommend ADVANCE when the current purpose is met; explain "
+                "why and at most one optional refinement. A pending recommendation "
+                "does not complete the stage or unlock its destination. Stay in the "
+                "current stage until the student chooses Confirm next stage in "
+                "Thinking Path (or exact confirm in chat). Stay here rejects the "
+                "recommendation. Do not begin next-stage coaching before confirmation."
             )
         else:
             parts.append(
-                "A recommendation to advance waits for student confirmation."
+                "A recommendation to advance waits for student confirmation. Keep "
+                "chat in the current stage; do not begin next-stage coaching yet."
             )
     if context.image_note.strip():
         parts.append(context.image_note.strip())

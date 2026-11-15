@@ -1281,11 +1281,11 @@ def test_street_stay_does_not_advance_stage(tmp_path):
     assert _thread_stage(store, thread_id) == "problem_identification"
 
 
-def test_street_advance_without_hmw_candidate_is_forced_stay(tmp_path):
+def test_street_semantic_stay_has_no_pending(tmp_path):
     store = StudentStore(tmp_path / "agentcore-street-advance.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(
-        payload=_output(research=None, recommendation=StageDecision.ADVANCE)
+        payload=_output(research=None, recommendation=StageDecision.STAY)
     )
     turn = _service(store, _provider(client)).submit(
         _request(thread_id=thread_id, student_message=_STREET)
@@ -1299,7 +1299,7 @@ def test_street_advance_auto_applies_only_with_student_hmw(tmp_path):
     store = StudentStore(tmp_path / "agentcore-street-auto.sqlite3")
     blocked_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(
-        payload=_output(research=None, recommendation=StageDecision.ADVANCE)
+        payload=_output(research=None, recommendation=StageDecision.STAY)
     )
     blocked = _service(
         store, _provider(client), auto_advance_stages=True
@@ -1309,6 +1309,9 @@ def test_street_advance_auto_applies_only_with_student_hmw(tmp_path):
     hmw = (
         "How might we improve road crossings for older pedestrians so that "
         "they can cross safely without rushing?"
+    )
+    client = FakeAgentCoreRuntime(
+        payload=_output(research=None, recommendation=StageDecision.ADVANCE)
     )
     allowed_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     allowed = _service(

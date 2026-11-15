@@ -2,6 +2,42 @@
 
 ## CURRENT STATUS
 
+### Ticket 03 / GitHub #16: confirmed advancement and free stage revisits (2026-11-15)
+
+- **Outcome:** Nonterminal recommendations remain pending without completion or
+  destination access. Thinking Path exposes Confirm next stage / Stay here in
+  both confirmation and selection modes; acceptance applies once. Revisits and
+  return to unlocked stages preserve completion records and original notes.
+- **Semantic framing:** General/stage prompts accept meaningful student-authored
+  prose and reject vague or solution-locked drafts. Removed lexical HMW vetoes
+  and structural promotions. Current-stage coaching continues until confirmation;
+  the deterministic mock no longer begins next-stage coaching prematurely.
+- **Persistence:** Conditional pending-row writes choose one winning tab. Active
+  revision revalidation rejects superseded decisions. Completion merges into the
+  latest journey, preserving concurrent preferences and learning updates. Legacy
+  focus/completions remain unchanged; gaps infer no new completion. No migration.
+- **Validation:** Canonical mock suite **2249 passed, 1 skipped** (75.09s), with
+  unmanaged `* 2.py` copies excluded and preserved. Eight new API cases cover
+  semantic routing, confirmation/rejection, same-stage no-op, revisits, legacy
+  gaps, restart, duplicate tabs, concurrent updates, and edit/confirm races.
+  Desktop 1440px and mobile 390px journeys checked; mobile width 390/390 and
+  accepted-session console errors 0. Compileall, whitespace, and Impeccable
+  detector checks passed. Unfiltered workspace: 3315 passed, 2 skipped, 23
+  failures confined to preserved unmanaged ` 2.py` copies with obsolete policy.
+- **Review:** Independent Standards and Spec reviews and re-reviews resolved
+  prompt/copy conflicts, premature mock coaching, stale metadata overwrite,
+  stale public docstrings, and active-revision concerns. No blocking findings.
+- **Compatibility / rollback:** No schema/data reset or existing-data write.
+  Revert only the ticket commit to roll back. Existing staged patch and all
+  unrelated work preserved. Historical transcript text stays unchanged. Existing
+  Streamlit full stage reruns clear unsent drafts; saved history is preserved.
+- **Handoff:** [new_docs/ticket_handoffs/03.md](../new_docs/ticket_handoffs/03.md)
+  records detailed evidence, limits, cleanup, and the next entry point. No paid
+  provider calls, push, deployment, real-model or student-outcome claim.
+- **Next exact action:** Record the ticket-only commit on #16 and close with
+  acceptance evidence; then start a new `gpt-6.1-sol` task for local 04 / #17,
+  “Resume project work with a useful next action”, after verifying live blockers.
+
 ### Ticket 02 / GitHub #15: lecture help and optional project application (2026-11-15)
 
 - **Outcome:** Existing composer exposes Ask about a lecture and Develop my

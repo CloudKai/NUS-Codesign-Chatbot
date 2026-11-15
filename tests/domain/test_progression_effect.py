@@ -402,17 +402,17 @@ def test_explicit_readiness_still_evaluate_may_create_pending(
     assert "Type exact `confirm` to advance." in turn.response_text
 
 
-def test_pi_explicit_readiness_evaluate_but_hmw_guard_still_applies(
+def test_pi_explicit_readiness_evaluates_semantic_stay(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """PI readiness stays EVALUATE; HMW structural guard may still force STAY."""
+    """PI readiness stays EVALUATE; the semantic assessment governs readiness."""
     store = StudentStore(tmp_path / "ready-pi.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     monkeypatch.setattr(settings, "student_stage_selection", False)
     assert progression_effect_for(
         "am i ready to move on", current_stage="problem_identification"
     ) == "evaluate"
-    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="stay"))
     service = _service(store, client, retriever=_NoRetrieve())
 
     turn = _submit(
@@ -497,14 +497,11 @@ def test_phase2_linear_select_stage_after_legitimate_advance(
     assert first.pending_transition is not None
     assert "is Ready." in first.response_text
 
-    move = _submit(
-        service,
-        thread_id,
-        "Move to Design specification",
-        stage="concept_generation",
-        key="phase2-move",
+    from backend.learning_service import LearningProgressService
+    from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
+    LearningProgressService(store, SQLiteNotebookRepository(store), SQLitePhaseTransitionRepository(store)).resolve(
+        thread_id, first.pending_transition.id, accepted=True,
     )
-    assert move.pending_transition is None
     assert _journey(store, thread_id)["current_stage"] == "design_specification"
 
 

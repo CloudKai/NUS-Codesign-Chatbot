@@ -329,22 +329,11 @@ class DeterministicCoachProvider:
             hmw_scaffold_ready=self.hmw_scaffold_ready,
         )
         if is_advancing and upcoming:
-            follow_up = next_questions[0] if next_questions else upcoming.reflection_prompt
-            hmw_feedback = ""
-            if stage.id == "problem_identification" and summary:
-                hmw_feedback = (
-                    "This is a clear How Might We direction because it identifies "
-                    "the people you are designing for, the opportunity you are "
-                    "exploring, and the outcome you want to achieve. Keep that "
-                    "intended benefit in view as you generate concepts.\n\n"
-                )
             response = (
-                f"**{upcoming.label}**\n\n"
-                f"{hmw_feedback}"
-                f"That's a solid start—now let's look more carefully at "
-                f"{upcoming.short_label.lower()}. {upcoming.description}\n\n"
+                f"**{stage.label}**\n\n"
+                f"Your contribution is workable for this stage. We can consider "
+                f"**{upcoming.label}** next. You can also refine your current work.\n\n"
                 f"{evidence_block}"
-                f"{follow_up}"
             )
         else:
             response = (

@@ -173,6 +173,33 @@ default mode (`AUTO_ADVANCE_STAGES=false`). The system must persist the
 recommendation and confirmation/rejection event first. Remove hidden comment
 parsing, keyword-stage heuristics, and unrestricted manual advancement.
 
+Ticket 03 / #16 clarifies the default confirmation contract: a nonterminal
+ADVANCE creates a pending recommendation without completing the current stage
+or unlocking its destination. Thinking Path shows **Confirm next stage** and
+**Stay here**; one acceptance atomically awards first completion and changes
+focus. Literal chat confirmation uses the same decision service. Repeated or
+stale decisions cannot award completion twice. The store conditionally claims
+the pending row, revalidates its active conversation revision, and builds the
+completion from transaction-current journey data, preserving concurrent edits
+and preferences. Terminal Reflection retains complete-in-place behavior.
+
+Stage selection remains controlled by `STUDENT_STAGE_SELECTION`. Navigation
+may revisit explicitly completed stages and return to the first unfinished
+stage after the contiguous completed prefix. Existing focus and explicit legacy
+completion records are preserved, including non-contiguous records; neither
+focus nor a gap infers a missing completion or unlocks a later unfinished stage.
+Selecting the current stage is a no-op and preserves its pending recommendation.
+Revisit coaching creates no new first-completion recommendation or award.
+
+Problem Identification uses the provider's validated structured semantic
+assessment of student-authored affected people, problem/context, desired
+outcome, and openness to alternative solutions. Meaningful informal prose is
+accepted; vague filler and solution-locked drafts remain STAY. The HMW formula
+is optional scaffolding. Application regex/wording checks neither veto an
+informal ADVANCE nor promote a formal-looking STAY. Shared and stage prompts
+keep coaching in the current stage until confirmation. Deterministic mocks
+verify routing and persistence, not real-model semantic quality.
+
 Audited auto-advance (`AUTO_ADVANCE_STAGES=true`) is an explicit local demo
 override: the coach ADVANCE recommendation is applied immediately without the
 Next/confirm UI, but a transition row is still persisted for auditability. Do

@@ -68,10 +68,6 @@ def test_authenticated_inprocess_path_confirms_pending_transition():
     )
     assert next_button.disabled is False
     next_button.click().run()
-    confirm = next(
-        button for button in app.button if button.key == "confirm-next-stage"
-    )
-    confirm.click().run()
 
     assert not app.exception
     assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
@@ -127,12 +123,6 @@ def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
 
         app.chat_input[0].set_value(
             "Which design gives older pedestrians enough time and visibility?"
-        ).run()
-        assert not app.exception
-
-        app.chat_input[0].set_value(
-            "How might we improve road crossings for older pedestrians so that "
-            "they can cross safely without rushing?"
         ).run()
         assert not app.exception
 
@@ -342,3 +332,30 @@ def test_course_sync_snapshots_streamlit_auth_before_background_worker(monkeypat
     assert not result.errors
     assert snapshot_threads == [main_thread]
     assert worker_threads and worker_threads[0] != main_thread
+
+
+def test_selection_mode_shows_one_confirmation_and_rejection(monkeypatch):
+    """Selection mode exposes the pending choice and confirms with one click."""
+    from backend.mock_provider import DeterministicCoachProvider
+    from backend.domain import StageDecision
+    monkeypatch.setattr('backend.owner_context.configured_coach_provider', lambda: DeterministicCoachProvider(StageDecision.ADVANCE))
+    client = _install_inprocess_api(monkeypatch, auto_advance=False, stage_selection=True)
+    try:
+        app = saved_app()
+        app.chat_input[0].set_value('Older pedestrians need to cross busy roads near our school safely and without stress.').run()
+        assert not app.exception
+        assert app.session_state['learning_journey']['completed_stages'] == []
+        assert app.button(key='thinking-path-next').label == 'Confirm next stage'
+        assert app.button(key='thinking-path-stay').label == 'Stay here'
+        assert not any(button.key == 'journey-select-concept_generation' for button in app.button)
+        app.button(key='thinking-path-stay').click().run()
+        assert client.pending_transition(app.session_state['thread_id']) is None
+        assert app.session_state['learning_journey']['current_stage'] == 'problem_identification'
+        app.chat_input[0].set_value('Older pedestrians need safer crossings to reach the shops without rushing.').run()
+        app.button(key='thinking-path-next').click().run()
+        assert not app.exception
+        assert app.session_state['learning_journey']['current_stage'] == 'concept_generation'
+        assert app.session_state['learning_journey']['completed_stages'] == ['problem_identification']
+        assert not any(button.key == 'confirm-next-stage' for button in app.button)
+    finally:
+        client.close()

@@ -532,8 +532,8 @@ def _selection_pending_ready_reminder_turn(
             ),
             recommendation=StageDecision.STAY,
             recommendation_rationale=(
-                "Keep focus until Move to <stage> or Analytics -> Progression "
-                "Work on this stage."
+                "Keep the current stage until the student explicitly confirms "
+                "the pending recommendation."
             ),
             response_mode="qa",
         ),
@@ -1769,7 +1769,6 @@ class CoachApplicationService:
         if (
             not owned_review
             and prepared_request.interaction_intent != "lecture_help"
-            and runtime_settings.student_stage_selection
             and prepared_request.revise_user_message_id is None
         ):
             candidate_pending = self._store.get_pending_phase_transition(
@@ -1889,6 +1888,21 @@ class CoachApplicationService:
                     )
                 }
             )
+        completed = normalize_journey(snapshot.metadata.get("learning_journey"))["completed_stages"]
+        if prepared_request.current_stage in completed and not owned_review:
+            # Historical completion survives refinement; navigation back to the
+            # unlocked frontier needs no second award or recommendation.
+            turn = turn.model_copy(update={
+                "pending_transition": None,
+                "assessment": turn.assessment.model_copy(update={
+                    "recommendation": (
+                        StageDecision.STAY
+                        if turn.assessment.recommendation is StageDecision.ADVANCE
+                        else turn.assessment.recommendation
+                    ),
+                    "readiness_candidate": False,
+                }),
+            })
         if (
             existing_pending is not None
             and not pending_ready_reminder
@@ -1897,8 +1911,7 @@ class CoachApplicationService:
             and str(turn.assessment.response_mode or "").strip().lower()
             == "coaching"
         ):
-            # Readiness unlocks the next stage but does not disable coaching in
-            # the current one. Keep the original pending row, prevent a second
+            # A pending recommendation does not disable current-stage coaching. Keep the original pending row, prevent a second
             # transition, and preserve the new Coach response as optional
             # refinement beneath the Ready notice.
             turn = turn.model_copy(
@@ -1913,7 +1926,7 @@ class CoachApplicationService:
                         update={
                             "recommendation": StageDecision.STAY,
                             "recommendation_rationale": (
-                                "The next stage is already unlocked; the student "
+                                "A recommendation awaits confirmation; the student "
                                 "chose to continue refining the current stage."
                             ),
                         }
@@ -2052,7 +2065,7 @@ class CoachApplicationService:
             and turn.pending_transition is not None
             and manual_stage_target is None
         ):
-            # Keep pending for Journey / Move to; rewrite Chat to Ready copy.
+            # Keep the saved recommendation visible until confirmation.
             pending = turn.pending_transition
             turn = turn.model_copy(
                 update={
@@ -2071,23 +2084,13 @@ class CoachApplicationService:
             and manual_stage_target is None
             and turn.assessment.recommendation is StageDecision.ADVANCE
         ):
-            # Include revise/resubmit: append-only edit rolls completed_stages
-            # back to the restored focus, so a replacement ADVANCE must
-            # re-record validated completion or Chat Ready unlocks a stage
-            # Journey still treats as incomplete.
+            # Nonterminal completion belongs to explicit confirmation. Terminal
+            # Reflection retains its existing complete-in-place contract.
             if (
                 prepared_request.current_stage == THINKING_STAGES[-1].id
                 and turn.pending_transition is None
             ):
                 # Reflection ADVANCE is complete-in-place (no next-stage pending).
-                validated_completion_stage = prepared_request.current_stage
-            elif (
-                runtime_settings.student_stage_selection
-                and turn.pending_transition is not None
-            ):
-                # Workflow validation (including the PI HMW guard) has already
-                # produced this pending ADVANCE. Phase 2 records completion while
-                # keeping focus and the auditable pending choice unchanged.
                 validated_completion_stage = prepared_request.current_stage
         persist_started = time.perf_counter()
         emit_coach_reply_ready(turn.response_text)

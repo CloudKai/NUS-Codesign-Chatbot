@@ -257,11 +257,12 @@ def test_manual_stage_command_atomically_rejects_pending_and_persists_turn(
     thread_id = store.create_thread(model_id="mock", support_mode="guided")
     service, _progress = _service(store, auto_advance=True)
     monkeypatch.setattr(settings, "student_stage_selection", True)
-    _unlock_manual_target(store, thread_id, "reflection")
 
     pending_turn = service.submit(_request(thread_id, key="manual-pending"))
     assert pending_turn.pending_transition is not None
     assert store.get_pending_phase_transition(thread_id) is not None
+    # Preserve a legacy pending alongside already recorded completion history.
+    _unlock_manual_target(store, thread_id, "reflection")
 
     selected = service.submit(
         _manual_stage_request(thread_id, key="manual-select", target="reflection")

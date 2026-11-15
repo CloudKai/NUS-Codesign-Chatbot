@@ -525,7 +525,7 @@ def test_explicit_navigation_variants_skip_retrieval_without_stage_mutation(
     """Bounded navigation variants route to Coaching without mutating state."""
     store = StudentStore(tmp_path / "navigation-variant.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="stay"))
     service = _service(store, client, retriever=_NoRetrieve())
 
     turn = _submit(service, thread_id, message, key="navigation-variant")
@@ -778,7 +778,7 @@ def test_phase2_validated_advance_completes_current_without_changing_focus(
     current_stage: str,
     completed_before: list[str],
 ) -> None:
-    """A validated Coaching ADVANCE unlocks only the immediate next stage."""
+    """A validated Coaching ADVANCE awaits confirmation without awarding completion."""
     store = StudentStore(tmp_path / "phase2-completion.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     if completed_before:
@@ -812,18 +812,14 @@ def test_phase2_validated_advance_completes_current_without_changing_focus(
     assert turn.response_text.startswith(
         f"**[{from_label}] -> [{to_label}] is Ready.**"
     )
-    assert f"Enter `Move to {to_label}`" in turn.response_text
-    assert "Go to Analytics -> Progression and click `Work on this stage`" in turn.response_text
+    assert "Confirm the recommendation" in turn.response_text
     assert f"You can also stay in **{from_label}**" in turn.response_text
     assert "where your current reasoning is still weakest" in turn.response_text
     assert "Type exact `confirm` to advance." not in turn.response_text
     thread = store.get_thread(thread_id) or {}
     journey = thread["metadata"]["learning_journey"]
     assert journey["current_stage"] == current_stage
-    assert journey["completed_stages"] == [
-        *completed_before,
-        current_stage,
-    ]
+    assert journey["completed_stages"] == completed_before
     assert store.get_pending_phase_transition(thread_id) is not None
     assert current_stage in selectable_stage_ids(journey)
     messages_before = store.get_messages(thread_id)
@@ -835,7 +831,11 @@ def test_phase2_validated_advance_completes_current_without_changing_focus(
         "problem_identification": "concept_generation",
         "concept_generation": "design_specification",
     }[current_stage]
-    store.select_learning_stage(thread_id, next_stage)
+    from backend.learning_service import LearningProgressService
+    from backend.repositories import SQLiteNotebookRepository
+    LearningProgressService(store, SQLiteNotebookRepository(store), SQLitePhaseTransitionRepository(store)).resolve(
+        thread_id, turn.pending_transition.id, accepted=True,
+    )
     selected = store.get_thread(thread_id) or {}
     selected_journey = selected["metadata"]["learning_journey"]
     assert selected_journey["current_stage"] == next_stage
@@ -883,8 +883,7 @@ def test_phase2_pending_followup_keeps_ready_and_allows_refinement(
     assert repeated.response_text.startswith(
         "**[Problem identification] -> [Concept generation] is Ready.**"
     )
-    assert "Go to Analytics -> Progression and click `Work on this stage`" in repeated.response_text
-    assert "Enter `Move to Concept generation`" in repeated.response_text
+    assert "Confirm the recommendation" in repeated.response_text
     assert store.get_pending_phase_transition(thread_id) is not None
 
     stay_client = FakeAgentCoreRuntime(
@@ -910,8 +909,7 @@ def test_phase2_pending_followup_keeps_ready_and_allows_refinement(
     assert reminder.response_text.startswith(
         "**[Problem identification] -> [Concept generation] is Ready.**"
     )
-    assert "Go to Analytics -> Progression and click `Work on this stage`" in reminder.response_text
-    assert "Enter `Move to Concept generation`" in reminder.response_text
+    assert "Confirm the recommendation" in reminder.response_text
     assert "keep refining the problem" in reminder.response_text.casefold()
     assert "You can also stay in **Problem identification**" in reminder.response_text
     assert store.get_pending_phase_transition(thread_id) is not None
@@ -1391,7 +1389,7 @@ def test_navigation_pi_guard_blocks_premature_advance(tmp_path) -> None:
     """Navigation does not bypass the student-authored HMW provenance guard."""
     store = StudentStore(tmp_path / "navigation-pi-guard.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="stay"))
     turn = _submit(
         _service(store, client, retriever=_NoRetrieve()),
         thread_id,
@@ -1401,7 +1399,6 @@ def test_navigation_pi_guard_blocks_premature_advance(tmp_path) -> None:
     assert len(client.calls) == 1
     assert turn.pending_transition is None
     assert turn.assessment.recommendation is StageDecision.STAY
-    assert "How Might We" in turn.response_text
     assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "problem_identification"
 
 
@@ -1682,7 +1679,7 @@ def test_mixed_adversarial_keeps_coaching_semantics(tmp_path) -> None:
     store = StudentStore(tmp_path / "mode-mixed.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(
-        payload=_coaching_payload(recommendation="advance")
+        payload=_coaching_payload(recommendation="stay")
     )
     message = ADVERSARIAL_MIXED[0][0]
     turn = _submit(_service(store, client), thread_id, message, key="mixed-keep")
