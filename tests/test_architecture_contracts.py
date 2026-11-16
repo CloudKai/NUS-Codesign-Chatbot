@@ -335,6 +335,9 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
     expected = {
         (method, path, name)
         for method, path, name in (
+            ("GET", "/api/v1/reader/session", "session"),
+            ("GET", "/api/v1/reader/threads", "notebooks"),
+            ("GET", "/api/v1/reader/threads/{thread_id}/messages/page", "messages"),
             ("GET", "/api/v1/auth/login", "auth_login"),
             ("GET", "/api/v1/auth/callback", "auth_callback"),
             ("GET", "/api/v1/auth/refresh", "auth_refresh"),

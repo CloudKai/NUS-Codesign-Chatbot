@@ -24,6 +24,12 @@ and scopes every notebook/source/message operation to that owner. The shared
 Both paths support Thinking Path progression, structured assessments, Review
 personalization, and selected image grounding.
 
+The optional [React notebook reader](frontend/README.md) runs at `/pilot/` on
+the same Caddy origin; Streamlit remains at `/`. Build it with Node 22 using
+`npm ci --ignore-scripts --prefix frontend` and `npm run build --prefix frontend`.
+It reads existing registered/Guest notebooks; authoring and lecturer work stay
+in Streamlit. The local browser proxy requires Caddy and enabled Guest access.
+
 The current research workflow uses five phases: **Problem identification**,
 **Concept generation**, **Design specification**, **Ethics & Critical Thinking**,
 and **Reflection**. The internal persisted id for Ethics & Critical Thinking

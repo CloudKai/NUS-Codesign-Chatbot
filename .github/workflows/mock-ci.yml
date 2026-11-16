@@ -21,6 +21,16 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Set up reader build
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build static notebook reader
+        run: npm ci --ignore-scripts --prefix frontend && npm run build --prefix frontend
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

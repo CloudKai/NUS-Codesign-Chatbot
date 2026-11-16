@@ -10,6 +10,22 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
+	# Static pilot coexists with Streamlit. Only this read-only API is public;
+	# the browser adapter independently requires verified credentials in all modes.
+	@reader {
+		method GET
+		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/messages/page)$
+	}
+	handle @reader {
+		reverse_proxy app:8000
+	}
+	handle /pilot {
+		redir /pilot/ 308
+	}
+	handle /pilot/* {
+		reverse_proxy app:8000
+	}
+
 	# Browser-facing guest bootstrap and renewal; other student APIs stay private.
 	handle /api/v1/auth/guest/start {
 		reverse_proxy app:8000
@@ -62,7 +78,7 @@
 		reverse_proxy app:8000
 	}
 
-	# Block every other path at the edge so unauthenticated FastAPI
+	# Block every other path at the edge so internal FastAPI
 	# coaching/CRUD routes never receive public traffic. The refresh cookie is
 	# Path=/api/v1/auth and is handled only by the public auth routes above.
 	# Caddy selects the most specific handle matcher first, so the routes

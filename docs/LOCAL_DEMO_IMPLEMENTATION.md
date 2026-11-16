@@ -134,6 +134,22 @@ transitions.
 
 ### Presentation
 
+Ticket 10 / #23 adds a bounded static React/TypeScript notebook reader at
+`/pilot/`, built from `frontend/` and served by `backend/http/notebook_reader.py`.
+Streamlit remains at `/`, including all authoring and lecturer workflows. Three
+typed read-only `/api/v1/reader` routes require a verified registered or enabled
+Guest credential even when internal local-demo routes permit anonymous access.
+They reuse owner-scoped workspace services and revision-bound message pagination,
+project only notebook titles/ids and saved message ids/roles/text, and exclude
+research/storage/assessment metadata. The exact method/path Caddy allow-list
+does not expose internal CRUD, generation, source or professor APIs. Private
+responses use `no-store`; a future CDN release must preserve cookies and disable
+private caching. Browser owner checks, request generations and aborts fence late
+responses. Private state is ephemeral and cleared on hiding/leaving; focus and
+a 15-second visible-page session probe detect identity changes. See
+[`frontend/README.md`](../frontend/README.md) for build, bounded scope and rollback.
+The external formative study remains pending; this pilot is engineering scope.
+
 Streamlit remains the frontend entrypoint. It only renders state and calls a
 typed API client; it must not call SQLite, local files, model SDKs, LangChain,
 or LangGraph directly.

@@ -20,7 +20,7 @@ logic.
 | `start.sh` | **Canonical launcher** — FastAPI `:8000` + Streamlit `:8501` with `USE_LOCAL_API=true` | Everyday path |
 | `start_prod.sh` | Docker app entrypoint — both services on `0.0.0.0`, supervised together | Production container; sqlite/local still may use `/app/data`; DSQL+S3 does not |
 | `deploy_ecr.sh` | ECR login + `compose.prod.yaml` pull/up | Host-only; needs `APP_IMAGE` + IAM role |
-| `build.sh` | Validation-only: `compileall` + full mock `pytest` | **Does not** initialize or modify the live DB |
+| `build.sh` | Validation-only: static reader TypeScript/build + `compileall` + full mock `pytest` | Install reader dependencies first with `npm ci --ignore-scripts --prefix frontend`; **does not** initialize or modify the live DB |
 | `init_db.py` | Explicit SQLite schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
 | `init_dsql.py` | Compatibility CLI for `scripts/dsql/cli.py` admin bootstrap | One DDL per transaction; async-job `CALL` on dedicated autocommit connection; initializes the five-phase workflow marker only with zero notebooks; keeps research DDL; never app startup; not `co_design_app`. CloudShell SSL/IPv4 checklist: [`docs/deploy/AWS_STATELESS_EC2.md`](../docs/deploy/AWS_STATELESS_EC2.md) (§ CloudShell / laptop init_dsql checklist) |
 | `smoke_dsql_idempotency.py` | Explicitly approved live DSQL runtime-role idempotency smoke | Requires `--confirm-live`, `DATABASE_PROVIDER=dsql`, `DSQL_USER=co_design_app`, and `--identifier cognito:<sub>`; mock provider only; no DDL/S3/Bedrock |

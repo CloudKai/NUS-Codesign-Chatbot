@@ -20,6 +20,7 @@ elif command -v python >/dev/null 2>&1; then
 fi
 
 echo "Using Python: $PYTHON"
+npm run build --prefix frontend
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/private/tmp/co-design-pycache}"
 
 "$PYTHON" -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime

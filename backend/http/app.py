@@ -38,6 +38,7 @@ from backend.domain import (
     SourceUpdateRequest,
 )
 from backend.owner_context import OwnerResolver, OwnerServices
+from backend.http.notebook_reader import register_notebook_reader
 from backend.persistence.guest_sessions import GUEST_SESSION_TTL
 from backend.coaching.progress import PROGRESS_LABELS
 from backend.operational_metrics import (
@@ -312,6 +313,8 @@ def create_app(
         """FastAPI dependency: Cognito-verified owner or local-student default."""
         return resolver.resolve(request)
 
+    register_notebook_reader(app, current_owner)
+
     def current_professor(
         request: Request,
         owner: OwnerServices = Depends(current_owner),
@@ -350,6 +353,9 @@ def create_app(
             )
             raise
         response.headers["X-Request-ID"] = request_id
+        if request.url.path.startswith("/api/v1/reader/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Vary"] = "Cookie"
         route = getattr(request.scope.get("route"), "path", None) or "<unmatched>"
         record_http_request(
             method=request.method,

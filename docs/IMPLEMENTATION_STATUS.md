@@ -2,6 +2,63 @@
 
 ## CURRENT STATUS
 
+### Ticket 10 / GitHub #23: authenticated React notebook reader (2026-11-16)
+
+- **Outcome:** Static React/TypeScript at `/pilot/` reads existing registered/Guest
+  notebooks and revision-bound history pages. Streamlit remains at `/` for
+  authoring, sources, stages and lecturer work. Existing services/storage stay
+  authoritative; no schema or data migration. Local fonts retain the established
+  IBM Plex Sans/Source Serif4 slate/teal design and course transparency notice.
+- **Boundary:** Three typed read-only browser routes require verified credentials
+  even in anonymous-capable local-demo mode. Normalized credentials prevent a
+  whitespace-cookie fallback. Responses omit research/storage/assessment metadata,
+  reject foreign notebooks and staff, and use no-store. Caddy exposes only exact
+  reader GET patterns; other internal APIs remain blocked. Build is in CI/Docker;
+  missing frontend output does not break Streamlit startup.
+- **Privacy:** Transcript/list/search are memory-only. Hiding/leaving clears them;
+  owner probes, aborts and request generations reject stale responses. Focus and
+  15-second visible-page checks detect changed sessions; this is not instant
+  cross-tab notification. Signed-in callback returns to Streamlit; reopen the
+  reader afterward. Source citations are saved text; evidence preview and writing
+  remain in Streamlit for this bounded slice.
+- **Validation:** Final canonical deterministic suite **2289 passed, 1 skipped**,
+  293 warnings in82.48s (`/private/tmp/ticket23-full-final.log`), excluding only
+  preserved unmanaged ` 2.py` copies. Auth/Guest/pagination/config slice **80
+  passed**; final reader/architecture/deployment slice **33 passed**. Four new
+  public HTTP tests include anonymous/whitespace rejection, registered paging,
+  private-field projection, foreign/staff guards, Guest origin/precedence/isolation,
+  restart and static asset scope. Frontend TypeScript/build, Python compile,
+  shell syntax, whitespace and both Caddy configs passed. Pinned dependency
+  installation reported zero vulnerabilities after Vite7.3.8 update. No Python
+  formatter/typechecker or Docker image/CI execution claim.
+- **Browser/recovery:** Disposable mock API/Streamlit/Caddy on loopback18080;
+  synthetic OIDC only, no live Cognito/model calls. Guest and registered reads,
+  26-message pagination, desktop1440x960/mobile390x844, empty/search/loading,
+  mobile focus, dark appearance and Streamlit coexistence checked. Mobile width
+  390/390. Delayed old-owner response discarded and search/history cleared on
+  synthetic identity switch. Final connected reader consoles0 errors/0 warnings;
+  initial signed-out probes produced expected401 resource errors; Streamlit had
+  17 existing warnings. Restart public-HTTP probe preserved Guest work, source
+  bytes, exact saved-answer replay and citation text without duplicate turns.
+- **Reviews/gates:** Separate Standards/Spec reviews and rechecks resolved the
+  credential bypass, transparency notice and mobile focus. Finish reviewer
+  returned fix for typography/eyebrow/direction record, then **ship for those
+  three scored fixes**. Detector[] before final visual corrections. Sol sole
+  writer; Luna discovery/Astra fixture diagnosis read-only. External5–8-student
+  observations and two-week pilot remain pending, zero sessions; no learning,
+  real capacity, cost, real OIDC, production-CDN or release claim. No paid calls,
+  push or deployment. Demo processes and QA browsers stopped before handoff.
+- **Handoff/rollback:** [10.md](../new_docs/ticket_handoffs/10.md). Revert only the
+  ticket commit and rebuild/remove reader routes together; saved data and existing
+  Streamlit entrypoint need no migration. Original staged patch preserved with
+  SHA256 `3822626dc9314c8fef41f80427af7eba322a24a2157543d453c7bddf16bf034a`.
+- **Next exact action:** Publish selective commit/evidence before closing #23,
+  then create a NEW `gpt-6.1-sol` task for local11 / #24, “React lecture conversation
+  and interrupted-turn recovery.” Its other native blockers #14/#15 are closed
+  with published evidence. Recheck live #23 closure/evidence in the fresh task;
+  read handoff10, EXECUTION, GITHUB_TICKETS and relevant guides/spec. Do not
+  implement #24 in this context. Keep the pending external study/release gates.
+
 ### Ticket 09 / GitHub #22: learning funnel and formative usability baseline (2026-11-16)
 
 - **Outcome:** Explicit optional usefulness ratings, citation-action receipts and

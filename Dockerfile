@@ -1,6 +1,13 @@
 # syntax=docker/dockerfile:1
 # Architecture-neutral base. Build for EC2 t4g (ARM64) with:
 #   docker buildx build --platform linux/arm64 -t <ECR_IMAGE_URI>:<tag> --push .
+FROM node:22-bookworm-slim AS reader-build
+WORKDIR /reader
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.12-slim
 
 ARG GIT_SHA=unknown
@@ -27,6 +34,7 @@ RUN groupadd --gid 1000 app \
     && useradd --uid 1000 --gid app --create-home app
 
 COPY --chown=app:app . .
+COPY --from=reader-build --chown=app:app /reader/dist ./frontend/dist
 # /app/data is optional for local/sqlite images only. Production DSQL+S3
 # containers do not mount or require persistent student data here.
 RUN mkdir -p /app/data /tmp/co-design \

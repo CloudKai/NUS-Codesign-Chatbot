@@ -1,4 +1,17 @@
 http://127.0.0.1:8080 {
+	@reader {
+		method GET
+		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/messages/page)$
+	}
+	handle @reader {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle /pilot {
+		redir /pilot/ 308
+	}
+	handle /pilot/* {
+		reverse_proxy 127.0.0.1:8000
+	}
 	# Local browser auth routes are exact-match only. The rest of FastAPI is not
 	# reachable through this browser-facing proxy.
 	handle /api/v1/auth/guest/start {
