@@ -142,6 +142,7 @@ from backend.student_store import (
     StudentStore,
 )
 from backend.title_service import NotebookTitleService
+from backend.usage import assessed, mark_replayed, usage_operation
 from backend.turn_perf import (
     begin_coach_turn_perf,
     current_perf,
@@ -813,12 +814,15 @@ class CoachApplicationService:
         *reply* receives the validated, final response text before persistence;
         callers must discard that preview if the turn fails to save.
         """
-        with coach_progress(progress, reply):
-            return self._submit_body(
+        with usage_operation("chat", request.thread_id) as usage, coach_progress(progress, reply):
+            turn = self._submit_body(
                 request,
                 execution_lease_held=execution_lease_held,
                 server_owned_specialist=server_owned_specialist,
             )
+            usage.success = True
+            usage.answer_delivered = bool(turn.response_text.strip()) and not usage.replayed
+            return turn
 
     def _submit_body(
         self,
@@ -915,6 +919,7 @@ class CoachApplicationService:
                                 "Completed coach idempotency result is invalid"
                             )
                         record_success()
+                        mark_replayed()
                         return CoachTurn.model_validate(reservation.turn_payload)
                     if reservation.state == "claimed":
                         try:
@@ -1281,60 +1286,59 @@ class CoachApplicationService:
                 conversation_revision=conversation_revision,
             )
             provider = self._workflow.provider
-            if hasattr(provider, "assess_stage_checkpoint"):
-                result = provider.assess_stage_checkpoint(request)
-            else:
-                result = provider.assess(request)
-            assessment = result.assessment
-            artifacts: dict[str, str] = {}
-            if note:
-                artifacts["stage_note"] = note[:400]
-            facione_payload: dict[str, int] = {}
-            raw_facione = getattr(assessment, "facione_scores", None)
-            if raw_facione is not None:
-                if hasattr(raw_facione, "model_dump"):
-                    facione_payload = dict(raw_facione.model_dump())
-                elif isinstance(raw_facione, dict):
-                    facione_payload = dict(raw_facione)
-            checkpoint = normalize_stage_checkpoint(
-                {
-                    "stage": cleaned_stage,
-                    "summary": (
-                        assessment.learning_summary
-                        or assessment.contribution_summary
-                        or assessment.stage_assessment
-                        or ""
-                    ),
-                    "strengths": list(assessment.review_strengths or []),
-                    "areas_to_revisit": list(assessment.review_improvements or []),
-                    "reasoning_progress": assessment.understanding_change or "",
-                    "important_message_ids": _stage_review_important_message_ids(
-                        stage_history
-                    ),
-                    "important_artifacts": artifacts,
-                    "facione_scores": facione_payload,
-                    "conversation_revision": conversation_revision,
-                },
-                stage_id=cleaned_stage,
-            )
-            if checkpoint is None:
-                raise ValueError("Empty stage checkpoint")
-            completed = self._store.complete_stage_review_job(
-                thread_id,
-                stage_id=cleaned_stage,
-                checkpoint=checkpoint,
-                job_id=cleaned_job_id,
-                lease_token=lease_token,
-            )
-            if completed:
-                # If new substantive work arrived while this job was running,
-                # its newer dirty token remains and is flushed as a follow-up
-                # job without allowing the stale result to overwrite it.
-                self._store.flush_stage_review_revisit(
-                    thread_id,
+            with usage_operation("stage_checkpoint", thread_id) as usage:
+                result = assessed(provider, request, checkpoint=hasattr(provider, "assess_stage_checkpoint"))
+                assessment = result.assessment
+                artifacts: dict[str, str] = {}
+                if note:
+                    artifacts["stage_note"] = note[:400]
+                facione_payload: dict[str, int] = {}
+                raw_facione = getattr(assessment, "facione_scores", None)
+                if raw_facione is not None:
+                    if hasattr(raw_facione, "model_dump"):
+                        facione_payload = dict(raw_facione.model_dump())
+                    elif isinstance(raw_facione, dict):
+                        facione_payload = dict(raw_facione)
+                checkpoint = normalize_stage_checkpoint(
+                    {
+                        "stage": cleaned_stage,
+                        "summary": (
+                            assessment.learning_summary
+                            or assessment.contribution_summary
+                            or assessment.stage_assessment
+                            or ""
+                        ),
+                        "strengths": list(assessment.review_strengths or []),
+                        "areas_to_revisit": list(assessment.review_improvements or []),
+                        "reasoning_progress": assessment.understanding_change or "",
+                        "important_message_ids": _stage_review_important_message_ids(
+                            stage_history
+                        ),
+                        "important_artifacts": artifacts,
+                        "facione_scores": facione_payload,
+                        "conversation_revision": conversation_revision,
+                    },
                     stage_id=cleaned_stage,
                 )
-                self.resubmit_queued_stage_review_jobs(thread_id)
+                if checkpoint is None:
+                    raise ValueError("Empty stage checkpoint")
+                completed = self._store.complete_stage_review_job(
+                    thread_id,
+                    stage_id=cleaned_stage,
+                    checkpoint=checkpoint,
+                    job_id=cleaned_job_id,
+                    lease_token=lease_token,
+                )
+                usage.success = bool(completed)
+                if completed:
+                    # If new substantive work arrived while this job was running,
+                    # its newer dirty token remains and is flushed as a follow-up
+                    # job without allowing the stale result to overwrite it.
+                    self._store.flush_stage_review_revisit(
+                        thread_id,
+                        stage_id=cleaned_stage,
+                    )
+                    self.resubmit_queued_stage_review_jobs(thread_id)
         except Exception:
             logger.exception(
                 "stage_review_execute_failed thread_id=%s stage_id=%s",
@@ -1469,114 +1473,118 @@ class CoachApplicationService:
             return
         if not self._store.mark_deep_review_job_running(thread_id, cleaned_id):
             return
-        try:
-            with get_deep_review_limiter().slot():
-                thread = self._notebooks.get_thread(thread_id)
-                if not thread:
-                    return
-                metadata = dict(thread.get("metadata") or {})
-                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
-                if not job or str(job.get("review_id") or "") != cleaned_id:
-                    return
-                if deep_review_job_is_stale(job, timeout):
+        with usage_operation("deep_review", thread_id) as usage:
+            try:
+                with get_deep_review_limiter().slot():
+                    thread = self._notebooks.get_thread(thread_id)
+                    if not thread:
+                        return
+                    metadata = dict(thread.get("metadata") or {})
+                    job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                    if not job or str(job.get("review_id") or "") != cleaned_id:
+                        return
+                    if deep_review_job_is_stale(job, timeout):
+                        self._store.fail_deep_review_job(
+                            thread_id,
+                            review_id=cleaned_id,
+                            error_code=DEEP_REVIEW_ERROR_TIMEOUT,
+                        )
+                        return
+                    journey = normalize_journey(metadata.get("learning_journey"))
+                    # Provenance must stay on the enqueue-time stage even if the
+                    # student advanced while this job was running.
+                    frozen_stage = str(job.get("stage_at_start") or "").strip()
+                    stage_id = (
+                        frozen_stage
+                        if frozen_stage in STAGE_BY_ID
+                        else current_stage(journey).id
+                    )
+                    request = CoachRequest(
+                        thread_id=thread_id,
+                        student_message=DEEP_REVIEW_TURN_MESSAGE,
+                        current_stage=stage_id,
+                        response_detail=str(
+                            journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
+                        ),
+                        review_id=cleaned_id,
+                    )
+                    prepared, snapshot = self._prepare_authoritative_turn(
+                        request,
+                        force_retrieval=True,
+                        frozen_history_revision=int(job.get("reviewed_revision") or 0),
+                        frozen_stage=stage_id,
+                        frozen_source_ids=list(job.get("source_ids") or []),
+                        frozen_message_ids=list(job.get("message_ids") or []),
+                    )
+                    prepared = self._server_owned_deep_review_request(prepared)
+                    prepared = prepared.model_copy(update={"review_id": cleaned_id})
+                    context_plan = plan_deep_review_context(
+                        frozen_history=list(prepared.history or []),
+                        frozen_source_ids=list(job.get("source_ids") or []),
+                        frozen_revision=int(job.get("reviewed_revision") or 0),
+                        frozen_stage=stage_id,
+                        snapshot=metadata.get(DEEP_REVIEW_SNAPSHOT_KEY),
+                        expected_checkpoint_revision=job.get("base_checkpoint_revision"),
+                        expected_checkpoint_version=job.get("base_checkpoint_version"),
+                        threshold=int(
+                            runtime_settings.deep_review_checkpoint_token_threshold
+                        ),
+                        force_full_final=bool(
+                            runtime_settings.deep_review_force_full_final
+                        ),
+                        journey_stage_reviews=metadata.get(JOURNEY_STAGE_REVIEWS_KEY),
+                    )
+                    metrics = record_deep_review_context_telemetry(context_plan)
+                    prepared = prepared.model_copy(
+                        update={
+                            "history": context_plan.converse_history,
+                            "deep_review_context_mode": context_plan.mode,
+                            "deep_review_compact_context": context_plan.compact_context,
+                            "deep_review_ref_map": context_plan.ref_map,
+                            "deep_review_context_metrics": metrics,
+                        }
+                    )
+                    turn = self._workflow.run(prepared)
+                    prepared, turn = self._maybe_rag_fallback(prepared, turn, snapshot)
+                    self._workflow.take_provisional_research_coding(thread_id)
+                    self._workflow.take_conversation_memory(thread_id)
+                    orchestration = self._workflow.take_review_orchestration(thread_id)
+                    if not orchestration.get("deep_review_succeeded"):
+                        raise ProviderUnavailableError(
+                            "Deep Review could not be completed",
+                            category="malformed",
+                        )
+                    snapshot_payload = self._deep_review_snapshot_from_turn(
+                        turn,
+                        conversation_revision=int(job.get("reviewed_revision") or 0),
+                        reviewed_stage_id=(
+                            frozen_stage if frozen_stage in STAGE_BY_ID else ""
+                        ),
+                        history=list(context_plan.frozen_history),
+                        ref_map=context_plan.ref_map,
+                        reviewed_message_ids=list(job.get("message_ids") or []),
+                        source_ids=list(job.get("source_ids") or []),
+                    )
+                    self._store.complete_deep_review_job(
+                        thread_id,
+                        review_id=cleaned_id,
+                        snapshot=snapshot_payload,
+                    )
+                    saved_thread = self._notebooks.get_thread(thread_id) or {}
+                    saved_job = parse_deep_review_job((saved_thread.get("metadata") or {}).get(DEEP_REVIEW_JOB_KEY))
+                    usage.success = bool(saved_job and saved_job.get("review_id") == cleaned_id and saved_job.get("status") == DEEP_REVIEW_JOB_COMPLETED)
+            except Exception:
+                logger.warning("deep_review_execute_failed operation_id=%s", usage.operation_id)
+                try:
                     self._store.fail_deep_review_job(
                         thread_id,
                         review_id=cleaned_id,
-                        error_code=DEEP_REVIEW_ERROR_TIMEOUT,
+                        error_code=DEEP_REVIEW_ERROR_FAILED,
                     )
-                    return
-                journey = normalize_journey(metadata.get("learning_journey"))
-                # Provenance must stay on the enqueue-time stage even if the
-                # student advanced while this job was running.
-                frozen_stage = str(job.get("stage_at_start") or "").strip()
-                stage_id = (
-                    frozen_stage
-                    if frozen_stage in STAGE_BY_ID
-                    else current_stage(journey).id
-                )
-                request = CoachRequest(
-                    thread_id=thread_id,
-                    student_message=DEEP_REVIEW_TURN_MESSAGE,
-                    current_stage=stage_id,
-                    response_detail=str(
-                        journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
-                    ),
-                    review_id=cleaned_id,
-                )
-                prepared, snapshot = self._prepare_authoritative_turn(
-                    request,
-                    force_retrieval=True,
-                    frozen_history_revision=int(job.get("reviewed_revision") or 0),
-                    frozen_stage=stage_id,
-                    frozen_source_ids=list(job.get("source_ids") or []),
-                    frozen_message_ids=list(job.get("message_ids") or []),
-                )
-                prepared = self._server_owned_deep_review_request(prepared)
-                prepared = prepared.model_copy(update={"review_id": cleaned_id})
-                context_plan = plan_deep_review_context(
-                    frozen_history=list(prepared.history or []),
-                    frozen_source_ids=list(job.get("source_ids") or []),
-                    frozen_revision=int(job.get("reviewed_revision") or 0),
-                    frozen_stage=stage_id,
-                    snapshot=metadata.get(DEEP_REVIEW_SNAPSHOT_KEY),
-                    expected_checkpoint_revision=job.get("base_checkpoint_revision"),
-                    expected_checkpoint_version=job.get("base_checkpoint_version"),
-                    threshold=int(
-                        runtime_settings.deep_review_checkpoint_token_threshold
-                    ),
-                    force_full_final=bool(
-                        runtime_settings.deep_review_force_full_final
-                    ),
-                    journey_stage_reviews=metadata.get(JOURNEY_STAGE_REVIEWS_KEY),
-                )
-                metrics = record_deep_review_context_telemetry(context_plan)
-                prepared = prepared.model_copy(
-                    update={
-                        "history": context_plan.converse_history,
-                        "deep_review_context_mode": context_plan.mode,
-                        "deep_review_compact_context": context_plan.compact_context,
-                        "deep_review_ref_map": context_plan.ref_map,
-                        "deep_review_context_metrics": metrics,
-                    }
-                )
-                turn = self._workflow.run(prepared)
-                prepared, turn = self._maybe_rag_fallback(prepared, turn, snapshot)
-                self._workflow.take_provisional_research_coding(thread_id)
-                self._workflow.take_conversation_memory(thread_id)
-                orchestration = self._workflow.take_review_orchestration(thread_id)
-                if not orchestration.get("deep_review_succeeded"):
-                    raise ProviderUnavailableError(
-                        "Deep Review could not be completed",
-                        category="malformed",
+                except Exception:
+                    logger.warning(
+                        "deep_review_fail_write_failed operation_id=%s", usage.operation_id
                     )
-                snapshot_payload = self._deep_review_snapshot_from_turn(
-                    turn,
-                    conversation_revision=int(job.get("reviewed_revision") or 0),
-                    reviewed_stage_id=(
-                        frozen_stage if frozen_stage in STAGE_BY_ID else ""
-                    ),
-                    history=list(context_plan.frozen_history),
-                    ref_map=context_plan.ref_map,
-                    reviewed_message_ids=list(job.get("message_ids") or []),
-                    source_ids=list(job.get("source_ids") or []),
-                )
-                self._store.complete_deep_review_job(
-                    thread_id,
-                    review_id=cleaned_id,
-                    snapshot=snapshot_payload,
-                )
-        except Exception:
-            logger.exception("deep_review_execute_failed review_id=%s", cleaned_id)
-            try:
-                self._store.fail_deep_review_job(
-                    thread_id,
-                    review_id=cleaned_id,
-                    error_code=DEEP_REVIEW_ERROR_FAILED,
-                )
-            except Exception:
-                logger.exception(
-                    "deep_review_fail_write_failed review_id=%s", cleaned_id
-                )
 
     def run_deep_review(
         self,

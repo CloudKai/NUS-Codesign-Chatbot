@@ -23,6 +23,7 @@ _OPERATIONAL_LOGGERS = (
     "backend.bedrock_retrieve",
     "backend.retrieval",
     "co_design.operational",
+    "co_design.usage",
     "co_design.turn_perf",
     "co_design.ui_perf",
 )

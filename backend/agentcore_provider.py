@@ -70,6 +70,7 @@ from .domain import (
 from .prompts import compose_coach_prompt
 from .providers import ProviderUnavailableError
 from .settings import FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN, settings
+from .usage import GenerationUsage, copy_usage, generation_call, safe_identifier
 from .turn_perf import (
     begin_coach_turn_perf,
     current_perf,
@@ -542,8 +543,30 @@ def _events_from_sse(raw: str) -> list[Any]:
     return events
 
 
-def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any]:
+def _payload_from_runtime_response(response: Mapping[str, Any], meter: GenerationUsage | None = None) -> dict[str, Any]:
     """Extract the structured coach_turn object from one runtime response."""
+    def metered_payload(value: Any) -> dict[str, Any]:
+        """Retain numeric usage even when a harness error rejects the response."""
+        if meter is not None and isinstance(value, dict):
+            # Supported result/output/coach_turn envelopes may carry their meters inside.
+            outer = value
+            value = _unwrap_runtime_object(value)
+            copy_usage(meter, outer, {
+                "model_input_tokens": "input_tokens", "model_output_tokens": "output_tokens",
+                "cache_read_input_tokens": "cache_read_tokens", "cache_write_input_tokens": "cache_write_tokens",
+                "model_call_count": "model_calls",
+            })
+            copy_usage(meter, value, {
+                "model_input_tokens": "input_tokens", "model_output_tokens": "output_tokens",
+                "cache_read_input_tokens": "cache_read_tokens", "cache_write_input_tokens": "cache_write_tokens",
+                "model_call_count": "model_calls",
+            })
+            if isinstance(value.get("runtime_model_id"), str):
+                meter.model = safe_identifier(value["runtime_model_id"])
+            if isinstance(value.get("runtime_model_region"), str):
+                meter.region = safe_identifier(value["runtime_model_region"])
+        return _final_coach_payload(value)
+
     content_type = str(response.get("contentType") or response.get("content_type") or "")
     raw_bytes = _read_response_bytes(response)
     raw = raw_bytes.decode("utf-8", errors="replace").strip()
@@ -559,7 +582,7 @@ def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any
         _raise_if_runtime_blocked(mappings)
         assembled = _text_from_stream_events(mappings)
         if assembled:
-            return _final_coach_payload(_parse_json_object(assembled))
+            return metered_payload(_parse_json_object(assembled))
         if len(events) == 1 and isinstance(events[0], dict):
             parsed = events[0]
         else:
@@ -574,7 +597,7 @@ def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any
         _raise_if_runtime_blocked(parsed)
         assembled = _text_from_stream_events(parsed)
         if assembled:
-            return _final_coach_payload(_parse_json_object(assembled))
+            return metered_payload(_parse_json_object(assembled))
         raise _malformed_error()
     if not isinstance(parsed, dict):
         raise _malformed_error()
@@ -582,8 +605,8 @@ def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any
     if "event" in parsed or "contentBlockDelta" in parsed:
         assembled = _text_from_stream_events([parsed])
         if assembled:
-            return _final_coach_payload(_parse_json_object(assembled))
-    return _final_coach_payload(parsed)
+            return metered_payload(_parse_json_object(assembled))
+    return metered_payload(parsed)
 
 
 def _request_specialist(request: CoachRequest) -> str:
@@ -1780,9 +1803,23 @@ class AgentCoreCoachProvider:
             payload["student_id"] = student_id[:128]
         return payload, plan
 
+    usage_metered = True
+
     def _call_runtime(
+        self, payload: dict[str, Any], *, request: CoachRequest, role: str,
+        fresh_stateless_session: bool = False,
+    ) -> dict[str, Any]:
+        """Meter every outer runtime invoke, including failed/recovery calls."""
+        with generation_call("agentcore", self._role_provider_model(role)[1], role, region=self._region) as meter:
+            return self._call_runtime_body(
+                payload, request=request, role=role,
+                fresh_stateless_session=fresh_stateless_session, meter=meter,
+            )
+
+    def _call_runtime_body(
         self,
         payload: dict[str, Any],
+        meter: GenerationUsage,
         *,
         request: CoachRequest,
         role: str,
@@ -1834,12 +1871,13 @@ class AgentCoreCoachProvider:
             perf.set("agentcore_call_count", current + 1)
         if not isinstance(response, Mapping):
             raise _malformed_error()
-        parsed = _payload_from_runtime_response(response)
+        parsed = _payload_from_runtime_response(response, meter)
         _record_runtime_model_provenance(parsed)
         # Recorded here so Deep Review reports cycle/cache telemetry too; the
         # Fast Chat validator repeats it with the same payload, which is a
         # no-op rewrite of identical values.
         _record_runtime_cache_metrics(parsed)
+        copy_usage(meter, dict(response.get("ResponseMetadata") or {}), {"RetryAttempts": "sdk_retries"})
         return parsed
 
     def _role_provider_model(self, role: str) -> tuple[str, str]:

@@ -82,6 +82,16 @@ restart; saved sources remain durable. These bounds exclude incoming HTTP/parser
 widget buffering, chat attachments and disk quotas. Additional UI processes
 multiply limits; this is not shared deployment-wide upload admission.
 
+Ticket 07 / #20 adds provider-call and operation accounting in `backend/usage.py`
+without storing content or raw identity/notebook ids. Failed and retried calls,
+Deep Review and stage checkpoints remain separate from saved-answer counts.
+Nullable meters preserve unknown SDK/model retry usage. The offline
+`scripts/cost_report.py` consumes explicit, evidenced monthly SGD inventory and
+usage exports; gross, credits, cash, post-credit baseline, runway and unknowns
+remain distinct. Generation estimates never double-count inventory charges.
+See [COST_ACCOUNTING.md](COST_ACCOUNTING.md). No schema/data migration or billing
+account access; runtime meter extraction is additive and not deployed here.
+
 The layers above are the behavior contract. Current code ownership:
 
 | Concern | Implementation | Compatibility import |

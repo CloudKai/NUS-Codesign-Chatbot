@@ -172,3 +172,20 @@ def system_prompt_with_optional_cache_point(
         {"cachePoint": {"type": CACHE_POINT_TYPE}},
         {"text": suffix},
     ]
+
+
+def generation_usage_from_agent_result(result: Any) -> dict[str, int]:
+    """Extract accumulated generation tokens without inventing failed-call usage.
+
+    Strands reports accumulated usage across returned cycles. Missing values,
+    retry counts and errors without a result remain unknown to the caller.
+    """
+    usage = getattr(getattr(result, "metrics", None), "accumulated_usage", None)
+    if not isinstance(usage, Mapping):
+        return {}
+    result_usage: dict[str, int] = {}
+    for source, destination in (("inputTokens", "model_input_tokens"), ("outputTokens", "model_output_tokens")):
+        value = usage.get(source)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            result_usage[destination] = value
+    return result_usage

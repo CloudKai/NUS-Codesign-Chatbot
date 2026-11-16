@@ -2,6 +2,54 @@
 
 ## CURRENT STATUS
 
+### Ticket 07 / GitHub #20: cost visibility before and after credits (2026-11-16)
+
+- **Outcome:** Content-free per-call usage events retain failed/retried generation,
+  available model/cache meters, Deep Review and stage-checkpoint costs. Operation
+  events distinguish saved answers, replay and notebook/day session proxies;
+  assessed usefulness remains unknown without operator evidence. Checkpoint success
+  follows durable completion. Class context scopes preserve frozen rate-limit
+  exceptions and the existing 429 contract.
+- **Accounting:** Offline `python -m scripts.cost_report` produces a monthly SGD
+  inventory for hosting, generation, retrieval, ingestion, storage, backups,
+  observability, network and other charges. Gross, applied credits, cash,
+  post-credit baseline, expiry-capped runway and unavailable inputs remain
+  distinct. Estimates never double-count inventory charges. Operator evidence,
+  exact model/region prices, coverage attestations and credit eligibility are
+  explicit; no account values or real prices were invented or fetched.
+- **Validation:** Final canonical mock suite **2268 passed, 1 skipped** (84.77s);
+  focused provider/HTTP/runtime checks **221 passed**, final HTTP **8 passed**,
+  concurrency/load-probe regression **59 passed**. Eight public HTTP accounting cases
+  cover replay, failure/retry, Deep Review success/failure, and nested recovery
+  envelopes. Twenty-five disposable CLI probes verify deterministic fixtures and
+  error handling; synthetic result S$35.20 gross / S$30.20 credits / S$5.00 cash,
+  two months runway, separate S$4.20 token estimate. Unknown fixture keeps totals
+  null. Mock API/Streamlit startup, grounded citations and public-HTTP restart
+  recovery passed using only disposable data. After an external port-8080
+  Jenkins conflict, final Guest-enabled validation used a temporary proxy on
+  loopback 18080; repository startup files were unchanged. Compile and whitespace passed.
+- **Reviews / omissions:** Separate read-only Standards and Spec reviews found
+  and resolved provider typing, checkpoint outcome timing, nested meters and
+  invalid JSON/decimal handling; final re-reviews had no actionable findings.
+  Luna discovery and Astra diagnosis were read-only; Sol sole writer. CLI seam
+  confirmation did not arrive, so its probes are acceptance checks, not committed
+  TDD regression tests. No UI changed; desktop/mobile visual journeys omitted.
+  No configured/installed typechecker or formatter result claimed.
+- **Compatibility / risks:** No schema/data/environment migration. Revert only
+  this ticket commit. New AgentCore token forwarding needs a future authorized
+  runtime publication; old runtimes stay compatible with unknown meters. Logs
+  require authorized billing reconciliation and are not a durable exactly-once
+  invoice. Hidden retries, incomplete exports and restricted credit pools remain
+  explicit limits. No actual cost, capacity, usefulness-study or S$30 claim.
+- **Handoff:** [new_docs/ticket_handoffs/07.md](../new_docs/ticket_handoffs/07.md)
+  records commands, evidence, limitations and preserved staged work. No paid calls,
+  billing-account access, push or deployment.
+- **Next exact action:** Publish #20 ticket-only commit and acceptance evidence
+  before closure, then create a fresh gpt-6.1-sol task for local 08 / GitHub #21,
+  “Budget-safe classroom generation admission.” Recheck native blockers #14/#20
+  are closed with evidence; read handoff 07 and new_docs/EXECUTION.md. Do not
+  implement #21 in this context.
+
 ### Ticket 06 / GitHub #19: bounded uploads and independent cleanup (2026-11-15)
 
 - **Outcome:** Sources uploads atomically admit running, queued and retry-retained

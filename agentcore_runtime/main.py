@@ -230,10 +230,11 @@ def _with_cache_telemetry(
     )
     payload["prompt_cache_enabled"] = bool(enabled)
     try:
-        from prompt_cache import cache_usage_from_agent_result
+        from prompt_cache import cache_usage_from_agent_result, generation_usage_from_agent_result
     except ImportError:  # pragma: no cover - companion package import
-        from agentcore_runtime.prompt_cache import cache_usage_from_agent_result
+        from agentcore_runtime.prompt_cache import cache_usage_from_agent_result, generation_usage_from_agent_result
     payload.update(cache_usage_from_agent_result(result))
+    payload.update(generation_usage_from_agent_result(result))
     stamp_structured_output_telemetry(
         payload,
         cycle_count=event_loop_cycle_count_from_agent_result(result),
@@ -687,7 +688,7 @@ async def _structured_role_invoke(
                 error_payload["first_cycle_tool_choice_decision"] = cycle_state[
                     "decision"
                 ]
-        return error_payload
+        return _with_cache_telemetry(error_payload, result, system_prompt, model_config)
     except Exception as error:
         first_stop = first_cycle_stop[0] if first_cycle_stop else ""
         category = invoke_failure_category(error)
@@ -719,7 +720,7 @@ async def _structured_role_invoke(
                 error_payload["first_cycle_tool_choice_decision"] = cycle_state[
                     "decision"
                 ]
-        return error_payload
+        return _with_cache_telemetry(error_payload, result, system_prompt, model_config)
 
 
 async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:

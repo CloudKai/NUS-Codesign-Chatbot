@@ -24,6 +24,7 @@ from .domain import (
 from .mock_provider import DeterministicCoachProvider
 from .prompts import compose_coach_prompt
 from .settings import settings
+from .usage import GenerationUsage, copy_usage, generation_call
 
 
 class ProviderUnavailableError(RuntimeError):
@@ -107,7 +108,14 @@ class OpenAICoachProvider:
         """Return the actual OpenAI model invoked for this request."""
         return self._model
 
+    usage_metered = True
+
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Meter one optional OpenAI call, preserving unknown SDK retry usage."""
+        with generation_call("openai", self._model, "review_deep" if request.specialist == "review" else "fast_chat", region="global") as meter:
+            return self._assess_metered(request, meter)
+
+    def _assess_metered(self, request: CoachRequest, meter: GenerationUsage) -> ProviderAssessmentResult:
         """Request JSON-schema output from the optional paid OpenAI provider."""
         try:
             prompt = compose_coach_prompt(request).composed_text
@@ -146,6 +154,17 @@ class OpenAICoachProvider:
             if effort:
                 create_kwargs["reasoning"] = {"effort": effort}
             response = self._client.responses.create(**create_kwargs)
+            usage = getattr(response, "usage", None)
+            if usage is not None:
+                values = usage.model_dump() if hasattr(usage, "model_dump") else vars(usage)
+                copy_usage(meter, values, {"input_tokens": "input_tokens", "output_tokens": "output_tokens"})
+                details = values.get("input_tokens_details") or {}
+                cached = details.get("cached_tokens") if isinstance(details, dict) else None
+                if isinstance(cached, int) and not isinstance(cached, bool) and meter.input_tokens is not None and 0 <= cached <= meter.input_tokens:
+                    # OpenAI includes cached reads in input_tokens; billing classes must be disjoint.
+                    meter.input_tokens -= cached
+                    meter.cache_read_tokens = cached
+                    meter.cache_write_tokens = 0
             turn = ProviderCoachOutput.model_validate_json(response.output_text)
         except Exception as error:
             # Provider errors are translated at the application boundary.

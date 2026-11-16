@@ -1,0 +1,88 @@
+{
+  "month": "2026-11",
+  "currency": "SGD",
+  "as_of": "2026-11-30",
+  "lines": [
+    {
+      "category": "hosting",
+      "name": "hosting",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    },
+    {
+      "category": "generation",
+      "name": "generation",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    },
+    {
+      "category": "retrieval",
+      "name": "retrieval",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    },
+    {
+      "category": "ingestion",
+      "name": "ingestion",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    },
+    {
+      "category": "storage",
+      "name": "storage",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    },
+    {
+      "category": "backups",
+      "name": "backups",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    },
+    {
+      "category": "observability",
+      "name": "observability",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    },
+    {
+      "category": "network",
+      "name": "network",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    },
+    {
+      "category": "other",
+      "name": "other",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Unavailable: operator must inventory all services, prices, taxes and credit restrictions."
+    }
+  ]
+}

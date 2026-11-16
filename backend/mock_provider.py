@@ -220,6 +220,8 @@ class DeterministicCoachProvider:
 
     provider_id = "mock"
 
+    usage_provider = "mock"
+
     def __init__(
         self,
         recommendation: StageDecision | None = None,

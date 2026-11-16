@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import uuid4
 
+from .usage import assessed
 from .domain import (
     CoachRequest,
     CoachTurn,
@@ -281,7 +282,7 @@ class CoachWorkflow:
 
     def _run_sequential(self, request: CoachRequest) -> CoachTurn:
         """Portable non-graph path used when LangGraph is unavailable."""
-        provider_result = _provider_result(self.provider.assess(request))
+        provider_result = _provider_result(assessed(self.provider, request))
         response_text, assessment = provider_result
         assessment = _lecture_assessment(request, assessment)
         assessment = _normalize_terminal_assessment(request, assessment)
@@ -434,7 +435,7 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
 
     def assess(state: dict) -> dict:
         request = CoachRequest.model_validate(state["request"])
-        provider_result = _provider_result(workflow.provider.assess(request))
+        provider_result = _provider_result(assessed(workflow.provider, request))
         response_text, assessment = provider_result
         assessment = _lecture_assessment(request, assessment)
         assessment = _normalize_terminal_assessment(request, assessment)

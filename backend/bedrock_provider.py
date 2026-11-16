@@ -20,6 +20,7 @@ import re
 from collections.abc import Iterator, Mapping
 from typing import Any
 
+from .usage import GenerationUsage, copy_usage, generation_call
 from .domain import (
     CoachImageInput,
     CoachRequest,
@@ -517,7 +518,14 @@ class BedrockCoachProvider:
             },
         }
 
+    usage_metered = True
+
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Meter a Converse attempt, including failures and available SDK retries."""
+        with generation_call("bedrock", self._model_id, "review_deep" if request.specialist == "review" else "fast_chat", region=self._region) as meter:
+            return self._assess_metered(request, meter)
+
+    def _assess_metered(self, request: CoachRequest, meter: GenerationUsage) -> ProviderAssessmentResult:
         """Request one structured coaching turn from Bedrock Converse.
 
         Args:
@@ -534,6 +542,11 @@ class BedrockCoachProvider:
             response = self._runtime_client().converse(**kwargs)
             if not isinstance(response, Mapping):
                 raise ProviderUnavailableError(_MALFORMED_FAILURE)
+            copy_usage(meter, dict(response.get("usage") or {}), {
+                "inputTokens": "input_tokens", "outputTokens": "output_tokens",
+                "cacheReadInputTokens": "cache_read_tokens", "cacheWriteInputTokens": "cache_write_tokens",
+            })
+            copy_usage(meter, dict(response.get("ResponseMetadata") or {}), {"RetryAttempts": "sdk_retries"})
             payload = _payload_from_converse(response)
             return _validated_result(payload, request)
         except ProviderUnavailableError:
