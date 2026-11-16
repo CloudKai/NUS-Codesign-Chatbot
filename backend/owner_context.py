@@ -21,6 +21,7 @@ from backend.application import CoachApplicationService
 from backend.auth_oidc import CognitoIdentity, CognitoOIDCClient, CognitoOIDCError
 from backend.auth_profiles import store_identifier_for_sub, sync_authenticated_user
 from backend.bedrock_retrieve import configured_context_retriever
+from backend.generation_admission import GenerationAdmission
 from backend.learning_service import LearningProgressService
 from backend.persistence.factory import create_student_store
 from backend.providers import configured_coach_provider
@@ -58,7 +59,9 @@ class OwnerResolver:
         oidc: CognitoOIDCClient,
         course_sync: CourseMaterialSyncCoordinator,
         auto_advance_stages: bool,
+        generation_admission: GenerationAdmission | None = None,
     ) -> None:
+        self._generation_admission = generation_admission
         self._default_store = default_store
         self._oidc = oidc
         self._course_sync = course_sync
@@ -204,6 +207,7 @@ class OwnerResolver:
             auto_advance_stages=self._auto_advance_stages
             and not settings.student_stage_selection,
             retriever=configured_context_retriever(),
+            generation_admission=self._generation_admission,
         )
 
         def _enqueue_stage_review(thread_id: str, stage_id: str) -> None:

@@ -69,7 +69,17 @@ def submit_deep_review_job(
             with _LOCK:
                 _SUBMITTED.discard(cleaned_id)
 
-    get_deep_review_executor().submit(_run)
+    from backend.coaching.background_admission import background_review_admission
+
+    def reject(category: str) -> None:
+        """Persist admission rejection and release the local duplicate guard."""
+        try:
+            service.reject_background_review(thread_id, cleaned_id, category)
+        finally:
+            with _LOCK:
+                _SUBMITTED.discard(cleaned_id)
+
+    background_review_admission().submit(get_deep_review_executor(), _run, reject)
 
 
 def reset_deep_review_jobs_for_tests() -> None:

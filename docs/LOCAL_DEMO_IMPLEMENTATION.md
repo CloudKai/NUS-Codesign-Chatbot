@@ -92,6 +92,22 @@ remain distinct. Generation estimates never double-count inventory charges.
 See [COST_ACCOUNTING.md](COST_ACCOUNTING.md). No schema/data migration or billing
 account access; runtime meter extraction is additive and not deployed here.
 
+Ticket 08 / #21 adds optional local generation admission through
+`GenerationAdmission` and a dedicated operator-selected SQLite ledger. With
+`GENERATION_ADMISSION_POLICY` configured, every visible provider call reserves
+conservative allowance before invocation, shares finite running/queue ceilings,
+and settles known complete usage or retains the full unknown charge. Failed,
+recovery, RAG fallback, Deep Review and checkpoint calls all use this seam.
+Expired invokes retain charge and capacity until settlement or backed-up operator
+recovery after all workers stop. Background review submissions also have finite
+process-local retained-work and wait ceilings. Streams distinguish actual queued
+work from thinking; limit errors preserve notebook/source/export access and explain
+the UTC monthly reset. Missing policy preserves local behavior without enforcement;
+multiple hosts/DSQL require a shared admission adapter before release. See
+[GENERATION_ADMISSION.md](GENERATION_ADMISSION.md) for configuration, headroom,
+reconciliation, recovery, and unsettled classroom wait/cost gates. No student
+schema/data migration or AWS/paid operation was performed.
+
 The layers above are the behavior contract. Current code ownership:
 
 | Concern | Implementation | Compatibility import |

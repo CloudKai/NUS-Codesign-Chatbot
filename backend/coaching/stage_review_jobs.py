@@ -122,7 +122,17 @@ def submit_stage_review_job(
                     "stage_review_job_recovery_after_exit_failed thread_id=%s",
                     cleaned_thread,
                 )
-    get_stage_review_executor().submit(_run)
+    from backend.coaching.background_admission import background_review_admission
+
+    def reject(category: str) -> None:
+        """Persist admission rejection and release the local duplicate guard."""
+        try:
+            service.reject_background_review(cleaned_thread, cleaned_job_id, category, stage_id=cleaned_stage)
+        finally:
+            with _LOCK:
+                _SUBMITTED.discard(key)
+
+    background_review_admission().submit(get_stage_review_executor(), _run, reject)
 
 
 def reset_stage_review_jobs_for_tests() -> None:

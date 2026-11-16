@@ -2372,11 +2372,13 @@ class StudentStore:
         error_code: str = "review_failed",
         job_id: str | None = None,
         lease_token: str | None = None,
+        queued_only: bool = False,
     ) -> bool:
         """Mark one stage review failed without rolling back completion.
 
         The job and lease tokens fence failure writes just like successful
-        completion writes. Revisit-dirty work remains durable after failure so
+        completion writes. ``queued_only`` permits only a matching unclaimed
+        queued job to be rejected before executor dispatch. Revisit-dirty work remains durable after failure so
         a later safe read or stage exit can retry it.
         """
         from backend.specialists.review_orchestration import (
@@ -2412,7 +2414,9 @@ class StudentStore:
                 status = str(prior_job.get("status") or "").strip().lower()
                 if status in {STAGE_REVIEW_COMPLETE, STAGE_REVIEW_FAILED}:
                     return False
-                if requested_job_id and status != STAGE_REVIEW_RUNNING:
+                if queued_only and (not requested_job_id or status != "queued" or requested_lease):
+                    return False
+                if requested_job_id and status != STAGE_REVIEW_RUNNING and not queued_only:
                     return False
                 if requested_lease and status != STAGE_REVIEW_RUNNING:
                     return False

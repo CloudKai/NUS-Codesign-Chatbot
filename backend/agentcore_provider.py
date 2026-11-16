@@ -70,6 +70,7 @@ from .domain import (
 from .prompts import compose_coach_prompt
 from .providers import ProviderUnavailableError
 from .settings import FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN, settings
+from .rate_limit import RateLimitExceeded
 from .usage import GenerationUsage, copy_usage, generation_call, safe_identifier
 from .turn_perf import (
     begin_coach_turn_perf,
@@ -2009,6 +2010,8 @@ class AgentCoreCoachProvider:
                 extra=" router_fallback=true router_specialist=coaching",
             )
             return SPECIALIST_COACHING
+        except RateLimitExceeded:
+            raise
         except Exception as error:
             translated = _translate_agentcore_error(error)
             if translated.category == "safety_blocked":
@@ -2146,6 +2149,8 @@ class AgentCoreCoachProvider:
             record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
             record_failure(error.category)
             raise
+        except RateLimitExceeded:
+            raise
         except Exception as error:
             if recovery_attempted:
                 record_field("agentcore_structured_output_retry_succeeded", False)
@@ -2216,6 +2221,8 @@ class AgentCoreCoachProvider:
                 max(0, int((time.monotonic() - started) * 1000)),
             )
             record_failure(error.category)
+            raise
+        except RateLimitExceeded:
             raise
         except Exception as error:
             translated = _translate_agentcore_error(error)
@@ -2314,6 +2321,8 @@ class AgentCoreCoachProvider:
             record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
             record_failure(error.category)
             raise
+        except RateLimitExceeded:
+            raise
         except Exception as error:
             translated = _translate_agentcore_error(error)
             self._log_role_precise(
@@ -2385,6 +2394,8 @@ class AgentCoreCoachProvider:
                 success=False,
                 failure_category=error.category,
             )
+            raise
+        except RateLimitExceeded:
             raise
         except Exception as error:
             translated = _translate_agentcore_error(error)

@@ -2,6 +2,55 @@
 
 ## CURRENT STATUS
 
+### Ticket 08 / GitHub #21: budget-safe generation admission (2026-11-16)
+
+- **Outcome:** Optional `GENERATION_ADMISSION_POLICY` enables a durable dedicated
+  SQLite allowance shared by local owners/workers. Every visible provider call
+  reserves conservative cost before invocation, including recovery, RAG fallback,
+  Deep Review and checkpoints. Complete evidenced meters may refund unused
+  reservation; failures/unknown usage retain the ceiling. Headroom stays reserved.
+  Overruns block new and already queued calls. Expired invokes retain both charge
+  and capacity until settlement or explicitly backed-up stopped-worker recovery.
+- **Waiting / student access:** Finite running/queued admission emits actual
+  queued/thinking states and distinct budget/capacity/wait/unavailable errors.
+  Background reviews share bounded retained-work capacity and independent queue
+  expiry; rejected checkpoints persist a fenced queued-to-failed result. Student
+  copy explains the UTC monthly reset and preserves notebook/source/export access.
+  LangGraph-compatible rate-limit exceptions preserve HTTP 429 propagation.
+- **Validation:** Canonical mock suite **2277 passed, 1 skipped** (77.07s), excluding
+  preserved unmanaged ` 2.py` copies only. Final public HTTP admission file **10
+  passed**; final UI/HTTP checks **60 passed** before the final extra recovery
+  case. Focused integration **149 passed**; reviewed architecture/progress/HTTP
+  **23 passed**. Compile and whitespace passed. Disposable recovery-command probe
+  verifies explicit shutdown confirmation, new backup, retained invoked charges
+  and no backup overwrite. Mock API/Streamlit/Caddy startup and restart preserve
+  exact saved transcript/recovery answer, source bytes and exhausted allowance.
+  Full suite covers retrieval/citations, streaming, graph state, confirmed stages
+  and existing-data compatibility. No static-typing/formatter result claimed.
+- **Browser / reviews:** Desktop 1440x960 and mobile 390x844 inspected waiting-limit,
+  funded-answer and budget-limit journeys. Desktop queued state and desktop/mobile exhausted
+  Library checked. Saved work/source/export access also verified through public
+  HTTP. Active-journey console snapshots had no errors; deliberate shutdown/restart
+  produced connection errors. A fresh connected final session had 0 errors and
+  23 existing feature-policy/iframe warnings. Separate read-only Standards and Spec reviews found and resolved queued
+  overrun bypass, queued-checkpoint fencing and premature thinking statuses; final
+  re-reviews found no concrete issues. Luna discovery was read-only; Sol sole writer.
+- **Compatibility / risks:** No student schema/data migration. Explicit sidecar
+  policy/ledger only; missing policy keeps legacy local behavior without budget
+  enforcement. All local workers must share one persistent file/policy. Multi-host/
+  DSQL requires a shared admission adapter before release; background submission
+  limits are process-local. Classroom wait target, real ceiling/pricing, hidden
+  retry exposure, external cost inventory/headroom and actual capacity remain
+  release gates. No paid calls, push, deployment or S$30/capacity claim. Preserve
+  the ledger across rollback; stop funded generation before reverting this ticket.
+- **Handoff:** [new_docs/ticket_handoffs/08.md](../new_docs/ticket_handoffs/08.md)
+  records evidence, configuration, recovery, omissions and staged-work preservation.
+- **Next exact action:** Publish #21 local ticket-only commit and evidence before
+  closure, then start a fresh `gpt-6.1-sol` task for local09 / GitHub #22,
+  “Learning funnel and formative usability baseline.” Live #22 is open; native
+  blockers #15/#17 are closed. Recheck live states in that fresh task; read
+  handoff08 and `new_docs/EXECUTION.md`. Do not implement #22 in this context.
+
 ### Ticket 07 / GitHub #20: cost visibility before and after credits (2026-11-16)
 
 - **Outcome:** Content-free per-call usage events retain failed/retried generation,

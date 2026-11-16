@@ -55,6 +55,7 @@ from backend.providers import (
 )
 from backend.coaching.streaming import coach_events, stream_error
 from backend.coaching.stream_events import GraphEvent, GraphSummary
+from backend.generation_admission import GenerationAdmission
 from backend.rate_limit import RateLimitExceeded
 from backend.guest_admission import GuestAdmissionLimiter
 from backend.settings import settings, validate_production_configuration
@@ -224,6 +225,7 @@ def create_app(
     workspace: WorkspaceService | None = None,
     oidc_client: CognitoOIDCClient | None = None,
     guest_admission: GuestAdmissionLimiter | None = None,
+    generation_admission: GenerationAdmission | None = None,
 ) -> FastAPI:
     """Create a local API with injectable progression and Guest admission.
 
@@ -274,6 +276,7 @@ def create_app(
         oidc=oidc,
         course_sync=course_sync,
         auto_advance_stages=bool(advance),
+        generation_admission=generation_admission,
     )
     if workspace is not None:
         # Replace the cached default workspace with the injected instance so
@@ -411,7 +414,8 @@ def create_app(
         """Build a 429 response with Retry-After for coach rate limits."""
         return HTTPException(
             status_code=429,
-            detail=error.detail,
+            detail=({"message": error.detail, "category": error.category}
+                    if error.category.startswith("generation_") else error.detail),
             headers={"Retry-After": str(max(1, int(error.retry_after_seconds)))},
         )
 

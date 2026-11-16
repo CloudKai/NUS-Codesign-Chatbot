@@ -39,6 +39,7 @@ from backend.student_journey import (
 )
 from backend.coaching.workflow_navigation import manual_stage_selection_target
 
+from ui.generation_feedback import generation_limit_message
 from ui.coach_welcome import (
     COACH_WELCOME_KIND,
     COACH_WELCOME_MARKDOWN,
@@ -312,6 +313,9 @@ def student_coach_error_message(category: str = "", *, status: Any = None) -> st
         status_code = int(status) if status is not None else None
     except (TypeError, ValueError):
         status_code = None
+    limit_message = generation_limit_message(normalized)
+    if limit_message:
+        return limit_message
     if normalized == "safety_blocked":
         return (
             "This turn was blocked by a safety check. Rephrase your message "
@@ -386,19 +390,20 @@ _INFLIGHT_ERROR_CAPTION = (
 )
 
 
-def _render_inflight_error(title: str) -> None:
+def _render_inflight_error(title: str, *, recovery_hint: bool = True) -> None:
     """Render a compact turn-failure row without a full-width alert card.
 
     Args:
         title: Student-safe message from ``student_coach_error_message``.
+        recovery_hint: Whether a persisted reply may need exact-key recovery.
     """
     escaped_title = html.escape(title)
     escaped_caption = html.escape(_INFLIGHT_ERROR_CAPTION)
+    caption = f'<p class="cd-inflight-error-caption">{escaped_caption}</p>' if recovery_hint else ""
     st.markdown(
         '<div class="cd-inflight-error" role="alert">'
         f'<p class="cd-inflight-error-title">{escaped_title}</p>'
-        f'<p class="cd-inflight-error-caption">{escaped_caption}</p>'
-        "</div>",
+        f'{caption}</div>',
         unsafe_allow_html=True,
     )
 
@@ -1461,7 +1466,7 @@ def handle_prompt(
                     for item in attachment_records[idempotency_key]
                     if isinstance(item, dict) and str(item.get("id") or "")
                 ]
-                thinking.update(label="Coach is thinking…", state="running")
+                thinking.update(label="Preparing your request…", state="running")
             else:
                 spans["source_upload_ms"] = 0.0
             # Preserve this key only while the same submitted text is unresolved.
@@ -1507,7 +1512,7 @@ def handle_prompt(
             thinking_started = time.perf_counter()
             if thinking is None:
                 thinking = st.status(
-                    "Coach is thinking…",
+                    "Preparing your request…",
                     expanded=False,
                     type="compact",
                 )
@@ -1573,7 +1578,9 @@ def handle_prompt(
                     if kind == "status":
                         phase = str(event.get("phase") or "").strip()
                         label = str(event.get("label") or "").strip()
-                        if phase == "retrieving":
+                        if phase == "queued":
+                            thinking.update(label=label or "Waiting for a generation slot…")
+                        elif phase == "retrieving":
                             thinking.update(label=label or "Searching course materials…")
                         elif phase == "thinking":
                             thinking.update(label=label or "Coach is thinking…")
@@ -1644,7 +1651,8 @@ def handle_prompt(
                 except Exception:
                     pass
                 _render_inflight_error(
-                    student_coach_error_message(error.category, status=error.status)
+                    student_coach_error_message(error.category, status=error.status),
+                    recovery_hint=not error.category.startswith("generation_"),
                 )
                 sync_chat_scroll(mode="settle")
                 return
@@ -1822,7 +1830,7 @@ def _submit_pending_edit(
         baseline_message_count=baseline_total,
     )
     thinking = st.status(
-        "Coach is thinking…",
+        "Preparing your request…",
         expanded=False,
         type="compact",
     )

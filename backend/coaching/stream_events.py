@@ -20,7 +20,7 @@ class StatusEvent(BaseModel):
     """Report an actual execution phase without student content."""
 
     event: Literal["status"] = "status"
-    phase: Literal["retrieving", "thinking", "saving"]
+    phase: Literal["queued", "retrieving", "thinking", "saving"]
     label: str
 
 

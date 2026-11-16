@@ -24,6 +24,7 @@ from backend.domain import CoachRequest, EducationalAssessment, ProviderAssessme
 
 if TYPE_CHECKING:
     from backend.workflow import AssessmentProvider
+    from backend.generation_admission import GenerationAdmission
 
 AssessmentResult = ProviderAssessmentResult | tuple[str, EducationalAssessment]
 
@@ -66,6 +67,7 @@ class UsageOperation:
 
     kind: Literal["chat", "deep_review", "stage_checkpoint"]
     session_key: str
+    admission: GenerationAdmission | None = None
     operation_id: str = field(default_factory=lambda: str(uuid4()))
     attempts: int = 0
     success: bool = False
@@ -109,6 +111,7 @@ def _emit(payload: dict[str, Any]) -> None:
 
 def usage_operation(
     kind: Literal["chat", "deep_review", "stage_checkpoint"], thread_id: str,
+    *, admission: GenerationAdmission | None = None,
 ) -> UsageOperation:
     """Count one operation and restore its caller context, including on failure.
 
@@ -117,7 +120,15 @@ def usage_operation(
     """
     day = datetime.now(timezone.utc).date().isoformat()
     session = hashlib.sha256(f"{day}:{thread_id}".encode()).hexdigest()[:32]
-    return UsageOperation(kind=kind, session_key=session)
+    return UsageOperation(kind=kind, session_key=session, admission=admission)
+
+
+def usage_correlation() -> dict[str, str]:
+    """Return content-free operation and hashed notebook/day log correlation."""
+    operation = _current.get()
+    if operation is None:
+        return {"operation_id": "operator", "thread_key": "operator"}
+    return {"operation_id": operation.operation_id, "thread_key": operation.session_key}
 
 
 def mark_replayed() -> None:
@@ -157,10 +168,13 @@ class _GenerationScope:
 
     meter: GenerationUsage
     operation: UsageOperation | None
+    reservation: str | None = None
 
     def __enter__(self) -> GenerationUsage:
         """Count the application attempt and expose its nullable numeric meters."""
         if self.operation is not None:
+            if self.operation.admission is not None:
+                self.reservation = self.operation.admission.acquire()
             self.operation.attempts += 1
         return self.meter
 
@@ -171,6 +185,8 @@ class _GenerationScope:
         """Record the outcome without suppressing or rewriting an exception."""
         # Generator context managers write __traceback__, which frozen errors forbid.
         self.meter.success = exc_type is None
+        if self.reservation and self.operation and self.operation.admission:
+            self.operation.admission.settle(self.reservation, self.meter)
         _emit(self.meter.model_dump(mode="json"))
 
 

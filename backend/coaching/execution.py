@@ -88,6 +88,7 @@ from backend.settings import (
     FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN,
     settings as runtime_settings,
 )
+from backend.rate_limit import RateLimitExceeded
 from backend.providers import ProviderUnavailableError
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
@@ -142,6 +143,7 @@ from backend.student_store import (
     StudentStore,
 )
 from backend.title_service import NotebookTitleService
+from backend.generation_admission import GenerationAdmission, configured_generation_admission
 from backend.usage import assessed, mark_replayed, usage_operation
 from backend.turn_perf import (
     begin_coach_turn_perf,
@@ -587,6 +589,7 @@ class CoachApplicationService:
         *,
         auto_advance_stages: bool = False,
         retriever: ContextRetriever | None = None,
+        generation_admission: GenerationAdmission | None = None,
     ) -> None:
         self._store = store
         self._notebooks = notebooks
@@ -594,6 +597,7 @@ class CoachApplicationService:
         self._progress = progress
         self._auto_advance_stages = auto_advance_stages
         self._retriever = retriever or LocalChunkRetriever()
+        self._generation_admission = generation_admission or configured_generation_admission()
 
     def _rate_limit_user_key(self) -> str:
         """Return the authenticated store owner key for coach rate limiting.
@@ -814,7 +818,7 @@ class CoachApplicationService:
         *reply* receives the validated, final response text before persistence;
         callers must discard that preview if the turn fails to save.
         """
-        with usage_operation("chat", request.thread_id) as usage, coach_progress(progress, reply):
+        with usage_operation("chat", request.thread_id, admission=self._generation_admission) as usage, coach_progress(progress, reply):
             turn = self._submit_body(
                 request,
                 execution_lease_held=execution_lease_held,
@@ -1049,11 +1053,23 @@ class CoachApplicationService:
         )
         if created:
             submit_deep_review_job(self, thread_id, str(job_payload["review_id"]))
+        job_payload = parse_deep_review_job((self._notebooks.get_thread(thread_id) or {}).get("metadata", {}).get(DEEP_REVIEW_JOB_KEY)) or job_payload
         return self._deep_review_job_model(
             job_payload,
             metadata={**metadata, DEEP_REVIEW_JOB_KEY: job_payload},
             conversation_revision=reviewed_revision,
         )
+
+    def reject_background_review(
+        self, thread_id: str, job_id: str, category: str, *, stage_id: str | None = None,
+    ) -> None:
+        """Persist a rejected/expired background submission without stage rollback."""
+        if stage_id is None:
+            self._store.fail_deep_review_job(thread_id, review_id=job_id, error_code=category)
+        else:
+            self._store.fail_stage_review_job(
+                thread_id, stage_id=stage_id, job_id=job_id, error_code=category, queued_only=True,
+            )
 
     def _enqueue_stage_reviews_after_completion(
         self,
@@ -1286,7 +1302,7 @@ class CoachApplicationService:
                 conversation_revision=conversation_revision,
             )
             provider = self._workflow.provider
-            with usage_operation("stage_checkpoint", thread_id) as usage:
+            with usage_operation("stage_checkpoint", thread_id, admission=self._generation_admission) as usage:
                 result = assessed(provider, request, checkpoint=hasattr(provider, "assess_stage_checkpoint"))
                 assessment = result.assessment
                 artifacts: dict[str, str] = {}
@@ -1339,8 +1355,8 @@ class CoachApplicationService:
                         stage_id=cleaned_stage,
                     )
                     self.resubmit_queued_stage_review_jobs(thread_id)
-        except Exception:
-            logger.exception(
+        except Exception as error:
+            logger.warning(
                 "stage_review_execute_failed thread_id=%s stage_id=%s",
                 thread_id,
                 cleaned_stage,
@@ -1349,7 +1365,7 @@ class CoachApplicationService:
                 failed = self._store.fail_stage_review_job(
                     thread_id,
                     stage_id=cleaned_stage,
-                    error_code="review_failed",
+                    error_code=error.category if isinstance(error, RateLimitExceeded) else "review_failed",
                     job_id=cleaned_job_id or None,
                     lease_token=lease_token if claimed else None,
                 )
@@ -1391,6 +1407,7 @@ class CoachApplicationService:
                 "stage_review_recovery_failed thread_id=%s", thread_id
             )
             thread = self._notebooks.get_thread(thread_id) or thread
+        thread = self._notebooks.get_thread(thread_id) or thread
         metadata = dict(thread.get("metadata") or {})
         return public_journey_stage_reviews(
             metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
@@ -1473,7 +1490,7 @@ class CoachApplicationService:
             return
         if not self._store.mark_deep_review_job_running(thread_id, cleaned_id):
             return
-        with usage_operation("deep_review", thread_id) as usage:
+        with usage_operation("deep_review", thread_id, admission=self._generation_admission) as usage:
             try:
                 with get_deep_review_limiter().slot():
                     thread = self._notebooks.get_thread(thread_id)
@@ -1573,13 +1590,13 @@ class CoachApplicationService:
                     saved_thread = self._notebooks.get_thread(thread_id) or {}
                     saved_job = parse_deep_review_job((saved_thread.get("metadata") or {}).get(DEEP_REVIEW_JOB_KEY))
                     usage.success = bool(saved_job and saved_job.get("review_id") == cleaned_id and saved_job.get("status") == DEEP_REVIEW_JOB_COMPLETED)
-            except Exception:
+            except Exception as error:
                 logger.warning("deep_review_execute_failed operation_id=%s", usage.operation_id)
                 try:
                     self._store.fail_deep_review_job(
                         thread_id,
                         review_id=cleaned_id,
-                        error_code=DEEP_REVIEW_ERROR_FAILED,
+                        error_code=error.category if isinstance(error, RateLimitExceeded) else DEEP_REVIEW_ERROR_FAILED,
                     )
                 except Exception:
                     logger.warning(
@@ -1856,7 +1873,8 @@ class CoachApplicationService:
             record_field("agent_ms", 0)
             turn = qa_evidence_gap_turn(prepared_request)
         else:
-            emit_coach_progress(PROGRESS_THINKING)
+            if self._generation_admission is None:
+                emit_coach_progress(PROGRESS_THINKING)
             with record_span("agent_ms"):
                 turn = self._workflow.run(prepared_request)
             prepared_request, turn = self._maybe_rag_fallback(
@@ -2527,7 +2545,8 @@ class CoachApplicationService:
                 "retrieval_required": True,
             }
         )
-        emit_coach_progress(PROGRESS_THINKING)
+        if self._generation_admission is None:
+            emit_coach_progress(PROGRESS_THINKING)
         agent_started = time.perf_counter()
         turn = self._workflow.run(retried)
         perf = current_perf()

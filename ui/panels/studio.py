@@ -46,6 +46,7 @@ from backend.student_journey import (
     stage_guidance_questions,
 )
 
+from ui.generation_feedback import generation_limit_message
 from ui.components import (
     facione_scores_table_html,
     progress_bar_html,
@@ -209,7 +210,7 @@ def _render_deep_review_stable() -> None:
             use_container_width=True,
         )
         if job and str(job.get("status") or "") == DEEP_REVIEW_JOB_FAILED:
-            st.error(_DEEP_REVIEW_ERROR)
+            st.error(generation_limit_message(str(job.get("error_code") or "")) or _DEEP_REVIEW_ERROR)
         if clicked and not view.disabled:
             try:
                 start_deep_review(thread_id)
@@ -246,7 +247,9 @@ def _render_deep_review_polling() -> None:
             use_container_width=True,
         )
         if view.status_label:
-            st.status(view.status_label, expanded=False, type="compact")
+            label = ("Waiting for a review worker (up to 30 seconds)…" if status == "queued"
+                     else "Preparing review; generation may be waiting for a slot…")
+            st.status(label, expanded=False, type="compact")
 
 
 def _render_deep_analysis_pdf_download(thread_id: str) -> None:
@@ -916,7 +919,8 @@ def render_learning_review(journey: dict[str, Any]) -> None:
         if status in {STAGE_REVIEW_QUEUED, STAGE_REVIEW_RUNNING}:
             pending_labels.append(f"{stage.label}: reviewing…")
         elif status == STAGE_REVIEW_FAILED:
-            pending_labels.append(f"{stage.label}: stage review unavailable.")
+            detail = generation_limit_message(str(job.get("error_code") or ""))
+            pending_labels.append(f"{stage.label}: {detail or 'stage review unavailable.'}")
 
     if pending_labels:
         for label in pending_labels:

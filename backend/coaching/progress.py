@@ -14,6 +14,7 @@ PROGRESS_THINKING = "thinking"
 PROGRESS_SAVING = "saving"
 
 PROGRESS_LABELS = {
+    "queued": "Waiting for a generation slot (up to 30 seconds)…",
     PROGRESS_RETRIEVING: "Searching course materials…",
     PROGRESS_THINKING: "Coach is thinking…",
     PROGRESS_SAVING: "Saving response…",

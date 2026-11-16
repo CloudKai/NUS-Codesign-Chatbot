@@ -60,7 +60,7 @@ class CoachExecutionLease:
     token: str
 
 
-@dataclass(frozen=True)
+@dataclass
 class RateLimitExceeded(Exception):
     """Raised when a caller exceeds an active, burst, or global coach limit.
 
