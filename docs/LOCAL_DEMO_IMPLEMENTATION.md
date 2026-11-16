@@ -134,20 +134,31 @@ transitions.
 
 ### Presentation
 
-Ticket 10 / #23 adds a bounded static React/TypeScript notebook reader at
-`/pilot/`, built from `frontend/` and served by `backend/http/notebook_reader.py`.
-Streamlit remains at `/`, including all authoring and lecturer workflows. Three
-typed read-only `/api/v1/reader` routes require a verified registered or enabled
-Guest credential even when internal local-demo routes permit anonymous access.
-They reuse owner-scoped workspace services and revision-bound message pagination,
-project only notebook titles/ids and saved message ids/roles/text, and exclude
-research/storage/assessment metadata. The exact method/path Caddy allow-list
-does not expose internal CRUD, generation, source or professor APIs. Private
-responses use `no-store`; a future CDN release must preserve cookies and disable
-private caching. Browser owner checks, request generations and aborts fence late
-responses. Private state is ephemeral and cleared on hiding/leaving; focus and
-a 15-second visible-page session probe detect identity changes. See
-[`frontend/README.md`](../frontend/README.md) for build, bounded scope and rollback.
+Tickets 10–11 / #23–24 add a bounded static React/TypeScript pilot at `/pilot/`,
+built from `frontend/` and served by `backend/http/notebook_reader.py`. Streamlit
+remains at `/` for project, source-management and lecturer workflows. Six typed
+browser routes cover session, notebook list, saved message page/citations, lecture
+stream, exact-key recovery and cited-original download. Verified registered or
+enabled Guest credentials are mandatory even in anonymous-capable internal mode;
+staff, cross-origin and foreign-notebook requests are rejected. POST requires
+Origin. Caddy exposes exact methods/paths only, with private no-store responses.
+The lecture adapter constructs the existing CoachRequest from saved stage/detail
+and fixed lecture intent, delegates to the same coach stream, and recovers through
+the existing completed-turn service. It never invents a second lifecycle/backend.
+Preview is ephemeral; malformed/EOF/canceled streams only trigger read reconciliation.
+Explicit retry retains the original identity. Citation download checks an exact
+active owner/notebook/message and its saved source mapping before serving attachment
+bytes; pasted notes use authorized extracted text. No source mutation is exposed.
+`StudentStore.get_active_message` is an indexed, revision-guarded read, with no
+schema migration. Older messages lacking citation metadata remain plain saved text.
+
+Browser replies/list/search stay in memory and clear on hiding/leaving. Unsent text
+and pending identity/question are tab-sessionStorage only, scoped by verified owner
+and notebook; replies/sources/tokens are never stored there. Owner changes discard
+other owners' drafts. Aborts, request generations and owner verification fence late
+responses; focus and 15-second visible probes detect changed sessions. These are
+bounded checks, not instantaneous cross-tab notification. See
+[`frontend/README.md`](../frontend/README.md) for build, recovery/privacy and rollback.
 The external formative study remains pending; this pilot is engineering scope.
 
 Streamlit remains the frontend entrypoint. It only renders state and calls a

@@ -55,14 +55,14 @@ export function useReader() {
     } catch (error) { fail(error, epoch); }
   }
 
-  async function open(notebookId: string, older = false) {
+  async function open(notebookId: string, older = false, refresh = false) {
     const snapshot = current.current;
     if (!snapshot.session || snapshot.busy) return;
     const epoch = ++generation.current;
     controller.current.abort();
     controller.current = new AbortController();
     const signal = controller.current.signal;
-    setState(value => ({ ...value, page: older ? value.page : null, busy: true, error: '' }));
+    setState(value => ({ ...value, page: older || refresh ? value.page : null, busy: true, error: '' }));
     try {
       const cursor = older ? snapshot.page?.next_cursor : null;
       const query = new URLSearchParams({ limit: '20' });

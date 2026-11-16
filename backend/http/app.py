@@ -313,7 +313,6 @@ def create_app(
         """FastAPI dependency: Cognito-verified owner or local-student default."""
         return resolver.resolve(request)
 
-    register_notebook_reader(app, current_owner)
 
     def current_professor(
         request: Request,
@@ -2401,6 +2400,7 @@ def create_app(
         )
         return resolved
 
+    register_notebook_reader(app, current_owner, coach_turn_stream)
     return app
 
 

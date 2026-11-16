@@ -73,3 +73,18 @@ nav { display: grid; gap: 4px; }
   .primary { color: #101112; }
   .primary:hover { background: #8ae7da; }
 }
+textarea { font: inherit; width: 100%; resize: vertical; min-height: 100px; max-height: 40dvh; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--surface); color: inherit; caret-color: var(--accent); }
+textarea::placeholder { color: var(--muted); }
+.composer { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 24px; display: grid; gap: 8px; }
+.composer-actions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.composer-actions span { font-size: 13px; }
+.turn-status { margin: 16px 0; }
+.recovery-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.recovery-actions p { width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; }
+.citations { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.citations button { font-size: 14px; text-align: left; overflow-wrap: anywhere; }
+.evidence { position: fixed; right: 0; top: 0; width: min(480px, 100%); height: 100dvh; overflow-y: auto; overscroll-behavior: contain; z-index: 4; background: var(--surface); border-left: 1px solid var(--line); padding: 24px; }
+.evidence-heading { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
+.evidence h3 { font-size: 20px; overflow-wrap: anywhere; max-width: 100%; margin: 0; }
+.evidence blockquote { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 24px; }
+.preview { color: var(--muted); }

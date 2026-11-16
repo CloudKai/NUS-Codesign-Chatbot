@@ -2,6 +2,72 @@
 
 ## CURRENT STATUS
 
+### Ticket 11 / GitHub #24: React lecture conversation and interrupted-turn recovery (2026-11-17)
+
+- **Outcome:** `/pilot/` asks lecture questions in existing notebooks, distinguishes
+  unsaved preview from saved completion, inspects saved citation excerpts and
+  downloads the mapped original. Streamlit remains available for project stages,
+  sources, notebook creation and lecturer work. Existing workflow/retrieval/storage
+  remain authoritative; no schema or data migration.
+- **Boundary:** Three additive strict browser routes delegate to the shared coach
+  stream and exact-key saved-turn service, plus active-citation download. Server
+  derives stage/detail and fixes lecture intent; clients cannot choose educational
+  authority. Verified registered/Guest credentials, same-origin checks, mandatory
+  Origin on POST, student role/ownership and no-store cover every reader route.
+  Caddy exposes only exact methods/paths. Citation authorization uses an indexed,
+  owner/notebook/revision-guarded message read, not a history scan. Pasted-text
+  notes now download their stored text; existing original-file bytes are retained.
+- **Recovery/privacy:** Split UTF-8/CRLF NDJSON, malformed events, wrong dispatch
+  identity, EOF, errors and reader cancellation reconcile only by exact GET; no
+  automatic POST replay. Preview clears on every uncertain/failed termination.
+  Explicit same-key retry requires a successful null reconciliation. Null means
+  not saved yet, not canceled. Replies/list/search remain memory-only. Unsent draft
+  and pending identity/question use owner/notebook-scoped tab sessionStorage;
+  reload restores them, newer edits survive earlier completion, changed identity
+  removes prior-owner drafts and rejects late replies. Storage denial warns before
+  reload; closing the tab does not promise draft recovery. Existing bounded owner
+  probes remain, not instantaneous cross-tab cookie notification.
+- **Validation:** Final canonical deterministic suite **2294 passed, 1 skipped**,
+  293 warnings in84.13s (`/private/tmp/ticket24-full-final.log`); only preserved
+  unmanaged ` 2.py` copies excluded. Final focused API/lifecycle/lecture/reader/
+  architecture/deployment slice **58 passed**,6 warnings in6.39s. Five new public
+  HTTP cases cover grounded lecture/replay/restart, exact citation bytes, auth/
+  origin/role/ownership/input guards, failed-save no-durability and superseded
+  citation rejection. Two initial red/green slices; subsequent guards characterize
+  implemented behavior, without a claimed isolated red for every assertion.
+  TypeScript/build, Python compile, whitespace and both Caddy configurations passed.
+- **Browser:** Disposable mock API/Streamlit/Caddy at loopback18080; synthetic OIDC
+  login/callback only. Guest/registered real grounded sends, source download,
+  reload/draft/citation focus return, desktop1440x960/mobile390x844 and dark theme
+  verified. Fragmented/malformed/EOF/error/wrong-key network fixtures made no
+  automatic replay. Real delayed-save preview cancellation + duplicate submit +
+  reload recovered one saved pair and retained a newer draft. Identity changed
+  during saving cleared old state and discarded late completion. Restart retained
+  Guest session/history/source bytes/exact replay with no duplicates. Fresh final
+  registered browser console0 errors/0 warnings; earlier signed-out/restart probes
+  produced expected errors. Streamlit coexistence0 errors/16 existing warnings.
+- **Reviews/gates:** Independent Standards/Spec reviews and rechecks resolved the
+  unbounded citation scan and stale architecture inventory. Impeccable detector[];
+  full finish review **ship**,0 material findings after exact390 viewport recapture
+  and scrollbar panel-width correction. Documenter confirmed inherited-world
+  extension; pre-existing token drift reported, preserved. External5–8-student
+  study and two-week pilot pending, zero sessions. No paid app, live Cognito/AWS,
+  capacity/cost/model-quality/student-outcome, push/deploy or release claim.
+- **Handoff/rollback:** [11.md](../new_docs/ticket_handoffs/11.md). Revert this ticket
+  commit and rebuild/remove its three additional reader routes together. No data
+  migration/rollback needed. Preserve original staged patch SHA256
+  `3822626dc9314c8fef41f80427af7eba322a24a2157543d453c7bddf16bf034a`, original user
+  status content and all unrelated/untracked work through the selective commit.
+- **Commit authorization:** Automatic approval review initially rejected the local
+  selective commit/index update before execution for missing direct authorization.
+  User explicitly approved the local ticket-only commit on2026-11-17. Proceed with
+  the isolated-index script and preservation checks; no push or deployment.
+- **Next exact action:** Publish ticket commit/evidence before closing#24, then
+  start a NEW `gpt-6.1-sol` task for local12/#25, “React progression, revisits,
+  and project resumption.” Native blockers#16/#17 are closed with published evidence;
+  recheck#24 closure/evidence and all blockers in the fresh task. Read handoff11
+  in full, EXECUTION, GITHUB_TICKETS and relevant guides/spec. Keep external gates.
+
 ### Ticket 10 / GitHub #23: authenticated React notebook reader (2026-11-16)
 
 - **Outcome:** Static React/TypeScript at `/pilot/` reads existing registered/Guest

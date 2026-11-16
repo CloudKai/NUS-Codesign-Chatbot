@@ -1,7 +1,9 @@
+import type { Citation } from './stream';
+
 /** Public reader contracts. Credentials stay in HttpOnly same-origin cookies. */
 export interface Session { owner_id: string; display_name: string; kind: 'guest' | 'registered' }
 export interface Notebook { id: string; name: string }
-export interface Message { id: string; role: string; content: string }
+export interface Message { id: string; role: string; content: string; citations: Citation[] }
 export interface NotebookList { owner_id: string; notebooks: Notebook[] }
 export interface Page {
   owner_id: string; notebook: Notebook; messages: Message[];

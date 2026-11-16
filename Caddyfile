@@ -10,13 +10,20 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	# Static pilot coexists with Streamlit. Only this read-only API is public;
+	# Static pilot coexists with Streamlit. Only these bounded student routes are public;
 	# the browser adapter independently requires verified credentials in all modes.
 	@reader {
 		method GET
-		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/messages/page)$
+		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/(messages/page|coach-turn|messages/[^/]+/citations/[^/]+/content))$
 	}
 	handle @reader {
+		reverse_proxy app:8000
+	}
+	@lecture {
+		method POST
+		path_regexp lecture ^/api/v1/reader/threads/[^/]+/lecture/stream$
+	}
+	handle @lecture {
 		reverse_proxy app:8000
 	}
 	handle /pilot {

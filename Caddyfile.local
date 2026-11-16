@@ -1,9 +1,16 @@
 http://127.0.0.1:8080 {
 	@reader {
 		method GET
-		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/messages/page)$
+		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/(messages/page|coach-turn|messages/[^/]+/citations/[^/]+/content))$
 	}
 	handle @reader {
+		reverse_proxy 127.0.0.1:8000
+	}
+	@lecture {
+		method POST
+		path_regexp lecture ^/api/v1/reader/threads/[^/]+/lecture/stream$
+	}
+	handle @lecture {
 		reverse_proxy 127.0.0.1:8000
 	}
 	handle /pilot {

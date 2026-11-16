@@ -254,6 +254,10 @@ class WorkspaceService:
         if not existed:
             raise ValueError("Notebook not found")
 
+    def get_active_message(self, thread_id: str, message_id: str) -> dict[str, Any] | None:
+        """Return one active owned message for saved-evidence authorization."""
+        return self._store.get_active_message(thread_id, message_id)
+
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
         """Return canonical chat history for a notebook."""
         if not self._store.get_thread(thread_id):
@@ -479,6 +483,9 @@ class WorkspaceService:
         if not source:
             raise ValueError("Source not found")
         data = read_source_bytes(source)
+        if data is None and source.get("kind") == "text":
+            # Pasted notes have extracted text, but no original uploaded object.
+            data = str(source.get("extractedText") or "").encode("utf-8")
         if data is None:
             raise ValueError("Source file is not available")
         mime = str(source.get("mime") or "application/octet-stream")

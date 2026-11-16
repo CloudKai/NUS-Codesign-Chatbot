@@ -5332,6 +5332,28 @@ class StudentStore:
         """Compatibility alias for :meth:`get_message_page`."""
         return self.get_message_page(thread_id, limit=limit, cursor=cursor)
 
+    def get_active_message(self, thread_id: str, message_id: str) -> dict[str, Any] | None:
+        """Return one visible owned message at the transaction-current notebook revision.
+
+        An exact primary-key lookup bounds citation authorization work regardless of
+        transcript length. Missing, superseded and internal rows return ``None``.
+        """
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT m.* FROM messages AS m
+                JOIN notebooks AS n ON n.id=m.notebook_id
+                WHERE m.id=? AND n.id=? AND n.user_id=?
+                  AND COALESCE(m.conversation_revision, 0) <= COALESCE(n.conversation_revision, 0)
+                  AND (m.superseded_at_revision IS NULL
+                       OR m.superseded_at_revision > COALESCE(n.conversation_revision, 0))""",
+                (message_id, thread_id, self.owner_id),
+            ).fetchone()
+        if row is None or self._is_coach_idempotency_marker_meta(_load(row["metadata_text"], {})):
+            return None
+        if not str(row["content"] or "").strip():
+            return None
+        return self._public_message_dict(row)
+
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
         """Return messages active at the notebook's current conversation revision."""
         thread = self.get_thread(thread_id)

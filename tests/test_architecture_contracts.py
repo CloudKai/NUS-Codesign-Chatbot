@@ -213,6 +213,7 @@ def test_student_store_public_and_dsql_occ_contracts_are_stable() -> None:
         "fail_stage_review_job",
         "find_source_by_path",
         "get_message_metadata",
+        "get_active_message",
         "get_message_page",
         "get_messages",
         "get_messages_at_revision",
@@ -335,6 +336,9 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
     expected = {
         (method, path, name)
         for method, path, name in (
+            ("POST", "/api/v1/reader/threads/{thread_id}/lecture/stream", "lecture_stream"),
+            ("GET", "/api/v1/reader/threads/{thread_id}/coach-turn", "saved_turn"),
+            ("GET", "/api/v1/reader/threads/{thread_id}/messages/{message_id}/citations/{source_id}/content", "cited_content"),
             ("GET", "/api/v1/reader/session", "session"),
             ("GET", "/api/v1/reader/threads", "notebooks"),
             ("GET", "/api/v1/reader/threads/{thread_id}/messages/page", "messages"),
