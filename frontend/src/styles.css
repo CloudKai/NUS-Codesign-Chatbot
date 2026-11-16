@@ -118,3 +118,26 @@ textarea::placeholder { color: var(--muted); }
   .project-panel.path-open { display: block; }
   .project-panel > .mobile-only { display: inline-flex; margin-bottom: 24px; }
 }
+.source-panel { width: min(540px, 100%); }
+.source-panel > h4, .source-panel section > h4 { margin: 28px 0 12px; }
+.source-upload { display: grid; gap: 10px; margin-block: 28px; border-block: 1px solid var(--line); padding-block: 24px; }
+.source-upload p { margin-bottom: 0; }
+.source-upload button { justify-self: start; }
+.source-upload input { max-width: 100%; font-size: 14px; }
+.source-list { padding: 0; list-style: none; }
+.source-list li, .upload-job { border-bottom: 1px solid var(--line); padding-block: 20px; overflow-wrap: anywhere; }
+.source-list label { display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 16px; }
+.source-list input { flex: 0 0 20px; width: 20px; height: 20px; min-height: 20px; padding: 0; }
+.source-list p { margin-block: 8px 12px; }
+.source-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.source-actions button { font-size: 14px; text-align: left; overflow-wrap: anywhere; max-width: 100%; }
+.upload-job strong { font-size: 14px; }
+.upload-job button { margin: 0 8px 8px 0; }
+.source-detail { border-top: 1px solid var(--line); margin-top: 28px; }
+.source-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.source-detail p { margin-block: 20px 12px; }
+.remove-confirm { margin-top: 16px; padding: 16px; background: var(--soft); border-radius: 8px; }
+.remove-confirm button { margin: 8px 8px 0 0; }
+@media (min-width: 1101px) {
+  .source-panel { width: 340px; }
+}

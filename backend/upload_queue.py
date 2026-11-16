@@ -40,6 +40,8 @@ class PendingSourceUpload:
     future: Future[list[dict[str, Any]]]
     failed: bool
     retryable: bool
+    completed: bool
+    processing: bool
 
 
 @dataclass
@@ -54,6 +56,7 @@ class _UploadJob:
     future: Future[list[dict[str, Any]]]
     size: int
     retained: bool = True
+    processing: bool = False
     attempts: int = 1
     failed: bool = False
     expires_at: float | None = None
@@ -139,7 +142,7 @@ class SourceUploadCoordinator:
             self._expire_locked()
             return [PendingSourceUpload(
                 key, job.owner_id, job.thread_id, job.filenames, job.future, job.failed,
-                job.failed and job.retained,
+                job.failed and job.retained, job.future.done(), job.processing,
             ) for key, job in reversed(self._jobs.items())
                 if job.owner_id == owner_id and job.thread_id == thread_id]
 
@@ -162,6 +165,7 @@ class SourceUploadCoordinator:
             job.operation = upload
             job.future = Future()
             job.failed = False
+            job.processing = False
             job.attempts += 1
             self._executor.submit(self._run, upload_id)
             return True
@@ -195,6 +199,7 @@ class SourceUploadCoordinator:
     def _run(self, upload_id: str) -> None:
         with self._lock:
             job = self._jobs[upload_id]
+            job.processing = True
             batch, operation = job.uploads, job.operation
         failed = False
         count = 0

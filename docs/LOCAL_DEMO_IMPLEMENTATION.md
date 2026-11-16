@@ -134,9 +134,9 @@ transitions.
 
 ### Presentation
 
-Tickets 10–12 / #23–25 add a bounded static React/TypeScript pilot at `/pilot/`,
+Tickets 10–13 / #23–26 add a bounded static React/TypeScript pilot at `/pilot/`,
 built from `frontend/` and served by `backend/http/notebook_reader.py`. Streamlit
-remains at `/` for source-management, remaining workspace and lecturer workflows. Ten typed
+remains at `/` for remaining workspace and lecturer workflows. Nineteen typed
 browser routes cover session, notebook list, saved message page/citations, lecture
 stream, exact-key recovery, cited-original download, canonical project view, project
 stream and explicit decision/selection adapters. Verified registered or
@@ -149,7 +149,7 @@ the existing completed-turn service. It never invents a second lifecycle/backend
 Preview is ephemeral; malformed/EOF/canceled streams only trigger read reconciliation.
 Explicit retry retains the original identity. Citation download checks an exact
 active owner/notebook/message and its saved source mapping before serving attachment
-bytes; pasted notes use authorized extracted text. No source mutation is exposed.
+bytes; pasted notes use authorized extracted text. Source mutations use only the explicit typed source adapters described below.
 `StudentStore.get_active_message` is an indexed, revision-guarded read, with no
 schema migration. Older messages lacking citation metadata remain plain saved text.
 
@@ -172,6 +172,22 @@ until a successful read. Draft/intent/original receipt survive reload and stage 
 The three-panel desktop layout uses a temporary Thinking Path panel on mobile with
 explicit return focus. Saved student contributions and coach summaries remain distinct.
 No schema/data migration or source/workspace management expansion is introduced.
+
+Ticket13/#26 adds nine narrow reader routes for source list/plain-text inspection,
+original attachment download, explicit selection/removal and bounded upload
+submit/status/retry/discard. These delegate to WorkspaceService and the existing
+SourceUploadCoordinator, owned/drained by the API lifespan. Queue/processing states
+are captured under the coordinator lock; success releases payloads and failed
+retry leases expire without a browser revisit. Bounds remain per process and do
+not include multipart/parser buffers or disk quotas; Streamlit retains its separate
+coordinator. No new persistence schema or data migration. Source changes apply to
+future requests; in-flight authorized snapshots and saved exact citation mapping
+remain unchanged. Removed originals cannot be downloaded through old citations.
+The temporary Sources view preserves the mounted transcript/composer, draft,
+reading position and return focus. Ambiguous writes require GET reconciliation
+before further source changes/new questions, with no automatic replay. Upload
+receipts are ephemeral across restart; saved source bytes remain durable. See the
+pilot README for upload ambiguity/partial-batch limitations and rollback.
 
 Streamlit remains the frontend entrypoint. It only renders state and calls a
 typed API client; it must not call SQLite, local files, model SDKs, LangChain,

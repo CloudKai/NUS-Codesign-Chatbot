@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi.responses import FileResponse, StreamingResponse, Response
 
+from backend.http.reader_sources import register_reader_sources
 from backend.domain import CitationReference, CoachRequest, CoachTurn
 from backend.learning.journey import normalize_journey, selectable_stage_ids
 from backend.learning.resume import StageResume, project_resume
@@ -151,6 +152,8 @@ def register_notebook_reader(
         if profile.get("role", "student") != "student":
             raise HTTPException(status_code=403, detail="Open the lecturer workspace in Streamlit")
         return owner
+
+    register_reader_sources(app, reader_owner)
 
     @app.get("/api/v1/reader/session", response_model=ReaderSession)
     def session(owner: OwnerServices = Depends(reader_owner)) -> ReaderSession:

@@ -39,6 +39,8 @@ from backend.domain import (
 )
 from backend.owner_context import OwnerResolver, OwnerServices
 from backend.http.notebook_reader import register_notebook_reader
+from backend.upload_queue import SourceUploadCoordinator
+from starlette.concurrency import run_in_threadpool
 from backend.persistence.guest_sessions import GUEST_SESSION_TTL
 from backend.coaching.progress import PROGRESS_LABELS
 from backend.operational_metrics import (
@@ -217,7 +219,12 @@ async def _app_lifespan(app: FastAPI):
     """Configure process-local sync thread capacity during startup."""
     tokens = configure_sync_threadpool(settings.sync_threadpool_tokens)
     app.state.sync_threadpool_tokens = tokens
-    yield
+    app.state.reader_uploads = SourceUploadCoordinator()
+    try:
+        yield
+    finally:
+        # Drain bounded work on shutdown; browser departure never owns cleanup.
+        await run_in_threadpool(app.state.reader_uploads.close)
 
 
 def create_app(

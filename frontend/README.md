@@ -1,6 +1,6 @@
 # Notebook reader pilot
 
-Tickets #23–25 add a lecture and project companion `/pilot/` alongside Streamlit at `/`. The existing
+Tickets #23–26 add a lecture and project companion `/pilot/` alongside Streamlit at `/`. The existing
 FastAPI workspace and transcript remain authoritative. Build with Node 22:
 
 ```sh
@@ -18,7 +18,7 @@ The public proxy exposes exact reader GET routes and bounded lecture/project str
 The adapter requires verified registered/Guest credentials even in anonymous-capable
 local mode, rejects staff and foreign notebooks, checks same-origin requests,
 requires Origin on writes, and sets no-store/Vary Cookie. Internal CRUD, coach,
-upload and lecturer routes remain private; only the reader stage adapters are public. Sign-in uses existing Cognito
+upload and lecturer routes remain private; narrow reader adapters are public. Sign-in uses existing Cognito
 and returns to Streamlit; reopen `/pilot/`. JavaScript never handles tokens.
 
 Ticket #24 adds lecture questions through the existing CoachRequest/NDJSON lifecycle.
@@ -79,7 +79,7 @@ Project reads invoke no model. Legacy untagged work stays in chat; no authorship
 completion is inferred.
 The engineering findings in `docs/LEARNING_BASELINE.md` constrain this slice:
 legible mobile reading, explicit loading/error recovery, independent evidence
-access, and interrupted-session privacy. Citation excerpts and safe downloads support evidence inspection. Source management and remaining workspace parity stay in Streamlit and later tickets. The 5–8-student observations and two-week
+access, and interrupted-session privacy. Citation excerpts and safe downloads support evidence inspection. Source upload, selection, inspection, download and removal are available in the pilot; remaining workspace parity stays in Streamlit and later tickets. The 5–8-student observations and two-week
 pilot remain pending, with zero completed sessions. No learning or retention
 benefit is inferred from this implementation.
 
@@ -91,3 +91,33 @@ from the Google Fonts upstream `ofl/ibmplexsans` and `ofl/sourceserif4` director
 Rollback: revert the ticket commit, rebuild the previous image, and remove its
 reader/static proxy routes together. Existing Streamlit URLs, sessions,
 notebooks, transcript, source bytes, and storage schemas need no migration.
+
+Ticket #26 adds a Sources view in the existing 340px right column at widths
+above 1100px. At 1100px and below it uses a temporary right-side panel up to
+540px wide, filling narrow viewports. It provides canonical selection and bounded
+plain-text inspection (24,000 characters), safe original downloads, and explicit
+removal confirmation. The transcript/composer remain mounted; closing Sources or
+inspection restores focus, and closing Sources restores chat reading position.
+No source bytes or extracted text enter browser storage. Deselecting affects future
+turns; an already running answer uses its original authorized snapshot. Saved
+citation labels/IDs/excerpts are not reassigned when sources change. Removed
+originals return unavailable instead of resolving to a different source.
+
+Nine additive typed reader routes cover sources and upload jobs. Multipart upload
+admission uses the existing SourceUploadCoordinator in the API process: defaults
+32 global/4 owner retained batches and 200/50 MiB, two workers, 300-second first
+failure retry lifetime and three attempts total. Progress distinguishes queued,
+processing, saved and failed. Successful payload release and failed retry expiry
+run independently of browser polling. Retry/discard are owner/notebook checked;
+retry uses freshly authenticated services. Receipts are count/age bounded and
+clear on API restart; saved sources persist. These limits are per process (separate
+from Streamlit's coordinator), not deployment-wide, and exclude incoming multipart
+parser buffers, disk quotas and chat attachments. No capacity/release claim follows.
+
+Source writes use the reader's credential, role, ownership and mandatory Origin
+guards. A lost write response pauses new questions and changes until successful
+GET reconciliation; writes are never automatically replayed. Upload transport
+failure may mean admission succeeded: check jobs and source filenames before
+explicitly selecting files again. There is no cross-request upload deduplication
+key or persistent upload queue. Partial batch failures can leave earlier files
+saved; inspect the source list before retrying a failed multi-file batch.

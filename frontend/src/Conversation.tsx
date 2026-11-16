@@ -1,6 +1,7 @@
 /** Lecture composer, exact-request reconciliation and saved citation inspection. */
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, currentSession, get, type Page, type Project } from './api';
+import { Sources } from './Sources';
 import { ThinkingPath } from './ThinkingPath';
 import { isTurn, readStream, type Citation, type Event } from './stream';
 
@@ -29,6 +30,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const [intent, setIntent] = useState<Intent>(initial.current.intent || 'lecture');
   const [pathOpen, setPathOpen] = useState(false);
   const pathToggle = useRef<HTMLButtonElement>(null);
+  const [sourceUncertain, setSourceUncertain] = useState(false);
   const [moving, setMoving] = useState(false);
   const [projectUncertain, setProjectUncertain] = useState(false);
   const intentRef = useRef(intent);
@@ -96,7 +98,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   }
 
   async function send(retry = false) {
-    if (lock.current || busy || moving || projectUncertain || (!retry && (pendingRef.current || !textRef.current.trim()))) return;
+    if (lock.current || busy || moving || sourceUncertain || projectUncertain || (!retry && (pendingRef.current || !textRef.current.trim()))) return;
     if (retry && checkedKey !== pendingRef.current?.key) return;
     lock.current = true;
     const receipt = retry ? pendingRef.current! : { key: crypto.randomUUID(), text: textRef.current, intent: intentRef.current };
@@ -209,6 +211,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       setPathOpen(value => !value);
       if (!pathOpen) window.requestAnimationFrame(() => document.getElementById('path-heading')?.focus({ preventScroll: true }));
     }}>Thinking Path{project.pending ? ' · decision pending' : ''}</button>
+    <Sources owner={owner} thread={page.notebook.id} expired={expired} uncertain={setSourceUncertain} opened={() => setPathOpen(false)}/>
     <fieldset className="intent-switch" disabled={watching || checking || moving || !!pending}>
       <legend>What would you like to work on?</legend>
       {(['lecture', 'project'] as const).map(value => <label key={value}><input type="radio" name="intent" value={value} checked={intent === value} onChange={() => {
@@ -248,7 +251,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       <textarea ref={composer} id="lecture-question" value={text} maxLength={12000} rows={3}
         placeholder="What would you like to understand?" onChange={event => remember(event.target.value, pendingRef.current)}/>
       <div className="composer-actions"><span className="supporting">{intent === 'lecture' ? 'Lecture help · project stages unchanged' : `Project coaching · ${project.stages.find(stage => stage.id === project.current_stage)?.label}`}</span>
-        <button className="primary" type="submit" disabled={watching || checking || busy || moving || projectUncertain || !!pending || !text.trim()}>{intent === 'lecture' ? 'Send question' : 'Send project work'}</button></div>
+        <button className="primary" type="submit" disabled={watching || checking || busy || moving || sourceUncertain || projectUncertain || !!pending || !text.trim()}>{intent === 'lecture' ? 'Send question' : 'Send project work'}</button></div>
     </form>
     {storageError ? <p role="alert">Tab storage is unavailable. Keep a copy of your draft before reloading.</p> : null}
     <div className="turn-status" role="status" aria-live="polite">{status}</div>

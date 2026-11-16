@@ -24,7 +24,7 @@ export default function App() {
     </header>
     {!session ? <main id="main" className="entry">
       <h1>Pick up your questions<br/>and project thinking.</h1>
-      <p>Ask about lectures, develop your project, and resume saved work in an existing notebook. Use Streamlit to create notebooks and manage sources.</p>
+      <p>Ask about lectures, develop your project, and resume saved work in an existing notebook. Use Streamlit to create notebooks.</p>
       <p className="course-notice">Your chatbot work is never graded and has no association with your course grades. This companion is used for CDE2300. Researchers want to understand how students use it and whether it benefits learning.</p>
       {reader.phase === 'checking' ? <p role="status">Checking your session…</p> : <>
         <div className="entry-actions"><a className="primary action" href="/api/v1/auth/login">Sign in</a>

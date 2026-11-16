@@ -2,6 +2,71 @@
 
 ## CURRENT STATUS
 
+### Ticket 13 / GitHub #26: React source management without draft loss (2026-11-17)
+
+- **Commit approval received:** The user continued after the explicit #26-only
+  commit approval question. The historical automatic-review hold is recorded in
+  handoff13. Proceed with the scoped temporary-index commit and preservation checks,
+  then publish actual-SHA evidence before closure. No push/deploy authorized.
+- **Outcome:** `/pilot/` students can upload, select, inspect bounded plain text,
+  download originals and explicitly remove sources. Nine narrow typed reader
+  adapters reuse WorkspaceService and SourceUploadCoordinator; source authority,
+  exact saved citation IDs/labels/excerpts, and existing educational policy remain
+  server-owned. No schema or existing-data migration.
+- **Uploads:** API-lifespan coordinator reuses finite count/byte admission, two
+  workers, independent success-payload release, first-failure retry TTL and three
+  attempts. Immutable locked snapshots distinguish queued/processing/saved/failed.
+  Owner/notebook guards apply to retry/discard; stale/duplicate actions reconcile.
+  Limits remain per API process, separate from Streamlit, excluding inbound
+  multipart/parser buffers and disk quotas. Lost upload responses and partial
+  batches need source/receipt inspection before explicit retry; no auto replay or
+  cross-request upload deduplication claim.
+- **Interface:** Preserves notebooks/chat/Thinking Path. Sources occupies the
+  existing rightmost340px above1100px, with mounted chat/composer unobscured;
+  smaller screens use a temporary panel up to540px, full-width at390px. Source
+  actions preserve draft and loaded transcript, inspection/close restore focus,
+  closing Sources restores reading position. Ambiguous writes pause new questions
+  until a successful GET. In-flight answers retain their original authorized
+  snapshot; deleted originals become unavailable without reassigning citations.
+- **Validation:** Three public HTTP red/green slices, followed by five HTTP source
+  contracts covering list/content/isolation, progress/retry/discard/restart,
+  selected-source/citation/removal authority, all-route guards/limits and finite
+  admission/corrected retry. Final focused **115 passed**,6 warnings in11.39s;
+  canonical deterministic full **2304 passed,1 skipped**,293 warnings in84.86s.
+  Only preserved unmanaged ` 2.py` copies excluded. Frontend/TypeScript build,
+  compileall, whitespace and both Caddy configs pass. No Ruff/static Python typing,
+  image/CI deployment, paid provider, live capacity or student-outcome claim.
+- **Browser/restart:** Desktop1440x960/mobile390x844/light/dark, Guest and synthetic
+  registered flows; exact original download, loaded-window/draft/reading-position,
+  keyboard/Escape focus, upload failure/retry, notebook switches and reload pass.
+  Real delayed-save removal preserves citation mapping and newer draft; removed
+  original404. Dropped selection response requires GET recovery; one POST, stale
+  removal reconciles. Four delayed batches fill owner allowance across notebooks,
+  fifth429; queue advances to processing, closed-tab upload saves exact bytes
+  without revisit. Same-store restart preserves IDs/selection/bytes/messages/
+  citations/project state. Fresh final connected React console0 errors/0 warnings;
+  intentional network/429/404 probes have expected errors. Streamlit coexistence
+  evidence and final process shutdown are recorded in handoff13.
+- **Reviews:** Separate read-only Luna Standards/Spec reviews; Standards no concrete
+  findings, Spec's combined-progress gap fixed and rechecked. Impeccable detector[];
+  finish review requested desktop width fix, now resolved and **ship** at that
+  verdict-pass scope. Read-only documenter confirmed incumbent system and added
+  README geometry clarification; DESIGN.md preserved, existing token drift not
+  repaired. Sol sole writer; concrete two-attempt Streamlit QA locator issue routed
+  read-only to Astra, resolution in handoff.
+- **Compatibility/rollback:** Revert only ticket13 code and its nine public routes,
+  rebuild previous frontend. No data reset, schema, cookie, environment or provider
+  migration. Saved data remains Streamlit-compatible; ephemeral API jobs/receipts
+  clear on restart, source files persist. External formative study and two-week
+  pilot remain pending, **zero participant sessions**. No paid calls, push/deploy.
+- **Handoff/Git/next:** [13.md](../new_docs/ticket_handoffs/13.md). Preserve original
+  staged patch SHA256 `3822626dc9314c8fef41f80427af7eba322a24a2157543d453c7bddf16bf034a`
+  and uncommitted ticket11/12 publication-result updates. Ticket-only local commit
+  and publication results are recorded in handoff appendices. Publish #26 evidence
+  before closure; only after success create a NEW local gpt-6.1-sol task for
+  **local14/#27 React workspace and preference parity**. #27 is OPEN, native blocker
+  #23 CLOSED/completed with published evidence6921655873, reverified before handoff.
+
 ### Ticket 12 / GitHub #25: React progression, revisits, and project resumption (2026-11-17)
 
 - **Outcome:** React `/pilot/` now develops project work through the shared coach
