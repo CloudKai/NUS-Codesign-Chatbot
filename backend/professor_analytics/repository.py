@@ -229,6 +229,27 @@ class ProfessorAnalyticsRepository:
     def __init__(self, store: StudentStore) -> None:
         self._store = store
 
+    def load_learning_rows(self) -> list[dict[str, Any]]:
+        """Return active student message metadata for aggregate funnels, never text.
+
+        Reuse the roster exclusion and active-revision predicates. Include only
+        owners with notebooks; Guest identity keys never leave the aggregate.
+        """
+        with self._store._connect() as connection:
+            rows = connection.execute(f'''
+                SELECT u.id AS user_id, u.identifier, u.cognito_sub,
+                       n.id AS notebook_id, m.id AS message_id,
+                       m.role AS message_role, m.is_error AS message_is_error,
+                       m.metadata_text AS message_metadata, m.assessment_text,
+                       m.cited_source_ids_text, m.proposed_stage,
+                       m.decision_status, m.decision_at,
+                       m.created_at AS message_created_at
+                FROM users u JOIN notebooks n ON n.user_id=u.id
+                LEFT JOIN messages m ON m.notebook_id=n.id {_ACTIVE_BRANCH_JOIN}
+                WHERE 1=1 {_STUDENT_ROLE_FILTER}
+            ''').fetchall()
+        return [dict(row) for row in rows]
+
     def load_class_rows(
         self,
         *,

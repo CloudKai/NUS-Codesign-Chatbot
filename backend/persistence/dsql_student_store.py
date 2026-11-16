@@ -52,6 +52,7 @@ _OCC_WRITE_METHODS = (
     "fail_coach_request",
     "persist_coach_turn",
     "update_message",
+    "record_learning_signal",
     "revise_user_message",
     "revise_conversation_from_user_message",
     "select_learning_stage",

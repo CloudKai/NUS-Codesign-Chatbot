@@ -35,6 +35,7 @@ from .specialists.review_orchestration import (
 )
 from .student_journey import normalize_journey
 from .student_store import StudentStore
+from .learning_signals import LearningReceipts
 
 _TRANSCRIPT_ROLES = {"user": "Student", "assistant": "Coach"}
 MESSAGE_PAGE_SIZE = 6
@@ -258,6 +259,10 @@ class WorkspaceService:
         if not self._store.get_thread(thread_id):
             raise ValueError("Notebook not found")
         return self._store.get_messages(thread_id)
+
+    def record_learning_signal(self, thread_id: str, message_id: str, kind: str) -> LearningReceipts:
+        """Persist one validated explicit rating or UI receipt on an owned answer."""
+        return LearningReceipts.model_validate(self._store.record_learning_signal(thread_id, message_id, kind))
 
     def has_messages(self, thread_id: str) -> bool:
         """Return whether an owned notebook has any visible chat rows."""

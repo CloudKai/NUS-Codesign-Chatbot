@@ -61,6 +61,7 @@ from backend.guest_admission import GuestAdmissionLimiter
 from backend.settings import settings, validate_production_configuration
 from backend.learning.hmw import hmw_scaffold_projection
 from backend.learning.resume import project_resume
+from backend.learning_signals import LearningSignal, LearningSignalSaved, LearningFunnel, learning_funnel
 from backend.student_journey import DEFAULT_STAGE, normalize_journey
 from backend.source_library import (
     CourseMaterialSyncCoordinator,
@@ -891,6 +892,26 @@ def create_app(
             status_code=503,
             detail="Professor research data is temporarily unavailable",
         )
+
+    @app.get('/api/v1/professor/learning-funnel', response_model=LearningFunnel)
+    def professor_learning_funnel(
+        request: Request, owner: OwnerServices = Depends(current_professor),
+    ) -> LearningFunnel:
+        """Return audited aggregate lecture and project measures without identities."""
+        _audit_professor_read(request, owner, action='professor.learning_funnel', scope='aggregate_learning')
+        return learning_funnel(ProfessorAnalyticsRepository(owner.store).load_learning_rows())
+
+    @app.post('/api/v1/threads/{thread_id}/messages/{message_id}/learning-signal', response_model=LearningSignalSaved)
+    def record_learning_signal(
+        thread_id: str, message_id: str, signal: LearningSignal,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> LearningSignalSaved:
+        """Accept a bounded owner-scoped answer receipt, without private text."""
+        try:
+            receipts = owner.workspace.record_learning_signal(thread_id, message_id, signal.kind)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail='Answer not found') from error
+        return LearningSignalSaved(signals=receipts)
 
     @app.get("/api/v1/professor/overview", response_model=OverviewResponse)
     def professor_overview(

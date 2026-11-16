@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import html
+import logging
 import mimetypes
 import time
 import uuid
@@ -40,6 +41,7 @@ from backend.student_journey import (
 from backend.coaching.workflow_navigation import manual_stage_selection_target
 
 from ui.generation_feedback import generation_limit_message
+from ui.learning_feedback import render_answer_feedback
 from ui.coach_welcome import (
     COACH_WELCOME_KIND,
     COACH_WELCOME_MARKDOWN,
@@ -78,6 +80,8 @@ from ui.session import (
     save_new_notebook,
 )
 from ui.sources import source_viewer_dialog
+
+logger = logging.getLogger(__name__)
 
 
 _HISTORY_PAGE_SIZE = 6
@@ -457,6 +461,11 @@ def render_citations(
             key=f"citation_{message['id']}_{reference['id']}",
             type="secondary",
         ):
+            if (message.get('metadata') or {}).get('interaction_intent') == 'lecture_help':
+                try:
+                    store.record_learning_signal(st.session_state.thread_id, message['id'], 'evidence_opened')
+                except Exception:
+                    logger.warning('Evidence-open receipt unavailable')
             source_viewer_dialog(str(reference["id"]))
 
     if len(valid_references) < 2:
@@ -878,6 +887,7 @@ def render_message(
             )
         st.markdown(concise_coach_response(display_content))
         render_citations(message, visible_source_ids=visible_source_ids)
+        render_answer_feedback(message)
         if metadata.get("interaction_intent") == "lecture_help" and metadata.get("source_refs"):
             if st.button(
                 "Apply this to my project",

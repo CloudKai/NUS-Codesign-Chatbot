@@ -2,6 +2,59 @@
 
 ## CURRENT STATUS
 
+### Ticket 09 / GitHub #22: learning funnel and formative usability baseline (2026-11-16)
+
+- **Outcome:** Explicit optional usefulness ratings, citation-action receipts and
+  deliberately opened recommendation details persist as bounded assistant-message
+  metadata. An owner/revision-fenced SQLite transaction prevents cross-connection
+  lost updates; DSQL uses existing whole-operation OCC retries. Canonical typed
+  receipt responses refresh the retained UI history without losing loaded pages.
+  Invalid imported fields remain unknown while valid sibling receipts survive.
+- **Reporting:** Existing lecturer authorization and fail-closed access audit gate
+  a metadata-only aggregate report under Participation. Lecture usefulness/returns,
+  framing proposals, recommendation openings, explicit confirmations and subsequent
+  saved Stage 2 turn proxies remain distinct. Every metric explains its denominator;
+  Guest/registered owner and notebook coverage are separate. Human-reviewed substance
+  is explicitly unknown and requires authorized Research review, never inferred
+  from stage movement or provisional rubric scores.
+- **Study:** [LEARNING_BASELINE.md](LEARNING_BASELINE.md) defines identical desktop/
+  mobile comparison fixtures, tasks, observation sheet, consent/data handling,
+  baseline defects and limitations. **5–8-student formative sessions and the later
+  two-week pilot remain pending external participants.** Zero completed student
+  observations; engineering fixtures are not learning/retention evidence.
+- **Validation:** Final canonical mock suite **2285 passed, 1 skipped**, 293 warnings
+  in86.47s (`ticket22-full-final.log`), excluding preserved unmanaged ` 2.py` copies
+  only. Final integration slice **118 passed**; after final readability copy,
+  UI/HTTP **71 passed**. Seven new public HTTP cases include explicit/deduplicated
+  feedback, independent historic confirmations, ownership/input validation,
+  cross-notebook later-day return, starter denominators, concurrent app connections,
+  malformed metadata and valid-sibling preservation. Compile/whitespace passed.
+  Impeccable detector `[]`; no configured typing/formatter result claimed.
+- **Browser/restart:** Disposable mock API/Streamlit/Caddy startup on loopback18080;
+  synthetic lecturer OIDC fixture only. Desktop1440x960/mobile390x844 check rating,
+  cited-source preview, lecture-to-project work, explicit detail opening,
+  confirmation, saved Stage 2 contribution/resume and report denominators. Mobile
+  student/report width390/390. Connected final consoles: student0 errors/22 existing
+  warnings; lecturer0 errors/12 warnings. Old disconnected session accumulated86
+  restart errors; clean final sessions supersede it. Public HTTP restart probe
+  preserved ratings/evidence receipts, exact saved answer, source bytes and export.
+  Full suite covers mock streaming, graph resumption, confirmation and compatibility;
+  no new delayed in-flight interruption browser study is claimed.
+- **Reviews/compatibility:** Separate read-only Standards/Spec reviews and re-reviews
+  resolved transaction racing, client validation, denominator/substance labels,
+  imported-field resilience and sibling preservation. Sol sole writer; Luna discovery
+  read-only; Astra not required. No schema/data/environment migration, paid calls,
+  push, deployment or student-study claim. Rollback only this ticket commit; retain
+  additive receipt metadata. All ticket demo/browser processes stopped at handoff.
+- **Handoff:** [new_docs/ticket_handoffs/09.md](../new_docs/ticket_handoffs/09.md).
+- **Next exact action:** Publish ticket-only commit/evidence and close #22's
+  engineering scope with the external study explicitly pending; then create a NEW
+  `gpt-6.1-sol` task for #23, “Authenticated React notebook reader,” whose sole
+  native blocker is #22. Recheck live state/evidence there; read handoff09,
+  `new_docs/EXECUTION.md`, `new_docs/GITHUB_TICKETS.md` and relevant guides/spec.
+  Do not implement #23 in this context. Pending student observations remain a
+  comparison/release gate, not a completed study.
+
 ### Ticket 08 / GitHub #21: budget-safe generation admission (2026-11-16)
 
 - **Outcome:** Optional `GENERATION_ADMISSION_POLICY` enables a durable dedicated

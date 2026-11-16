@@ -8,6 +8,8 @@ from urllib.parse import quote, unquote
 
 import httpx
 
+from .learning_signals import LearningFunnel, LearningSignalSaved, LearningReceipts
+
 from .domain import (
     CoachRequest,
     CoachTurn,
@@ -395,6 +397,14 @@ class LocalApiClient:
         response.raise_for_status()
         return response.json()
 
+    def professor_learning_funnel(self) -> LearningFunnel:
+        """Return audited aggregate learning measures and denominator definitions."""
+        response = self._http.get(
+            f'{self._base_url}/api/v1/professor/learning-funnel', **self._request_kwargs()
+        )
+        response.raise_for_status()
+        return LearningFunnel.model_validate(response.json())
+
     def professor_engagement(self) -> dict[str, Any]:
         """Return professor-authorised engagement analytics."""
         response = self._http.get(
@@ -562,6 +572,18 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def record_learning_signal(self, thread_id: str, message_id: str, kind: str) -> LearningReceipts:
+        """Persist a validated explicit rating or UI receipt for an owned answer."""
+        from backend.learning_signals import LearningSignal
+
+        signal = LearningSignal(kind=kind)
+        response = self._http.post(
+            f'{self._base_url}/api/v1/threads/{thread_id}/messages/{message_id}/learning-signal',
+            json=signal.model_dump(), **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return LearningSignalSaved.model_validate(response.json()).signals
 
     def has_messages(self, thread_id: str) -> bool:
         """Return the owner-scoped visible-message existence projection."""

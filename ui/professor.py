@@ -2211,6 +2211,32 @@ def _render_critical_thinking(client) -> None:
 
 def _render_engagement(client) -> None:
     """Render meaningful usage patterns without rewarding high message volume."""
+    with st.expander('Lecture help and project progression'):
+        try:
+            funnel = client.professor_learning_funnel().model_dump()
+        except Exception:
+            st.info('Learning measures are unavailable. Reopen this page to retry.')
+        else:
+            for group, title in [('lecture_help', 'Lecture help'), ('project_work', 'Project work')]:
+                st.markdown(f'**{title}**')
+                for name, measure in funnel[group].items():
+                    label = name.replace('_', ' ').capitalize()
+                    if name == 'subsequent_stage2_contribution':
+                        label = 'Saved Stage 2 turn after confirmation (unreviewed)'
+                    elif name == 'stage2_saved_turn_participation':
+                        label = 'Saved Stage 2 turn participation (unreviewed)'
+                    st.write(f"{label}: {measure['numerator']} / {measure['denominator']} {measure['unit']}")
+                    st.write(funnel['definitions'][name])
+            st.write('Human-reviewed substantive Stage 2 work: unknown')
+            st.write(funnel['definitions']['human_reviewed_substantive_stage2_notebooks'])
+            coverage = funnel['identities']
+            st.write(
+                f"{coverage['owners']} workspace identities across {coverage['notebooks']} notebooks "
+                f"({coverage['guest_owners']} Guest; {coverage['registered_owners']} registered). "
+                f"{coverage['unclassified_messages']} messages have unknown intent."
+            )
+            for limitation in funnel['limitations']:
+                st.write(limitation)
     try:
         with st.spinner("Loading participation signals…"):
             data = client.professor_engagement()

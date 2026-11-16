@@ -364,3 +364,24 @@ Final acceptance requires successful Streamlit and FastAPI startup, mock mode,
 preserved user data, streaming, grounded
 citations, inspectable graph state, confirmed progress transitions, recovery
 after restart, responsive UI, passing tests, and accurate setup documentation.
+
+## Learning-funnel baseline (ticket 09 / #22)
+
+`backend/learning_signals.py` defines bounded typed explicit usefulness ratings,
+citation-action receipts and recommendation-detail openings. The existing
+owner-scoped workspace path persists at most three receipt fields in assistant
+message metadata; SQLite acquires write authority before checking active revision
+and merging receipts, and DSQL uses the whole-operation OCC wrapper. No schema or
+student-data migration. The HTTP/client boundary returns canonical typed receipts
+so fragment feedback updates preserve the loaded transcript window.
+
+The existing authorized, fail-closed audited lecturer API exposes an aggregate
+`/api/v1/professor/learning-funnel`, rendered under Participation. Metadata-only
+repository reads exclude superseded/internal rows; no transcript or identity is
+returned. Lecture usefulness/return and project recommendation/confirmation/saved
+turn proxies remain separate, with population definitions and Guest/notebook
+limits. Invalid imported receipt fields remain unknown while valid sibling fields
+survive. Human-reviewed substance is explicitly unknown and uses the existing
+Research workflow. See [LEARNING_BASELINE.md](LEARNING_BASELINE.md) for exact
+numerators/denominators, reproducible desktop/mobile tasks and the pending
+5–8-student formative study; engineering/mock evidence is not student outcomes.

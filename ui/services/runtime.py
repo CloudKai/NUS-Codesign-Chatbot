@@ -38,6 +38,7 @@ from backend.domain import (
     SourceUpdateRequest,
 )
 from backend.learning_service import LearningProgressService
+from backend.learning_signals import LearningReceipts
 from backend.providers import configured_coach_provider
 from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
 from backend.settings import settings
@@ -641,6 +642,15 @@ class WorkspaceFacade:
             return self._service().get_messages(thread_id)
 
         return _memo_read(("get_messages", thread_id), load)
+
+    def record_learning_signal(self, thread_id: str, message_id: str, kind: str) -> LearningReceipts:
+        """Route an owner-scoped receipt through the active workspace boundary."""
+        if local_api_enabled():
+            receipts = local_api_client().record_learning_signal(thread_id, message_id, kind)
+        else:
+            receipts = self._service().record_learning_signal(thread_id, message_id, kind)
+        self.forget_run_reads(thread_id)
+        return receipts
 
     def has_messages(self, thread_id: str) -> bool:
         """Return the bounded owner-scoped visible-message existence flag."""

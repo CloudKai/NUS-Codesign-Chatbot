@@ -47,6 +47,7 @@ from backend.student_journey import (
 )
 
 from ui.generation_feedback import generation_limit_message
+from ui.learning_feedback import record_display
 from ui.components import (
     facione_scores_table_html,
     progress_bar_html,
@@ -1008,12 +1009,19 @@ def render_pending_transition(
         pending = _fetch_pending_transition()
     if not pending:
         return
-    st.info(
-        f"The coach recommends {STAGE_BY_ID[pending.to_stage].label}: "
-        f"{pending.assessment.recommendation_rationale} "
-        "Your current stage stays active until you confirm.",
-        icon=":material/auto_awesome:",
+    recommendation = st.expander(
+        f'Coach recommends {STAGE_BY_ID[pending.to_stage].label}',
+        key=f'coach-recommendation-{pending.id}', on_change='rerun',
     )
+    with recommendation:
+        st.info(
+            f"The coach recommends {STAGE_BY_ID[pending.to_stage].label}: "
+            f"{pending.assessment.recommendation_rationale} "
+            "Your current stage stays active until you confirm.",
+            icon=":material/auto_awesome:",
+        )
+        if recommendation.open:
+            record_display(pending.id)
 
 
 def _fetch_pending_transition():

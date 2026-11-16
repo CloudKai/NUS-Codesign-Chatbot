@@ -4418,6 +4418,54 @@ class StudentStore:
         marker = self.get_system_metadata(RESEARCH_WORKFLOW_CONTRACT_KEY) or {}
         return workflow_contract_is_ready(marker)
 
+    def record_learning_signal(self, thread_id: str, message_id: str, kind: str) -> dict[str, Any]:
+        """Save an idempotent, bounded receipt on an owned active assistant answer.
+
+        The latest explicit rating replaces the previous rating. Other receipts
+        keep their first server timestamp. No text or client identity is accepted.
+        Missing, foreign, revised-away and ineligible messages raise ValueError.
+        """
+        from backend.learning_signals import LearningSignal, learning_receipts
+
+        signal = LearningSignal(kind=kind)
+        with self._lock, self._connect() as connection:
+            # SQLite's implicit transaction begins at UPDATE, after a stale read
+            # could already have lost a concurrent receipt or revision. DSQL's
+            # whole-operation OCC wrapper owns its transaction instead.
+            if isinstance(connection, sqlite3.Connection):
+                connection.execute('BEGIN IMMEDIATE')
+            notebook = connection.execute(
+                'SELECT conversation_revision FROM notebooks WHERE id=? AND user_id=?',
+                (thread_id, self.owner_id),
+            ).fetchone()
+            row = connection.execute(
+                'SELECT * FROM messages WHERE id=? AND notebook_id=?',
+                (message_id, thread_id),
+            ).fetchone()
+            if (not notebook or not row or row['role'] != 'assistant' or row['is_error']
+                    or not self._is_active_at_revision(row, int(notebook['conversation_revision'] or 0))):
+                raise ValueError('Answer not found')
+            metadata = _load(row['metadata_text'], {})
+            if metadata.get('kind') or metadata.get('_internal_type'):
+                raise ValueError('Answer not found')
+            if signal.kind == 'recommendation_displayed':
+                if not row['proposed_stage']:
+                    raise ValueError('Recommendation not found')
+            elif metadata.get('interaction_intent') != 'lecture_help':
+                raise ValueError('Lecture answer not found')
+            if signal.kind == 'evidence_opened' and not _load(row['cited_source_ids_text'], []):
+                raise ValueError('Cited answer not found')
+            receipts = learning_receipts(metadata.get('learning_signals'))
+            if signal.kind in {'useful', 'not_useful'}:
+                if (receipts.get('rating') or {}).get('kind') != signal.kind:
+                    receipts['rating'] = {'kind': signal.kind, 'at': utc_now()}
+            else:
+                receipts.setdefault(signal.kind, utc_now())
+            metadata['learning_signals'] = receipts
+            connection.execute('UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?',
+                               (_dump(metadata), message_id, thread_id))
+        return receipts
+
     def update_message(self, message_id: str, content: str) -> None:
         """Refuse destructive in-place content replacement for chat messages.
 
