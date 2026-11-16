@@ -14,14 +14,14 @@
 	# the browser adapter independently requires verified credentials in all modes.
 	@reader {
 		method GET
-		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/(messages/page|coach-turn|messages/[^/]+/citations/[^/]+/content))$
+		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/(messages/page|coach-turn|project|messages/[^/]+/citations/[^/]+/content))$
 	}
 	handle @reader {
 		reverse_proxy app:8000
 	}
 	@lecture {
 		method POST
-		path_regexp lecture ^/api/v1/reader/threads/[^/]+/lecture/stream$
+		path_regexp lecture ^/api/v1/reader/threads/[^/]+/(lecture/stream|project/(stream|select-stage|resolve/[^/]+))$
 	}
 	handle @lecture {
 		reverse_proxy app:8000

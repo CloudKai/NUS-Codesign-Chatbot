@@ -2,6 +2,74 @@
 
 ## CURRENT STATUS
 
+### Ticket 12 / GitHub #25: React progression, revisits, and project resumption (2026-11-17)
+
+- **Outcome:** React `/pilot/` now develops project work through the shared coach
+  stream, shows canonical pending recommendations, confirms/rejects them through
+  the existing atomic service, revisits completed stages, and resumes exact saved
+  student work with attributed coach feedback and one server-projected next action.
+  The browser calculates no readiness, unlocks or completion. Lecture mode retains
+  access to pending decisions and leaves project progress unchanged.
+- **Interface:** User requested Impeccable design while retaining three vertical
+  panels: notebooks left, mounted chat/composer center, Thinking Path right.
+  At1100px and below the path uses a temporary panel with explicit return focus;
+  notebook navigation collapses at700px. Active stage remains above chat. Previewing
+  saved stage work changes no active stage. Stage actions focus the path heading;
+  they preserve draft and loaded transcript, rather than the prior focus target.
+- **Boundary/recovery:** Four additive typed reader routes project the shared
+  resume/pending state, project stream and explicit decision/selection actions.
+  Verified registered/Guest identity, student role, ownership, same-origin writes,
+  mandatory Origin and no-store remain. Caddy exposes exact methods/paths only.
+  Stale/duplicate decisions reconcile saved state without optimistic advancement;
+  ambiguous actions block further sends/actions until successful GET refresh.
+  No automatic POST replay. Draft/intent/original request receipt stay scoped to
+  owner/notebook/tab; original lecture receipts remain compatible.
+- **Validation:** Final canonical deterministic suite **2299 passed,1 skipped**,
+  293 warnings in83.34s (`/private/tmp/ticket25-full.log`), excluding only preserved
+  unmanaged ` 2.py` copies. Five new public HTTP cases cover artifacts/authorship,
+  pending/no-award, reject/confirm/repeat/revisit/restart, all-route guards, stale
+  edited-revision decisions and completed-stage refinement. Three initial red/green
+  slices; remaining guards characterize implementation. Final focused slice
+  **76 passed**,6 warnings in8.52s. TypeScript/frontend build, compileall, whitespace
+  and both Caddy configurations passed. No formatter/typechecker/CI/image claim.
+- **Browser/restart:** Disposable mock stack, Guest and synthetic registered OIDC
+  callback; desktop1440x960/mobile390x844 and light/dark path inspected. Verified
+  rejection, explicit confirmation, completed revisit/frontier return, artifacts,
+  locked stages, reload, draft/focus, lecture recommendation visibility, grounded
+  lecture/citation/original download. Other-tab decision yields409/read recovery;
+  duplicate click makes one POST. Saved-but-lost decision response needs GET-only
+  refresh. Real delayed project save + Stop watching + reload recovers one saved
+  turn, original project intent and a newer draft. Same-store restart retains
+  pending/artifacts/history/source bytes and exact lecture/project replay with no
+  duplicate pair. Fresh final connected console0 errors/0 warnings; deliberate
+  abort/restart tabs have expected errors. Streamlit coexistence0 errors/16 existing
+  warnings. All ticket browsers/demo processes stopped; ports8000/8501/18080 clear.
+- **Reviews:** Separate read-only Luna Standards/Spec reviews and rechecks found
+  no remaining definite regression. Spec's hidden-in-lecture pending action was
+  fixed and browser-tested. Impeccable detector[]; full UI review **ship**, expanded
+  work/locked-stage coverage caveat closed by inspected additional captures.
+  Documenter corrected README focus/layout wording; existing palette-token and
+  Streamlit-vs-pilot layout differences preserved, no global system rewrite.
+- **Compatibility/rollback:** No schema, environment or existing student-data
+  migration. Streamlit, sources, original bytes and saved learning state remain
+  compatible. Revert this ticket code and its four proxy routes together, rebuild
+  prior frontend; no data reset. Tab intent is additive; old receipts default to
+  lecture. Source/workspace parity stays in later tickets. External formative study
+  and two-week pilot pending, **zero participant sessions**. No paid calls, real
+  Cognito/AWS/CDN/capacity/cost/model-quality/student-outcome, push/deploy or release claim.
+- **Handoff/Git:** [12.md](../new_docs/ticket_handoffs/12.md). Selective ticket-only
+  commit authorized; preserve original staged patch SHA256
+  `3822626dc9314c8fef41f80427af7eba322a24a2157543d453c7bddf16bf034a`, all user work,
+  and uncommitted ticket11 publication-result updates. Commit/publication results
+  are recorded in the handoff appendix after completion, not implied here.
+- **Next exact action:** Selective local commit with preservation assertions,
+  publish concrete acceptance evidence to#25 before closure, then create a NEW
+  `gpt-6.1-sol` task for local13/#26 “React source management without draft loss.”
+  Live#26 OPEN/ready; native blockers#19/#24 closed/completed. Fresh task must read
+  handoff12, EXECUTION, GITHUB_TICKETS and relevant guides/spec, recheck live blockers,
+  preserve three-panel direction and pending external study gates. No second ticket
+  is implemented in this context.
+
 ### Ticket 11 / GitHub #24: React lecture conversation and interrupted-turn recovery (2026-11-17)
 
 - **Outcome:** `/pilot/` asks lecture questions in existing notebooks, distinguishes

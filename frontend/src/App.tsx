@@ -1,4 +1,4 @@
-/** CDE2300 lecture conversation; project and lecturer work remain in Streamlit. */
+/** CDE2300 lecture and project companion over the shared coaching policy. */
 import { useEffect, useRef, useState } from 'react';
 import { useReader } from './useReader';
 import { Conversation } from './Conversation';
@@ -19,12 +19,12 @@ export default function App() {
     <a className="skip-link" href="#main">Skip to saved work</a>
     <header className="app-header">
       <a className="wordmark" href="/pilot/">CDE2300</a>
-      <span className="reader-label">Lecture companion</span>
+      <span className="reader-label">Student companion</span>
       <a className="streamlit-link" href="/">Open Streamlit</a>
     </header>
     {!session ? <main id="main" className="entry">
-      <h1>Make sense of your<br/>lecture questions.</h1>
-      <p>Ask lecture questions in an existing notebook and inspect saved evidence. Use Streamlit to create notebooks, manage sources, and develop your project.</p>
+      <h1>Pick up your questions<br/>and project thinking.</h1>
+      <p>Ask about lectures, develop your project, and resume saved work in an existing notebook. Use Streamlit to create notebooks and manage sources.</p>
       <p className="course-notice">Your chatbot work is never graded and has no association with your course grades. This companion is used for CDE2300. Researchers want to understand how students use it and whether it benefits learning.</p>
       {reader.phase === 'checking' ? <p role="status">Checking your session…</p> : <>
         <div className="entry-actions"><a className="primary action" href="/api/v1/auth/login">Sign in</a>
@@ -83,9 +83,9 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
         }}>Notebooks</button></div>
         {reader.error ? <p role="alert" className="error">{reader.error} <button onClick={() => void reader.reload()}>Refresh notebooks</button></p> : null}
         {reader.busy ? <p role="status">Loading saved history…</p> : null}
-        {reader.page ? <Conversation key={`${session.owner_id}:${reader.page.notebook.id}`} page={reader.page} owner={session.owner_id}
-          busy={reader.busy} refresh={() => reader.open(reader.page!.notebook.id, false, true)} expired={() => void reader.reload()}
-          loadEarlier={() => reader.open(reader.page!.notebook.id, true)}/> : !reader.busy ? <div className="choose-notebook"><h2>Pick up a thread.</h2><p>Choose a notebook to ask a lecture question or revisit saved work.</p></div> : null}
+        {reader.page && reader.project ? <Conversation key={`${session.owner_id}:${reader.page.notebook.id}`} page={reader.page} project={reader.project} owner={session.owner_id}
+          busy={reader.busy} refresh={async () => { if (!await reader.open(reader.page!.notebook.id, false, true)) throw new Error('Refresh failed'); }} expired={() => void reader.reload()}
+          loadEarlier={() => reader.open(reader.page!.notebook.id, true).then(() => {})}/> : !reader.busy ? <div className="choose-notebook"><h2>Pick up a thread.</h2><p>Choose a notebook to ask a lecture question or revisit saved work.</p></div> : null}
       </main>
     </div>;
 }

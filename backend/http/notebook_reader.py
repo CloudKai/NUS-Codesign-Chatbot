@@ -10,8 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from fastapi.responses import FileResponse, StreamingResponse, Response
 
 from backend.domain import CitationReference, CoachRequest, CoachTurn
-from backend.learning.journey import normalize_journey
+from backend.learning.journey import normalize_journey, selectable_stage_ids
+from backend.learning.resume import StageResume, project_resume
+from backend.learning.stages import THINKING_STAGES
 from backend.owner_context import OwnerServices
+from backend.operational_metrics import record_stage_transition
 from backend.settings import settings
 
 
@@ -63,6 +66,47 @@ class LectureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     student_message: str = Field(min_length=1, max_length=12_000)
     idempotency_key: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+
+
+class ReaderStage(StageResume):
+    """Canonical stage artifact with server-projected navigation availability."""
+
+    id: str
+    label: str
+    selectable: bool
+
+
+class ReaderPending(BaseModel):
+    """Visible recommendation without private assessment or research metadata."""
+
+    id: str
+    from_stage: str
+    to_stage: str
+    rationale: str
+
+
+class ReaderProject(BaseModel):
+    """Owner-fenced saved project work and canonical pending action."""
+
+    owner_id: str
+    thread_id: str
+    current_stage: str
+    stages: list[ReaderStage]
+    pending: ReaderPending | None
+
+
+class ReaderDecision(BaseModel):
+    """Explicit decision for one saved recommendation; additional authority is forbidden."""
+
+    model_config = ConfigDict(extra="forbid")
+    accepted: bool = Field(strict=True)
+
+
+class ReaderSelection(BaseModel):
+    """Requested focus; the application enforces the canonical unlock policy."""
+
+    model_config = ConfigDict(extra="forbid")
+    stage_id: str = Field(min_length=1, max_length=64)
 
 
 def _message(row: dict[str, Any]) -> ReaderMessage:
@@ -149,19 +193,85 @@ def register_notebook_reader(
             conversation_revision=page["conversation_revision"],
         )
 
+    @app.get("/api/v1/reader/threads/{thread_id}/project", response_model=ReaderProject)
+    def project(thread_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderProject:
+        """Read canonical artifacts and navigation without invoking a provider or writing data."""
+        thread = owner.workspace.get_thread(thread_id)
+        if thread is None:
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        metadata = thread.get("metadata") or {}
+        journey = normalize_journey(metadata.get("learning_journey"))
+        resume = project_resume(metadata, owner.store.get_messages(thread_id))
+        selectable = selectable_stage_ids(journey) if settings.student_stage_selection else ()
+        pending = owner.learning.get_pending(thread_id)
+        return ReaderProject(
+            owner_id=owner.user_id, thread_id=thread_id, current_stage=resume.current_stage,
+            stages=[ReaderStage(
+                **view.model_dump(), id=stage.id, label=stage.label, selectable=stage.id in selectable,
+            ) for stage, view in zip(THINKING_STAGES, resume.stages, strict=True)],
+            pending=ReaderPending(
+                id=pending.id, from_stage=pending.from_stage, to_stage=pending.to_stage,
+                rationale=pending.assessment.recommendation_rationale,
+            ) if pending else None,
+        )
+
+    @app.post("/api/v1/reader/threads/{thread_id}/project/resolve/{transition_id}", response_model=ReaderProject)
+    def project_resolve(
+        thread_id: str, transition_id: str, payload: ReaderDecision,
+        owner: OwnerServices = Depends(reader_owner),
+    ) -> ReaderProject:
+        """Apply the shared atomic decision; stale/duplicate requests require canonical rereading."""
+        if owner.workspace.get_thread(thread_id) is None:
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            owner.learning.resolve(thread_id, transition_id, payload.accepted)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail="Project changed. Refresh saved project work.") from error
+        record_stage_transition(outcome="accepted" if payload.accepted else "rejected")
+        return project(thread_id, owner)
+
+    @app.post("/api/v1/reader/threads/{thread_id}/project/select-stage", response_model=ReaderProject)
+    def project_select(
+        thread_id: str, payload: ReaderSelection, owner: OwnerServices = Depends(reader_owner),
+    ) -> ReaderProject:
+        """Select only application-authorized stages without awarding completion in the browser."""
+        if owner.workspace.get_thread(thread_id) is None:
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            owner.learning.select_stage(thread_id, payload.stage_id)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail="Stage unavailable. Refresh saved project work.") from error
+        record_stage_transition(outcome="selected")
+        return project(thread_id, owner)
+
     @app.post("/api/v1/reader/threads/{thread_id}/lecture/stream")
     def lecture_stream(
         thread_id: str, payload: LectureRequest, request: Request,
         owner: OwnerServices = Depends(reader_owner),
     ) -> StreamingResponse:
         """Reuse the shared dispatch/preview/save lifecycle with server-owned lecture intent."""
+        return dispatch(thread_id, payload, request, owner, "lecture_help")
+
+    @app.post("/api/v1/reader/threads/{thread_id}/project/stream")
+    def project_stream(
+        thread_id: str, payload: LectureRequest, request: Request,
+        owner: OwnerServices = Depends(reader_owner),
+    ) -> StreamingResponse:
+        """Coach student-authored project work through the same saved-turn lifecycle."""
+        return dispatch(thread_id, payload, request, owner, "project_coaching")
+
+    def dispatch(
+        thread_id: str, payload: LectureRequest, request: Request, owner: OwnerServices,
+        intent: Literal["lecture_help", "project_coaching"],
+    ) -> StreamingResponse:
+        """Build the shared request from authoritative saved stage and response detail."""
         thread = owner.workspace.get_thread(thread_id)
         if thread is None:
             raise HTTPException(status_code=404, detail="Notebook not found")
         journey = normalize_journey((thread.get("metadata") or {}).get("learning_journey"))
         coach_request = CoachRequest(
             thread_id=thread_id, student_message=payload.student_message,
-            idempotency_key=payload.idempotency_key, interaction_intent="lecture_help",
+            idempotency_key=payload.idempotency_key, interaction_intent=intent,
             current_stage=journey["current_stage"], response_detail=journey["response_detail"],
         )
         return stream_turn(coach_request, request, owner)

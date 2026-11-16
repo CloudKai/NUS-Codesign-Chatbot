@@ -31,3 +31,15 @@ export async function currentSession(signal: AbortSignal): Promise<Session> {
     return get<Session>('/api/v1/reader/session', signal);
   }
 }
+
+/** Saved project artifacts and navigation are projected by the shared learning policy. */
+export interface Stage {
+  id: string; label: string; completed: boolean; selectable: boolean;
+  artifact_label: string; student_work: { message_id: string; text: string }[];
+  feedback: { message_id: string; text: string }[]; coach_summary: string;
+  decision: string; next_action: string;
+}
+export interface Project {
+  owner_id: string; thread_id: string; current_stage: string; stages: Stage[];
+  pending: { id: string; from_stage: string; to_stage: string; rationale: string } | null;
+}

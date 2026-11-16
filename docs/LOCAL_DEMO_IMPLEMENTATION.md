@@ -134,11 +134,12 @@ transitions.
 
 ### Presentation
 
-Tickets 10–11 / #23–24 add a bounded static React/TypeScript pilot at `/pilot/`,
+Tickets 10–12 / #23–25 add a bounded static React/TypeScript pilot at `/pilot/`,
 built from `frontend/` and served by `backend/http/notebook_reader.py`. Streamlit
-remains at `/` for project, source-management and lecturer workflows. Six typed
+remains at `/` for source-management, remaining workspace and lecturer workflows. Ten typed
 browser routes cover session, notebook list, saved message page/citations, lecture
-stream, exact-key recovery and cited-original download. Verified registered or
+stream, exact-key recovery, cited-original download, canonical project view, project
+stream and explicit decision/selection adapters. Verified registered or
 enabled Guest credentials are mandatory even in anonymous-capable internal mode;
 staff, cross-origin and foreign-notebook requests are rejected. POST requires
 Origin. Caddy exposes exact methods/paths only, with private no-store responses.
@@ -160,6 +161,17 @@ responses; focus and 15-second visible probes detect changed sessions. These are
 bounded checks, not instantaneous cross-tab notification. See
 [`frontend/README.md`](../frontend/README.md) for build, recovery/privacy and rollback.
 The external formative study remains pending; this pilot is engineering scope.
+
+Ticket12/#25 renders the existing `project_resume` projection, canonical stage
+labels/selectability and pending recommendation in React's right Thinking Path
+panel. Project coaching delegates to the same stream with fixed project intent;
+confirmation/rejection and gated revisits delegate to `LearningProgressService`.
+The browser calculates no unlocks, readiness or completion. Every action reconciles
+saved state without optimistic advancement; ambiguous responses block further actions
+until a successful read. Draft/intent/original receipt survive reload and stage moves.
+The three-panel desktop layout uses a temporary Thinking Path panel on mobile with
+explicit return focus. Saved student contributions and coach summaries remain distinct.
+No schema/data migration or source/workspace management expansion is introduced.
 
 Streamlit remains the frontend entrypoint. It only renders state and calls a
 typed API client; it must not call SQLite, local files, model SDKs, LangChain,

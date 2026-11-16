@@ -1,10 +1,12 @@
 /** Lecture composer, exact-request reconciliation and saved citation inspection. */
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, currentSession, get, type Page } from './api';
+import { ApiError, currentSession, get, type Page, type Project } from './api';
+import { ThinkingPath } from './ThinkingPath';
 import { isTurn, readStream, type Citation, type Event } from './stream';
 
-interface Receipt { key: string; text: string }
-interface Draft { text: string; pending: Receipt | null }
+type Intent = 'lecture' | 'project';
+interface Receipt { key: string; text: string; intent?: Intent }
+interface Draft { text: string; pending: Receipt | null; intent?: Intent }
 const empty: Draft = { text: '', pending: null };
 
 /** Read only this owner's tab-scoped unsent text and recovery identity; never store replies. */
@@ -13,17 +15,24 @@ function restore(key: string): Draft {
     const value = JSON.parse(sessionStorage.getItem(key) || 'null');
     if (!value || typeof value.text !== 'string') return empty;
     const pending = value.pending;
-    return { text: value.text, pending: pending && typeof pending.key === 'string' && typeof pending.text === 'string' ? pending : null };
+    return { text: value.text, intent: value.intent === 'project' ? 'project' : 'lecture', pending: pending && typeof pending.key === 'string' && typeof pending.text === 'string' ? pending : null };
   } catch { return empty; }
 }
 
 /** Keep draft, focus and loaded transcript stable during progress and evidence inspection. */
-export function Conversation({ page, owner, refresh, expired, busy, loadEarlier }: {
-  page: Page; owner: string; refresh: () => Promise<void>; expired: () => void;
+export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier }: {
+  page: Page; project: Project; owner: string; refresh: () => Promise<void>; expired: () => void;
   busy: boolean; loadEarlier: () => Promise<void>;
 }) {
   const storageKey = `codesign-lecture:${owner}:${page.notebook.id}`;
   const initial = useRef(restore(storageKey));
+  const [intent, setIntent] = useState<Intent>(initial.current.intent || 'lecture');
+  const [pathOpen, setPathOpen] = useState(false);
+  const pathToggle = useRef<HTMLButtonElement>(null);
+  const [moving, setMoving] = useState(false);
+  const [projectUncertain, setProjectUncertain] = useState(false);
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
   const [text, setText] = useState(initial.current.text);
   const [pending, setPending] = useState<Receipt | null>(initial.current.pending);
   const pendingRef = useRef(pending);
@@ -52,7 +61,7 @@ export function Conversation({ page, owner, refresh, expired, busy, loadEarlier 
     pendingRef.current = nextPending;
     setText(nextText);
     setPending(nextPending);
-    try { sessionStorage.setItem(storageKey, JSON.stringify({ text: nextText, pending: nextPending })); }
+    try { sessionStorage.setItem(storageKey, JSON.stringify({ text: nextText, pending: nextPending, intent: intentRef.current })); }
     catch { setStorageError(true); }
   }
 
@@ -87,10 +96,10 @@ export function Conversation({ page, owner, refresh, expired, busy, loadEarlier 
   }
 
   async function send(retry = false) {
-    if (lock.current || busy || (!retry && (pendingRef.current || !textRef.current.trim()))) return;
+    if (lock.current || busy || moving || projectUncertain || (!retry && (pendingRef.current || !textRef.current.trim()))) return;
     if (retry && checkedKey !== pendingRef.current?.key) return;
     lock.current = true;
-    const receipt = retry ? pendingRef.current! : { key: crypto.randomUUID(), text: textRef.current };
+    const receipt = retry ? pendingRef.current! : { key: crypto.randomUUID(), text: textRef.current, intent: intentRef.current };
     if (!receipt) { lock.current = false; return; }
     remember(textRef.current, receipt);
     setWatching(true);
@@ -101,7 +110,7 @@ export function Conversation({ page, owner, refresh, expired, busy, loadEarlier 
     let terminalError: Event & { event: 'error' } | null = null;
     try {
       await verify();
-      const response = await fetch(`${path}/lecture/stream`, {
+      const response = await fetch(`${path}/${receipt.intent || 'lecture'}/stream`, {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ student_message: receipt.text, idempotency_key: receipt.key }),
@@ -136,6 +145,37 @@ export function Conversation({ page, owner, refresh, expired, busy, loadEarlier 
     }
   }
 
+  async function stageAction(route: string, body: object) {
+    if (lock.current || pendingRef.current || busy || moving) return;
+    lock.current = true;
+    setMoving(true);
+    setProjectUncertain(true);
+    setStatus('Checking saved project…');
+    try {
+      await verify();
+      const response = await fetch(`${path}/project/${route}`, {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      await verify();
+      if ([401, 403].includes(response.status)) { expired(); return; }
+      // Even an ambiguous POST is reconciled by reads; decisions are never automatically replayed.
+      await refresh();
+      if (active.current) {
+        setProjectUncertain(false);
+        setStatus(response.ok ? 'Saved project updated.' : 'That action is no longer available. Saved project refreshed.');
+      }
+    } catch { if (active.current) setStatus('Could not verify the project action. Refresh saved project before continuing.'); }
+    finally { if (active.current) setMoving(false); lock.current = false; }
+  }
+
+  async function refreshProject() {
+    setMoving(true);
+    try { await verify(); await refresh(); if (active.current) { setProjectUncertain(false); setStatus('Saved project refreshed.'); } }
+    catch { if (active.current) setStatus('Could not refresh saved project. Try again when connected.'); }
+    finally { if (active.current) setMoving(false); }
+  }
+
   async function download() {
     if (!evidence) return;
     setDownloadError('');
@@ -162,15 +202,28 @@ export function Conversation({ page, owner, refresh, expired, busy, loadEarlier 
   useEffect(() => { if (evidence) evidenceHeading.current?.focus({ preventScroll: true }); }, [evidence]);
 
   return <section aria-label="Saved conversation" className="conversation">
+    <div className="conversation-chat">
     <h2>{page.notebook.name}</h2>
-    <p className="supporting">Ask about a lecture. Answers use available course evidence and selected notebook sources; gaps are stated. Project stages stay unchanged.</p>
+    <p className="supporting active-stage">Project stage: {project.stages.find(stage => stage.id === project.current_stage)?.label}</p>
+    <button ref={pathToggle} className="path-toggle mobile-only" aria-expanded={pathOpen} aria-controls="project-path" onClick={() => {
+      setPathOpen(value => !value);
+      if (!pathOpen) window.requestAnimationFrame(() => document.getElementById('path-heading')?.focus({ preventScroll: true }));
+    }}>Thinking Path{project.pending ? ' · decision pending' : ''}</button>
+    <fieldset className="intent-switch" disabled={watching || checking || moving || !!pending}>
+      <legend>What would you like to work on?</legend>
+      {(['lecture', 'project'] as const).map(value => <label key={value}><input type="radio" name="intent" value={value} checked={intent === value} onChange={() => {
+        intentRef.current = value; setIntent(value); remember(textRef.current, pendingRef.current);
+      }}/>{value === 'lecture' ? 'Ask about a lecture' : 'Develop my project'}</label>)}
+    </fieldset>
+    {intent === 'lecture' ? <p className="supporting">Answers use available course evidence and selected notebook sources; gaps are stated. Lecture help leaves your project stage unchanged.</p> : null}
+    {projectUncertain ? <p role="alert">Check saved project before another action. <button disabled={moving || busy} onClick={() => void refreshProject()}>Refresh saved project</button></p> : null}
     <p className="supporting">{page.messages.length} of {page.total_count} saved messages.</p>
     {page.next_cursor ? <button disabled={busy} onClick={() => {
       const height = document.documentElement.scrollHeight;
       const scroll = window.scrollY;
       void loadEarlier().then(() => window.requestAnimationFrame(() => window.scrollTo(0, scroll + document.documentElement.scrollHeight - height)));
     }}>Load earlier messages</button> : null}
-    {page.messages.length === 0 ? <p>No saved messages yet. Ask your first lecture question below.</p> : null}
+    {page.messages.length === 0 ? <p>No saved messages yet. Write your first question or project contribution below.</p> : null}
     {page.messages.map(message => <article className={`message ${message.role === 'user' ? 'student' : 'coach'}`} key={message.id}>
       <h3>{message.role === 'user' ? 'You' : 'Coach'}</h3>
       <div className="message-content">{message.content}</div>
@@ -191,11 +244,11 @@ export function Conversation({ page, owner, refresh, expired, busy, loadEarlier 
       {downloadError ? <p role="alert">{downloadError}</p> : null}
     </aside> : null}
     <form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
-      <label htmlFor="lecture-question">Your lecture question</label>
+      <label htmlFor="lecture-question">{intent === 'lecture' ? 'Your lecture question' : 'Your project contribution'}</label>
       <textarea ref={composer} id="lecture-question" value={text} maxLength={12000} rows={3}
         placeholder="What would you like to understand?" onChange={event => remember(event.target.value, pendingRef.current)}/>
-      <div className="composer-actions"><span className="supporting">Lecture help · project stages unchanged</span>
-        <button className="primary" type="submit" disabled={watching || checking || busy || !!pending || !text.trim()}>Send question</button></div>
+      <div className="composer-actions"><span className="supporting">{intent === 'lecture' ? 'Lecture help · project stages unchanged' : `Project coaching · ${project.stages.find(stage => stage.id === project.current_stage)?.label}`}</span>
+        <button className="primary" type="submit" disabled={watching || checking || busy || moving || projectUncertain || !!pending || !text.trim()}>{intent === 'lecture' ? 'Send question' : 'Send project work'}</button></div>
     </form>
     {storageError ? <p role="alert">Tab storage is unavailable. Keep a copy of your draft before reloading.</p> : null}
     <div className="turn-status" role="status" aria-live="polite">{status}</div>
@@ -206,5 +259,10 @@ export function Conversation({ page, owner, refresh, expired, busy, loadEarlier 
       <button disabled={checking || busy} onClick={() => void reconcile(pending)}>Check saved answer</button>
       <button disabled={checking || busy || checkedKey !== pending.key} onClick={() => void send(true)}>Retry same question</button>
     </div> : null}
+    </div>
+    <aside id="project-path" className={`project-panel ${pathOpen ? 'path-open' : ''}`} aria-label="Project Thinking Path">
+      <button className="mobile-only" onClick={() => { setPathOpen(false); pathToggle.current?.focus({ preventScroll: true }); }}>Return to chat</button>
+      <ThinkingPath project={project} disabled={watching || checking || busy || moving || !!pending || projectUncertain} act={stageAction}/>
+    </aside>
   </section>;
 }

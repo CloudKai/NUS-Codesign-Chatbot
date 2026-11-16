@@ -1,13 +1,13 @@
 /** Ephemeral reader state; owner changes and late responses cannot share a transcript. */
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, currentSession, get, type NotebookList, type Page, type Session } from './api';
+import { ApiError, currentSession, get, type NotebookList, type Page, type Project, type Session } from './api';
 
 interface ReaderState {
   phase: 'checking' | 'signed-out' | 'ready' | 'error';
   session: Session | null; notebooks: NotebookList['notebooks'];
-  page: Page | null; busy: boolean; error: string;
+  page: Page | null; project: Project | null; busy: boolean; error: string;
 }
-const blank: ReaderState = { phase: 'checking', session: null, notebooks: [], page: null, busy: false, error: '' };
+const blank: ReaderState = { phase: 'checking', session: null, notebooks: [], page: null, project: null, busy: false, error: '' };
 
 /** Own the session lifecycle and owner/revision-fenced list and page requests. */
 export function useReader() {
@@ -62,18 +62,27 @@ export function useReader() {
     controller.current.abort();
     controller.current = new AbortController();
     const signal = controller.current.signal;
-    setState(value => ({ ...value, page: older || refresh ? value.page : null, busy: true, error: '' }));
+    setState(value => ({ ...value, page: older || refresh ? value.page : null, project: older || refresh ? value.project : null, busy: true, error: '' }));
     try {
       const cursor = older ? snapshot.page?.next_cursor : null;
       const query = new URLSearchParams({ limit: '20' });
       if (cursor) query.set('cursor', cursor);
-      const page = await get<Page>(`/api/v1/reader/threads/${encodeURIComponent(notebookId)}/messages/page?${query}`, signal);
+      const base = `/api/v1/reader/threads/${encodeURIComponent(notebookId)}`;
+      const [page, project] = await Promise.all([
+        get<Page>(`${base}/messages/page?${query}`, signal), get<Project>(`${base}/project`, signal),
+      ]);
       const verified = await currentSession(signal);
       if (epoch !== generation.current) return;
-      if (page.owner_id !== snapshot.session.owner_id || verified.owner_id !== page.owner_id) { void reload(); return; }
+      if (page.owner_id !== snapshot.session.owner_id || project.owner_id !== page.owner_id || project.thread_id !== notebookId || verified.owner_id !== page.owner_id) { void reload(); return; }
       if (older && snapshot.page && page.conversation_revision !== snapshot.page.conversation_revision) throw new ApiError(409);
-      setState(value => ({ ...value, busy: false, page: { ...page,
-        messages: older && snapshot.page ? [...page.messages, ...snapshot.page.messages] : page.messages } }));
+      const previous = snapshot.page;
+      const keepWindow = refresh && previous && page.conversation_revision === previous.conversation_revision
+        && page.messages.some(message => previous.messages.some(prior => prior.id === message.id));
+      const messages = older && previous ? [...page.messages, ...previous.messages]
+        : keepWindow ? [...previous.messages.filter(prior => !page.messages.some(message => message.id === prior.id)), ...page.messages] : page.messages;
+      setState(value => ({ ...value, busy: false, project, page: { ...page, messages,
+        next_cursor: keepWindow ? previous.next_cursor : page.next_cursor } }));
+      return true;
     } catch (error) { fail(error, epoch); }
   }
 
