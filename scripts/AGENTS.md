@@ -41,6 +41,7 @@ logic.
 | `benchmark_student_source_chunks.py` | Informational dynamic vs precomputed vs cached chunk probe | In-memory + temp SQLite only. Prints counts and wall time; not a pytest latency SLO. Do not run against production data. |
 | `benchmark_coach_turn_mock.py` | Informational mock `CoachApplicationService` submit time by history size | Isolated temp SQLite + deterministic provider. Refuses live AWS. Not a latency SLO. |
 | `load_probe.py` | Free local FastAPI/rate-limit/ownership/KB-pool capacity probe | Mock + temp SQLite only. Fake provider/KB delays are script-only and restored. Never AgentCore/Bedrock/DSQL/S3/Cognito. Not an EC2/Haiku benchmark. |
+| `classroom_probe.py` | Stepped80 Guest HTTP sessions, generation overload, restart and independent local backup restore | Separate loopback mock worker and new temporary data only; no supplied workspace. Reports real local failures and unresolved live/cost gates. See `docs/operations/CLASSROOM_CAPACITY_GATE.md`. |
 
 ## Environment variables
 

@@ -24,6 +24,11 @@ and scopes every notebook/source/message operation to that owner. The shared
 Both paths support Thinking Path progression, structured assessments, Review
 personalization, and selected image grounding.
 
+Operators can run the disposable [classroom capacity and recovery rehearsal](docs/operations/CLASSROOM_CAPACITY_GATE.md)
+with `.venv/bin/python -m scripts.classroom_probe`. The observed80-request wait
+and admission errors, unknown complete S$30 costs and unresolved provider/wait
+inputs keep classroom readiness gated; mock results are not a live-capacity pass.
+
 The optional [React notebook reader](frontend/README.md) runs at `/pilot/` on
 the same Caddy origin; Streamlit remains at `/`. Build it with Node 22 using
 `npm ci --ignore-scripts --prefix frontend` and `npm run build --prefix frontend`.

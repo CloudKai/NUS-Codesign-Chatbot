@@ -1,0 +1,90 @@
+{
+  "month": "2026-11",
+  "currency": "SGD",
+  "as_of": "2026-11-17",
+  "inventory_complete": false,
+  "usage_complete": false,
+  "lines": [
+    {
+      "category": "hosting",
+      "name": "Host and attached capacity",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "EC2/runtime host, EBS, load balancing, public IPv4 and recurring compute; reconcile all active regions/services. No complete current bill supplied."
+    },
+    {
+      "category": "generation",
+      "name": "All generation and runtime charges",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Inference, AgentCore runtime, guardrails, SDK/model retries, failures, recovery, RAG fallback, Deep Review and stage checkpoints; measured monthly use and priced worst-case call ceiling absent."
+    },
+    {
+      "category": "retrieval",
+      "name": "Knowledge Base and vector retrieval",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "KB Retrieve queries, vector/index/search capacity and query requests; corpus volume, index service and actual charges unverified."
+    },
+    {
+      "category": "ingestion",
+      "name": "Recurring corpus and source ingestion",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Parsing/OCR, embeddings, reindexing, repeated uploads and ingestion jobs; allocate recurring maintenance and amortization once. Workload unknown."
+    },
+    {
+      "category": "storage",
+      "name": "All primary storage and requests",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "S3 originals/extracts/derived objects, DSQL capacity/requests, object requests, retention and versions. Complete volumes and bill absent."
+    },
+    {
+      "category": "backups",
+      "name": "Independent backup and restore operations",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Off-host copies, snapshots, retained versions, restore request/transfer and rehearsal allocation. Local disposable restore is not evidence of a funded independent backup service."
+    },
+    {
+      "category": "observability",
+      "name": "Logs metrics traces alarms and retention",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "CloudWatch and any other log/metric/trace sink, retention, ingestion and alarm charges; inspect enabled sinks and pricing tiers. No account evidence supplied."
+    },
+    {
+      "category": "network",
+      "name": "CDN requests egress and network capacity",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "CloudFront/CDN requests, egress, NAT, inter-service/inter-region transfer, internet requests and any fixed network charges. Inspect actual topology and bill."
+    },
+    {
+      "category": "other",
+      "name": "Identity DNS domain support FX and taxes",
+      "gross_sgd": null,
+      "credits_sgd": null,
+      "credit_eligible": null,
+      "basis": "unknown",
+      "evidence": "Cognito or other identity usage, DNS/domain amortization, certificates if charged, support, taxes and other services; record source-currency FX rate/date/tax basis. No complete bill/credit evidence supplied."
+    }
+  ]
+}

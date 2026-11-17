@@ -5,6 +5,11 @@ account bill, choose infrastructure, or enforce a generation budget (#21).
 Use a current complete bill before assessing the S$30/month release gate.
 The repository contains no verified account prices or remaining credit balance.
 
+Ticket15's [cash-funded gate record](operations/CLASSROOM_CAPACITY_GATE.md)
+inventories the recurring categories with explicit unknowns, requires positive
+approved headroom and records the pending funding/usage decision. It establishes
+no S$30 pass; its empty partial usage input is not zero actual monthly usage.
+
 Run from the repository root:
 
 ```sh

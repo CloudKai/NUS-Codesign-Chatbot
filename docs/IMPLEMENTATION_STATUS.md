@@ -2,6 +2,68 @@
 
 ## CURRENT STATUS
 
+### Ticket 15 / GitHub #28: capacity and sustainable-cost gate — PARTIAL / OPEN (2026-11-17)
+
+- **Scope/status:** Local characterization and recovery rehearsal recorded; #28
+  stays OPEN. No live classroom/S$30/default-interface/release claim; #29 remains
+  blocked by #28. Native blockers18/19/21 reverified CLOSED/completed with published
+  evidence before edits. External formative study/two-week pilot: ZERO sessions.
+- **Behavior/files:** New `scripts/classroom_probe.py` runs real loopback HTTP from
+  a separate driver against a mock-only disposable API worker. Steps10/20/40/80,
+  80 idle authenticated Guest sessions/concurrent reads, repeat/restored80 bursts,
+  capacity/wait overload and provider failure. Uses existing reader stream,
+  retrieval/citation, recovery, admission and persistence services; no product/UI,
+  schema, provider dependency, existing-data or host/storage migration changes.
+  New HTTP backup/accounting regression, explicit unknown recurring-cost inventory,
+  aggregate measured JSON and [operator gate runbook](operations/CLASSROOM_CAPACITY_GATE.md).
+- **Measured limits:** Final step80 saved all48 admitted normal turns;29 queue
+  expiries/3 admission-unavailable. Repeat80:48 saved/30 wait/2 unavailable.
+  Restored80:22 saved/50 wait/8 unavailable. All normal `thinking` admissions match
+  saved completions; canonical HTTP transcript/recovery/citation/replay assertions
+  pass, all replays preserve ledger, zero owner-isolation violations. Two-slot
+  queue overload:6 saved/74 capacity rejections;50-ms deadline:4 saved/76 waits.
+  Saved completion p95 at80=31080.28ms; client-observed queue p95=30047.15ms
+  (rejected samples include terminal recovery GET). Server maximum377072KiB RSS,
+  176 sampled Python threads, four running/73 queued sampled peaks; RSS/CPU are
+  process high-water/cumulative, not deployment sizing or leak-proof evidence.
+- **Concrete local blocker:** Both full runs exposed wait/unavailable errors.
+  Two-attempt rule followed: read-only Astra diagnosis, no third identical retry.
+  Plausible abandoned uninvoked FIFO head after SQLite error plus writer-lock
+  polling pressure; causal fault reproduction remains pending. No admission-policy
+  implementation changed and no uncertain invoked slot/charge was waived.
+- **Recovery/funding:** Same-store process restart and independent local backup
+  restore match canonical snapshot SHA256
+  `5b3fd4ca3b66f70e6f53c355351da6364c58268a4071e19c232b9bfe32e85133`.
+  Original tree unavailable; only separate backup DB/file/policy bytes restored.
+  Ledger snapshot229 reservations/16600 synthetic microSGD unchanged; final396/
+  19900/unsettled0. Separate HTTP regression restores exhausted funding without
+  renewing allowance. No physical off-host/DSQL/S3 recovery claim. Nine-category
+  current cost inventory is explicitly unknown; complete gross/credits/cash/
+  post-credit/runway all null. Approved positive headroom and funding/usage choice
+  pending; an empty partial usage export does not mean zero spend.
+- **Validation:** Focused119 passed/6 warnings/16.73s. Canonical full2309 passed,
+  1 skipped/293 warnings/84.64s; only preserved unmanaged ` 2.py` duplicates excluded.
+  Initial recovery/admission11 passed. Final four-session smoke and child-launch/
+  range guards pass. Compileall, whitespace and frontend TypeScript/build pass.
+  Canonical `scripts/start.sh` API+Streamlit startup and same-store restart return
+  ready/health/document200 on disposable data; processes stopped,8000/8501/18080
+  clear, unrelated8080 untouched. UI unchanged: no new browser/UI certification.
+- **Reviews/compatibility:** Separate read-only Luna Standards/Spec reviews. Launch
+  guard and users1..80 findings corrected; explicit admission/save assertion and
+  truthful report labels replace a hard-coded zero summary. Final review disposition
+  in [handoff15](../new_docs/ticket_handoffs/15.md). No paid calls/push/deploy. Rollback
+  removes only ticket rehearsal/test/docs; all existing data and ledgers preserved.
+- **Next exact action:** In a fresh #28 task, reproduce the suspected abandoned
+  FIFO waiter through the approved public HTTP boundary with controlled real-SQLite
+  contention, or confirm an additional admission test seam before adding it. Fix only
+  supported cleanup/lock pressure, recharacterize, and resolve lecturer-approved
+  maximum queue/total wait, evidenced real provider capacity, complete recurring bill,
+  approved positive headroom/funding decision and off-host recovery. Live tests still
+  need fresh explicit request/token/cost cap. Do not start #29 or close #28 meanwhile.
+  Ticket-only selective local commit/publication results are recorded only after
+  success; original staged patch and prior handoff11–14/status publication bytes
+  remain separately preserved.
+
 ### Ticket 14 / GitHub #27: React workspace and preference parity (2026-11-17)
 
 - **Outcome:** Bounded workspace slice complete: notebook create/rename/confirmed

@@ -1,0 +1,393 @@
+{
+  "evidence": "local_mock_characterization_only",
+  "users": 80,
+  "fake_provider_delay_seconds": 0.25,
+  "max_running": 4,
+  "initial_max_queued": 80,
+  "initial_queue_deadline_seconds": 30,
+  "server_workers": 1,
+  "open_sessions": {
+    "authenticated_http_sessions": 80,
+    "idle_hold_seconds": 2,
+    "hold_and_concurrent_read_seconds": 2.244,
+    "read_completions": 80,
+    "generation_reservations_added": 0,
+    "server_peak_threads": 174,
+    "server_process_max_rss_kib": 348688,
+    "server_cpu_seconds": 37.783,
+    "sampled_peak_running": 4,
+    "sampled_peak_queued": 70
+  },
+  "steps": [
+    {
+      "scenario": "step-10",
+      "sessions": 10,
+      "submitted": 10,
+      "dispatch_acknowledged": 10,
+      "admitted_thinking": 10,
+      "queued": 6,
+      "completed_saved": 10,
+      "terminal_errors": {},
+      "unclassified_errors": 0,
+      "completion_ms_all_outcomes": {
+        "p50": 926.69,
+        "p95": 1204.44,
+        "max": 1204.44
+      },
+      "completion_ms_saved": {
+        "p50": 926.69,
+        "p95": 1204.44,
+        "max": 1204.44
+      },
+      "dispatch_to_thinking_ms": {
+        "p50": 664.69,
+        "p95": 948.28,
+        "max": 948.28
+      },
+      "observed_queue_ms": {
+        "p50": 277.86,
+        "p95": 547.88,
+        "max": 547.88
+      },
+      "same_key_replays_verified": 10,
+      "ledger_unchanged_by_replays": true,
+      "server_peak_threads": 25,
+      "server_process_max_rss_kib": 171104,
+      "server_cpu_seconds": 2.218,
+      "sampled_peak_running": 4,
+      "sampled_peak_queued": 6,
+      "transcript_recovery_replay_assertions_passed": true
+    },
+    {
+      "scenario": "step-20",
+      "sessions": 20,
+      "submitted": 20,
+      "dispatch_acknowledged": 20,
+      "admitted_thinking": 20,
+      "queued": 16,
+      "completed_saved": 20,
+      "terminal_errors": {},
+      "unclassified_errors": 0,
+      "completion_ms_all_outcomes": {
+        "p50": 941.14,
+        "p95": 1500.0,
+        "max": 1517.94
+      },
+      "completion_ms_saved": {
+        "p50": 941.14,
+        "p95": 1500.0,
+        "max": 1517.94
+      },
+      "dispatch_to_thinking_ms": {
+        "p50": 681.54,
+        "p95": 1237.45,
+        "max": 1260.03
+      },
+      "observed_queue_ms": {
+        "p50": 538.75,
+        "p95": 1058.43,
+        "max": 1058.43
+      },
+      "same_key_replays_verified": 20,
+      "ledger_unchanged_by_replays": true,
+      "server_peak_threads": 48,
+      "server_process_max_rss_kib": 206704,
+      "server_cpu_seconds": 4.193,
+      "sampled_peak_running": 4,
+      "sampled_peak_queued": 16,
+      "transcript_recovery_replay_assertions_passed": true
+    },
+    {
+      "scenario": "step-40",
+      "sessions": 40,
+      "submitted": 40,
+      "dispatch_acknowledged": 40,
+      "admitted_thinking": 40,
+      "queued": 36,
+      "completed_saved": 40,
+      "terminal_errors": {},
+      "unclassified_errors": 0,
+      "completion_ms_all_outcomes": {
+        "p50": 1700.28,
+        "p95": 3116.1,
+        "max": 3126.85
+      },
+      "completion_ms_saved": {
+        "p50": 1700.28,
+        "p95": 3116.1,
+        "max": 3126.85
+      },
+      "dispatch_to_thinking_ms": {
+        "p50": 1437.22,
+        "p95": 2853.43,
+        "max": 2863.61
+      },
+      "observed_queue_ms": {
+        "p50": 1260.73,
+        "p95": 2467.15,
+        "max": 2472.59
+      },
+      "same_key_replays_verified": 40,
+      "ledger_unchanged_by_replays": true,
+      "server_peak_threads": 88,
+      "server_process_max_rss_kib": 260048,
+      "server_cpu_seconds": 8.477,
+      "sampled_peak_running": 4,
+      "sampled_peak_queued": 32,
+      "transcript_recovery_replay_assertions_passed": true
+    },
+    {
+      "scenario": "step-80",
+      "sessions": 80,
+      "submitted": 80,
+      "dispatch_acknowledged": 80,
+      "admitted_thinking": 48,
+      "queued": 75,
+      "completed_saved": 48,
+      "terminal_errors": {
+        "generation_wait": 29,
+        "generation_unavailable": 3
+      },
+      "unclassified_errors": 0,
+      "completion_ms_all_outcomes": {
+        "p50": 8709.36,
+        "p95": 30926.25,
+        "max": 31097.68
+      },
+      "completion_ms_saved": {
+        "p50": 7573.75,
+        "p95": 31080.28,
+        "max": 31097.68
+      },
+      "dispatch_to_thinking_ms": {
+        "p50": 7310.53,
+        "p95": 30825.01,
+        "max": 30843.89
+      },
+      "observed_queue_ms": {
+        "p50": 7811.76,
+        "p95": 30047.15,
+        "max": 30094.19
+      },
+      "same_key_replays_verified": 48,
+      "ledger_unchanged_by_replays": true,
+      "server_peak_threads": 174,
+      "server_process_max_rss_kib": 348688,
+      "server_cpu_seconds": 36.827,
+      "sampled_peak_running": 4,
+      "sampled_peak_queued": 70,
+      "transcript_recovery_replay_assertions_passed": true
+    },
+    {
+      "scenario": "repeat-burst",
+      "sessions": 80,
+      "submitted": 80,
+      "dispatch_acknowledged": 80,
+      "admitted_thinking": 48,
+      "queued": 76,
+      "completed_saved": 48,
+      "terminal_errors": {
+        "generation_wait": 30,
+        "generation_unavailable": 2
+      },
+      "unclassified_errors": 0,
+      "completion_ms_all_outcomes": {
+        "p50": 5645.77,
+        "p95": 30822.11,
+        "max": 30959.47
+      },
+      "completion_ms_saved": {
+        "p50": 3337.93,
+        "p95": 6433.78,
+        "max": 30959.47
+      },
+      "dispatch_to_thinking_ms": {
+        "p50": 3068.05,
+        "p95": 6171.67,
+        "max": 30701.4
+      },
+      "observed_queue_ms": {
+        "p50": 3780.46,
+        "p95": 30014.78,
+        "max": 30093.34
+      },
+      "same_key_replays_verified": 48,
+      "ledger_unchanged_by_replays": true,
+      "server_peak_threads": 174,
+      "server_process_max_rss_kib": 377072,
+      "server_cpu_seconds": 60.628,
+      "sampled_peak_running": 4,
+      "sampled_peak_queued": 70,
+      "transcript_recovery_replay_assertions_passed": true
+    },
+    {
+      "scenario": "restored-burst",
+      "sessions": 80,
+      "submitted": 80,
+      "dispatch_acknowledged": 80,
+      "admitted_thinking": 22,
+      "queued": 76,
+      "completed_saved": 22,
+      "terminal_errors": {
+        "generation_wait": 50,
+        "generation_unavailable": 8
+      },
+      "unclassified_errors": 0,
+      "completion_ms_all_outcomes": {
+        "p50": 31110.54,
+        "p95": 31270.59,
+        "max": 31374.25
+      },
+      "completion_ms_saved": {
+        "p50": 4603.63,
+        "p95": 8193.63,
+        "max": 8295.67
+      },
+      "dispatch_to_thinking_ms": {
+        "p50": 4339.8,
+        "p95": 7921.48,
+        "max": 8034.55
+      },
+      "observed_queue_ms": {
+        "p50": 29712.19,
+        "p95": 30113.96,
+        "max": 30239.23
+      },
+      "same_key_replays_verified": 22,
+      "ledger_unchanged_by_replays": true,
+      "server_peak_threads": 176,
+      "server_process_max_rss_kib": 341232,
+      "server_cpu_seconds": 30.081,
+      "sampled_peak_running": 4,
+      "sampled_peak_queued": 73,
+      "transcript_recovery_replay_assertions_passed": true
+    },
+    {
+      "scenario": "overload-burst",
+      "sessions": 80,
+      "submitted": 80,
+      "dispatch_acknowledged": 80,
+      "admitted_thinking": 6,
+      "queued": 2,
+      "completed_saved": 6,
+      "terminal_errors": {
+        "generation_capacity": 74
+      },
+      "unclassified_errors": 0,
+      "completion_ms_all_outcomes": {
+        "p50": 1669.72,
+        "p95": 2481.22,
+        "max": 3496.84
+      },
+      "completion_ms_saved": {
+        "p50": 2481.54,
+        "p95": 3496.84,
+        "max": 3496.84
+      },
+      "dispatch_to_thinking_ms": {
+        "p50": 1462.09,
+        "p95": 2483.3,
+        "max": 2483.3
+      },
+      "observed_queue_ms": {
+        "p50": 962.12,
+        "p95": 1019.53,
+        "max": 1019.53
+      },
+      "same_key_replays_verified": 6,
+      "ledger_unchanged_by_replays": true,
+      "server_peak_threads": 164,
+      "server_process_max_rss_kib": 216272,
+      "server_cpu_seconds": 6.676,
+      "sampled_peak_running": 4,
+      "sampled_peak_queued": 2,
+      "transcript_recovery_replay_assertions_passed": true
+    },
+    {
+      "scenario": "wait-expiry-burst",
+      "sessions": 80,
+      "submitted": 80,
+      "dispatch_acknowledged": 80,
+      "admitted_thinking": 4,
+      "queued": 76,
+      "completed_saved": 4,
+      "terminal_errors": {
+        "generation_wait": 76
+      },
+      "unclassified_errors": 0,
+      "completion_ms_all_outcomes": {
+        "p50": 1641.86,
+        "p95": 1945.69,
+        "max": 2429.94
+      },
+      "completion_ms_saved": {
+        "p50": 2420.02,
+        "p95": 2429.94,
+        "max": 2429.94
+      },
+      "dispatch_to_thinking_ms": {
+        "p50": 1400.27,
+        "p95": 1414.88,
+        "max": 1414.88
+      },
+      "observed_queue_ms": {
+        "p50": 41.09,
+        "p95": 95.74,
+        "max": 274.51
+      },
+      "same_key_replays_verified": 4,
+      "ledger_unchanged_by_replays": true,
+      "server_peak_threads": 162,
+      "server_process_max_rss_kib": 223792,
+      "server_cpu_seconds": 6.36,
+      "sampled_peak_running": 4,
+      "sampled_peak_queued": 6,
+      "transcript_recovery_replay_assertions_passed": true
+    }
+  ],
+  "restart": {
+    "same_store_snapshot_sha256": "5b3fd4ca3b66f70e6f53c355351da6364c58268a4071e19c232b9bfe32e85133",
+    "matched": true
+  },
+  "restore": {
+    "independent_backup_snapshot_sha256": "5b3fd4ca3b66f70e6f53c355351da6364c58268a4071e19c232b9bfe32e85133",
+    "matched": true,
+    "original_store_unavailable": true,
+    "physical_off_host_backup_tested": false
+  },
+  "restored_ledger": {
+    "reservations": 229,
+    "charged_micro_sgd": 16600,
+    "unsettled": 0
+  },
+  "final_ledger": {
+    "reservations": 396,
+    "charged_micro_sgd": 19900,
+    "unsettled": 0
+  },
+  "provider_failure": {
+    "dispatched": true,
+    "saved": false,
+    "admitted": true,
+    "queued": false,
+    "category": "unavailable",
+    "status": 503,
+    "completion_ms": 1023.1733330001589,
+    "dispatch_to_thinking_ms": 11.157874992932193,
+    "observed_queue_ms": null
+  },
+  "owner_isolation_violations": 0,
+  "live_ready": false,
+  "unresolved_gates": [
+    "agreed_maximum_classroom_wait",
+    "real_provider_capacity",
+    "complete_cash_funded_SGD30_inventory_and_headroom",
+    "off_host_backup_operations",
+    "external_formative_study_and_two_week_pilot"
+  ],
+  "report_notes": [
+    "Captured before final launch-capability/range guards and reporting-label clarification; numeric observations unchanged. Final guard/small-run validation is in handoff15.",
+    "observed_queue_ms for rejection includes the explicit no-saved-answer recovery GET after the terminal event; admitted samples end on thinking.",
+    "Shared developer host; focused regression tests overlapped part of this run. No controlled deployment-envelope performance claim."
+  ]
+}

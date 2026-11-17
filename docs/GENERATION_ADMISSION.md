@@ -7,6 +7,13 @@ monthly inventory and external charges. Funded/classroom release remains blocked
 until the operator evidences a conservative ceiling, headroom, real usage,
 provider/runtime bounds, shared topology and an acceptable maximum wait.
 
+Ticket15's [classroom rehearsal](operations/CLASSROOM_CAPACITY_GATE.md) observed
+queue-expiry and admission-unavailable outcomes at80 submissions with a synthetic
+four-running/80-queued policy. All admitted normal turns were saved once, but
+acceptable classroom throughput/wait remains unproven. A possible abandoned FIFO
+waiter after SQLite contention requires controlled reproduction before a fix.
+Do not interpret the configured wait ceiling as an approved classroom target.
+
 ## Configuration and scope
 
 Set `GENERATION_ADMISSION_POLICY` to an absolute operator-owned JSON file. Missing

@@ -1,5 +1,10 @@
 # Mock load probe and EC2 monitoring
 
+For the ticket15 stepped80-session, bounded-generation, restart/independent-restore
+rehearsal and explicit unresolved cost/readiness gates, use
+[CLASSROOM_CAPACITY_GATE.md](CLASSROOM_CAPACITY_GATE.md). Its observed80-request
+wait/unavailable outcomes are a local capacity limit, not a successful live gate.
+
 ## Mock capacity probe (no paid providers)
 
 Virtual users are **distinct authenticated owners**. The probe must not treat a
