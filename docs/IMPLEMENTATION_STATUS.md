@@ -2,6 +2,62 @@
 
 ## CURRENT STATUS
 
+### Ticket 15 / GitHub #28 continuation: local contention fixed — PARTIAL / OPEN (2026-11-17)
+
+This continuation supersedes the pending local-diagnosis next action in the
+historical #28 entry below. Prior publication/KEEP LOCAL decision bytes remain
+preserved; **no publication, closure, push, deployment or #29 work**.
+
+- **Reproduction/fix:** New public HTTP regression forces a real native SQLite
+  busy timeout for queued A. Before the fix, B times out waiting behind abandoned
+  A after the active invocation releases its slot. After the fix, B promptly
+  saves/recovers/replays; failed A has no answer, only its uninvoked reservation
+  is refunded, and headroom stays protected. Failed BEGIN connections close;
+  acquire errors best-effort retire only their still-queued token. Ineligible
+  waiters use read-only hints; promotion still rechecks expiry/FIFO/capacity under
+  the original serialized transaction. Running/uncertain slots/charges, all
+  ceilings and deadlines remain protected. Busy cleanup can itself fail; finite
+  queue expiry remains the fallback. No additional admission test seam.
+- **Separate measurements:** Cleanup alone saves78/77/77 at80 with2/3/3
+  unavailable and no waits. Final cleanup+read-polling saves310/310 normal-wave
+  submissions, including80/80 for step/repeat/restored waves with no terminal
+  errors. Saved completion p95:6090.34/5749.39/6620.83ms; queue p95:
+  5082.16/4736.30/5141.70ms. Deliberate overload6 saved/74 capacity; short-wait
+  4 saved/76 wait; admitted provider503 unsaved/conservatively charged. All HTTP
+  transcript/citation/recovery/replay/owner assertions pass; replays leave ledger
+  unchanged. One characterization per implementation, no suite overlap; shared
+  host/HTTP clients, not real provider capacity or rendered browser/WebSocket load.
+- **Recovery/resources:** Restart and independent local restore snapshot match
+  `d5f41b728bed03a94b1000b7dc258a8c3c2a0021f8ebdd8ef7a90a94a5c73bf5`.
+  Ledger230/23000 synthetic microSGD/unsettled0 at backup; final397/32100/0.
+  Server maximum390176KiB RSS/174 sampled threads/running4/queued72; high-water
+  samples are not production sizing. No physical off-host recovery claim.
+- **Validation:** Controlled red1 failed at survivor timeout; final focused120
+  passed/6 warnings/19.15s; full canonical2310 passed/1 skipped/293 warnings/91.33s.
+  Only unmanaged ` 2.py` duplicates excluded. Compileall/whitespace pass. Canonical
+  mock API+Streamlit startup and same-store restart with admission enabled return
+  ready/health/document200. Owned processes stopped;8000/8501/18080 clear,8080
+  untouched. Separate read-only Luna Standards/Spec code re-reviews: no findings.
+  No UI/frontend changes or new browser/build/Ruff/static Python typing/live claims.
+- **Files/compatibility:** Admission adapter, new HTTP regression, admission/gate
+  docs, local aggregate report and [continuation handoff](../new_docs/ticket_handoffs/15-continuation.md).
+  No schema/dependency/data/auth/UI/provider migration. Roll back continuation code
+  only; preserve student data/ledger and stop funded generation before removing
+  admission safeguards. Original staged patch/prior handoff11–15/status bytes
+  preserved. Local commit was rejected before execution by automatic approval
+  review for lack of exact trusted commit authorization; all seven fix paths remain
+  unstaged/uncommitted. No retry/bypass. Exact local commit approval is now needed;
+  publication remains separately KEEP LOCAL. See continuation handoff hold.
+- **Next exact action:** #28 remains OPEN/#29 blocked. Resolve the external gates
+  in [CLASSROOM_CAPACITY_GATE.md](operations/CLASSROOM_CAPACITY_GATE.md): approved
+  queue/total waits, real provider/model/region/runtime/KB/worst-price evidence,
+  complete recurring bill/workload/credits and positive approved headroom/funding
+  decision, funded off-host restore. Nine-category costs remain unknown/null;
+  require evidenced post-credit C plus positive H with C+H<=S$30, or explicit
+  funding/usage/postponement decision. Formative study/two-week pilot still ZERO
+  sessions; preserve #27 capability gaps. No unchanged load retry needed. Paid
+  tests require fresh explicit cap; publication stays KEEP LOCAL.
+
 ### Ticket 15 / GitHub #28: capacity and sustainable-cost gate — PARTIAL / OPEN (2026-11-17)
 
 - **Scope/status:** Local characterization and recovery rehearsal recorded; #28

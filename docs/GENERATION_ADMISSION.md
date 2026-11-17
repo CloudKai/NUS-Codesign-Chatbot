@@ -10,8 +10,10 @@ provider/runtime bounds, shared topology and an acceptable maximum wait.
 Ticket15's [classroom rehearsal](operations/CLASSROOM_CAPACITY_GATE.md) observed
 queue-expiry and admission-unavailable outcomes at80 submissions with a synthetic
 four-running/80-queued policy. All admitted normal turns were saved once, but
-acceptable classroom throughput/wait remains unproven. A possible abandoned FIFO
-waiter after SQLite contention requires controlled reproduction before a fix.
+acceptable classroom throughput/wait remains unproven. The [local continuation](../new_docs/ticket_handoffs/15-continuation.md) reproduces
+an abandoned uninvoked FIFO waiter with a native SQLite busy fault and fixes its
+cleanup. Read polling reduces writer-lock pressure; the final synthetic rehearsal
+saves all three80-request waves. This does not establish live provider capacity.
 Do not interpret the configured wait ceiling as an approved classroom target.
 
 ## Configuration and scope
@@ -56,7 +58,12 @@ The monthly generation allowance is `monthly_micro_sgd - headroom_micro_sgd`.
 Headroom is strictly positive and reserved for delayed usage/external charges;
 the rest of the complete cost inventory still needs independent verification.
 Reservations, pending waits, charges and active/uncertain slots are serialized
-with short SQLite `BEGIN IMMEDIATE` transactions. Locks have a two-second timeout;
+with short SQLite `BEGIN IMMEDIATE` transactions. Ineligible waiters use read-only
+scheduling hints; every promotion rechecks expiry, capacity and FIFO under the
+writer lock. Failed BEGIN connections close immediately. Failed acquires attempt
+a second bounded transaction to refund only their own still-queued token. If that
+cleanup also fails, expiry remains the fallback; running/uncertain work is never
+released by this cleanup. Each SQLite lock wait has a two-second timeout;
 content/identities/prompts are absent from the ledger and admission events.
 
 ## Waiting and reconciliation

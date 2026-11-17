@@ -111,8 +111,42 @@ class SQLiteGenerationAdmission:
     def _connection(self) -> sqlite3.Connection:
         """Begin a short serialized write transaction with a bounded lock wait."""
         db = sqlite3.connect(self.policy.ledger_path, timeout=2)
-        db.execute("BEGIN IMMEDIATE")
+        try:
+            db.execute("BEGIN IMMEDIATE")
+        except sqlite3.Error:
+            db.close()
+            raise
         return db
+
+    def _retire_waiter(self, token: str) -> None:
+        """Best-effort refund of this failed acquire's uninvoked queued token.
+
+        A second bounded transaction can succeed after a transient lock clears.
+        If the ledger remains unavailable, normal queue expiry remains the bound.
+        Running/uncertain reservations are never released by this cleanup.
+        """
+        try:
+            with closing(self._connection()) as db, db:
+                db.execute("UPDATE generation_calls SET state='settled',amount=0 WHERE token=? AND state='queued'", (token,))
+        except sqlite3.Error:
+            _event("waiter_cleanup_unavailable")
+
+    def _waiter_may_advance(self, token: str, now: float) -> bool:
+        """Read a scheduling hint without taking the ledger's writer lock.
+
+        Eligibility is always rechecked under BEGIN IMMEDIATE before promotion.
+        Stale reads can delay a poll, never grant capacity or bypass FIFO/budget.
+        Expired queued heads are excluded so a survivor can trigger their cleanup.
+        """
+        with closing(sqlite3.connect(self.policy.ledger_path, timeout=2)) as db:
+            state = db.execute("SELECT state,deadline FROM generation_calls WHERE token=?", (token,)).fetchone()
+            if state is None or state[0] != "queued" or state[1] <= now:
+                return True
+            if db.execute("SELECT 1 FROM generation_calls WHERE state='overrun' LIMIT 1").fetchone():
+                return True
+            running = db.execute("SELECT COUNT(*) FROM generation_calls WHERE state IN ('running','uncertain')").fetchone()[0]
+            first = db.execute("SELECT token FROM generation_calls WHERE state='queued' AND deadline>? ORDER BY created,token LIMIT 1", (now,)).fetchone()
+            return running < self.policy.max_running and first is not None and first[0] == token
 
     def _expire(self, db: sqlite3.Connection, now: float) -> None:
         """Release abandoned waits; quarantine expired invokes without refunds.
@@ -145,6 +179,7 @@ class SQLiteGenerationAdmission:
         token = uuid4().hex
         started = time.monotonic()
         queued = False
+        reserved_queue = False
         now = self._clock()
         instant = datetime.fromtimestamp(now, timezone.utc)
         period = instant.strftime("%Y-%m")
@@ -167,12 +202,16 @@ class SQLiteGenerationAdmission:
                     token, period, "queued" if queued else "running", self.policy.call_reserve_micro_sgd,
                     now + (self.policy.max_wait_seconds if queued else self.policy.lease_seconds), now,
                 ))
+                reserved_queue = queued
             if queued:
                 emit_coach_progress("queued")
                 _event("queued")
             while queued:
                 time.sleep(min(0.02, self.policy.max_wait_seconds))
                 now = self._clock()
+                if (time.monotonic() - started < self.policy.max_wait_seconds
+                        and not self._waiter_may_advance(token, now)):
+                    continue
                 with closing(self._connection()) as db, db:
                     self._expire(db, now)
                     row = db.execute("SELECT state FROM generation_calls WHERE token=?", (token,)).fetchone()
@@ -193,6 +232,10 @@ class SQLiteGenerationAdmission:
             _event("admitted")
             return token
         except sqlite3.Error as error:
+            if reserved_queue:
+                self._retire_waiter(token)
+            _event("acquire_unavailable", sqlite_code=str(getattr(error, "sqlite_errorcode", "unknown")),
+                   sqlite_name=str(getattr(error, "sqlite_errorname", "unknown")))
             raise RateLimitExceeded(2, "Generation admission is unavailable. Your saved work remains available.", category="generation_unavailable") from error
 
     def settle(self, token: str, meter: GenerationUsage) -> None:

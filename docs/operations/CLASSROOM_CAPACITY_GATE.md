@@ -158,7 +158,7 @@ past its native #28 blocker. The next action is to resolve the recorded evidence
 gates, then rerun the same characterization with approved inputs in a fresh
 #28 session; any live test still needs fresh capped approval.
 
-## Observed local capacity limit
+## Initial observed local capacity limit
 
 [Measured aggregate results](../examples/classroom-capacity/mock-results-2026-11-17.json)
 record the second full run. Steps10/20/40 saved all submissions. Step80 saved48,
@@ -180,9 +180,55 @@ code findings, **not a proven causal reproduction**: exact SQLite error codes an
 idle-slot time were not captured, and sampler overhead can perturb contention.
 No production admission change or third attempt at the same80 load was made.
 
-Next local diagnostic: reproduce abandonment with a controlled real-SQLite busy
-fault through the agreed public HTTP boundary, keeping paid calls disabled and
-using disposable data. If a lower admission seam is necessary, confirm that test
-seam before adding tests there. Then make only the supported cleanup/lock-pressure
-fix, preserve FIFO and conservative invoked/uncertain charges, and rerun capacity
-characterization. Do not hide the failure by increasing deadlines or waiving slots.
+The next-action diagnosis above was completed by the local continuation below.
+Historical results remain unchanged.
+
+## Local contention continuation (2026-11-17)
+
+The public HTTP regression `tests/http/test_generation_contention.py` forces a
+real native SQLite busy timeout on queued A while one deterministic invocation
+is held. Before the fix, A returns429/unavailable and B cannot complete within
+two seconds of the running call completing, despite capacity being free. After
+the fix, B saves/recovers/replays promptly, A has no saved answer, and public
+budget checks show only the uninvoked reservation was refunded. The final fault
+fixture uses an exclusive SQLite transaction so either a poll read or write can
+hit the same native timeout; it never substitutes admission methods.
+
+Failed acquires now best-effort retire only their own still-queued reservation;
+failed BEGIN connections close. This alone saved78/77/77 of the three80-request
+waves with2/3/3 admission-unavailable outcomes and no queue expiries. Ineligible
+waiters now use read-only scheduling hints, while promotion still rechecks all
+original expiry, FIFO and capacity conditions under BEGIN IMMEDIATE. No queue
+deadline, allowance, running/queued ceiling or uncertain-invocation protection
+was relaxed. The controlled test proves the abandoned-wait mechanism; it does
+not establish the exact cause of every earlier aggregate load failure.
+
+The final rehearsal (same250-ms mock delay/four running/80 queued/30-second wait)
+completed310/310 normal submissions, with no admission errors or queue expiries:
+
+| Wave | Saved | Saved completion p50 / p95 ms | Observed queue p95 ms |
+| --- | ---: | ---: | ---: |
+| Step10 |10/10|910.32 /1196.56|540.65|
+| Step20 |20/20|966.01 /1521.37|1060.78|
+| Step40 |40/40|1582.50 /2907.64|2214.99|
+| Step80 |80/80|3641.45 /6090.34|5082.16|
+| Repeat80 |80/80|3313.32 /5749.39|4736.30|
+| Restored80 |80/80|4226.61 /6620.83|5141.70|
+
+Separate overload still saves6/rejects74 capacity; short-wait saves4/rejects76
+wait. The admitted deliberate provider503 remains unsaved and conservatively
+charged. All canonical transcript/citation/recovery/replay checks pass; replays
+leave the ledger unchanged and owner isolation checks pass. Idle80-session reads
+complete with no reservations. Server maximum RSS390176KiB/174 sampled threads;
+maximum sampled running4/queued72. Same-store restart and independent local
+restore match, with final397 reservations/32100 synthetic microSGD/unsettled0.
+Both runs are retained in the [local aggregate report](../examples/classroom-capacity/mock-results-2026-11-17-continuation.json).
+
+Each implementation has one characterization here; results on a shared developer
+host are not statistical or production-capacity evidence. No regression suite
+overlapped these runs. These are authenticated HTTP clients, not rendered browser
+tabs or Streamlit WebSockets. No true off-host recovery, paid/model/region/KB
+capacity, approved classroom wait, complete cost/headroom or student-study claim.
+#28 remains OPEN/#29 blocked. All funding and external gates above still apply.
+See [continuation handoff](../../new_docs/ticket_handoffs/15-continuation.md) for
+validation, compatibility, local-only Git and the next exact action.
