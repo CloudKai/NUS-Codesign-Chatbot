@@ -3,7 +3,7 @@ import type { Citation } from './stream';
 /** Public reader contracts. Credentials stay in HttpOnly same-origin cookies. */
 export interface Session { owner_id: string; display_name: string; kind: 'guest' | 'registered' }
 export interface Notebook { id: string; name: string }
-export interface Message { id: string; role: string; content: string; citations: Citation[] }
+export interface Message { id: string; role: string; content: string; citations: Citation[]; feedback_available: boolean; rating: 'useful' | 'not_useful' | null }
 export interface NotebookList { owner_id: string; notebooks: Notebook[] }
 export interface Page {
   owner_id: string; notebook: Notebook; messages: Message[];
@@ -43,3 +43,11 @@ export interface Project {
   owner_id: string; thread_id: string; current_stage: string; stages: Stage[];
   pending: { id: string; from_stage: string; to_stage: string; rationale: string } | null;
 }
+
+/** Allowlisted notebook controls; all educational state remains server-owned. */
+export interface NotebookSettings {
+  owner_id: string; notebook: Notebook; response_detail: 'short' | 'long'; response_language: string;
+  selected_model: string; reasoning_effort: string | null; assignment: Record<string, string>;
+  models: { id: string; label: string; reasoning_efforts: string[] }[];
+}
+export interface Preferences { owner_id: string; appearance: 'System' | 'Light' | 'Dark' }

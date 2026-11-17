@@ -189,6 +189,20 @@ before further source changes/new questions, with no automatic replay. Upload
 receipts are ephemeral across restart; saved source bytes remain durable. See the
 pilot README for upload ambiguity/partial-batch limitations and rollback.
 
+Ticket14/#27 adds nine typed browser workspace adapters over existing services:
+notebook create/settings/update/confirmed-remove/transcript export, global appearance
+read/update, append-only message revise and bounded learning receipts. Learning state,
+model registry and response preference normalization remain server-owned. Appearance
+uses existing owner preferences; response detail/language/model/reasoning and assignment
+context use notebook metadata. Browser invalidation refreshes only verified owner/list/
+settings state without remounting ordinary transcript updates. Ambiguous mutations
+require GET reconciliation without automatic replay. Message edits retain the original
+target/content/request key for shared-service recovery; the composer draft survives.
+No schema/data migration. Current folder organization was removed from the canonical
+backend and remains a documented capability gap; no folder parity is claimed. Additional
+Streamlit-only workflows and existing literal Markdown rendering are recorded in the
+pilot README; this bounded engineering slice does not authorize a default frontend switch.
+
 Streamlit remains the frontend entrypoint. It only renders state and calls a
 typed API client; it must not call SQLite, local files, model SDKs, LangChain,
 or LangGraph directly.

@@ -9,8 +9,8 @@ interface Jobs { owner_id: string; thread_id: string; jobs: Job[] }
 interface Detail { source: Source; text: string; truncated: boolean }
 
 /** Show safe source controls while keeping drafts, transcript, and source authority separate. */
-export function Sources({ owner, thread, expired, uncertain, opened }: {
-  owner: string; thread: string; expired: () => void; uncertain: (value: boolean) => void; opened: () => void;
+export function Sources({ owner, thread, expired, uncertain, opened, disabled }: {
+  disabled: boolean; owner: string; thread: string; expired: () => void; uncertain: (value: boolean) => void; opened: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<SourceList | null>(null);
@@ -62,7 +62,7 @@ export function Sources({ owner, thread, expired, uncertain, opened }: {
   }
 
   async function act(route: string, body?: object | FormData) {
-    if (lock.current || unverified) return;
+    if (lock.current || unverified || disabled) return;
     lock.current = true; setBusy(true); setError('');
     setUnverified(true); uncertain(true);
     // Invalidate older reads before a mutation; an ambiguous write is followed only by reads.
@@ -162,34 +162,34 @@ export function Sources({ owner, thread, expired, uncertain, opened }: {
       <p role="status">{busy ? 'Checking sources…' : notice}</p>
       {unverified ? <p className="supporting">Source changes and new questions pause until a successful refresh.</p> : null}
       <form className="source-upload" onSubmit={event => {
-        event.preventDefault(); if (!files.length || busy || unverified) return;
+        event.preventDefault(); if (!files.length || busy || unverified || disabled) return;
         const data = new FormData(); files.forEach(file => data.append('files', file)); void act('uploads', data);
       }}>
         <label htmlFor="source-files">Add files to this notebook</label>
-        <input ref={fileInput} id="source-files" type="file" multiple disabled={busy || unverified}
+        <input ref={fileInput} id="source-files" type="file" multiple disabled={busy || unverified || disabled}
           onChange={event => setFiles(Array.from(event.target.files || []))}/>
         <p className="supporting">{list ? `Up to ${list.max_files} files per batch, ${Math.floor(list.max_file_bytes / 1048576)} MB per file. ` : ''}Documents, text and images can be stored; extracted text is available where supported.</p>
-        <button type="submit" disabled={!files.length || busy || unverified}>Upload files</button>
+        <button type="submit" disabled={!files.length || busy || unverified || disabled}>Upload files</button>
       </form>
       {jobs.length ? <section aria-label="Upload progress" className="upload-jobs"><h4>Upload progress</h4>
         <p className="supporting">Retry is available for up to 5 minutes after first failure, with 3 attempts total. Check available sources before retrying; earlier files in a failed batch may already be saved. Receipts expire and clear on server restart; saved sources remain below.</p>
         {jobs.map(job => <div className="upload-job" key={job.id}>
           <strong>{job.filenames.join(', ')}</strong><p>{({queued: 'Queued — waiting for an upload worker…', processing: 'Processing source…', saved: 'Saved to sources', failed: 'Upload failed'})[job.state]}</p>
-          {job.state === 'failed' ? <button disabled={busy || unverified || !job.retryable} onClick={() => void act(`uploads/${encodeURIComponent(job.id)}/retry`)}>Retry upload</button> : null}
-          {!['queued', 'processing'].includes(job.state) ? <button disabled={busy || unverified} onClick={() => void act(`uploads/${encodeURIComponent(job.id)}/discard`)}>{job.state === 'failed' ? 'Dismiss failed upload' : 'Dismiss receipt'}</button> : null}
+          {job.state === 'failed' ? <button disabled={busy || unverified || disabled || !job.retryable} onClick={() => void act(`uploads/${encodeURIComponent(job.id)}/retry`)}>Retry upload</button> : null}
+          {!['queued', 'processing'].includes(job.state) ? <button disabled={busy || unverified || disabled} onClick={() => void act(`uploads/${encodeURIComponent(job.id)}/discard`)}>{job.state === 'failed' ? 'Dismiss failed upload' : 'Dismiss receipt'}</button> : null}
         </div>)}
       </section> : null}
       <h4>Available sources{list ? ` · ${list.sources.length}` : ''}</h4>
       {list?.sources.length === 0 ? <p>Add your first source to ground notebook answers.</p> : null}
       <ul className="source-list">{list?.sources.map(source => <li key={source.id}>
-        <label><input type="checkbox" checked={source.selected} disabled={source.locked || busy || unverified} onChange={event => void act(`sources/${encodeURIComponent(source.id)}/select`, {selected: event.target.checked})}/>{source.title}</label>
+        <label><input type="checkbox" checked={source.selected} disabled={source.locked || busy || unverified || disabled} onChange={event => void act(`sources/${encodeURIComponent(source.id)}/select`, {selected: event.target.checked})}/>{source.title}</label>
         <p className="supporting">{source.locked ? 'Course material · always included' : `${source.kind} · ${source.size.toLocaleString()} bytes`}</p>
         <div className="source-actions"><button id={`inspect-${source.id}`} disabled={busy} onClick={() => void inspect(source)}>Inspect {source.title}</button>
           <button onClick={() => void download(source)}>Download {source.title}</button>
-          {!source.locked ? <button disabled={busy || unverified} onClick={() => { setRemoving(source.id); setDetail(null); }}>Remove {source.title}</button> : null}</div>
+          {!source.locked ? <button disabled={busy || unverified || disabled} onClick={() => { setRemoving(source.id); setDetail(null); }}>Remove {source.title}</button> : null}</div>
         {removing === source.id ? <div className="remove-confirm" role="group" aria-label={`Remove ${source.title}?`}>
           <p>Remove this source from the notebook? Saved answers remain, but its original will no longer be downloadable.</p>
-          <button disabled={busy || unverified} onClick={() => { void act(`sources/${encodeURIComponent(source.id)}/remove`).then(() => {
+          <button disabled={busy || unverified || disabled} onClick={() => { void act(`sources/${encodeURIComponent(source.id)}/remove`).then(() => {
             if (active.current) { setRemoving(''); heading.current?.focus({preventScroll: true}); }
           }); }}>Confirm removal</button><button onClick={() => setRemoving('')}>Keep source</button>
         </div> : null}

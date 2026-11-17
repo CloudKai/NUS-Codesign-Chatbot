@@ -141,3 +141,28 @@ textarea::placeholder { color: var(--muted); }
 @media (min-width: 1101px) {
   .source-panel { width: 340px; }
 }
+/* Workspace actions inherit the established three-panel surface and type. */
+select { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 44px; width: 100%; }
+option { background: var(--surface); color: inherit; }
+.workspace-tools, .workspace-preferences, .workspace-tools form { display: grid; gap: 10px; min-width: 0; }
+.workspace-tools { margin-top: 20px; border-top: 1px solid var(--line); padding-top: 20px; }
+.workspace-preferences { padding-top: 24px; }
+.workspace-preferences h2 { font-size: 18px; margin: 0; }
+.workspace-preferences form, .workspace-preferences > p { margin-top: 20px; }
+.workspace-tools button { text-align: left; overflow-wrap: anywhere; }
+.tool-heading { display: grid; gap: 10px; margin-bottom: 12px; }
+.message-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.message-actions button { font-size: 13px; padding: 6px 10px; }
+.message-actions [role="group"] { display: flex; flex-wrap: wrap; gap: 8px; }
+.message-actions button[aria-pressed="true"] { background: var(--soft); border-color: var(--accent); }
+.message-edit { display: grid; gap: 10px; margin-top: 20px; }
+:root[data-appearance="Light"] { color-scheme: light; color: #1f2933; background: #f6f8fb; --surface: #fff; --muted: #52606d; --line: #dde3e9; --accent: #087c71; --soft: #dff6f2; }
+:root[data-appearance="Dark"] { color-scheme: dark; color: #e8eaed; background: #0f1011; --surface: #101112; --muted: #b3bac2; --line: #393e42; --accent: #63decd; --soft: #123a35; }
+:root[data-appearance="Dark"] .primary { color: #101112; }
+:root[data-appearance="Dark"] .primary:hover { background: #8ae7da; }
+:root[data-appearance="Light"] .primary { color: #fff; }
+:root[data-appearance="Light"] .primary:hover { background: #08675e; }
+
+@media (min-width: 701px) {
+  .notebooks { position: sticky; top: 0; max-height: 100dvh; overflow-y: auto; align-self: start; }
+}

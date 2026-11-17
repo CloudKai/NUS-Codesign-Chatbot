@@ -2,6 +2,68 @@
 
 ## CURRENT STATUS
 
+### Ticket 14 / GitHub #27: React workspace and preference parity (2026-11-17)
+
+- **Outcome:** Bounded workspace slice complete: notebook create/rename/confirmed
+  delete/full saved-transcript export, owner System/Light/Dark and notebook response
+  detail/language/model/reasoning/assignment settings; copy, confirmed append-only
+  message edit/recovery and optional lecture-answer ratings. Shared services and
+  canonical educational state remain authoritative. No schema/existing-data migration.
+- **Boundary/state:** Nine narrow typed reader adapters retain credential/student/
+  ownership/Origin/no-store guards and exact Caddy paths. Verified owner/notebook
+  invalidation refreshes list/settings without remounting ordinary conversation
+  updates; loaded history, chat reading position and composer draft survive.
+  Ambiguous writes require successful GET reconciliation, never automatic POST replay.
+  Edits retain original target/content/key and preserve a newer draft. Deletion
+  confirms irreversible scope, reconciles list and restores useful keyboard focus.
+- **Design:** Preserved user-pinned three vertical panels; navigation/preferences
+  left (independent desktop scrolling), mounted chat center, Thinking Path right.
+  Sources retains reserved340px right column above1100px and temporary mobile panel.
+  Existing type/tokens and700/1100 breakpoints preserved; appearance covers controls,
+  text inputs, menus, source panels and states. No global design-system rewrite.
+- **Validation:** Three public HTTP red/green slices plus four integration contracts
+  cover CRUD/export/restart, preferences/educational/private-key preservation,
+  edits/ratings/exact-key recovery and all-route credentials/CSRF/staff/owner guards.
+  Broad focused **125 passed**,6 warnings,11.99s; canonical full **2308 passed,
+  1 skipped**,293 warnings,87.01s, excluding only unmanaged ` 2.py` duplicates.
+  Final focused reader/architecture/deployment **52 passed**,6 warnings,4.98s.
+  Strict TypeScript/build, compileall, whitespace and both Caddy configs pass.
+- **Browser/restart:** Disposable mock Guest and synthetic registered login/callback,
+  desktop1440/mobile390/light/dark, existing20->26 history, copy/edit/rating/export,
+  rename/settings keep exact mounted composer/loaded pages/reading position; scoped
+  drafts/reload/theme and explicit delete cancel/confirm pass. Lost saved rename
+  response blocks send until GET refresh, one POST. Real delayed edit/stop/reload/
+  explicit check recovers one turn/newer draft. Grounded source upload/citation/
+  original bytes and confirm/revisit regressions pass. Fresh unrelated Guest gets
+  empty work/System/no old draft; successful deletion focuses creation. Same-store
+  restart snapshot matches exact settings/messages/project/source/export/byte hashes.
+  Final connected-page console0 errors/0 warnings; deliberate auth/abort/500 probes
+  have expected errors. Actual Streamlit coexistence evidence is in handoff14.
+- **Reviews:** Read-only Luna Standards/Spec reviews; stale settings reload on delete
+  and misleading feedback-error copy fixed, browser-tested and independently rechecked
+  resolved. Spec found no further mismatch beyond disclosed absent folders. Impeccable
+  detector[]; reviewer scored its two findings resolved, **ship at verdict-pass scope**:
+  scoped extension needs no PRODUCT.md and existing literal Markdown rendering gap is
+  explicitly carried forward. Documenter confirms no global design artifact update.
+- **Gaps/limits:** Folder organization was removed from canonical backend/Streamlit;
+  no folder CRUD contract exists or is revived, **no implemented folder-parity claim**.
+  No standalone regenerate contract; edit-and-ask-again and exact-key retry remain
+  distinct. Chat attachment entry, website/pasted source ingestion, source rename,
+  Deep Review/PDF, notebook display-name editing and lecturer tools remain Streamlit
+  workflows. Existing literal Markdown markers remain a documented rendering gap.
+  No blanket parity/default switch/release claim. Ambiguous create may already exist;
+  inspect refreshed list before another explicit create (no new deduplication API).
+- **Compatibility/Git/next:** [handoff14](../new_docs/ticket_handoffs/14.md). Code-only
+  rollback with the nine public route patterns and prior frontend rebuild; no DB reset.
+  Original staged patch SHA256 `3822626dc9314c8fef41f80427af7eba322a24a2157543d453c7bddf16bf034a`
+  plus original status and handoff11/12/13 publication-result updates preserved using
+  selective temporary-index protocol. Local commit/publication results recorded below
+  only after successful execution; publish matching #27 evidence before closure.
+  Next only after publication/closure: NEW local Sol local15/#28 capacity/cost gate;
+  live native blockers18/19/21 closed with published evidence, recheck at entry.
+  External formative study/two-week pilot pending, **ZERO sessions**. No paid calls,
+  real Cognito/AWS/CDN/provider/live capacity/cost/student-outcome, push/deploy claim.
+
 ### Ticket 13 / GitHub #26: React source management without draft loss (2026-11-17)
 
 - **Commit approval received:** The user continued after the explicit #26-only

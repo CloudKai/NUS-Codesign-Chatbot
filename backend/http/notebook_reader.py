@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from fastapi.responses import FileResponse, StreamingResponse, Response
 
 from backend.http.reader_sources import register_reader_sources
+from backend.http.reader_workspace import register_reader_workspace
+from backend.learning_signals import learning_receipts
 from backend.domain import CitationReference, CoachRequest, CoachTurn
 from backend.learning.journey import normalize_journey, selectable_stage_ids
 from backend.learning.resume import StageResume, project_resume
@@ -48,6 +50,8 @@ class ReaderMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     citations: list[CitationReference] = Field(default_factory=list)
+    feedback_available: bool = False
+    rating: Literal["useful", "not_useful"] | None = None
 
 
 class ReaderPage(BaseModel):
@@ -121,7 +125,12 @@ def _message(row: dict[str, Any]) -> ReaderMessage:
             citations.append(CitationReference.model_validate(value))
         except ValueError:
             continue
-    return ReaderMessage(id=row["id"], role=row["role"], content=row["content"], citations=citations)
+    meta = metadata if isinstance(metadata, dict) else {}
+    return ReaderMessage(
+        id=row["id"], role=row["role"], content=row["content"], citations=citations,
+        feedback_available=row['role'] == 'assistant' and meta.get('interaction_intent') == 'lecture_help' and not row.get('is_error'),
+        rating=(learning_receipts(meta.get('learning_signals')).get('rating') or {}).get('kind'),
+    )
 
 
 def _notebook(row: dict[str, Any]) -> ReaderNotebook:
@@ -131,6 +140,7 @@ def _notebook(row: dict[str, Any]) -> ReaderNotebook:
 def register_notebook_reader(
     app: FastAPI, resolve_owner: Callable[[Request], OwnerServices],
     stream_turn: Callable[[CoachRequest, Request, OwnerServices], StreamingResponse],
+    revise: Callable[[str, str, str, str, Request, OwnerServices], CoachTurn],
 ) -> None:
     """Register bounded student conversation routes; never use the anonymous local demo owner."""
 
@@ -154,6 +164,7 @@ def register_notebook_reader(
         return owner
 
     register_reader_sources(app, reader_owner)
+    register_reader_workspace(app, reader_owner, revise)
 
     @app.get("/api/v1/reader/session", response_model=ReaderSession)
     def session(owner: OwnerServices = Depends(reader_owner)) -> ReaderSession:

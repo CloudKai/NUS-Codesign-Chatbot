@@ -1,14 +1,14 @@
 http://127.0.0.1:8080 {
 	@reader {
 		method GET
-		path_regexp reader ^/api/v1/reader/(session|threads|threads/[^/]+/(messages/page|coach-turn|project|uploads|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content))$
+		path_regexp reader ^/api/v1/reader/(session|preferences|threads|threads/[^/]+/(settings|transcript\.txt|messages/page|coach-turn|project|uploads|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content))$
 	}
 	handle @reader {
 		reverse_proxy 127.0.0.1:8000
 	}
 	@lecture {
 		method POST
-		path_regexp lecture ^/api/v1/reader/threads/[^/]+/(uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove)|lecture/stream|project/(stream|select-stage|resolve/[^/]+))$
+		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|messages/[^/]+/(revise|learning-signal)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove)|lecture/stream|project/(stream|select-stage|resolve/[^/]+)))$
 	}
 	handle @lecture {
 		reverse_proxy 127.0.0.1:8000

@@ -1,6 +1,6 @@
 # Notebook reader pilot
 
-Tickets #23–26 add a lecture and project companion `/pilot/` alongside Streamlit at `/`. The existing
+Tickets #23–27 add a lecture and project companion `/pilot/` alongside Streamlit at `/`. The existing
 FastAPI workspace and transcript remain authoritative. Build with Node 22:
 
 ```sh
@@ -121,3 +121,57 @@ failure may mean admission succeeded: check jobs and source filenames before
 explicitly selecting files again. There is no cross-request upload deduplication
 key or persistent upload queue. Partial batch failures can leave earlier files
 saved; inspect the source list before retrying a failed multi-file batch.
+
+
+## Workspace and preference scope (#27)
+
+The pilot creates and renames notebooks, downloads the full active saved transcript,
+and deletes a notebook only after explicit confirmation. The shared WorkspaceService
+performs writes and owned-file cleanup. Preferences stay in the existing navigation;
+on desktop it scrolls independently so the three-panel workspace remains intact.
+Appearance is an owner preference (System, Light, Dark); coaching style (Guide/Free),
+response language, configured model/reasoning and assignment title/context are notebook
+settings. Changes affect future answers. Unknown existing preference keys and other
+notebook learning fields remain intact. No schema or existing-data migration is needed.
+
+Nine additional narrow reader routes expose only these required GET/POST commands,
+plus shared append-only user-message editing and bounded learning receipts. Existing
+reader credential, student role, owner, Origin and no-store controls apply. Internal
+workspace routes stay private. Owner/notebook verification and request generations
+fence asynchronous reads. A successful write reconciles canonical list/settings;
+ordinary renames/preferences retain the mounted transcript/composer and loaded history.
+An ambiguous workspace write blocks new questions and changes until explicit GET-only
+Refresh workspace succeeds. No automatic POST replay is performed. An ambiguous create
+may already exist: inspect the refreshed notebook list before creating another.
+There is no cross-request notebook-create deduplication contract.
+
+Saved messages can be copied. Editing a student message requires an explicit confirm
+and reruns the shared append-only revision service, replacing the active suffix without
+erasing historical revisions. The newer composer draft stays intact. An uncertain edit
+keeps its original target, content and idempotency key in the existing owner/notebook/tab
+receipt; Check saved answer and explicit same-key retry use the original command.
+Stop watching does not prove cancellation. An early null check may require checking
+again after the server saves. Editing is a JSON result from the existing route rather
+than a second streaming lifecycle. Eligible lecture answers offer optional Useful /
+Not useful feedback; HTTP failure is shown honestly and reads refresh canonical ratings.
+
+### Remaining student capability gaps
+
+This ticket does **not** establish complete student-interface parity or authorize a
+default switch. Folder CRUD/moving has no current canonical service/API: StudentStore
+explicitly ignores the legacy folder filter and Streamlit's notebook library documents
+that organization was removed. This implementation neither revives folder metadata nor
+adds a storage migration. There is no standalone regenerate capability in the current
+workspace; edit-and-ask-again and exact-key retry retain their distinct existing meanings.
+
+Other capabilities still in Streamlit include chat attachment entry, website/pasted-text
+source ingestion, source renaming, Deep Review controls/PDF export, notebook display-name
+editing, and lecturer work. Saved Coach content continues the existing literal plain-text
+rendering; Markdown markers can be visible (including legacy/project mock replies). Rich
+Markdown rendering is not claimed by this ticket. The external formative study and
+two-week pilot remain pending, with zero participant sessions; engineering results are
+not release, learning-outcome, capacity, actual-cost or real-model-quality evidence.
+
+Rollback #27 code and its nine public route patterns together, then rebuild the previous
+frontend. No database reset or data migration is required. Existing messages, revision
+history, source bytes, preferences, and Streamlit workflows remain usable.

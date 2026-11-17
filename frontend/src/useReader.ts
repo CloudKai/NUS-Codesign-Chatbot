@@ -86,6 +86,24 @@ export function useReader() {
     } catch (error) { fail(error, epoch); }
   }
 
+  async function refreshList() {
+    const snapshot = current.current;
+    const epoch = generation.current;
+    if (!snapshot.session) throw new Error('Session unavailable');
+    const signal = controller.current.signal;
+    const list = await get<NotebookList>('/api/v1/reader/threads', signal);
+    const verified = await currentSession(signal);
+    if (epoch !== generation.current) throw new Error('View changed');
+    if (list.owner_id !== snapshot.session.owner_id || verified.owner_id !== list.owner_id) { void reload(); throw new Error('Owner changed'); }
+    setState(value => {
+      const notebook = value.page && list.notebooks.find(item => item.id === value.page!.notebook.id);
+      return { ...value, notebooks: list.notebooks,
+        page: notebook && value.page ? { ...value.page, notebook } : null,
+        project: notebook ? value.project : null };
+    });
+    return list;
+  }
+
   async function startGuest() {
     reset();
     const epoch = generation.current;
@@ -132,5 +150,5 @@ export function useReader() {
     };
   }, []);
 
-  return { ...state, reload, open, startGuest };
+  return { ...state, reload, open, startGuest, refreshList };
 }

@@ -2407,7 +2407,13 @@ def create_app(
         )
         return resolved
 
-    register_notebook_reader(app, current_owner, coach_turn_stream)
+    def reader_revise(
+        thread_id: str, message_id: str, content: str, key: str, request: Request, owner: OwnerServices,
+    ) -> CoachTurn:
+        """Bind the existing edit endpoint to the credential-guarded student browser adapter."""
+        return revise_user_message(thread_id, message_id, MessageReviseRequest(content=content, idempotency_key=key), request, owner)
+
+    register_notebook_reader(app, current_owner, coach_turn_stream, reader_revise)
     return app
 
 

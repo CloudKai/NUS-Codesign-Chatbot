@@ -6,7 +6,7 @@ import { ThinkingPath } from './ThinkingPath';
 import { isTurn, readStream, type Citation, type Event } from './stream';
 
 type Intent = 'lecture' | 'project';
-interface Receipt { key: string; text: string; intent?: Intent }
+interface Receipt { key: string; text: string; intent?: Intent; message?: string }
 interface Draft { text: string; pending: Receipt | null; intent?: Intent }
 const empty: Draft = { text: '', pending: null };
 
@@ -21,8 +21,9 @@ function restore(key: string): Draft {
 }
 
 /** Keep draft, focus and loaded transcript stable during progress and evidence inspection. */
-export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier }: {
+export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, externalBlocked, activity }: {
   page: Page; project: Project; owner: string; refresh: () => Promise<void>; expired: () => void;
+  externalBlocked: boolean; activity: (value: boolean) => void;
   busy: boolean; loadEarlier: () => Promise<void>;
 }) {
   const storageKey = `codesign-lecture:${owner}:${page.notebook.id}`;
@@ -44,6 +45,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const [checkedKey, setCheckedKey] = useState('');
   const [status, setStatus] = useState('');
   const [preview, setPreview] = useState('');
+  const [edit, setEdit] = useState<{ id: string; text: string } | null>(null);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [storageError, setStorageError] = useState(false);
   const [evidence, setEvidence] = useState<{ citation: Citation; message: string } | null>(null);
   const [downloadError, setDownloadError] = useState('');
@@ -83,9 +86,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       await verify();
       if (saved !== null && !isTurn(saved)) throw new Error('Malformed saved reply');
       if (saved) {
-        remember(textRef.current === receipt.text ? '' : textRef.current, null);
+        remember(!receipt.message && textRef.current === receipt.text ? '' : textRef.current, null);
         setStatus('Answer saved.');
         await refresh();
+        if (receipt.message) composer.current?.focus({ preventScroll: true });
       } else {
         setCheckedKey(receipt.key);
         setStatus('No saved answer found yet. It may still be running. Check again, or retry this same question with its original request identity.');
@@ -97,11 +101,11 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     } finally { if (active.current) setChecking(false); }
   }
 
-  async function send(retry = false) {
-    if (lock.current || busy || moving || sourceUncertain || projectUncertain || (!retry && (pendingRef.current || !textRef.current.trim()))) return;
+  async function send(retry = false, revision?: Receipt) {
+    if (lock.current || busy || moving || externalBlocked || feedbackBusy || sourceUncertain || projectUncertain || (!retry && (pendingRef.current || (!revision && !textRef.current.trim())))) return;
     if (retry && checkedKey !== pendingRef.current?.key) return;
     lock.current = true;
-    const receipt = retry ? pendingRef.current! : { key: crypto.randomUUID(), text: textRef.current, intent: intentRef.current };
+    const receipt = retry ? pendingRef.current! : revision || { key: crypto.randomUUID(), text: textRef.current, intent: intentRef.current };
     if (!receipt) { lock.current = false; return; }
     remember(textRef.current, receipt);
     setWatching(true);
@@ -112,13 +116,15 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     let terminalError: Event & { event: 'error' } | null = null;
     try {
       await verify();
-      const response = await fetch(`${path}/${receipt.intent || 'lecture'}/stream`, {
+      const response = await fetch(receipt.message ? `${path}/messages/${encodeURIComponent(receipt.message)}/revise` : `${path}/${receipt.intent || 'lecture'}/stream`, {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_message: receipt.text, idempotency_key: receipt.key }),
+        body: JSON.stringify(receipt.message ? { content: receipt.text, idempotency_key: receipt.key } : { student_message: receipt.text, idempotency_key: receipt.key }),
       });
       if (!response.ok) throw new ApiError(response.status);
-      await readStream(response, page.notebook.id, receipt.key, event => {
+      if (receipt.message) {
+        if (!isTurn(await response.json())) throw new Error('Malformed saved edit');
+      } else await readStream(response, page.notebook.id, receipt.key, event => {
         if (!active.current) return;
         if (event.event === 'started') setStatus('Question accepted.');
         if (event.event === 'status') setStatus(({ queued: 'Waiting for capacity…', retrieving: 'Finding evidence…', thinking: 'Preparing an answer…', saving: 'Saving answer…' })[event.phase]);
@@ -148,7 +154,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   }
 
   async function stageAction(route: string, body: object) {
-    if (lock.current || pendingRef.current || busy || moving) return;
+    if (lock.current || pendingRef.current || busy || moving || externalBlocked || feedbackBusy) return;
     lock.current = true;
     setMoving(true);
     setProjectUncertain(true);
@@ -196,6 +202,25 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     } catch { if (active.current) setDownloadError('This source could not be downloaded. It may have been removed; try again or open Streamlit.'); }
   }
 
+  async function rate(message: string, kind: 'useful' | 'not_useful') {
+    if (lock.current || feedbackBusy || externalBlocked) return;
+    lock.current = true; setFeedbackBusy(true);
+    try {
+      await verify();
+      const response = await fetch(`${path}/messages/${encodeURIComponent(message)}/learning-signal`, {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind }),
+      });
+      await verify();
+      if ([401, 403].includes(response.status)) { expired(); return; }
+      await refresh(); setStatus(response.ok ? 'Feedback saved.' : 'Feedback was not saved. Latest saved answer refreshed; try again.');
+    } catch { if (active.current) setStatus('Could not verify feedback. Refresh saved project to read the latest saved answer before trying again.'); }
+    finally { lock.current = false; if (active.current) setFeedbackBusy(false); }
+  }
+  useEffect(() => { activity(watching || checking || moving || !!pending || sourceUncertain || projectUncertain || feedbackBusy); }, [watching, checking, moving, pending, sourceUncertain, projectUncertain, feedbackBusy]);
+  const editIndex = pending?.message ? page.messages.findIndex(message => message.id === pending.message) : -1;
+  const visibleMessages = editIndex >= 0 ? page.messages.slice(0, editIndex) : page.messages;
+
   useEffect(() => {
     active.current = true;
     if (initial.current.pending) void reconcile(initial.current.pending);
@@ -211,7 +236,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       setPathOpen(value => !value);
       if (!pathOpen) window.requestAnimationFrame(() => document.getElementById('path-heading')?.focus({ preventScroll: true }));
     }}>Thinking Path{project.pending ? ' · decision pending' : ''}</button>
-    <Sources owner={owner} thread={page.notebook.id} expired={expired} uncertain={setSourceUncertain} opened={() => setPathOpen(false)}/>
+    <Sources disabled={externalBlocked} owner={owner} thread={page.notebook.id} expired={expired} uncertain={setSourceUncertain} opened={() => setPathOpen(false)}/>
     <fieldset className="intent-switch" disabled={watching || checking || moving || !!pending}>
       <legend>What would you like to work on?</legend>
       {(['lecture', 'project'] as const).map(value => <label key={value}><input type="radio" name="intent" value={value} checked={intent === value} onChange={() => {
@@ -227,9 +252,25 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       void loadEarlier().then(() => window.requestAnimationFrame(() => window.scrollTo(0, scroll + document.documentElement.scrollHeight - height)));
     }}>Load earlier messages</button> : null}
     {page.messages.length === 0 ? <p>No saved messages yet. Write your first question or project contribution below.</p> : null}
-    {page.messages.map(message => <article className={`message ${message.role === 'user' ? 'student' : 'coach'}`} key={message.id}>
+    {visibleMessages.map(message => <article className={`message ${message.role === 'user' ? 'student' : 'coach'}`} key={message.id}>
       <h3>{message.role === 'user' ? 'You' : 'Coach'}</h3>
       <div className="message-content">{message.content}</div>
+      <div className="message-actions">
+        <button onClick={() => { void navigator.clipboard.writeText(message.content).then(() => setStatus('Message copied.')).catch(() => setStatus('Could not copy. Select the message text to copy it.')); }}>Copy {message.role === 'user' ? 'your message' : 'answer'}</button>
+        {message.role === 'user' ? <button disabled={watching || checking || moving || !!pending || externalBlocked || sourceUncertain || projectUncertain} id={`edit-trigger-${message.id}`} onClick={() => setEdit({ id: message.id, text: message.content })}>Edit message</button> : null}
+        {message.feedback_available ? <div role="group" aria-label="Was this answer useful?">
+          {(['useful', 'not_useful'] as const).map(kind => <button key={kind} aria-pressed={message.rating === kind} disabled={feedbackBusy || watching || checking || !!pending || externalBlocked} onClick={() => void rate(message.id, kind)}>{kind === 'useful' ? 'Useful' : 'Not useful'}</button>)}
+        </div> : null}
+      </div>
+      {edit?.id === message.id ? <form className="message-edit" onSubmit={event => {
+        event.preventDefault(); const receipt = { key: crypto.randomUUID(), text: edit.text, message: edit.id }; setEdit(null); void send(false, receipt);
+      }}>
+        <label htmlFor={`edit-${message.id}`}>Revise your message</label>
+        <textarea autoFocus id={`edit-${message.id}`} value={edit.text} maxLength={12000} onChange={event => setEdit({ ...edit, text: event.target.value })}/>
+        <p>Saving replaces this message and the replies after it in your active transcript, then asks the coach again. Your composer draft is kept.</p>
+        <button type="button" onClick={() => { setEdit(null); document.getElementById(`edit-trigger-${message.id}`)?.focus({ preventScroll: true }); }}>Cancel edit</button>
+        <button disabled={!edit.text.trim() || watching || checking || busy || moving || feedbackBusy || !!pending || externalBlocked || sourceUncertain || projectUncertain}>Confirm edit & ask again</button>
+      </form> : null}
       {message.citations.length ? <div className="citations" aria-label="Supporting evidence">{message.citations.map(citation =>
         <button key={`${citation.label}:${citation.source_id}`} onClick={event => {
           returnScroll.current = window.scrollY; citationButton.current = event.currentTarget;
@@ -251,21 +292,21 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       <textarea ref={composer} id="lecture-question" value={text} maxLength={12000} rows={3}
         placeholder="What would you like to understand?" onChange={event => remember(event.target.value, pendingRef.current)}/>
       <div className="composer-actions"><span className="supporting">{intent === 'lecture' ? 'Lecture help · project stages unchanged' : `Project coaching · ${project.stages.find(stage => stage.id === project.current_stage)?.label}`}</span>
-        <button className="primary" type="submit" disabled={watching || checking || busy || moving || sourceUncertain || projectUncertain || !!pending || !text.trim()}>{intent === 'lecture' ? 'Send question' : 'Send project work'}</button></div>
+        <button className="primary" type="submit" disabled={watching || checking || busy || moving || sourceUncertain || projectUncertain || externalBlocked || feedbackBusy || !!pending || !text.trim()}>{intent === 'lecture' ? 'Send question' : 'Send project work'}</button></div>
     </form>
     {storageError ? <p role="alert">Tab storage is unavailable. Keep a copy of your draft before reloading.</p> : null}
     <div className="turn-status" role="status" aria-live="polite">{status}</div>
     {preview ? <article className="message preview"><h3>Coach · unsaved preview</h3><div className="message-content">{preview}</div></article> : null}
     {watching ? <button onClick={() => { controller.current.abort(); }}>Stop watching</button> : null}
     {pending && !watching ? <div className="recovery-actions">
-      <p className="supporting">Pending question: {pending.text}</p>
+      <p className="supporting">{pending.message ? 'Pending edit' : 'Pending question'}: {pending.text}</p>
       <button disabled={checking || busy} onClick={() => void reconcile(pending)}>Check saved answer</button>
       <button disabled={checking || busy || checkedKey !== pending.key} onClick={() => void send(true)}>Retry same question</button>
     </div> : null}
     </div>
     <aside id="project-path" className={`project-panel ${pathOpen ? 'path-open' : ''}`} aria-label="Project Thinking Path">
       <button className="mobile-only" onClick={() => { setPathOpen(false); pathToggle.current?.focus({ preventScroll: true }); }}>Return to chat</button>
-      <ThinkingPath project={project} disabled={watching || checking || busy || moving || !!pending || projectUncertain} act={stageAction}/>
+      <ThinkingPath project={project} disabled={watching || checking || busy || moving || !!pending || projectUncertain || externalBlocked || feedbackBusy} act={stageAction}/>
     </aside>
   </section>;
 }
