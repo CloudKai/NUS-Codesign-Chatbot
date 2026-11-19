@@ -2,6 +2,70 @@
 
 ## Current status
 
+### Reply text streaming (Phase 4 item 4, partly blocked)
+
+New setting `COACH_STREAM_REPLY_DELTAS_ENABLED` (default off, in `.env.example`).
+No live command was run. Marks: **(script run)**, **(hand)**, **(doc)**.
+
+- **What shipped.** Two opt-in NDJSON events on `/api/v1/coach/turn/stream`:
+  `reply_delta` (`{"event":"reply_delta","text":"..."}`, an unvalidated
+  fragment, appended in order) and `reply_discard` (no payload, withdraws all
+  fragments). A client gets them only when the setting is on and it sends
+  `X-Coach-Reply-Deltas: 1`; older clients and the Streamlit transport see the
+  original events (a client that rejects unknown events would otherwise end the
+  stream as malformed). `reply_ready` is still the validated reply and `done`
+  the only saved acknowledgement; idempotency, persistence and error events are
+  unchanged. A turn that fails after streamed text sends `reply_discard` then
+  `error`; the retry after a source check sends `reply_discard` before the second
+  pass. React (`frontend/src/stream.ts`, `Conversation.tsx`) appends deltas to
+  the unsaved preview only, clears it on `reply_discard`, `error` and stream end,
+  and shows the existing "not confirmed saved" status after a failure.
+- **Which providers stream.** Mock (a simulation: it cuts the finished reply into
+  4-word pieces, so it proves the transport, not model timing) and direct Bedrock
+  Converse (uses `converse_stream` when a client asked for deltas and decodes the
+  top-level `response_text` from the streamed forced-tool JSON; validated as before;
+  stub-tested only, never run against Bedrock).
+- **Blocked: AgentCore Runtime (the production path).** Evidence (hand):
+  `agentcore_runtime/main.py` `invoke` returns one dict and its docstring says
+  "never `yield`" (lines 818-828); `_stream_specialist_invoke` is a stub that
+  returns an error payload (805-815); `backend/agentcore_provider.py` calls
+  `invoke_agent_runtime(..., accept="application/json")` (line 1886) and
+  parses one response body (`_payload_from_runtime_response`). The runtime does
+  see partial reply text (its `_first_text_timing_callback`, `main.py` 169-203,
+  finds `response_text` in streamed tool-input JSON), but only for timing. AWS
+  documents streaming for AgentCore Runtime (`InvokeAgentRuntime` "supports
+  streaming responses"; entrypoints may `yield`) (doc), so the platform can do it.
+  Using it needs a changed runtime entrypoint (republished runtime version), a
+  streaming response contract, and a decision on the output guardrail, which runs
+  on the complete output (`enforce_mantle_guardrail(..., source="OUTPUT")`) after
+  generation. That changes the runtime contract, so it was not built.
+- **Time to first visible text, mock provider, offline (script run,
+  `scripts/evals/measure_stream_first_text.py`, 15 runs per mode, medians).**
+  Plain mock: 15.1 ms before (`reply_ready`), 14.5 ms after (`reply_delta`).
+  Simulated latency mock (150 ms first token + 20 ms per 4-word chunk, 6-7
+  chunks): 286.7 ms before, 183.9 ms after. This shows the pipeline hands the
+  first fragment to the consumer as soon as the provider emits it (about 14 ms
+  of overhead on top of 170 ms) and that the old path waits for the full reply.
+  It does not show real model, AgentCore or network latency, because the delays
+  are inputs I chose; it does not show browser rendering time.
+- **Tests (script run).** 21 new (18 `tests/domain/test_reply_streaming.py`, 3 in
+  `test_bedrock_provider.py`): event order, nothing saved while text streams,
+  discard then error after a validation failure, no deltas without opt-in,
+  idempotent replay streams no text and calls no model, discard before the
+  source-check retry, HTTP needs setting and header, extractor edge cases. Full
+  mock suite 2703 passed, 1 skipped, 0 failed with a built `frontend/dist`; without
+  it the two known `test_notebook_reader.py` failures return. No frontend unit test
+  framework exists; `npm ci` and `npm run build` (`tsc --noEmit` then `vite build`)
+  passed. `frontend/dist` and `node_modules` are git-ignored, were not committed
+  and were removed afterwards.
+- **Risks.** Streamed text can differ from the saved text (retries and
+  server-side post-processing); the preview is replaced by `reply_ready`. An
+  unvalidated fragment may show text that the final validation rejects, which is
+  why it is opt-in, labelled unsaved and withdrawn on failure. Enabling the
+  setting with `MODEL_PROVIDER=agentcore` changes nothing.
+- **Rollback.** Leave the setting off (default), or revert the commits. No schema
+  or stored-data change.
+
 ### Laya production readiness (Phase 4 item 3, report only)
 
 No product behavior changed. The classifier stays off unless

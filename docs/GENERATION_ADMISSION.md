@@ -72,7 +72,7 @@ Only the winning durable chat execution reaches call admission; same-key replays
 and waiters do not spend twice. Chat streams acknowledge dispatch with `started`;
 this is **pending**, not saved or a guaranteed model slot. `status/queued` means a
 cost reservation and bounded generation wait really exist. `thinking` follows
-slot admission; `reply_ready` is unsaved, and `done` acknowledges persistence.
+slot admission; `reply_ready` is unsaved, and `done` acknowledges persistence. Opt-in `reply_delta` fragments are earlier, unvalidated and unsaved; `reply_discard` withdraws them.
 Nonstream requests wait within the same finite policy. Capacity/full queue,
 wait expiry, budget and unavailable-ledger rejections have separate categories.
 HTTP 429 includes `Retry-After`; streams carry equivalent status/category/retry.

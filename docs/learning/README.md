@@ -307,6 +307,8 @@ The route returns `application/x-ndjson`: newline-delimited JSON. Each line is a
 {"event":"done","turn":{"response_text":"...","assessment":{}}}
 ```
 
+Two further events exist for clients that opt in (header `X-Coach-Reply-Deltas: 1`, with `COACH_STREAM_REPLY_DELTAS_ENABLED` on, default off): `{"event":"reply_delta","text":"..."}` carries an unvalidated, ephemeral fragment of the reply being generated, and `{"event":"reply_discard"}` withdraws every fragment so far. `reply_ready` remains the validated reply and `done` the only saved acknowledgement. Only the mock and direct Bedrock Converse providers produce fragments; the AgentCore Runtime path returns one JSON object and sends none.
+
 The last example abbreviates the required assessment fields; it is not a valid standalone `CoachTurn` fixture. Actual code also emits a small `graph` summary and structured `error` events. The `example-phase` value is illustrative, not a real progress enum.
 
 The current route runs a background thread and consumes progress from a queue. It does not stream raw model tokens into the response in this path. The final answer arrives after structured validation and persistence. This supports trustworthy saved output and visible progress, but it is different from token-by-token LLM streaming.
@@ -1237,7 +1239,7 @@ Check the app image's immutable Git revision and the actual AgentCore DEFAULT ve
 
 #### Q19. Is the UI streaming model tokens?
 
-The inspected coach route streams NDJSON progress and a final validated/persisted turn. It is not raw token streaming. A later stream error can appear inside an HTTP 200 response, so the client must process event types and terminal state.
+The inspected coach route streams NDJSON progress and a final validated/persisted turn. It is not raw token streaming unless the client opts in to `reply_delta` events (see 2.7), and then only for providers that can produce partial text; those fragments are never saved. A later stream error can appear inside an HTTP 200 response, so the client must process event types and terminal state.
 
 #### Q20. How do you protect students from each other?
 
