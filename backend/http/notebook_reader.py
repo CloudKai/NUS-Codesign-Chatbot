@@ -7,18 +7,35 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
-from fastapi.responses import FileResponse, StreamingResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, Response
 
+from backend.auth_profiles import has_streamlit_access
 from backend.http.reader_sources import register_reader_sources
-from backend.http.reader_workspace import register_reader_workspace
+from backend.http.reader_workspace import (
+    ReaderNotebook,
+    reader_notebook,
+    reader_notebook_for_owner,
+    register_reader_workspace,
+)
 from backend.learning_signals import learning_receipts
 from backend.domain import CitationReference, CoachRequest, CoachTurn
-from backend.learning.journey import normalize_journey, selectable_stage_ids
+from backend.learning.journey import (
+    FACIONE_DIMENSIONS,
+    learning_review,
+    merge_checkpoint_items_into_sections,
+    normalize_journey,
+    selectable_stage_ids,
+)
 from backend.learning.resume import StageResume, project_resume
 from backend.learning.stages import THINKING_STAGES
 from backend.owner_context import OwnerServices
 from backend.operational_metrics import record_stage_transition
 from backend.settings import settings
+from backend.specialists.review_orchestration import (
+    DEEP_REVIEW_SNAPSHOT_KEY,
+    JOURNEY_STAGE_REVIEWS_KEY,
+    parse_journey_stage_reviews,
+)
 
 
 class ReaderSession(BaseModel):
@@ -29,11 +46,11 @@ class ReaderSession(BaseModel):
     kind: Literal["guest", "registered"]
 
 
-class ReaderNotebook(BaseModel):
-    """Notebook list entry without educational, research, or storage metadata."""
+class ReaderChatSummary(BaseModel):
+    """Bounded, owner-scoped preview of an active saved conversation."""
 
-    id: str
-    name: str
+    preview: str
+    activity_at: str
 
 
 class ReaderNotebooks(BaseModel):
@@ -41,6 +58,7 @@ class ReaderNotebooks(BaseModel):
 
     owner_id: str
     notebooks: list[ReaderNotebook]
+    chat_summaries: dict[str, ReaderChatSummary]
 
 
 class ReaderMessage(BaseModel):
@@ -71,6 +89,7 @@ class LectureRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     student_message: str = Field(min_length=1, max_length=12_000)
     idempotency_key: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
+    attachment_source_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
 class ReaderStage(StageResume):
@@ -90,6 +109,29 @@ class ReaderPending(BaseModel):
     rationale: str
 
 
+class ReaderReviewFeedback(BaseModel):
+    """Saved formative feedback grouped by the stage it addresses."""
+
+    stage_id: str
+    items: list[str]
+
+
+class ReaderFacioneScore(BaseModel):
+    """A rubric dimension and its saved score, when assessed."""
+
+    dimension: str
+    score: int | None = Field(ge=1, le=4)
+
+
+class ReaderReview(BaseModel):
+    """Student-facing review projected from saved conversation assessments."""
+
+    summary: str
+    strengths: list[ReaderReviewFeedback]
+    improvements: list[ReaderReviewFeedback]
+    facione_scores: list[ReaderFacioneScore]
+
+
 class ReaderProject(BaseModel):
     """Owner-fenced saved project work and canonical pending action."""
 
@@ -98,6 +140,7 @@ class ReaderProject(BaseModel):
     current_stage: str
     stages: list[ReaderStage]
     pending: ReaderPending | None
+    review: ReaderReview
 
 
 class ReaderDecision(BaseModel):
@@ -131,10 +174,6 @@ def _message(row: dict[str, Any]) -> ReaderMessage:
         feedback_available=row['role'] == 'assistant' and meta.get('interaction_intent') == 'lecture_help' and not row.get('is_error'),
         rating=(learning_receipts(meta.get('learning_signals')).get('rating') or {}).get('kind'),
     )
-
-
-def _notebook(row: dict[str, Any]) -> ReaderNotebook:
-    return ReaderNotebook(id=row["id"], name=row["name"])
 
 
 def register_notebook_reader(
@@ -179,10 +218,21 @@ def register_notebook_reader(
     @app.get("/api/v1/reader/threads", response_model=ReaderNotebooks)
     def notebooks(owner: OwnerServices = Depends(reader_owner)) -> ReaderNotebooks:
         """List owned notebooks without changing or migrating their data."""
-        return ReaderNotebooks(owner_id=owner.user_id, notebooks=[
-            _notebook(row)
-            for row in owner.workspace.list_threads()
-        ])
+        rows = owner.workspace.list_threads()
+        entries = [reader_notebook(row) for row in rows]
+        notebook_ids = {entry.id for entry in entries if entry.kind == "notebook"}
+        for entry in entries:
+            if entry.parent_notebook_id not in notebook_ids:
+                entry.parent_notebook_id = None
+        summaries = {
+            entry.id: ReaderChatSummary(
+                preview=" ".join(str(row.get("latestUserMessage") or "")[:640].split())[:160],
+                activity_at=str(row.get("lastMessageAt") or row.get("createdAt") or ""),
+            )
+            for entry, row in zip(entries, rows, strict=True)
+            if entry.kind == "chat" or int(row.get("messageCount") or 0) > 0
+        }
+        return ReaderNotebooks(owner_id=owner.user_id, notebooks=entries, chat_summaries=summaries)
 
     @app.get("/api/v1/reader/threads/{thread_id}/messages/page", response_model=ReaderPage)
     def messages(
@@ -201,7 +251,7 @@ def register_notebook_reader(
             status = int(getattr(error, "status_code", 400))
             raise HTTPException(status_code=status, detail="History changed. Reopen the notebook.") from error
         return ReaderPage(
-            owner_id=owner.user_id, notebook=_notebook(notebook),
+            owner_id=owner.user_id, notebook=reader_notebook_for_owner(notebook, owner),
             messages=[_message(row) for row in page["messages"]],
             next_cursor=page["next_cursor"], total_count=page["total_count"],
             conversation_revision=page["conversation_revision"],
@@ -215,7 +265,16 @@ def register_notebook_reader(
             raise HTTPException(status_code=404, detail="Notebook not found")
         metadata = thread.get("metadata") or {}
         journey = normalize_journey(metadata.get("learning_journey"))
-        resume = project_resume(metadata, owner.store.get_messages(thread_id))
+        messages = owner.store.get_messages(thread_id)
+        resume = project_resume(metadata, messages)
+        snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+        checkpoints = parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+        review = learning_review(
+            messages,
+            journey,
+            deep_review_snapshot=snapshot if isinstance(snapshot, dict) else None,
+            journey_stage_reviews=checkpoints,
+        )
         selectable = selectable_stage_ids(journey) if settings.student_stage_selection else ()
         pending = owner.learning.get_pending(thread_id)
         return ReaderProject(
@@ -227,6 +286,19 @@ def register_notebook_reader(
                 id=pending.id, from_stage=pending.from_stage, to_stage=pending.to_stage,
                 rationale=pending.assessment.recommendation_rationale,
             ) if pending else None,
+            review=ReaderReview(
+                summary=review["saved_summary"] or str(metadata.get("learning_summary") or "").strip(),
+                strengths=merge_checkpoint_items_into_sections(
+                    review["strength_sections"], checkpoints, field="strengths",
+                ),
+                improvements=merge_checkpoint_items_into_sections(
+                    review["improvement_sections"], checkpoints, field="areas_to_revisit",
+                ),
+                facione_scores=[
+                    ReaderFacioneScore(dimension=label, score=review["facione_scores"][key] or None)
+                    for key, label in FACIONE_DIMENSIONS
+                ],
+            ),
         )
 
     @app.post("/api/v1/reader/threads/{thread_id}/project/resolve/{transition_id}", response_model=ReaderProject)
@@ -282,11 +354,14 @@ def register_notebook_reader(
         thread = owner.workspace.get_thread(thread_id)
         if thread is None:
             raise HTTPException(status_code=404, detail="Notebook not found")
+        if len(set(payload.attachment_source_ids)) != len(payload.attachment_source_ids):
+            raise HTTPException(status_code=422, detail="Attachment IDs must be distinct")
         journey = normalize_journey((thread.get("metadata") or {}).get("learning_journey"))
         coach_request = CoachRequest(
             thread_id=thread_id, student_message=payload.student_message,
             idempotency_key=payload.idempotency_key, interaction_intent=intent,
             current_stage=journey["current_stage"], response_detail=journey["response_detail"],
+            attachment_source_ids=payload.attachment_source_ids,
         )
         return stream_turn(coach_request, request, owner)
 
@@ -315,20 +390,68 @@ def register_notebook_reader(
             raise HTTPException(status_code=404, detail="Saved citation not found")
         try:
             content = owner.workspace.read_source_content(thread_id, source_id)
-        except ValueError as error:
-            raise HTTPException(status_code=404, detail="Source no longer available") from error
+        except ValueError:
+            try:
+                content = owner.workspace.read_library_source(source_id)
+            except ValueError as error:
+                raise HTTPException(status_code=404, detail="Source unavailable") from error
         return Response(content.data, media_type="application/octet-stream", headers={
             "Content-Disposition": "attachment; filename*=UTF-8''" + quote(content.filename, safe=""),
             "X-Content-Type-Options": "nosniff",
         })
+
+    def streamlit_allowed(request: Request) -> bool:
+        """Check verified Cognito identity and reload its persisted access profile."""
+        if not str(request.cookies.get(settings.cognito_id_token_cookie_name) or "").strip():
+            return False
+        try:
+            owner = resolve_owner(request)
+        except HTTPException as error:
+            if error.status_code == 401:
+                return False
+            raise
+        profile = owner.store.get_user_by_id(owner.user_id) or {}
+        return has_streamlit_access(profile, settings.streamlit_access_subjects)
+
+    @app.get("/api/v1/auth/streamlit-access", include_in_schema=False)
+    def streamlit_access(request: Request) -> Response:
+        """Authorize the proxy's Streamlit requests and WebSocket handshakes."""
+        headers = {"Cache-Control": "no-store", "Vary": "Cookie"}
+        if not streamlit_allowed(request):
+            raise HTTPException(status_code=403, detail="Streamlit access required", headers=headers)
+        return Response(status_code=204, headers=headers)
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/pilot/", include_in_schema=False)
+    def browser_home(request: Request) -> Response:
+        """Choose the default workspace from the verified browser identity."""
+        headers = {"Cache-Control": "no-store", "Vary": "Cookie"}
+        if streamlit_allowed(request):
+            query = request.url.query
+            target = f"/streamlit/?{query}" if query else "/streamlit/"
+            return RedirectResponse(target, status_code=302, headers=headers)
+        if (
+            not request.cookies.get(settings.cognito_id_token_cookie_name)
+            and request.cookies.get(settings.cognito_session_hint_cookie_name)
+            and "auth_refreshed" not in request.query_params
+        ):
+            return RedirectResponse("/api/v1/auth/refresh", status_code=302, headers=headers)
+        response = pilot_asset("index.html")
+        response.headers["Vary"] = "Cookie"
+        return response
 
     @app.get("/pilot/{asset_path:path}", include_in_schema=False)
     def pilot_asset(asset_path: str) -> FileResponse:
         """Serve built public assets only; missing builds never break Streamlit startup."""
         root = Path(__file__).resolve().parents[2] / "frontend" / "dist"
         relative = asset_path or "index.html"
+        root = root.resolve()
         path = (root / relative).resolve()
-        if not path.is_relative_to(root.resolve()) or path.suffix not in {".html", ".js", ".css", ".svg", ".ico", ".ttf", ".txt"}:
+        if not path.is_relative_to(root):
+            raise HTTPException(status_code=404, detail="Not found")
+        allowed_suffixes = {".html", ".js", ".css", ".svg", ".ico", ".ttf", ".txt"}
+        design_assets = {"favicon.png", "fonts/inter-latin-wght-normal.woff2"}
+        if path.suffix not in allowed_suffixes and path.relative_to(root).as_posix() not in design_assets:
             raise HTTPException(status_code=404, detail="Not found")
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Not found")

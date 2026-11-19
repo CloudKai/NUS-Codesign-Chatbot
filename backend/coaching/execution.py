@@ -118,9 +118,10 @@ from backend.specialists.review_orchestration import (
 )
 from backend.source_library import (
     CHAT_ATTACHMENT_ORIGIN,
+    conversation_sources,
     image_inputs_for_sources,
     is_locked_course_source,
-    list_visible_sources,
+    private_library_sources,
     selected_source_context,
     shared_course_catalog_scope,
 )
@@ -1027,9 +1028,9 @@ class CoachApplicationService:
             for message in messages
             if str(message.get("id") or "").strip()
         ]
-        visible_sources = list_visible_sources(
+        visible_sources = conversation_sources(
             self._store,
-            thread_id,
+            thread,
             selected_only=True,
             include_extracted_text=False,
         )
@@ -2655,9 +2656,9 @@ class CoachApplicationService:
         def _load_sources() -> list[dict[str, Any]]:
             started = time.perf_counter()
             try:
-                visible_sources = list_visible_sources(
+                visible_sources = conversation_sources(
                     self._store,
-                    request.thread_id,
+                    thread,
                     selected_only=False,
                     include_extracted_text=False,
                 )
@@ -2707,6 +2708,10 @@ class CoachApplicationService:
                 attachment_id,
                 include_extracted_text=False,
             )
+            if not attachment:
+                linked = private_library_sources(self._store, [attachment_id])
+                if linked and (linked[0].get("metadata") or {}).get("reader_attachment_thread") == request.thread_id:
+                    attachment = linked[0]
             if not attachment or str(
                 (attachment.get("metadata") or {}).get("origin") or ""
             ).strip() != CHAT_ATTACHMENT_ORIGIN:
@@ -2718,7 +2723,7 @@ class CoachApplicationService:
             snapshot = TurnSnapshot.from_authoritative_state(
                 thread=thread,
                 current_stage=authoritative_stage,
-                visible_sources=[*visible_sources, *attachment_sources],
+                visible_sources=list({source["id"]: source for source in [*visible_sources, *attachment_sources]}.values()),
             )
         selected_sources = list(snapshot.selected_sources)
         # Keep this original set only for integrity checks.  Per-turn privacy

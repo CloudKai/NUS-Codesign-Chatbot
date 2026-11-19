@@ -76,7 +76,7 @@ services:
         - >-
           import urllib.request;
           urllib.request.urlopen("http://127.0.0.1:8000/api/v1/ready", timeout=2);
-          urllib.request.urlopen("http://127.0.0.1:8501/_stcore/health", timeout=2)
+          urllib.request.urlopen("http://127.0.0.1:8501/streamlit/_stcore/health", timeout=2)
       interval: 30s
       timeout: 5s
       retries: 3

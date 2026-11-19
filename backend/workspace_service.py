@@ -36,6 +36,7 @@ from .specialists.review_orchestration import (
 from .student_journey import normalize_journey
 from .student_store import StudentStore
 from .learning_signals import LearningReceipts
+from .sources.library import private_library_sources
 
 _TRANSCRIPT_ROLES = {"user": "Student", "assistant": "Coach"}
 MESSAGE_PAGE_SIZE = 6
@@ -199,7 +200,7 @@ class WorkspaceService:
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
         """Return one owned notebook or ``None``."""
         thread = self._store.get_thread(thread_id)
-        return public_thread(thread) if thread else None
+        return public_thread(thread) if thread and not (thread.get("metadata") or {}).get("reader_library") else None
 
     def create_thread(
         self,
@@ -209,13 +210,17 @@ class WorkspaceService:
         support_mode: str,
         assignment: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
+        quick_chat: bool = False,
+        parent_notebook_id: str | None = None,
     ) -> dict[str, Any]:
-        """Create a notebook and optionally merge initial metadata."""
+        """Create an owned notebook or quick chat and optionally merge initial metadata."""
         thread_id = self._store.create_thread(
             name=name,
             model_id=model_id,
             support_mode=support_mode,
             assignment=assignment,
+            quick_chat=quick_chat,
+            parent_notebook_id=parent_notebook_id,
         )
         if metadata:
             self._store.update_thread(thread_id, metadata=metadata)
@@ -249,7 +254,10 @@ class WorkspaceService:
         The public API still reports an absent/foreign notebook as not found
         after that safe owner-scoped cleanup attempt.
         """
-        existed = self._store.get_thread(thread_id) is not None
+        existing = self._store.get_thread(thread_id)
+        if (existing or {}).get("metadata", {}).get("reader_library"):
+            raise ValueError("Notebook not found")
+        existed = existing is not None
         self._store.delete_thread(thread_id)
         if not existed:
             raise ValueError("Notebook not found")
@@ -379,19 +387,21 @@ class WorkspaceService:
         )
 
     def list_sources(
-        self, thread_id: str, *, selected_only: bool = False
+        self, thread_id: str, *, selected_only: bool = False, include_extracted_text: bool = True
     ) -> list[dict[str, Any]]:
         """List notebook sources without exposing filesystem paths.
 
         Shared Lecture Notes/Readings are projected from the course catalog
         and are not inserted as per-notebook ``sources`` rows.
         """
-        if not self._store.get_thread(thread_id):
+        thread = self._store.get_thread(thread_id)
+        if not thread:
             raise ValueError("Notebook not found")
         return [
             public_source(source)
             for source in list_visible_sources(
-                self._store, thread_id, selected_only=selected_only
+                self._store, thread_id, selected_only=selected_only, include_extracted_text=include_extracted_text,
+                thread_metadata=thread.get("metadata") or {},
             )
         ]
 
@@ -437,6 +447,55 @@ class WorkspaceService:
         )
         return [public_attachment(source) for source in created]
 
+    def library_sources(self, source_ids: list[str] | None = None, *,
+                        include_extracted_text: bool = False) -> list[dict[str, Any]]:
+        """List this owner's library, optionally retrieving exact source IDs and text."""
+        return private_library_sources(self._store, source_ids, include_extracted_text=include_extracted_text)
+
+    def upload_library_files(self, uploads: Iterable[tuple[str, bytes, str | None]], *,
+                             thread_id: str | None = None, attachment: bool = False) -> list[dict[str, Any]]:
+        """Save a single original per upload and optionally link it to notebook Sources."""
+        if thread_id is not None and self.get_thread(thread_id) is None:
+            raise ValueError("Notebook not found")
+        if attachment and thread_id is None:
+            raise ValueError("Chat not found")
+        created = add_file_sources(
+            self._store, self._store.ensure_library_thread(), uploads,
+            origin=CHAT_ATTACHMENT_ORIGIN if attachment else "source_panel",
+            selected=False,
+            compress=False,
+            extra_metadata={
+                "reader_checked_upload": True,
+                **({"reader_attachment_thread": thread_id} if attachment else {}),
+            },
+        )
+        if thread_id is not None and not attachment:
+            for source in created:
+                self._store.set_reader_source_link(thread_id, source["id"], True)
+        return [public_attachment(source) for source in created]
+
+    def set_library_link(self, thread_id: str, source_id: str, selected: bool | None, *,
+                         require_link: bool = False) -> None:
+        """Attach, enable, disable or detach an owned source without deleting its bytes."""
+        matches = self.library_sources([source_id])
+        if not matches or (require_link and not any(
+            row["id"] == source_id for row in self.list_sources(thread_id, include_extracted_text=False)
+        )):
+            raise ValueError("Source not found")
+        self._store.set_reader_source_link(thread_id, source_id, selected)
+
+    def delete_library_source(self, source_id: str) -> None:
+        """Permanently delete one owned original; linked projections will no longer resolve."""
+        matches = self.library_sources([source_id])
+        if not matches:
+            raise ValueError("Source not found")
+        self._store.delete_source(matches[0]["threadId"], source_id)
+
+    def read_library_source(self, source_id: str) -> SourceContent:
+        """Read an owned original independently of current notebook membership."""
+        matches = self.library_sources([source_id], include_extracted_text=True)
+        return self._source_content(matches[0] if matches else None)
+
     def set_source_selected(
         self, thread_id: str, source_id: str, selected: bool
     ) -> dict[str, Any]:
@@ -479,7 +538,11 @@ class WorkspaceService:
 
     def read_source_content(self, thread_id: str, source_id: str) -> SourceContent:
         """Read source file bytes for preview/download via local or object storage."""
-        source = get_visible_source(self._store, thread_id, source_id)
+        return self._source_content(get_visible_source(self._store, thread_id, source_id))
+
+    @staticmethod
+    def _source_content(source: dict[str, Any] | None) -> SourceContent:
+        """Build a safe download from an already authorized source row."""
         if not source:
             raise ValueError("Source not found")
         data = read_source_bytes(source)

@@ -1,4 +1,4 @@
-"""Contract checks for the optional local same-origin guest proxy."""
+"""Contract checks for the local same-origin browser proxy."""
 
 from pathlib import Path
 
@@ -25,15 +25,17 @@ def test_local_proxy_routes_only_explicit_auth_and_health_paths():
     assert "handle /api/* {\n\t\treverse_proxy" not in config
 
 
-def test_launcher_keeps_existing_mode_and_disables_guests_without_caddy():
-    """Guest mode optionally starts Caddy; missing Caddy preserves standard startup."""
+def test_launcher_routes_the_root_through_caddy_with_or_without_guests():
+    """Both guest configurations use the same React-first browser endpoint."""
     script = Path("scripts/start.sh").read_text(encoding="utf-8")
+    config = Path("Caddyfile.local").read_text(encoding="utf-8")
     assert "command -v caddy" in script
-    assert 'export GUEST_ACCESS_ENABLED="false"' in script
-    assert 'LOCAL_BROWSER_URL="http://127.0.0.1:8501"' in script
     assert 'caddy run --config "$ROOT/Caddyfile.local" --adapter caddyfile' in script
     assert 'LOCAL_BROWSER_URL="http://127.0.0.1:8080"' in script
-    proxy_branch = script.index('export CO_DESIGN_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8080}"')
-    regular_branch = script.index('export CO_DESIGN_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8501}"')
-    assert proxy_branch < regular_branch
-    assert script.index('if command -v caddy') < proxy_branch
+    assert "--server.baseUrlPath streamlit" in script
+    assert "GUEST_ACCESS_ENABLED" not in script
+    assert "handle / {\n\t\treverse_proxy 127.0.0.1:8000" in config
+    assert "handle /api/v1/auth/streamlit-access" not in config
+    assert "uri /api/v1/auth/streamlit-access" in config
+    assert "header_up -Upgrade" in config
+    assert "header_up -Connection" in config

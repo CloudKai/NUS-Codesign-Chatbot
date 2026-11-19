@@ -399,11 +399,18 @@ class Settings:
         "CO_DESIGN_PUBLIC_API_URL",
         os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000"),
     )
-    ui_base_url: str = os.getenv("CO_DESIGN_UI_URL", "http://127.0.0.1:8501")
+    ui_base_url: str = os.getenv("CO_DESIGN_UI_URL", "http://127.0.0.1:8080")
     use_local_api: bool = _boolean("USE_LOCAL_API", True)
     # Guest ownership is an explicit opt-in. Keep production disabled until
     # the guest persistence migration and later release phases are approved.
     guest_access_enabled: bool = _boolean("GUEST_ACCESS_ENABLED", False)
+    streamlit_access_subjects: frozenset[str] = field(
+        default_factory=lambda: frozenset(
+            subject.strip()
+            for subject in os.getenv("STREAMLIT_ACCESS_COGNITO_SUBS", "").split(",")
+            if subject.strip()
+        )
+    )
     guest_starts_per_minute: int = _bounded_int("GUEST_STARTS_PER_MINUTE", 120, 1, 10000)
     guest_starts_per_hour: int = _bounded_int("GUEST_STARTS_PER_HOUR", 480, 1, 10000)
     guest_session_cookie_name: str = os.getenv(

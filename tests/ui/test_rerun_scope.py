@@ -683,7 +683,7 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "not prev_attention and attention" in watch_block
     assert "prev_active and not active" in watch_block
     journey_block = source.split("def render_journey_track", 1)[1].split(
-        "def _dedupe_feedback_items", 1
+        "def _conclusion_sections_from_checkpoints", 1
     )[0]
     assert 'state_classes = f"{state_classes} open preview-open"' in journey_block
     assert 'state_classes = f"{state_classes} focus"' in journey_block

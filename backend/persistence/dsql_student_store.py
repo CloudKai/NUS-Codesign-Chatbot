@@ -45,6 +45,8 @@ _OCC_WRITE_METHODS = (
     "consume_oauth_login_state",
     "update_user_preferences",
     "create_thread",
+    "ensure_library_thread",
+    "set_reader_source_link",
     "update_thread",
     "add_message",
     "claim_coach_request",

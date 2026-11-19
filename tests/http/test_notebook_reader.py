@@ -110,3 +110,52 @@ def test_pilot_serves_only_built_public_assets(tmp_path: Path) -> None:
     assert client.get("/pilot/package.json").status_code == 404
     assert client.get("/pilot/src/App.tsx").status_code == 404
     assert client.get("/pilot/assets/unknown.js").status_code == 404
+
+
+
+def test_default_workspace_and_streamlit_gate(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Only persisted staff and the exact enabled Cognito account reach Streamlit."""
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "streamlit_access_subjects", frozenset({"enabled"}))
+    root = StudentStore(tmp_path / "routing.sqlite3")
+    oidc = FakeOIDC(root)
+    for subject, role in (("lecturer", "lecturer"), ("admin", "admin"), ("enabled", "student"), ("student", "student")):
+        _seed_user(root, subject, role)
+        oidc.add(subject)
+    app = create_app(root, oidc_client=oidc)
+    gate = "/api/v1/auth/streamlit-access"
+    client = TestClient(app, follow_redirects=False)
+    _, guest_secret = root.create_guest_session()
+
+    for cookie in ({}, {settings.guest_session_cookie_name: guest_secret}, {settings.cognito_id_token_cookie_name: "invalid"}):
+        client.cookies.clear()
+        client.cookies.update(cookie)
+        response = client.get(gate, headers={"X-User-Id": "lecturer", "X-Role": "lecturer"})
+        assert response.status_code == 403
+        assert response.headers["cache-control"] == "no-store"
+        home = client.get("/")
+        assert home.status_code == 200
+        assert '<div id="root">' in home.text
+        assert home.headers["vary"] == "Cookie"
+
+    for subject in ("lecturer", "admin", "enabled", "student"):
+        client.cookies.clear()
+        client.cookies.set(settings.cognito_id_token_cookie_name, f"token-{subject}")
+        allowed = subject != "student"
+        assert client.get(gate).status_code == (204 if allowed else 403)
+        assert client.get("/api/v1/auth/me").json()["user"]["streamlit_access"] is allowed
+        for path in ("/", "/pilot/"):
+            response = client.get(f"{path}?auth_refreshed=1")
+            assert response.status_code == (302 if allowed else 200)
+            assert response.headers["cache-control"] == "no-store"
+            if allowed:
+                assert response.headers["location"] == "/streamlit/?auth_refreshed=1"
+
+    client.cookies.set(settings.cognito_id_token_cookie_name, "token-lecturer")
+    _seed_user(root, "lecturer", "student")
+    assert client.get(gate).status_code == 403
+
+    client.cookies.clear()
+    client.cookies.set(settings.cognito_session_hint_cookie_name, "1")
+    assert client.get("/").headers["location"] == "/api/v1/auth/refresh"
+    assert client.get("/?auth_refreshed=1").status_code == 200

@@ -317,7 +317,7 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     guest_claim_cancel_index = caddyfile.index("handle /api/v1/auth/guest/claim/cancel")
     health_index = caddyfile.index("handle /api/v1/health")
     block_index = caddyfile.index("handle /api/*")
-    streamlit_index = caddyfile.index("handle {\n\t\treverse_proxy app:8501")
+    streamlit_index = caddyfile.index("handle @streamlit {")
     assert login_index < block_index
     assert callback_index < block_index
     assert me_index < block_index
@@ -330,7 +330,15 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert guest_claim_cancel_index < block_index
     assert health_index < block_index < streamlit_index
 
-    api_block = caddyfile[block_index:streamlit_index]
+    home_index = caddyfile.index("handle / {")
+    api_block = caddyfile[block_index:home_index]
+    assert 'handle / {\n\t\treverse_proxy app:8000' in caddyfile
+    assert "handle /api/v1/auth/streamlit-access" not in caddyfile
+    streamlit_block = caddyfile[streamlit_index:]
+    assert streamlit_block.index("forward_auth app:8000") < streamlit_block.index("reverse_proxy app:8501")
+    assert "uri /api/v1/auth/streamlit-access" in streamlit_block
+    assert "header_up -Upgrade" in streamlit_block
+    assert "header_up -Connection" in streamlit_block
     assert "reverse_proxy app:8000" not in api_block
     assert 'respond "Not Found" 404' in api_block
 

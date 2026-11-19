@@ -202,10 +202,10 @@ class SourceUploadCoordinator:
             job.processing = True
             batch, operation = job.uploads, job.operation
         failed = False
-        count = 0
+        receipts: list[dict[str, Any]] = []
         try:
             assert operation is not None
-            count = len(operation(batch))
+            receipts = [{key: row[key] for key in ("id", "title") if key in row} for row in operation(batch)]
         except Exception as error:
             failed = True
             # Do not keep exception tracebacks (which reference the batch) in
@@ -224,8 +224,8 @@ class SourceUploadCoordinator:
             if failed:
                 job.future.set_exception(SourceUploadFailed("The file could not be added."))
             else:
-                # The UI needs only a count, never extracted text/file content.
-                job.future.set_result([{} for _ in range(count)])
+                # Only safe identity is retained; never paths, text or bytes.
+                job.future.set_result(receipts)
             self._trim_receipts_locked(job.owner_id)
 
     @staticmethod

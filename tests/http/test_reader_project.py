@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from pytest import MonkeyPatch
+from pytest import MonkeyPatch, mark
 
 from backend.api import create_app
 from backend.settings import settings
@@ -46,6 +46,37 @@ def test_reader_project_resumes_canonical_authored_work(tmp_path: Path, monkeypa
     assert framing['coach_summary'] == 'Coach summary'
     assert framing['completed'] is True
     assert view['stages'][1]['next_action'] == 'Describe two different concepts and compare how each addresses the need.'
+    assert all(item['score'] is None for item in view['review']['facione_scores'])
+    student.add_message(thread, 'assistant', 'Consider other crossing options.', metadata={
+        'assessment': {
+            'current_stage': 'problem_identification', 'recommendation': 'stay',
+            'learning_summary': 'Identified a need for safer crossings.',
+            'review_strengths': ['Identified the affected residents.'],
+            'review_improvements': ['Compare other crossing options.'],
+            'facione_scores': {'analysis': 3},
+        },
+    })
+    review = client.get(f'/api/v1/reader/threads/{thread}/project').json()['review']
+    assert review['summary'] == 'Identified a need for safer crossings.'
+    assert review['strengths'][0]['items'] == ['Identified the affected residents.']
+    assert review['improvements'][0]['items'] == ['Compare other crossing options.']
+    assert review['facione_scores'][0] == {'dimension': 'Analysis', 'score': 3}
+    student.update_thread(thread, metadata={'journey_stage_reviews': {
+        'jobs': {'problem_identification': {'status': 'complete'}},
+        'reviews': {'problem_identification': {
+            'strengths': ['Named a concrete setting.'],
+            'areas_to_revisit': ['Check how people reach the bus stop.'],
+            'facione_scores': {'analysis': 4},
+        }},
+    }})
+    review = client.get(f'/api/v1/reader/threads/{thread}/project').json()['review']
+    assert review['strengths'][0]['items'] == [
+        'Named a concrete setting.', 'Identified the affected residents.',
+    ]
+    assert review['improvements'][0]['items'] == [
+        'Check how people reach the bus stop.', 'Compare other crossing options.',
+    ]
+    assert review['facione_scores'][0]['score'] == 4
 
 
 def test_reader_project_turn_requires_confirmation(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -78,10 +109,16 @@ def test_reader_project_turn_requires_confirmation(tmp_path: Path, monkeypatch: 
     assert view['current_stage'] == 'problem_identification'
     assert not view['stages'][0]['completed']
     assert view['stages'][0]['student_work'][0]['text'] == text
+    review = view['review']
+    assert review['summary'] == turn['assessment']['learning_summary']
+    assert all(item['score'] is None for item in review['facione_scores'])
     assert client.get(f'{path}/coach-turn?idempotency_key=project-one').json() == turn
 
 
-def test_reader_decisions_revisits_and_restart(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+@mark.parametrize("quick_chat", [False, True], ids=["notebook", "standalone-chat"])
+def test_reader_decisions_revisits_and_restart(
+    tmp_path: Path, monkeypatch: MonkeyPatch, quick_chat: bool,
+) -> None:
     """Reject/confirm/repeat/stale actions retain canonical completion across restart."""
     import json
     import backend.owner_context as owners
@@ -94,7 +131,7 @@ def test_reader_decisions_revisits_and_restart(tmp_path: Path, monkeypatch: Monk
     root = StudentStore(tmp_path / 'decisions.sqlite3')
     _seed_user(root, 'student', 'student')
     student = StudentStore(root.path, identifier='cognito:student')
-    thread = student.create_thread(model_id='mock', support_mode='critical-thinking')
+    thread = student.create_thread(model_id='mock', support_mode='critical-thinking', quick_chat=quick_chat)
     oidc = FakeOIDC(root)
     client = TestClient(create_app(root, oidc_client=oidc, auto_advance_stages=False), base_url='https://testserver')
     client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))

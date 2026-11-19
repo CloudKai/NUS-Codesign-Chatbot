@@ -1,4 +1,5 @@
 http://127.0.0.1:8080 {
+	bind 127.0.0.1
 	@reader {
 		method GET
 		path_regexp reader ^/api/v1/reader/(session|preferences|threads|threads/[^/]+/(settings|transcript\.txt|messages/page|coach-turn|project|uploads|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content))$
@@ -8,7 +9,7 @@ http://127.0.0.1:8080 {
 	}
 	@lecture {
 		method POST
-		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|messages/[^/]+/(revise|learning-signal)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove)|lecture/stream|project/(stream|select-stage|resolve/[^/]+)))$
+		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|move|attachments|messages/[^/]+/(revise|learning-signal)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove|link)|lecture/stream|project/(stream|select-stage|resolve/[^/]+)))$
 	}
 	handle @lecture {
 		reverse_proxy 127.0.0.1:8000
@@ -60,7 +61,23 @@ http://127.0.0.1:8080 {
 	handle /api/* {
 		respond "Not Found" 404
 	}
-	handle {
+	handle / {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	@streamlit path /streamlit /streamlit/*
+	handle @streamlit {
+		header Cache-Control "no-store"
+		forward_auth 127.0.0.1:8000 {
+			uri /api/v1/auth/streamlit-access
+			# The auth subrequest must stay HTTP even when Streamlit upgrades.
+			header_up -Upgrade
+			header_up -Connection
+		}
 		reverse_proxy 127.0.0.1:8501
+	}
+
+	handle {
+		respond "Not Found" 404
 	}
 }

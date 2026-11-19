@@ -16,7 +16,7 @@ from backend.auth_oidc import (
     CognitoOIDCError,
     OAUTH_STATE_TTL_SECONDS,
 )
-from backend.auth_profiles import sync_authenticated_user
+from backend.auth_profiles import has_streamlit_access, sync_authenticated_user
 from backend.cognito_cookies import (
     SESSION_HINT_COOKIE_VALUE,
     id_token_cookie_settings,
@@ -100,6 +100,7 @@ def _public_user_payload(user: dict[str, Any]) -> dict[str, Any]:
         "email": user.get("email"),
         "display_name": str(user.get("display_name") or "Student"),
         "role": str(user.get("role") or "student"),
+        "streamlit_access": has_streamlit_access(user, settings.streamlit_access_subjects),
     }
 
 

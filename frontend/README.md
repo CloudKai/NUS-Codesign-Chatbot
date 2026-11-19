@@ -1,25 +1,27 @@
-# Notebook reader pilot
+# React student workspace
 
-Tickets #23–27 add a lecture and project companion `/pilot/` alongside Streamlit at `/`. The existing
-FastAPI workspace and transcript remain authoritative. Build with Node 22:
+React serves the default browser workspace at `/`. The `/pilot/` entrypoint
+still works. FastAPI remains authoritative for workspace data and transcripts.
+Build with Node 22:
 
 ```sh
 npm ci --ignore-scripts --prefix frontend
 npm run build --prefix frontend
 ```
 
-Run the existing local launcher with Guest enabled and Caddy installed, or the
-existing container build. Open the same-origin browser proxy at `/pilot/`.
-FastAPI serves only `frontend/dist`; an absent build returns 404 for the pilot
-while Streamlit continues to start. CI and the image build compile the pilot;
-`scripts/build.sh` validates it using already installed dependencies before pytest.
+Run `sh scripts/start.sh` with Caddy installed and open
+`http://127.0.0.1:8080/`. Guest availability comes from `GUEST_ACCESS_ENABLED`.
+Verified lecturers and admins use `/streamlit/`. Ordinary accounts can be
+enabled for that workspace with a server-side `STREAMLIT_ACCESS_COGNITO_SUBS`
+grant. The browser proxy checks every Streamlit request, including the
+WebSocket handshake. The same builds run under the production container.
 
 The public proxy exposes exact reader GET routes and bounded lecture/project stream and stage-action POST routes.
 The adapter requires verified registered/Guest credentials even in anonymous-capable
 local mode, rejects staff and foreign notebooks, checks same-origin requests,
 requires Origin on writes, and sets no-store/Vary Cookie. Internal CRUD, coach,
-upload and lecturer routes remain private; narrow reader adapters are public. Sign-in uses existing Cognito
-and returns to Streamlit; reopen `/pilot/`. JavaScript never handles tokens.
+upload and lecturer routes remain private; narrow reader adapters are public. Sign-in uses existing Cognito and returns to `/`, which selects the account’s
+workspace. JavaScript never handles tokens.
 
 Ticket #24 adds lecture questions through the existing CoachRequest/NDJSON lifecycle.
 The bounded browser body contains only question and idempotency key; the server

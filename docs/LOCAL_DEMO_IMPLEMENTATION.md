@@ -3,14 +3,15 @@
 ## Goal
 
 Evolve Co-design Chatbot into a professional local demonstration for a
-professor: a student uses the existing Streamlit research workspace while the
-backend visibly executes a single critical-thinking workflow. The local system
+professor: students use the React workspace while the backend executes a single
+critical-thinking workflow. Streamlit serves the protected lecturer and Enabled
+Access workspaces. The local system
 must work without AWS, internet access, or paid model APIs in mock mode.
 
 The target architecture is:
 
 ```text
-Streamlit UI -> typed FastAPI client -> FastAPI /api/v1 -> application services
+React or protected Streamlit UI -> FastAPI /api/v1 -> application services
     -> one LangGraph coach workflow -> model/retrieval/storage ports
     -> mock or optional OpenAI model, SQLite, local files, and local vector search
 ```
@@ -134,9 +135,12 @@ transitions.
 
 ### Presentation
 
-Tickets 10–13 / #23–26 add a bounded static React/TypeScript pilot at `/pilot/`,
-built from `frontend/` and served by `backend/http/notebook_reader.py`. Streamlit
-remains at `/` for remaining workspace and lecturer workflows. Nineteen typed
+The React/TypeScript workspace is built from `frontend/` and served at `/` by
+`backend/http/notebook_reader.py`, with `/pilot/` retained as an alias. FastAPI
+routes verified staff and explicitly enabled Cognito subjects to `/streamlit/`.
+Caddy checks that permission before proxying every Streamlit request, including
+WebSocket handshakes. Streamlit rechecks access on application reruns. Enabled
+Access does not grant lecturer permissions. The existing typed
 browser routes cover session, notebook list, saved message page/citations, lecture
 stream, exact-key recovery, cited-original download, canonical project view, project
 stream and explicit decision/selection adapters. Verified registered or

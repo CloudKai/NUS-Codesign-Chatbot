@@ -12,6 +12,7 @@ from backend.learning.stages import (
     ThinkingStage,
 )
 from backend.specialists.review_orchestration import (
+    STAGE_REVIEW_COMPLETE,
     normalize_deep_review_stage_reviews,
 )
 
@@ -712,9 +713,8 @@ def _research_facione_projection(
 def _review_summary(assessment: dict[str, Any] | None) -> str:
     """Prefer the model-written learning_summary; never paste student prompts."""
     if not assessment:
-        return _EMPTY_REVIEW_SUMMARY
-    summary = " ".join(str(assessment.get("learning_summary") or "").split()).strip()
-    return summary or _EMPTY_REVIEW_SUMMARY
+        return ""
+    return " ".join(str(assessment.get("learning_summary") or "").split()).strip()
 
 
 def _clean_feedback_items(values: Iterable[Any]) -> list[str]:
@@ -882,6 +882,34 @@ def _merge_stage_section_items(
                 "items": _clean_feedback_items([*extra_items, *existing]),
             }
         )
+    return merged
+
+
+def complete_checkpoint_review(
+    stage_id: str, blob: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Read the saved feedback for a completed stage checkpoint."""
+    job = (blob.get("jobs") or {}).get(stage_id) or {}
+    if job.get("status") != STAGE_REVIEW_COMPLETE:
+        return None
+    review = (blob.get("reviews") or {}).get(stage_id)
+    return review if isinstance(review, dict) else None
+
+
+def merge_checkpoint_items_into_sections(
+    sections: list[dict[str, Any]] | None,
+    blob: dict[str, Any],
+    *,
+    field: str,
+) -> list[dict[str, Any]]:
+    """Prepend completed checkpoint feedback to the corresponding stage."""
+    merged: list[dict[str, Any]] = []
+    for section in sections or []:
+        stage_id = str(section.get("stage_id") or "").strip()
+        checkpoint = complete_checkpoint_review(stage_id, blob) or {}
+        extra = checkpoint.get(field) or []
+        existing = section.get("items") or []
+        merged.append({**section, "items": _clean_feedback_items([*extra, *existing])})
     return merged
 
 
@@ -1121,7 +1149,8 @@ def learning_review(
         "understanding_description": level_description,
         "completed_stages": completed_labels,
         "contributions": contributions,
-        "summary": summary,
+        "summary": summary or _EMPTY_REVIEW_SUMMARY,
+        "saved_summary": summary,
         "facione_scores": facione_scores,
         "facione_behavior_counts": facione_behavior_counts,
         "facione_holistic_candidate": facione_holistic_candidate,

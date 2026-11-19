@@ -1343,10 +1343,13 @@ class StudentStore:
         model_id: str,
         support_mode: str,
         assignment: dict[str, str] | None = None,
+        quick_chat: bool = False,
+        parent_notebook_id: str | None = None,
     ) -> str:
         """Create a notebook and return its id (``thread_id`` compatibility).
 
-        New notebooks start on Guide coaching (``response_detail=short``).
+        New notebooks start on Guide coaching. Quick chats use a
+        settings marker written atomically with the conversation root.
         """
         from backend.student_journey import DEFAULT_STAGE
 
@@ -1357,6 +1360,10 @@ class StudentStore:
             "support_mode": support_mode,
             "assignment": assignment or {},
         }
+        if quick_chat:
+            settings_blob["quick_chat"] = True
+            if parent_notebook_id is not None:
+                settings_blob["reader_parent_notebook_id"] = parent_notebook_id
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
@@ -1389,6 +1396,60 @@ class StudentStore:
                 (thread_id, self.owner_id),
             ).fetchone()
         return self._thread_dict(row) if row else None
+
+    def ensure_library_thread(self) -> str:
+        """Return a stable private storage anchor without creating a user-visible conversation."""
+        thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"codesign-library:{self.owner_id}"))
+        now = utc_now()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """INSERT INTO notebooks
+                    (id, user_id, title, current_stage, progress_text, settings_text,
+                     conversation_revision, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?) ON CONFLICT (id) DO NOTHING""",
+                (thread_id, self.owner_id, "Library storage", DEFAULT_STAGE, "{}",
+                 _dump({"reader_library": True}), now, now),
+            )
+        return thread_id
+
+    def owned_sources(self, source_ids: list[str] | None = None, *,
+                      include_extracted_text: bool = False) -> list[dict[str, Any]]:
+        """Read only source rows attached to this owner's storage or conversations."""
+        if source_ids == []:
+            return []
+        parameters = [self.owner_id]
+        criteria = ""
+        if source_ids is not None:
+            criteria = " AND s.id IN (" + ",".join("?" for _ in source_ids) + ")"
+            parameters.extend(source_ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT s.* FROM sources s JOIN notebooks n ON n.id=s.notebook_id "
+                "WHERE n.user_id=?" + criteria + " ORDER BY s.created_at DESC, s.id",
+                parameters,
+            ).fetchall()
+        return [self._source_dict(row, include_extracted_text=include_extracted_text) for row in rows]
+
+    def set_reader_source_link(self, thread_id: str, source_id: str, selected: bool | None) -> None:
+        """Merge a source membership or explicit detach into a settings-only update."""
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?", (thread_id, self.owner_id)
+                ).fetchone()
+                if row is None:
+                    raise ValueError("Notebook not found")
+                metadata = self._thread_dict(row)["metadata"]
+                if metadata.get("reader_library"):
+                    raise ValueError("Invalid source destination")
+                links = dict(metadata.get("reader_source_links") or {})
+                links[source_id] = selected
+                metadata["reader_source_links"] = links
+                if selected is True:
+                    metadata["allow_model_knowledge"] = False
+                if self._update_settings_text_only(connection, thread_id, row, metadata):
+                    return
+        raise ConversationRevisionConflictError("Sources changed. Refresh sources.")
 
     def list_threads(
         self, search: str = "", folder_id: str | None = None
@@ -1453,6 +1514,14 @@ class StudentStore:
                          ORDER BY recent.created_at DESC, recent.id DESC
                          LIMIT 1
                        ) AS latestUserMessage,
+                       MAX(CASE
+                           WHEN m.role IN ('user', 'assistant')
+                                AND m.metadata_text NOT LIKE '%"_internal_type": "coach_idempotency"%'
+                                AND COALESCE(m.conversation_revision, 0) <= COALESCE(n.conversation_revision, 0)
+                                AND (m.superseded_at_revision IS NULL
+                                     OR m.superseded_at_revision > COALESCE(n.conversation_revision, 0))
+                           THEN m.created_at
+                       END) AS lastMessageAt,
                        MAX(COALESCE(
                            CASE
                                WHEN m.metadata_text NOT LIKE '%"_internal_type": "coach_idempotency"%'
@@ -1476,7 +1545,8 @@ class StudentStore:
                 """,
                 parameters,
             ).fetchall()
-        return [self._thread_dict(row) for row in rows]
+        threads = [self._thread_dict(row) for row in rows]
+        return [thread for thread in threads if not thread["metadata"].get("reader_library")]
 
     def _thread_dict(self, row: Any) -> dict[str, Any]:
         """Map a notebooks row to the thread-shaped dict expected by callers."""
@@ -1530,6 +1600,7 @@ class StudentStore:
             "studentTurnCount",
             "latestUserMessage",
             "lastActivity",
+            "lastMessageAt",
         ):
             if key in row.keys():
                 value[key] = row[key]

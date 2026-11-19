@@ -1,7 +1,7 @@
 # Co-design Student Chatbot
 
-Local critical-thinking coach for university students. The app is a **Streamlit**
-UI plus a **FastAPI** coaching API. Student data stays on your machine (SQLite +
+Local critical-thinking coach for university students. The app uses a React student
+workspace and a protected Streamlit workspace, both backed by **FastAPI**. Student data stays on your machine (SQLite +
 files under `data/`). Amazon Cognito Managed Login proves identity; FastAPI
 keeps Cognito refresh + ID tokens in HttpOnly cookies (never DB / localStorage).
 
@@ -10,9 +10,9 @@ Cognito authentication
         ↓
 FastAPI /api/v1/auth/callback
         ↓
-HttpOnly Cognito refresh + ID-token cookies (Path=/api/v1/auth)
+HttpOnly ID cookie (Path=/) and refresh cookie (Path=/api/v1/auth)
         ↓
-Streamlit asks FastAPI /api/v1/auth/me
+FastAPI serves React at / or routes eligible accounts to /streamlit/
 ```
 
 Use **one command** to start everything. That command starts both services with
@@ -29,11 +29,14 @@ with `.venv/bin/python -m scripts.classroom_probe`. The observed80-request wait
 and admission errors, unknown complete S$30 costs and unresolved provider/wait
 inputs keep classroom readiness gated; mock results are not a live-capacity pass.
 
-The optional [React notebook reader](frontend/README.md) runs at `/pilot/` on
-the same Caddy origin; Streamlit remains at `/`. Build it with Node 22 using
-`npm ci --ignore-scripts --prefix frontend` and `npm run build --prefix frontend`.
-It reads existing registered/Guest notebooks; authoring and lecturer work stay
-in Streamlit. The local browser proxy requires Caddy and enabled Guest access.
+The [React workspace](frontend/README.md) is the default at `/`. Registered
+students and guests use the same saved notebooks and coaching API. Lecturers,
+admins, and accounts with Enabled Access automatically open `/streamlit/`.
+To grant Enabled Access, set `STREAMLIT_ACCESS_COGNITO_SUBS` in your runtime
+environment to a comma-separated list of verified Cognito user `sub` values
+and restart the services. The grant provides the Streamlit student workspace
+for ordinary accounts. Lecturer tools still require a persisted staff role.
+
 
 The current research workflow uses five phases: **Problem identification**,
 **Concept generation**, **Design specification**, **Ethics & Critical Thinking**,
@@ -121,9 +124,9 @@ course, and allow this exact local callback URL:
 
 - Callback: `http://127.0.0.1:8000/api/v1/auth/callback`
 
-Sign-in starts at `http://127.0.0.1:8000/api/v1/auth/login`. Profile Logout
+Sign-in starts at `http://127.0.0.1:8080/api/v1/auth/login`. Profile Logout
 revokes the Cognito refresh token (best-effort) at
-`http://127.0.0.1:8000/api/v1/auth/logout`, clears auth cookies, and returns to
+`http://127.0.0.1:8080/api/v1/auth/logout`, clears auth cookies, and returns to
 the login gate with `?signed_out=1`.
 
 Keep every local URL on `127.0.0.1` (not `localhost`) so host-only cookies stay
@@ -134,9 +137,13 @@ Cognito owns the browser session via HttpOnly refresh + ID-token cookies
 Refresh cookie Max-Age defaults to 30 days; Cognito app-client refresh validity
 is authoritative. Tokens are never stored in SQLite or returned in API JSON.
 
-### 5. Start the whole program (one command)
+### 5. Build and start the program
+
+Install Caddy and use Node 22 for the frontend build.
 
 ```bash
+npm ci --ignore-scripts --prefix frontend
+npm run build --prefix frontend
 sh scripts/start.sh
 ```
 
@@ -144,7 +151,8 @@ Then open:
 
 | Service | URL |
 |---|---|
-| Streamlit UI | [http://127.0.0.1:8501](http://127.0.0.1:8501) |
+| Co-design workspace | [http://127.0.0.1:8080/](http://127.0.0.1:8080/) |
+| Protected Streamlit workspace | [http://127.0.0.1:8080/streamlit/](http://127.0.0.1:8080/streamlit/) |
 | API health | [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) |
 
 Stop with `Ctrl+C` in the terminal that ran the script (it stops both API and UI).
@@ -337,7 +345,8 @@ contract.
 ```text
 scripts/start.sh
   ├── FastAPI  backend.api:app     :8000   (coach turns, transitions)
-  └── Streamlit streamlit_app.py   :8501   (ui/ panels)
+  ├── Streamlit streamlit_app.py   :8501   (protected workspace)
+  └── Caddy                        :8080   (React root and gated Streamlit)
 
 ui/  → presentation only
 backend/ → domain, workflow, providers, SQLite, sources
@@ -372,7 +381,9 @@ Browser HTTPS -> CloudFront (viewer TLS, caching disabled)
   /api/v1/auth/logout          -> app:8000
   /api/v1/health               -> app:8000 (optional public probe)
   other /api/*                 -> 404 (never reaches FastAPI)
-  everything else              -> app:8501 (Streamlit)
+  / and /pilot/*               -> app:8000 (React or verified staff redirect)
+  /streamlit/*                 -> app:8501 after FastAPI access check
+  everything else              -> 404
 ```
 
 FastAPI and Streamlit share one `app` container and are not published to the

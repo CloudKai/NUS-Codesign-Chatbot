@@ -454,6 +454,7 @@ def list_visible_sources(
     *,
     selected_only: bool = False,
     include_extracted_text: bool = True,
+    thread_metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """List personal notebook sources plus the shared Lecture Notes catalog.
 
@@ -468,6 +469,7 @@ def list_visible_sources(
             stale row still has ``selected=True``.
         include_extracted_text: When False, skip object-storage reads of
             extracted text on persisted rows.
+        thread_metadata: Previously loaded owned notebook metadata, if available.
 
     Returns:
         Merged personal and shared-catalog source dictionaries, or personal
@@ -478,11 +480,21 @@ def list_visible_sources(
         selected_only=False,
         include_extracted_text=include_extracted_text,
     )
-    persisted = [
-        source
-        for source in persisted
-        if not is_chat_attachment_source(source)
-    ]
+    metadata = thread_metadata if thread_metadata is not None else (store.get_thread(thread_id) or {}).get("metadata") or {}
+    links = metadata.get("reader_source_links") or {}
+    personal = {str(source["id"]): source for source in persisted if not is_chat_attachment_source(source)}
+    if links:
+        linked = store.owned_sources(
+            [key for key, enabled in links.items() if isinstance(enabled, bool)],
+            include_extracted_text=include_extracted_text,
+        )
+        for source in linked:
+            if not is_locked_course_source(source):
+                personal[str(source["id"])] = {**source, "selected": links[str(source["id"])]}
+        for key, enabled in links.items():
+            if enabled is None:
+                personal.pop(key, None)
+    persisted = list(personal.values())
     persisted_course_paths = {
         str((source.get("metadata") or {}).get("lecture_note_relative_path") or "")
         for source in persisted
@@ -539,6 +551,33 @@ def list_course_library_sources(
 CHAT_ATTACHMENT_ORIGIN = "chat_attachment"
 
 
+def private_library_sources(store: StudentStore, ids: list[str] | None = None, *,
+                            include_extracted_text: bool = False) -> list[dict[str, Any]]:
+    """Project student-owned originals, including uploads previously hidden by chat scope."""
+    return [source for source in store.owned_sources(ids, include_extracted_text=include_extracted_text)
+            if not is_locked_course_source(source)]
+
+
+def conversation_sources(store: StudentStore, thread: Mapping[str, Any], *, selected_only: bool,
+                         include_extracted_text: bool = False) -> list[dict[str, Any]]:
+    """Combine a conversation's sources and the selected scope of its owned parent."""
+    properties = thread.get("metadata") or {}
+    current = list_visible_sources(store, str(thread["id"]), selected_only=selected_only,
+                                   include_extracted_text=include_extracted_text, thread_metadata=properties)
+    parent_id = properties.get("reader_parent_notebook_id")
+    if not properties.get("quick_chat") or not isinstance(parent_id, str):
+        return current
+    parent = store.get_thread(parent_id)
+    metadata = (parent or {}).get("metadata") or {}
+    if not parent or metadata.get("quick_chat") or metadata.get("reader_library"):
+        return current
+    inherited = list_visible_sources(store, parent_id, selected_only=True,
+                                     include_extracted_text=include_extracted_text, thread_metadata=metadata)
+    in_scope = {source["id"]: source for source in current}
+    in_scope.update({source["id"]: source for source in inherited})
+    return list(in_scope.values())
+
+
 def is_chat_attachment_source(source: Mapping[str, Any]) -> bool:
     """Return whether a private source belongs only to one chat turn."""
     metadata = source.get("metadata") or {}
@@ -568,8 +607,18 @@ def get_visible_source(
     found = store.get_source(
         thread_id, source_id, include_extracted_text=include_extracted_text
     )
+    thread = store.get_thread(thread_id) or {}
+    links = (thread.get("metadata") or {}).get("reader_source_links") or {}
     if found:
-        return found
+        if source_id not in links:
+            return found
+        if links[source_id] is None:
+            return None
+        return {**found, "selected": links[source_id]}
+    if isinstance(links.get(source_id), bool):
+        sources = private_library_sources(store, [source_id], include_extracted_text=include_extracted_text)
+        if sources:
+            return {**sources[0], "selected": links[source_id]}
     wanted = str(source_id or "").strip()
     if not wanted:
         return None

@@ -2,9 +2,10 @@ import type { Citation } from './stream';
 
 /** Public reader contracts. Credentials stay in HttpOnly same-origin cookies. */
 export interface Session { owner_id: string; display_name: string; kind: 'guest' | 'registered' }
-export interface Notebook { id: string; name: string }
+export interface Notebook { id: string; name: string; kind: 'notebook' | 'chat'; parent_notebook_id: string | null; pinned: boolean }
 export interface Message { id: string; role: string; content: string; citations: Citation[]; feedback_available: boolean; rating: 'useful' | 'not_useful' | null }
-export interface NotebookList { owner_id: string; notebooks: Notebook[] }
+export interface ChatSummary { preview: string; activity_at: string }
+export interface NotebookList { owner_id: string; notebooks: Notebook[]; chat_summaries: Record<string, ChatSummary> }
 export interface Page {
   owner_id: string; notebook: Notebook; messages: Message[];
   next_cursor: string | null; total_count: number; conversation_revision: number;
@@ -14,6 +15,9 @@ export interface Page {
 export class ApiError extends Error {
   constructor(public status: number) { super('Reader request failed'); }
 }
+
+/** Signal that the signed-in account belongs in the protected workspace. */
+export class StreamlitAccess extends Error {}
 
 /** Fetch JSON without retaining private browser HTTP cache entries. */
 export async function get<T>(path: string, signal: AbortSignal): Promise<T> {
@@ -26,8 +30,10 @@ export async function get<T>(path: string, signal: AbortSignal): Promise<T> {
 export async function currentSession(signal: AbortSignal): Promise<Session> {
   try { return await get<Session>('/api/v1/reader/session', signal); }
   catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 401) throw error;
-    await get('/api/v1/auth/me', signal);
+    if (!(error instanceof ApiError) || ![401, 403].includes(error.status)) throw error;
+    const profile = await get<{ user: { streamlit_access: boolean } }>('/api/v1/auth/me', signal);
+    if (profile.user.streamlit_access) throw new StreamlitAccess();
+    if (error.status === 403) throw error;
     return get<Session>('/api/v1/reader/session', signal);
   }
 }
@@ -42,7 +48,14 @@ export interface Stage {
 export interface Project {
   owner_id: string; thread_id: string; current_stage: string; stages: Stage[];
   pending: { id: string; from_stage: string; to_stage: string; rationale: string } | null;
+  review?: {
+    summary: string;
+    strengths: ReviewFeedback[];
+    improvements: ReviewFeedback[];
+    facione_scores: { dimension: string; score: number | null }[];
+  };
 }
+export interface ReviewFeedback { stage_id: string; items: string[] }
 
 /** Allowlisted notebook controls; all educational state remains server-owned. */
 export interface NotebookSettings {
@@ -50,4 +63,11 @@ export interface NotebookSettings {
   selected_model: string; reasoning_effort: string | null; assignment: Record<string, string>;
   models: { id: string; label: string; reasoning_efforts: string[] }[];
 }
-export interface Preferences { owner_id: string; appearance: 'System' | 'Light' | 'Dark' }
+export interface Preferences {
+  owner_id: string;
+  appearance: 'System' | 'Light' | 'Dark';
+  display_name: string;
+  reduce_motion: boolean;
+  default_mode: 'lecture' | 'project';
+  starter_prompts: boolean;
+}

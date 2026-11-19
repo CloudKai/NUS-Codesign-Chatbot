@@ -127,11 +127,18 @@ def test_reader_source_selection_removal_and_saved_citation_mapping(tmp_path: Pa
         assert client.post(path + f'/sources/{second}/select', json={'selected': True}, headers=origin).status_code == 409
         assert client.post(path + f'/sources/{second}/remove', headers=origin).status_code == 409
         assert client.get(path + '/messages/page').json()['messages'][-1]['citations'] == saved_mapping
-        assert client.get(path + f"/messages/{message['id']}/citations/{second}/content").status_code == 404
+        citation = path + f"/messages/{message['id']}/citations/{second}/content"
+        assert client.get(citation).status_code == 200
         assert client.get(path + f'/sources/{second}').status_code == 404
         response = client.post(path + '/lecture/stream', json={'student_message': 'Explain analogy in design', 'idempotency_key': 'removed'}, headers=origin)
         later = next(event['turn'] for event in map(json.loads, response.text.splitlines()) if event['event'] == 'done')
         assert later['assessment']['citations'] == []
+        remove = f'/api/v1/reader/threads/library/sources/{second}/remove'
+        assert client.post(remove, headers=origin).status_code == 422
+        assert client.post(remove, headers=origin, json={'confirmed': True}).status_code == 200
+        assert client.get(citation).status_code == 404
+        saved_message = next(row for row in client.get(path + '/messages/page').json()['messages'] if row['id'] == message['id'])
+        assert saved_message['citations'] == saved_mapping
 
 
 def test_reader_sources_all_route_guards_and_limits(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
@@ -210,3 +217,90 @@ def test_reader_upload_admission_and_corrected_retry(tmp_path: Path, monkeypatch
             time.sleep(.01)
         assert [source['title'] for source in sources] == ['0.txt']
         assert client.post(path + '/uploads', files=[('files', ('freed.txt', b'Freed allowance', 'text/plain'))], headers=origin).status_code == 202
+
+
+def test_library_uploads_links_attachment_scope_and_image_validation(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Keep one private original across paths and authorize RAG by actual scope."""
+    import io
+    import json
+
+    from PIL import Image
+    from backend.source_library import image_inputs_for_source_ids
+
+    monkeypatch.setattr(settings, 'public_api_base_url', 'https://testserver')
+    root = StudentStore(tmp_path / 'library.sqlite3')
+    for student in ('student', 'other'):
+        _seed_user(root, student, 'student')
+    oidc = FakeOIDC(root)
+    origin = {'Origin': 'https://testserver'}
+    base = '/api/v1/reader/threads'
+    library = base + '/library'
+    with TestClient(create_app(root, oidc_client=oidc), base_url='https://testserver') as client:
+        client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))
+        notebook = client.post(base, json={'name': 'Lecture notebook'}, headers=origin).json()['notebook']['id']
+        chat = client.post(base, json={'kind': 'chat'}, headers=origin).json()['notebook']['id']
+        other_chat = client.post(base, json={'kind': 'chat'}, headers=origin).json()['notebook']['id']
+        notebook_path = f'{base}/{notebook}'
+        chat_path = f'{base}/{chat}'
+
+        def upload(path: str, name: str, data: bytes, mime: str) -> dict:
+            response = client.post(path + '/uploads', files={'files': (name, data, mime)}, headers=origin)
+            assert response.status_code == 202, response.text
+            for _ in range(150):
+                rows = client.get(path + '/sources').json()['sources']
+                source = next((row for row in rows if row['title'] == name), None)
+                if source:
+                    return source
+                time.sleep(.01)
+            raise AssertionError('Upload did not become visible')
+
+        private = upload(library, 'private.txt', b'Private notes unrelated to the lecture.', 'text/plain')
+        assert not client.get(notebook_path + '/sources').json()['sources']
+        lecture = upload(notebook_path, 'lecture-design.txt', b'Analogy connects familiar patterns to new design problems.', 'text/plain')
+        assert lecture['selected']
+        assert {row['id'] for row in client.get(library + '/sources').json()['sources']} == {private['id'], lecture['id']}
+        assert client.post(f"{notebook_path}/sources/{private['id']}/link", headers=origin).status_code == 200
+        assert client.post(f"{notebook_path}/sources/{private['id']}/select", json={'selected': False}, headers=origin).status_code == 200
+        assert client.post(chat_path + '/move', json={'parent_notebook_id': notebook}, headers=origin).status_code == 200
+
+        def turn(thread: str, request: dict) -> dict:
+            response = client.post(f'{base}/{thread}/lecture/stream', json=request, headers=origin)
+            return next(event['turn'] for event in map(json.loads, response.text.splitlines()) if event['event'] == 'done')
+
+        result = turn(chat, {'student_message': 'Explain analogy in design.', 'idempotency_key': 'inside'})
+        assert {item['source_id'] for item in result['assessment']['citations']} == {lecture['id']}
+        assert client.post(chat_path + '/move', json={'parent_notebook_id': None}, headers=origin).status_code == 200
+        result = turn(chat, {'student_message': 'Explain analogy in design.', 'idempotency_key': 'outside'})
+        assert result['assessment']['citations'] == []
+
+        invalid = client.post(chat_path + '/attachments', files={'files': ('fake.png', b'not a PNG', 'image/png')}, headers=origin)
+        assert invalid.status_code == 422
+        image = io.BytesIO()
+        Image.new('RGB', (2, 2), 'red').save(image, format='PNG')
+        assert client.post(library + '/uploads', files={'files': ('wrong.jpg', image.getvalue(), 'image/jpeg')}, headers=origin).status_code == 422
+        valid = upload(library, 'diagram.png', image.getvalue(), 'image/png')
+        assert valid['kind'] == 'image'
+        assert client.get(library + f"/sources/{valid['id']}/content").content == image.getvalue()
+        assert client.post(f"{notebook_path}/sources/{valid['id']}/link", headers=origin).status_code == 200
+        store = StudentStore(root.path, identifier='cognito:student')
+        vision = image_inputs_for_source_ids(store, notebook, [valid['id']])
+        assert [(item['source_id'], item['mime']) for item in vision] == [(valid['id'], 'image/png')]
+        assert vision[0]['data_url'].startswith('data:image/png;base64,')
+        attachment = client.post(chat_path + '/attachments', files={
+            'files': ('chat.txt', b'Analogy provides a comparison to develop a design idea.', 'text/plain')
+        }, headers=origin)
+        assert attachment.status_code == 200, attachment.text
+        attached = attachment.json()[0]['id']
+        assert attached in {row['id'] for row in client.get(library + '/sources').json()['sources']}
+        assert attached not in {row['id'] for row in client.get(chat_path + '/sources').json()['sources']}
+        request = {'student_message': 'Summarize the attached file.', 'idempotency_key': 'attached', 'attachment_source_ids': [attached]}
+        # Evidence from the composer is scoped to the chat and this turn.
+        result = turn(chat, request)
+        assert {item['source_id'] for item in result['assessment']['citations']} == {attached}
+        foreign_turn = client.post(f'{base}/{other_chat}/lecture/stream', json=request, headers=origin)
+        assert foreign_turn.status_code != 200 or '"event":"done"' not in foreign_turn.text.replace(' ', '')
+        assert client.post(f"{notebook_path}/remove", headers=origin, json={'confirmed': True}).status_code == 200
+        assert client.get(library + f"/sources/{lecture['id']}/content").status_code == 200
+        client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('other'))
+        assert client.get(library + '/sources').json()['sources'] == []
+        assert client.get(library + f'/sources/{attached}/content').status_code == 404

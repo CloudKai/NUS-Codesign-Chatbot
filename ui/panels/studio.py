@@ -19,6 +19,10 @@ from typing import Any, Literal
 
 import streamlit as st
 
+from backend.learning.journey import (
+    complete_checkpoint_review as _complete_checkpoint_review,
+    merge_checkpoint_items_into_sections as _merge_checkpoint_items_into_sections,
+)
 from backend.settings import settings
 from backend.specialists.review_orchestration import (
     DEEP_REVIEW_JOB_COMPLETED,
@@ -26,7 +30,6 @@ from backend.specialists.review_orchestration import (
     DEEP_REVIEW_JOB_KEY,
     DEEP_REVIEW_SNAPSHOT_KEY,
     JOURNEY_STAGE_REVIEWS_KEY,
-    STAGE_REVIEW_COMPLETE,
     STAGE_REVIEW_FAILED,
     STAGE_REVIEW_QUEUED,
     STAGE_REVIEW_RUNNING,
@@ -643,56 +646,6 @@ def render_journey_track() -> None:
                             )
                 if is_focus or is_preview_open:
                     _render_stage_suggestions(stage)
-
-
-def _dedupe_feedback_items(*groups: list[Any]) -> list[str]:
-    """Return cleaned feedback strings with case-insensitive dedupe, first wins."""
-    seen: set[str] = set()
-    result: list[str] = []
-    for group in groups:
-        for raw in group:
-            cleaned = " ".join(str(raw).split()).strip()
-            if not cleaned:
-                continue
-            key = cleaned.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append(cleaned)
-    return result
-
-
-def _complete_checkpoint_review(
-    stage_id: str, blob: dict[str, Any]
-) -> dict[str, Any] | None:
-    """Return a completed stage-checkpoint review mapping, if present."""
-    job = (blob.get("jobs") or {}).get(stage_id) or {}
-    if str(job.get("status") or "") != STAGE_REVIEW_COMPLETE:
-        return None
-    review = (blob.get("reviews") or {}).get(stage_id)
-    return review if isinstance(review, dict) else None
-
-
-def _merge_checkpoint_items_into_sections(
-    sections: list[dict[str, Any]] | None,
-    blob: dict[str, Any],
-    *,
-    field: str,
-) -> list[dict[str, Any]]:
-    """Prepend Journey stage-checkpoint items onto matching Review sections."""
-    merged: list[dict[str, Any]] = []
-    for section in list(sections or []):
-        stage_id = str(section.get("stage_id") or "").strip()
-        checkpoint = _complete_checkpoint_review(stage_id, blob)
-        extra = list((checkpoint or {}).get(field) or []) if checkpoint else []
-        existing = list(section.get("items") or [])
-        merged.append(
-            {
-                **section,
-                "items": _dedupe_feedback_items(extra, existing),
-            }
-        )
-    return merged
 
 
 def _conclusion_sections_from_checkpoints(

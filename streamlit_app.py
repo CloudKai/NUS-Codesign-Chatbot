@@ -67,6 +67,15 @@ except AuthServiceUnavailable:
     if st.button("Retry", key="auth-service-retry"):
         st.rerun()
     st.stop()
+# The public proxy gates requests before opening a Streamlit session. Recheck
+# the backend decision on reruns so a revoked account cannot keep using it.
+if st.get_option("server.baseUrlPath") == "streamlit" and (
+    not user or user.get("streamlit_access") is not True
+):
+    st.warning("This account uses the Co-design student workspace.")
+    st.link_button("Open Co-design", "/")
+    st.stop()
+
 signed_out_shell_rendered = False
 if not user:
     # Auth gate has no preference store; always use the app default (System).

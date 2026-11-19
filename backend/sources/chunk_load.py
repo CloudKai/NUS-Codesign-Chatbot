@@ -103,7 +103,7 @@ def hydrate_selected_retrieval_sources(
                 item,
                 original,
                 owner_id=owner_id,
-                notebook_id=notebook_id,
+                notebook_id=str(original.get("threadId") or notebook_id),
                 storage=storage,
                 metrics=metrics,
             )

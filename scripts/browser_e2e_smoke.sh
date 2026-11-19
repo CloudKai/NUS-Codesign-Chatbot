@@ -11,7 +11,7 @@ TASK_ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 TASK_PWCLI="${PWCLI:-${HOME}/.codex/skills/playwright/scripts/playwright_cli.sh}"
 TASK_SESSION="co-design-browser-smoke"
 TASK_OUTPUT="$TASK_ROOT/output/playwright/browser-smoke"
-TASK_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8501}"
+TASK_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8080}"
 
 if ! command -v npx >/dev/null 2>&1; then
   echo "npx is required for the Playwright CLI. Install Node.js/npm first." >&2
@@ -22,8 +22,8 @@ if [ ! -x "$TASK_PWCLI" ]; then
   echo "Set PWCLI to the installed playwright_cli.sh path." >&2
   exit 1
 fi
-if ! curl --fail --silent "$TASK_UI_URL/_stcore/health" >/dev/null; then
-  echo "Local Streamlit is not ready at $TASK_UI_URL. Start it with: sh scripts/start.sh" >&2
+if ! curl --fail --silent "${TASK_UI_URL%/}/api/v1/health" >/dev/null; then
+  echo "Local browser proxy is not ready at $TASK_UI_URL. Start it with: sh scripts/start.sh" >&2
   exit 1
 fi
 
@@ -39,14 +39,15 @@ echo "Opening the signed-out UI at desktop width."
 cat <<'CHECKLIST'
 
 Manual authenticated continuation (do not put credentials in this script):
-  1. In the headed browser, press "Sign in or create an account" and complete
-     the real Cognito Hosted UI flow.
+  1. With an ordinary student account, press "Sign in" in the browser and
+     complete the real Cognito Hosted UI flow. Confirm the URL returns to /.
   2. Confirm the returned workspace has the expected profile and a notebook.
   3. Upload a small .txt source, select it, ask a grounded question, and open
      its [S1] citation preview.
-  4. Send a second Focus message, press Next, and confirm the Evidence stage.
+  4. In Design coaching, send a project contribution. If the coach recommends
+     the next Thinking Path stage, explicitly confirm the recommendation.
   5. Reload once; verify chat, citation, and stage remain. Then delete the
-     disposable notebook and sign out.
+     disposable notebook. Sign out after capturing the mobile evidence.
   6. Return here and press Enter to capture the authenticated mobile evidence.
 
 The script never fabricates a Cognito session, so this continuation requires

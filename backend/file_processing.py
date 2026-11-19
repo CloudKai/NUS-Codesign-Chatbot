@@ -40,6 +40,27 @@ _MAX_PRESENTATION_SLIDES = 300
 _MAX_SPREADSHEET_CELLS = 200_000
 
 
+def checked_upload_mime(name: str, data: bytes, mime: str | None) -> str | None:
+    """Decode supported raster uploads before storage and use their actual MIME."""
+    suffix = Path(name).suffix.lower()
+    if suffix not in IMAGE_SUFFIXES and not (mime or "").lower().startswith("image/"):
+        return mime
+    from PIL import Image
+
+    formats = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP", ".gif": "GIF"}
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != formats.get(suffix) or image.width * image.height > 24_000_000:
+                raise ValueError("Invalid image format or dimensions")
+            detected = Image.MIME[image.format]
+            image.verify()
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+        return detected
+    except (OSError, SyntaxError, ValueError, Image.DecompressionBombError) as error:
+        raise ValueError("Choose a valid PNG, JPEG, WEBP, or GIF image under 24 megapixels.") from error
+
+
 @dataclass(frozen=True)
 class StoredUpload:
     name: str

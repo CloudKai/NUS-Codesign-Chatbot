@@ -87,6 +87,13 @@ def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
         or mimetypes.guess_type(name)[0]
         or "image/png"
     )
+    if (source.get("metadata") or {}).get("reader_checked_upload"):
+        from backend.file_processing import checked_upload_mime
+
+        try:
+            mime = checked_upload_mime(name, payload, mime) or mime
+        except ValueError:
+            return None
     encoded = base64.b64encode(payload).decode("ascii")
     return {
         "type": "input_image",

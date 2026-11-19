@@ -10,7 +10,7 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	# Static pilot coexists with Streamlit. Only these bounded student routes are public;
+	# React is the student workspace. Only these bounded student routes are public;
 	# the browser adapter independently requires verified credentials in all modes.
 	@reader {
 		method GET
@@ -21,7 +21,7 @@
 	}
 	@lecture {
 		method POST
-		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|messages/[^/]+/(revise|learning-signal)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove)|lecture/stream|project/(stream|select-stage|resolve/[^/]+)))$
+		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|move|attachments|messages/[^/]+/(revise|learning-signal)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove|link)|lecture/stream|project/(stream|select-stage|resolve/[^/]+)))$
 	}
 	handle @lecture {
 		reverse_proxy app:8000
@@ -100,7 +100,23 @@
 	# legitimate FastAPI coach turn. A browser or CloudFront timeout before
 	# FastAPI finishes is acceptable; the same idempotency key recovers the
 	# durable result. Leave Caddy's default unlimited read timeout.
-	handle {
+	handle / {
+		reverse_proxy app:8000
+	}
+
+	@streamlit path /streamlit /streamlit/*
+	handle @streamlit {
+		header Cache-Control "no-store"
+		forward_auth app:8000 {
+			uri /api/v1/auth/streamlit-access
+			# The auth subrequest must stay HTTP even when Streamlit upgrades.
+			header_up -Upgrade
+			header_up -Connection
+		}
 		reverse_proxy app:8501
+	}
+
+	handle {
+		respond "Not Found" 404
 	}
 }

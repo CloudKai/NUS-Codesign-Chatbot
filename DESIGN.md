@@ -1,3 +1,6 @@
+> React `/pilot/` uses the redesigned [frontend design system](frontend/DESIGN.md).
+> The guide below remains authoritative for the preserved Streamlit interface.
+
 # Co-design Design Specification
 
 ## 1. Product intent

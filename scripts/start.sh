@@ -4,8 +4,8 @@
 # =============================================================================
 # Starts:
 #   1) FastAPI coaching API on http://127.0.0.1:8000
-#   2) Streamlit UI on http://127.0.0.1:8501
-#   3) Optional exact-route Caddy browser proxy on http://127.0.0.1:8080
+#   2) Internal Streamlit service on http://127.0.0.1:8501/streamlit/
+#   3) Caddy browser entrypoint on http://127.0.0.1:8080/
 #
 # Always sets USE_LOCAL_API=true so Thinking Path stage advancement and selected
 # image grounding work. Prefer this over starting Streamlit alone.
@@ -30,24 +30,19 @@ fi
 export USE_LOCAL_API="true"
 export CO_DESIGN_API_URL="${CO_DESIGN_API_URL:-http://127.0.0.1:8000}"
 
-GUEST_ENABLED="$("$PYTHON" -c 'from backend.settings import settings; print("true" if settings.guest_access_enabled else "false")')"
-CADDY_PID=""
-if [ "$GUEST_ENABLED" = "true" ]; then
-  if command -v caddy >/dev/null 2>&1; then
-    export CO_DESIGN_PUBLIC_API_URL="${CO_DESIGN_PUBLIC_API_URL:-http://127.0.0.1:8080}"
-    export CO_DESIGN_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8080}"
-    LOCAL_BROWSER_URL="http://127.0.0.1:8080"
-    echo "Guest access enabled; starting exact-route Caddy browser proxy."
-  else
-    echo "Guest access is configured, but Caddy is missing; starting the existing local UI with guest access disabled." >&2
-    export GUEST_ACCESS_ENABLED="false"
-    export CO_DESIGN_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8501}"
-    LOCAL_BROWSER_URL="http://127.0.0.1:8501"
-  fi
-else
-  export CO_DESIGN_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8501}"
-  LOCAL_BROWSER_URL="http://127.0.0.1:8501"
+if ! command -v caddy >/dev/null 2>&1; then
+  echo "Install Caddy to run the same-origin React and Streamlit routes." >&2
+  exit 1
 fi
+if [ ! -f "$ROOT/frontend/dist/index.html" ]; then
+  echo "Build React first: npm ci --ignore-scripts --prefix frontend && npm run build --prefix frontend" >&2
+  exit 1
+fi
+
+export CO_DESIGN_PUBLIC_API_URL="${CO_DESIGN_PUBLIC_API_URL:-http://127.0.0.1:8080}"
+export CO_DESIGN_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8080}"
+LOCAL_BROWSER_URL="http://127.0.0.1:8080"
+CADDY_PID=""
 
 echo "Starting Co-design Chatbot"
 echo "  API:  http://127.0.0.1:8000/api/v1/health"
@@ -93,37 +88,37 @@ if [ "$i" -ge 60 ]; then
   exit 1
 fi
 
-if [ "$GUEST_ENABLED" = "true" ] && command -v caddy >/dev/null 2>&1; then
-  caddy run --config "$ROOT/Caddyfile.local" --adapter caddyfile &
-  CADDY_PID=$!
-  echo "Waiting for local browser proxy…"
-  proxy_ready=false
-  i=0
-  while [ "$i" -lt 40 ]; do
-    if "$PYTHON" - <<'PY'
+caddy run --config "$ROOT/Caddyfile.local" --adapter caddyfile &
+CADDY_PID=$!
+echo "Waiting for local browser proxy…"
+proxy_ready=false
+i=0
+while [ "$i" -lt 40 ]; do
+  if "$PYTHON" - <<'PY'
 import sys
 import urllib.request
 try:
     with urllib.request.urlopen("http://127.0.0.1:8080/api/v1/health", timeout=1) as response:
         sys.exit(0 if response.status == 200 else 1)
 except Exception:
-    sys.exit(1)
+  sys.exit(1)
 PY
-    then
-      proxy_ready=true
-      break
-    fi
-    i=$((i + 1))
-    sleep 0.25
-  done
-  if [ "$proxy_ready" != "true" ]; then
-    echo "Caddy did not become ready; check that port 8080 is free and Caddyfile.local is valid." >&2
-    exit 1
+  then
+    proxy_ready=true
+    break
   fi
-  echo "Browser proxy is ready."
+  i=$((i + 1))
+  sleep 0.25
+done
+if [ "$proxy_ready" != "true" ]; then
+  echo "Caddy did not become ready; check that port 8080 is free and Caddyfile.local is valid." >&2
+  exit 1
 fi
+echo "Browser proxy is ready."
 
 "$PYTHON" -m streamlit run streamlit_app.py \
   --server.address 127.0.0.1 \
   --server.port 8501 \
+  --server.baseUrlPath streamlit \
+  --server.headless true \
   --browser.gatherUsageStats false

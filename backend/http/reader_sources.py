@@ -1,17 +1,22 @@
 """Typed source projections for the authenticated student browser companion."""
 
+import asyncio
 from collections.abc import Callable
 from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.owner_context import OwnerServices
+from backend.file_processing import checked_upload_mime
 from backend.source_library import is_locked_course_source
 from backend.settings import settings
-from backend.upload_queue import PendingSourceUpload, SourceUploadCoordinator, UploadAdmissionError
+from backend.upload_queue import PendingSourceUpload, SourceUploadCoordinator, SourceUploadFailed, UploadAdmissionError
+
+_LIBRARY = "library"
 
 
 class ReaderSource(BaseModel):
@@ -40,6 +45,13 @@ class ReaderSourceSelection(BaseModel):
 
     model_config = ConfigDict(extra='forbid')
     selected: bool = Field(strict=True)
+
+
+class ReaderLibraryDelete(BaseModel):
+    """Require a deliberate permanent delete from the private Library."""
+
+    model_config = ConfigDict(extra="forbid")
+    confirmed: Literal[True]
 
 
 class ReaderSourceDetail(BaseModel):
@@ -91,12 +103,49 @@ def register_reader_sources(
 
     def require_thread(thread_id: str, owner: OwnerServices) -> None:
         """Reject missing or foreign notebooks before any source operation."""
-        if owner.workspace.get_thread(thread_id) is None:
+        if thread_id != _LIBRARY and owner.workspace.get_thread(thread_id) is None:
             raise HTTPException(status_code=404, detail='Notebook not found')
 
     def queue(request: Request) -> SourceUploadCoordinator:
         """Use the API process's bounded coordinator, created and drained by its lifespan."""
         return request.app.state.reader_uploads
+
+    async def upload_batch(files: list[UploadFile], limit: int) -> list[tuple[str, bytes, str | None]]:
+        """Check a finite multipart batch and validate images before admission."""
+        try:
+            if not files or len(files) > limit:
+                raise HTTPException(status_code=400, detail="Choose fewer files.")
+            maximum = max(1, int(settings.max_file_size_mb)) * 1024 * 1024
+            batch = []
+            for file in files:
+                data = await file.read(maximum + 1)
+                if len(data) > maximum:
+                    raise HTTPException(status_code=413, detail="File exceeds upload limit.")
+                name = file.filename or "upload.bin"
+                try:
+                    mime = await run_in_threadpool(checked_upload_mime, name, data, file.content_type)
+                except ValueError as error:
+                    raise HTTPException(status_code=422, detail=str(error)) from error
+                batch.append((name, data, mime))
+            return batch
+        finally:
+            for file in files:
+                await file.close()
+
+    def submit_batch(request: Request, owner: OwnerServices, scope: str,
+                     batch: list[tuple[str, bytes, str | None]], *, attachment: bool = False) -> PendingSourceUpload:
+        """Admit bounded upload work under the existing owner-scoped queue."""
+        coordinator = queue(request)
+        try:
+            key = coordinator.submit(
+                owner_id=owner.user_id, thread_id=scope, uploads=batch,
+                upload=lambda files: owner.workspace.upload_library_files(
+                    files, thread_id=None if scope == _LIBRARY else scope, attachment=attachment
+                ),
+            )
+        except UploadAdmissionError as error:
+            raise HTTPException(status_code=429, detail=str(error), headers={"Retry-After": "5"}) from error
+        return next(job for job in coordinator.jobs_for(owner.user_id, scope) if job.upload_id == key)
 
     @app.get('/api/v1/reader/threads/{thread_id}/uploads', response_model=ReaderUploads)
     def reader_uploads(thread_id: str, request: Request, owner: OwnerServices = Depends(reader_owner)) -> ReaderUploads:
@@ -117,32 +166,43 @@ def register_reader_sources(
         not require a browser revisit. Failed attempts retain no credentials.
         """
         require_thread(thread_id, owner)
+        return _upload(submit_batch(request, owner, thread_id, await upload_batch(files, settings.max_files)))
+
+    @app.post('/api/v1/reader/threads/{thread_id}/attachments')
+    async def reader_attachments(
+        thread_id: str, request: Request, files: list[UploadFile] = File(...),
+        owner: OwnerServices = Depends(reader_owner),
+    ) -> list[dict[str, str]]:
+        """Save composer uploads and return only IDs and titles for the next turn."""
+        if thread_id == _LIBRARY:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        require_thread(thread_id, owner)
+        scope = f"attachment:{thread_id}"
+        batch = await upload_batch(files, min(settings.max_files, 5))
+        coordinator = queue(request)
         try:
-            if not files or len(files) > settings.max_files:
-                raise HTTPException(status_code=400, detail='Choose fewer files.')
-            uploads = []
-            maximum = max(1, int(settings.max_file_size_mb)) * 1024 * 1024
-            for file in files:
-                data = await file.read(maximum + 1)
-                if len(data) > maximum:
-                    raise HTTPException(status_code=413, detail='File exceeds upload limit.')
-                uploads.append((file.filename or 'upload.bin', data, file.content_type))
-            coordinator = queue(request)
-            key = coordinator.submit(owner_id=owner.user_id, thread_id=thread_id, uploads=uploads,
-                                     upload=lambda batch: owner.workspace.upload_sources(thread_id, batch))
-            return next(_upload(job) for job in coordinator.jobs_for(owner.user_id, thread_id) if job.upload_id == key)
+            key = coordinator.submit(
+                owner_id=owner.user_id, thread_id=scope, uploads=batch,
+                upload=lambda items: owner.workspace.upload_library_files(items, thread_id=thread_id, attachment=True),
+            )
+            job = next(job for job in coordinator.jobs_for(owner.user_id, scope) if job.upload_id == key)
+            return await asyncio.shield(asyncio.wrap_future(job.future))
         except UploadAdmissionError as error:
-            raise HTTPException(status_code=429, detail=str(error), headers={'Retry-After': '5'}) from error
+            raise HTTPException(status_code=429, detail="Uploads are busy. Try again.", headers={"Retry-After": "5"}) from error
+        except SourceUploadFailed as error:
+            raise HTTPException(status_code=422, detail="File processing failed. Check the Library before retrying.") from error
         finally:
-            for file in files:
-                await file.close()
+            if "key" in locals():
+                coordinator.discard(key, owner.user_id)
 
     @app.post('/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/retry', status_code=202)
     def reader_upload_retry(thread_id: str, upload_id: str, request: Request, owner: OwnerServices = Depends(reader_owner)) -> dict[str, bool]:
         """Retry only an owned retained failure with freshly authenticated owner services."""
         require_thread(thread_id, owner)
         if not queue(request).retry(upload_id, owner.user_id, thread_id,
-                                    lambda batch: owner.workspace.upload_sources(thread_id, batch)):
+                                    lambda batch: owner.workspace.upload_library_files(
+                                        batch, thread_id=None if thread_id == _LIBRARY else thread_id
+                                    )):
             raise HTTPException(status_code=409, detail='Upload changed or retry expired. Refresh sources.')
         return {'accepted': True}
 
@@ -162,7 +222,10 @@ def register_reader_sources(
         require_thread(thread_id, owner)
         return ReaderSources(owner_id=owner.user_id, thread_id=thread_id,
                              max_files=settings.max_files, max_file_bytes=settings.max_file_size_mb * 1024 * 1024,
-                             sources=[_source(row) for row in owner.workspace.list_sources(thread_id)])
+                             sources=[_source(row) for row in (
+                                 owner.workspace.library_sources() if thread_id == _LIBRARY else
+                                 owner.workspace.list_sources(thread_id, include_extracted_text=False)
+                             )])
 
     @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/select', response_model=ReaderSources)
     def reader_source_select(
@@ -170,19 +233,39 @@ def register_reader_sources(
         owner: OwnerServices = Depends(reader_owner),
     ) -> ReaderSources:
         """Set explicit selection through the shared store; locked sources remain authoritative."""
+        if thread_id == _LIBRARY:
+            raise HTTPException(status_code=404, detail="Notebook not found")
         require_thread(thread_id, owner)
         try:
-            owner.workspace.set_source_selected(thread_id, source_id, payload.selected)
+            owner.workspace.set_library_link(thread_id, source_id, payload.selected, require_link=True)
         except ValueError as error:
             raise HTTPException(status_code=409, detail='Source changed or is locked. Refresh sources.') from error
         return reader_sources(thread_id, owner)
 
-    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/remove', response_model=ReaderSources)
-    def reader_source_remove(thread_id: str, source_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderSources:
-        """Remove only an owned unlocked source; keep saved citation mappings unchanged."""
+    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/link', response_model=ReaderSources)
+    def reader_source_link(thread_id: str, source_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderSources:
+        """Add an owned Library source to the target notebook and enable it."""
+        if thread_id == _LIBRARY:
+            raise HTTPException(status_code=404, detail="Notebook not found")
         require_thread(thread_id, owner)
         try:
-            owner.workspace.delete_source(thread_id, source_id)
+            owner.workspace.set_library_link(thread_id, source_id, True)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail="Library source not found") from error
+        return reader_sources(thread_id, owner)
+
+    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/remove', response_model=ReaderSources)
+    def reader_source_remove(thread_id: str, source_id: str, payload: ReaderLibraryDelete | None = None,
+                             owner: OwnerServices = Depends(reader_owner)) -> ReaderSources:
+        """Detach a notebook source or permanently delete an explicitly confirmed Library original."""
+        require_thread(thread_id, owner)
+        if thread_id == _LIBRARY and payload is None:
+            raise HTTPException(status_code=422, detail="Confirm permanent deletion")
+        try:
+            if thread_id == _LIBRARY:
+                owner.workspace.delete_library_source(source_id)
+            else:
+                owner.workspace.set_library_link(thread_id, source_id, None, require_link=True)
         except ValueError as error:
             raise HTTPException(status_code=409, detail='Source changed or is locked. Refresh sources.') from error
         return reader_sources(thread_id, owner)
@@ -191,7 +274,10 @@ def register_reader_sources(
     def reader_source(thread_id: str, source_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderSourceDetail:
         """Inspect up to 24,000 characters of owned extracted text without executing it."""
         require_thread(thread_id, owner)
-        row = owner.workspace.get_source(thread_id, source_id)
+        if thread_id == _LIBRARY:
+            row = next(iter(owner.workspace.library_sources([source_id], include_extracted_text=True)), None)
+        else:
+            row = owner.workspace.get_source(thread_id, source_id)
         if row is None:
             raise HTTPException(status_code=404, detail='Source not found')
         text = str(row.get('extractedText') or '')
@@ -202,7 +288,8 @@ def register_reader_sources(
         """Download an owned original as an attachment; never render untrusted active content."""
         require_thread(thread_id, owner)
         try:
-            content = owner.workspace.read_source_content(thread_id, source_id)
+            content = (owner.workspace.read_library_source(source_id) if thread_id == _LIBRARY
+                       else owner.workspace.read_source_content(thread_id, source_id))
         except ValueError as error:
             raise HTTPException(status_code=404, detail='Source unavailable') from error
         return Response(content.data, media_type='application/octet-stream', headers={

@@ -16,6 +16,15 @@ STUDENT_ROLE = "student"
 PROTECTED_ROLES = frozenset({"lecturer", "admin"})
 
 
+def has_streamlit_access(
+    user: Mapping[str, Any], enabled_subjects: frozenset[str],
+) -> bool:
+    """Allow persisted staff roles and explicitly enabled Cognito accounts."""
+    subject = str(user.get("cognito_sub") or "").strip()
+    role = str(user.get("role") or "").strip().lower()
+    return bool(subject and (role in PROTECTED_ROLES or subject in enabled_subjects))
+
+
 @dataclass(frozen=True)
 class AuthProfile:
     """Application user profile bound to a Cognito subject."""
