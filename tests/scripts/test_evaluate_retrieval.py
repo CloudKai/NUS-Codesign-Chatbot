@@ -715,6 +715,10 @@ def test_ids_selection_keeps_file_order_and_parses_commas() -> None:
         ["--live-model", "--max-live-calls", "4", "--ids", "gm001,not-an-id"],
         ["--live-model", "--max-live-calls", "4", "--ids", ","],
         ["--live-model", "--max-live-calls", "1", "--compare-source-check", "--ids", "gm001"],
+        ["--live-model", "--max-live-calls", "4", "--categories", "course_content,no_such_category"],
+        ["--live-model", "--max-live-calls", "4", "--categories", ","],
+        ["--live-model", "--max-live-calls", "4", "--skip-sample", "-1"],
+        ["--live-model", "--max-live-calls", "4", "--ids", "gm146", "--expected-decision", "retrieve"],
     ],
 )
 def test_bad_selection_or_compare_cap_is_refused_before_a_client_exists(
@@ -724,7 +728,18 @@ def test_bad_selection_or_compare_cap_is_refused_before_a_client_exists(
     assert "refused" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("argv", [["--ids", "gm001"], ["--compare-source-check"], ["--live-kb", "--max-live-calls", "2", "--ids", "gm001"]])
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--ids", "gm001"],
+        ["--compare-source-check"],
+        ["--live-kb", "--max-live-calls", "2", "--ids", "gm001"],
+        ["--categories", "course_content"],
+        ["--expected-decision", "skip"],
+        ["--skip-sample", "3"],
+        ["--live-kb", "--max-live-calls", "2", "--categories", "course_content"],
+    ],
+)
 def test_selection_and_compare_flags_need_live_model(argv, no_boto, capsys) -> None:
     assert _EVAL.main(argv) == 2
     assert "--live-model" in capsys.readouterr().err
@@ -813,7 +828,17 @@ def test_main_compare_with_ids_runs_on_a_stub_client(haiku_settings, monkeypatch
     assert len(stub.requests) == 6
     data = json.loads(out.read_text())
     assert data["mode"] == "live_model_compare"
-    assert data["selection"] == {"ids": ["gm146", "gm147", "gm279"], "messages_in_set": 295}
+    assert data["selection"] == {
+        "ids": ["gm279", "gm146", "gm147"],
+        "categories": None,
+        "expected_decision": None,
+        "skip_sample": 0,
+        "compare_source_check": True,
+        "messages_in_set": 295,
+        "rows_selected": 3,
+        "rows_after_cap": 3,
+    }
+    assert [p["id"] for p in data["pairs"]] == ["gm146", "gm147", "gm279"]
     assert data["calls"]["messages_selected"] == 3 and data["calls"]["messages_in_set"] == 295
     assert "live_model_compare" in capsys.readouterr().out
 
@@ -826,6 +851,174 @@ def test_main_live_model_with_ids_sends_only_those_rows(haiku_settings, monkeypa
     assert _EVAL.main(["--live-model", "--ids", "gm146,gm279", "--max-live-calls", "10"]) == 0
     assert len(stub.requests) == 2
     assert "2 selected (295 in set)" in capsys.readouterr().out
+
+
+def _labelled(*items):
+    """Rows from (category, expected_decision) pairs, ids t1, t2, ..."""
+    return [
+        dict(_row("hello", expected), id=f"t{i}", category=category)
+        for i, (category, expected) in enumerate(items, 1)
+    ]
+
+
+def test_ids_and_categories_select_the_union_in_file_order() -> None:
+    rows = _labelled(
+        ("course_content", "retrieve"),
+        ("greeting_thanks_chitchat", "skip"),
+        ("course_content", "skip"),
+        ("procedural_ui", "skip"),
+    )
+    chosen = _EVAL.select_live_rows(rows, ids=["t4"], categories=["course_content"])
+    assert [r["id"] for r in chosen] == ["t1", "t3", "t4"]
+    only_retrieve = _EVAL.select_live_rows(rows, categories=["course_content"], expected_decision="retrieve")
+    assert [r["id"] for r in only_retrieve] == ["t1"]
+    assert [r["id"] for r in _EVAL.select_live_rows(rows, expected_decision="skip")] == ["t2", "t3", "t4"]
+    with pytest.raises(_EVAL.LiveRunRefused, match="no_such_category"):
+        _EVAL.select_live_rows(rows, categories=["no_such_category"])
+    with pytest.raises(_EVAL.LiveRunRefused):
+        _EVAL.select_live_rows(rows, categories=["procedural_ui"], expected_decision="retrieve")
+
+
+def test_skip_sample_is_deterministic_excludes_selected_rows_and_is_bounded() -> None:
+    rows = _labelled(
+        ("course_content", "retrieve"),
+        *[("greeting_thanks_chitchat", "skip")] * 6,
+        ("course_content", "skip"),
+    )
+    kwargs = {"categories": ["course_content"], "expected_decision": "retrieve", "skip_sample": 3}
+    first = [r["id"] for r in _EVAL.select_live_rows(rows, **kwargs)]
+    assert first == [r["id"] for r in _EVAL.select_live_rows(rows, **kwargs)]
+    pool = ["t2", "t3", "t4", "t5", "t6", "t7", "t8"]
+    assert first == ["t1", *[pool[i] for i in _EVAL.evenly_spaced_indices(7, 3)]]
+    # Already-selected skip rows are not drawn again; the sample is capped by the pool.
+    with_skip = _EVAL.select_live_rows(rows, categories=["course_content"], skip_sample=50)
+    assert [r["id"] for r in with_skip] == [r["id"] for r in rows]
+    assert len(_EVAL.select_live_rows(rows, ids=["t1"], skip_sample=50)) == 8
+
+
+def test_item3_subset_on_the_real_gate_file_selects_169_rows() -> None:
+    messages = _EVAL.load_messages()
+    categories = ["course_content", "course_logistics", "informal_or_multilingual", "upload_question", "follow_up"]
+    chosen = _EVAL.select_live_rows(
+        messages, categories=categories, expected_decision="retrieve", skip_sample=60
+    )
+    retrieve = [r for r in chosen if r["expected_decision"] == "retrieve"]
+    skip_ids = [str(r["id"]) for r in messages if r["expected_decision"] == "skip"]
+    assert len(chosen) == 169 and len(retrieve) == 109
+    assert all(r["category"] in categories for r in retrieve)
+    assert [str(r["id"]) for r in chosen if r["expected_decision"] == "skip"] == [
+        skip_ids[i] for i in _EVAL.evenly_spaced_indices(len(skip_ids), 60)
+    ]
+    order = {str(r["id"]): i for i, r in enumerate(messages)}
+    assert [order[str(r["id"])] for r in chosen] == sorted(order[str(r["id"])] for r in chosen)
+
+
+def test_item1_subset_by_category_equals_the_listed_ids() -> None:
+    messages = _EVAL.load_messages()
+    chosen = _EVAL.select_live_rows(messages, categories=["greeting_thanks_chitchat"], ids=["gm279"])
+    assert [r["id"] for r in chosen] == [f"gm{i:03d}" for i in range(146, 179)] + ["gm279"]
+
+
+def test_main_cap_applies_after_the_category_filter(haiku_settings, monkeypatch, capsys) -> None:
+    stub = _StubBedrock()
+    monkeypatch.setattr(
+        _EVAL, "_build_bedrock_runtime_client", lambda region, limit: _EVAL.CountingConverseClient(stub, limit)
+    )
+    greetings = [str(r["id"]) for r in _EVAL.load_messages() if r["category"] == "greeting_thanks_chitchat"]
+    argv = ["--live-model", "--categories", "greeting_thanks_chitchat", "--max-live-calls", "4"]
+    assert _EVAL.main(argv) == 0
+    out = capsys.readouterr().out
+    assert len(stub.requests) == 4
+    assert "selection: ids -; categories greeting_thanks_chitchat" in out
+    assert "rows selected 33; rows after cap 4" in out
+    assert "4 of 33 selected (295 in set)" in out
+    # The 4 sent rows are the evenly spaced subset of the 33 greeting rows.
+    sent = [_student_message(call) for call in stub.requests]
+    by_id = {str(r["id"]): r["message"] for r in _EVAL.load_messages()}
+    assert sent == [by_id[greetings[i]] for i in _EVAL.evenly_spaced_indices(33, 4)]
+
+
+_UTC = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+_FIXED_RUN = {"git_sha": "a" * 40, "git_dirty": False, "generated_at_utc": "2026-11-19T12:00:00Z"}
+
+
+def test_git_run_metadata_never_raises_and_has_a_utc_timestamp() -> None:
+    import re
+
+    run = _EVAL._git_run_metadata()
+    assert set(run) == {"git_sha", "git_dirty", "generated_at_utc"}
+    assert run["git_sha"] is None or re.fullmatch(r"[0-9a-f]{40}", run["git_sha"])
+    assert run["git_dirty"] in (None, True, False)
+    assert re.match(_UTC, run["generated_at_utc"])
+
+
+def test_git_run_metadata_is_none_when_git_is_missing(monkeypatch) -> None:
+    import subprocess
+
+    def _missing(*_args, **_kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(subprocess, "run", _missing)
+    run = _EVAL._git_run_metadata()
+    assert run["git_sha"] is None and run["git_dirty"] is None
+
+
+def test_offline_json_output_carries_the_run_block_and_stdout_is_unchanged(monkeypatch, tmp_path, capsys) -> None:
+    import re
+
+    seen = {}
+
+    def _fake_offline(*_args):
+        return {"mode": "offline"}
+
+    def _fake_report(result):
+        seen["result"] = dict(result)
+        return "report"
+
+    monkeypatch.setattr(_EVAL, "_block_network", lambda: None)
+    monkeypatch.setattr(_EVAL, "run_offline", _fake_offline)
+    monkeypatch.setattr(_EVAL, "format_report", _fake_report)
+    out = tmp_path / "offline.json"
+    assert _EVAL.main(["--json-output", str(out)]) == 0
+    data = json.loads(out.read_text())
+    assert data["mode"] == "offline"
+    assert re.fullmatch(r"[0-9a-f]{40}", data["run"]["git_sha"] or "0" * 40)
+    assert re.match(_UTC, data["run"]["generated_at_utc"])
+    assert "run" not in seen["result"]
+    assert capsys.readouterr().out == "report\n"
+
+
+def test_live_model_json_output_carries_the_run_block(haiku_settings, monkeypatch, tmp_path) -> None:
+    stub = _StubBedrock()
+    monkeypatch.setattr(
+        _EVAL, "_build_bedrock_runtime_client", lambda region, limit: _EVAL.CountingConverseClient(stub, limit)
+    )
+    monkeypatch.setattr(_EVAL, "_git_run_metadata", lambda: dict(_FIXED_RUN))
+    for extra in ([], ["--compare-source-check"]):
+        out = tmp_path / f"live{len(extra)}.json"
+        assert _EVAL.main(["--live-model", "--ids", "gm146", "--max-live-calls", "2", *extra,
+                           "--json-output", str(out)]) == 0
+        assert json.loads(out.read_text())["run"] == _FIXED_RUN
+
+
+def test_live_kb_json_output_carries_the_run_block(monkeypatch, tmp_path) -> None:
+    from backend.settings import settings
+
+    class EmptyKb:
+        def retrieve(self, **_kwargs):
+            return {"retrievalResults": []}
+
+    for name, value in _LIVE_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(settings, "knowledge_base_id", "kb-test")
+    monkeypatch.setattr(settings, "course_materials_bucket", "bucket-test")
+    monkeypatch.setattr(_EVAL, "_build_live_client", lambda _region, limit: _EVAL.CountingClient(EmptyKb(), limit))
+    monkeypatch.setattr(_EVAL, "_git_run_metadata", lambda: dict(_FIXED_RUN))
+    out = tmp_path / "kb.json"
+    assert _EVAL.main(["--live-kb", "--max-live-calls", "2", "--json-output", str(out)]) == 0
+    data = json.loads(out.read_text())
+    assert data["mode"] == "live" and data["retrieval"]["live_calls_made"] == 2
+    assert data["run"] == _FIXED_RUN
 
 
 def test_agentcore_is_never_invoked_by_the_live_model_path() -> None:

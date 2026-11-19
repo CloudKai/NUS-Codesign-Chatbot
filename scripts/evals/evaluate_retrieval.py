@@ -18,10 +18,14 @@ LIVE MODEL mode (real Bedrock ``converse`` calls to the fast-chat Haiku model)
 is also off by default. It runs only with ``--live-model`` AND
 ``--max-live-calls N``. It sends each gate message through the first Fast Chat
 call with ``needs_sources`` on and reports flag rate, wrong-skip, false-retrieve
-and extra model calls by category. ``--ids`` limits it to chosen rows, and
-``--compare-source-check`` sends each chosen row with the SOURCE CHECK rule on
-and then off (two calls per row, both counted by ``--max-live-calls``). Tests
-use a stub client only.
+and extra model calls by category. ``--ids``, ``--categories``,
+``--expected-decision`` and ``--skip-sample`` limit it to chosen rows
+(``--max-live-calls`` applies after them), and ``--compare-source-check`` sends
+each chosen row with the SOURCE CHECK rule on and then off (two calls per row,
+both counted by ``--max-live-calls``). Tests use a stub client only.
+
+Every ``--json-output`` file (all modes) carries a ``run`` block with the git
+SHA, a dirty flag and a UTC timestamp.
 
 Metric definitions (also in ``scripts/evals/datasets/README.md``):
 
@@ -1825,28 +1829,69 @@ def summarize_live_model(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any
     }
 
 
-def select_live_rows(
-    messages: Sequence[Mapping[str, Any]], *, ids: Sequence[str] | None = None
-) -> list[Mapping[str, Any]]:
-    """Keep the rows whose id is listed, in file order (``None`` keeps all).
-
-    Raises:
-        LiveRunRefused: When an id is not in the set, or nothing is selected.
-    """
-    if ids is None:
-        return list(messages)
-    wanted = list(dict.fromkeys(ids))
-    if not wanted:
-        raise LiveRunRefused("--ids was given but names no id")
-    known = {str(row["id"]) for row in messages}
-    unknown = [item for item in wanted if item not in known]
+def _refuse_unknown(flag: str, unknown: Sequence[str]) -> None:
     if unknown:
         more = f" and {len(unknown) - 5} more" if len(unknown) > 5 else ""
-        raise LiveRunRefused(f"unknown id(s) in --ids: {', '.join(unknown[:5])}{more}")
-    chosen = set(wanted)
-    selected = [row for row in messages if str(row["id"]) in chosen]
+        raise LiveRunRefused(f"unknown value(s) in {flag}: {', '.join(unknown[:5])}{more}")
+
+
+def select_live_rows(
+    messages: Sequence[Mapping[str, Any]],
+    *,
+    ids: Sequence[str] | None = None,
+    categories: Sequence[str] | None = None,
+    expected_decision: str | None = None,
+    skip_sample: int = 0,
+) -> list[Mapping[str, Any]]:
+    """Select the gate rows a live-model run sends, in file order.
+
+    Order: (a) with neither ``ids`` nor ``categories`` start from all rows,
+    else keep rows whose id **or** category is listed (union); (b)
+    ``expected_decision`` keeps only rows with that label; (c) ``skip_sample``
+    adds that many ``skip`` rows not already selected, chosen with
+    ``evenly_spaced_indices`` over that pool in file order. ``None`` for a
+    filter means "not given"; ``--max-live-calls`` applies later.
+
+    Raises:
+        LiveRunRefused: On an unknown id or category, an empty ``ids`` or
+            ``categories`` list, a bad ``expected_decision``, a negative
+            ``skip_sample``, or an empty selection.
+    """
+    if ids is not None and not ids:
+        raise LiveRunRefused("--ids was given but names no id")
+    if categories is not None and not categories:
+        raise LiveRunRefused("--categories was given but names no category")
+    if expected_decision is not None and expected_decision not in DECISIONS:
+        raise LiveRunRefused(f"--expected-decision must be one of {', '.join(sorted(DECISIONS))}")
+    if skip_sample < 0:
+        raise LiveRunRefused("--skip-sample must be 0 or more")
+    wanted_ids = set(ids or ())
+    wanted_categories = set(categories or ())
+    known_ids = {str(row["id"]) for row in messages}
+    _refuse_unknown("--ids", [item for item in dict.fromkeys(ids or ()) if item not in known_ids])
+    _refuse_unknown(
+        "--categories",
+        [item for item in dict.fromkeys(categories or ()) if item not in MESSAGE_CATEGORIES],
+    )
+    if ids is None and categories is None:
+        selected = list(messages)
+    else:
+        selected = [
+            row
+            for row in messages
+            if str(row["id"]) in wanted_ids or str(row["category"]) in wanted_categories
+        ]
+    if expected_decision is not None:
+        selected = [row for row in selected if row["expected_decision"] == expected_decision]
+    if skip_sample:
+        taken = {str(row["id"]) for row in selected}
+        pool = [
+            row for row in messages if row["expected_decision"] == "skip" and str(row["id"]) not in taken
+        ]
+        taken |= {str(pool[i]["id"]) for i in evenly_spaced_indices(len(pool), skip_sample)}
+        selected = [row for row in messages if str(row["id"]) in taken]
     if not selected:
-        raise LiveRunRefused("--ids selected no rows")
+        raise LiveRunRefused("the row filters selected no rows")
     return selected
 
 
@@ -2146,6 +2191,20 @@ def _failure_lines(summary: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _selection_line(selection: Mapping[str, Any]) -> str:
+    def _list(key: str) -> str:
+        values = selection.get(key)
+        return "-" if values is None else ",".join(values)
+
+    return (
+        f"selection: ids {_list('ids')}; categories {_list('categories')}; "
+        f"expected decision {selection.get('expected_decision') or 'any'}; "
+        f"skip sample {selection.get('skip_sample', 0)}; "
+        f"rows selected {selection.get('rows_selected', 'n/a')}; "
+        f"rows after cap {selection.get('rows_after_cap', 'n/a')}"
+    )
+
+
 def _calls_lines(result: Mapping[str, Any]) -> list[str]:
     calls = result["calls"]
     model = result["model"]
@@ -2157,6 +2216,9 @@ def _calls_lines(result: Mapping[str, Any]) -> list[str]:
         f"({calls['messages_in_set']} in set)",
         f"tokens: input {result['tokens']['input']}, output {result['tokens']['output']}",
     ]
+    selection = result.get("selection")
+    if selection:
+        lines.insert(1, _selection_line(selection))
     if result["first_failure"]:
         failure = result["first_failure"]
         arm = f" ({failure['arm']})" if failure.get("arm") else ""
@@ -2253,6 +2315,50 @@ def _block_network() -> None:
     socket.socket.connect_ex = _refuse  # type: ignore[method-assign]
     socket.create_connection = _refuse  # type: ignore[assignment]
     socket.getaddrinfo = _refuse  # type: ignore[assignment]
+
+
+def _git_run_metadata() -> dict[str, Any]:
+    """Return the checkout's commit and a UTC timestamp for a JSON output file.
+
+    ``git_dirty`` is true when tracked files have uncommitted changes
+    (untracked files are ignored). Both git fields are ``None`` when git is
+    unavailable. Local subprocess only; never raises.
+    """
+    import subprocess
+    from datetime import datetime, timezone
+
+    def _git(*command: str) -> str | None:
+        try:
+            done = subprocess.run(
+                ["git", *command],
+                cwd=_PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return done.stdout if done.returncode == 0 else None
+
+    sha = _git("rev-parse", "HEAD")
+    status = _git("status", "--porcelain", "--untracked-files=no")
+    return {
+        "git_sha": (sha.strip() or None) if sha is not None else None,
+        "git_dirty": bool(status.strip()) if status is not None else None,
+        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
+def _write_json_output(path: Path, result: Mapping[str, Any]) -> None:
+    """Write ``result`` as JSON with a ``run`` block (git SHA, UTC timestamp).
+
+    Shared by the offline, ``--live-kb`` and ``--live-model`` modes. ``run`` is
+    added only to the file, so the printed report is unchanged.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {**result, "run": _git_run_metadata()}
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def format_report(result: Mapping[str, Any]) -> str:
@@ -2383,7 +2489,31 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ID[,ID...]",
         help="--live-model only: send only these gate message ids (comma-separated, "
         "may be repeated; kept in file order). An unknown id is refused. "
-        "--max-live-calls applies after this filter.",
+        "With --categories, rows matching either are kept. "
+        "--max-live-calls applies after all filters.",
+    )
+    parser.add_argument(
+        "--categories",
+        action="append",
+        default=None,
+        metavar="CATEGORY[,CATEGORY...]",
+        help="--live-model only: send only rows of these categories (comma-separated, "
+        "may be repeated). An unknown category is refused. With --ids, rows "
+        "matching either are kept.",
+    )
+    parser.add_argument(
+        "--expected-decision",
+        choices=sorted(DECISIONS),
+        default=None,
+        help="--live-model only: after --ids/--categories, keep only rows with this label.",
+    )
+    parser.add_argument(
+        "--skip-sample",
+        type=int,
+        default=0,
+        metavar="N",
+        help="--live-model only: then add N skip-labelled rows not already selected, "
+        "evenly spaced over the remaining skip rows in file order (deterministic).",
     )
     parser.add_argument(
         "--compare-source-check",
@@ -2396,7 +2526,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def parse_ids(values: Sequence[str] | None) -> list[str] | None:
-    """Flatten repeated, comma-separated ``--ids`` values (``None`` if absent)."""
+    """Flatten repeated, comma-separated ``--ids`` or ``--categories`` values (``None`` if absent)."""
     if values is None:
         return None
     return [part.strip() for value in values for part in value.split(",") if part.strip()]
@@ -2421,17 +2551,30 @@ def _main_live_model(args: argparse.Namespace) -> int:
     questions = load_questions(args.questions, materials)
     messages = load_messages(args.messages, materials, [q["id"] for q in questions])
     ids = parse_ids(args.ids)
+    categories = parse_ids(args.categories)
     # Select and check before the client exists: a refusal makes no client.
     try:
-        selected = select_live_rows(messages, ids=ids)
-        if args.compare_source_check:
-            check_compare_limit(limit)
+        selected = select_live_rows(
+            messages,
+            ids=ids,
+            categories=categories,
+            expected_decision=args.expected_decision,
+            skip_sample=args.skip_sample,
+        )
+        rows_to_send = check_compare_limit(limit) if args.compare_source_check else limit
     except LiveRunRefused as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
-    selection = None
-    if ids is not None:
-        selection = {"ids": [str(row["id"]) for row in selected], "messages_in_set": len(messages)}
+    selection = {
+        "ids": list(dict.fromkeys(ids)) if ids is not None else None,
+        "categories": list(dict.fromkeys(categories)) if categories is not None else None,
+        "expected_decision": args.expected_decision,
+        "skip_sample": args.skip_sample,
+        "compare_source_check": bool(args.compare_source_check),
+        "messages_in_set": len(messages),
+        "rows_selected": len(selected),
+        "rows_after_cap": min(len(selected), rows_to_send),
+    }
     client = _build_bedrock_runtime_client(region, limit)
     if args.compare_source_check:
         result = run_live_model_compare(
@@ -2449,10 +2592,7 @@ def _main_live_model(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     if args.json_output:
-        args.json_output.parent.mkdir(parents=True, exist_ok=True)
-        args.json_output.write_text(
-            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        _write_json_output(args.json_output, result)
     code = live_model_exit_code(result)
     if code == 1:
         print("every call failed", file=sys.stderr)
@@ -2465,8 +2605,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.live_model:
         return _main_live_model(args)
-    if args.ids is not None or args.compare_source_check:
-        print("refused: --ids and --compare-source-check need --live-model", file=sys.stderr)
+    if (
+        args.ids is not None
+        or args.categories is not None
+        or args.expected_decision is not None
+        or args.skip_sample
+        or args.compare_source_check
+    ):
+        print(
+            "refused: --ids, --categories, --expected-decision, --skip-sample and "
+            "--compare-source-check need --live-model",
+            file=sys.stderr,
+        )
         return 2
     live_requested = args.live_kb or args.max_live_calls is not None
     limit = 0
@@ -2498,8 +2648,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = run_offline(materials, questions, messages, followups)
     print(format_report(result))
     if args.json_output:
-        args.json_output.parent.mkdir(parents=True, exist_ok=True)
-        args.json_output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        _write_json_output(args.json_output, result)
     return 0
 
 

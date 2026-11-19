@@ -14,6 +14,19 @@ MOCK_OPENAI=true MODEL_PROVIDER=mock OPENAI_API_KEY= USE_LOCAL_API=false \
 The default path makes no network call, needs no keys and takes about 15
 seconds. The script blocks socket connections in offline mode.
 
+Every `--json-output` file, in all three modes (offline, `--live-kb`,
+`--live-model`), has a `run` block: `git_sha` (`git rev-parse HEAD`),
+`git_dirty` (true when tracked files have uncommitted changes; untracked files
+are ignored) and `generated_at_utc` (`YYYY-MM-DDTHH:MM:SSZ`). The git fields
+are `null` when git is not available. The offline and `--live-kb` modes share
+one writer in `main()`; `--live-model` uses the same helper
+(`_write_json_output`). The block is added to the file only, so the printed
+report is unchanged. To compare two files, drop `run` first:
+
+```bash
+python -c "import json,sys;a,b=(json.load(open(p)) for p in sys.argv[1:]);[d.pop('run',None) for d in (a,b)];print(a==b)" before.json after.json
+```
+
 - **Gate.** The script composes the repo's own rules-based retrieval gate
   (`resolve_mode_policy`, the attachment, stage-status, navigation and
   meta-guidance overrides, and `_wants_course_catalog_retrieval`) the way
@@ -260,6 +273,9 @@ the normal credential chain.
   Base" below. The report also prints `page_coverage`: results with a page,
   and questions scored at page level.
 - **Gate.** The gate numbers still come from the offline gate and make no call.
+- **Run block.** The JSON file carries `run` (git SHA, dirty flag, UTC
+  timestamp), as in offline mode. The row filters of `--live-model` do not
+  apply here and are refused.
 
 ## Page numbers from the Knowledge Base
 
@@ -359,9 +375,10 @@ The tool schema is the Pydantic schema with `$ref` entries inlined; Strands'
 own conversion is not available here, so the first run also checks that Bedrock
 accepts the schema.
 
-**Which rows are sent.** All gate messages, sequentially, one call each, up to
-`--max-live-calls`. Below the row count the script sends an evenly spaced,
-deterministic subset. History is the `history` field of the row (16 follow-up
+**Which rows are sent.** All gate messages, or the rows the filters select (see
+"Choose rows" below), sequentially, one call each, up to `--max-live-calls`.
+Below the selected row count the script sends an evenly spaced, deterministic
+subset of the selected rows. History is the `history` field of the row (16 follow-up
 rows have two turns). No retrieved excerpts are attached to any row. Production
 stamps the SOURCE CHECK rule only on rows the gate searched nothing for. The eval
 turns it on for every row so each row has a flag, but only **eligible** rows
@@ -496,18 +513,77 @@ the error. An eval parse failure therefore marks a first generation that
 production would try to recover. The eval failure rate is an upper bound on the
 student-facing rate, not a measure of it.
 
-### Compare SOURCE CHECK on vs off for chosen ids
+### Choose rows
 
-`--ids ID[,ID...]` (comma-separated, may be repeated) keeps only those gate
-rows, in file order. An unknown id or an empty list is refused (exit 2, no
-client built). `--compare-source-check` sends each chosen row twice, back to
+The filters make a small live run possible. They apply in this order:
+
+1. `--ids ID[,ID...]` and `--categories CATEGORY[,CATEGORY...]` (each
+   comma-separated, may be repeated). With neither, all rows are kept. With one
+   or both, a row is kept when its id **or** its category is listed (union).
+   An unknown id, an unknown category (not in `MESSAGE_CATEGORIES`) or an empty
+   list is refused.
+2. `--expected-decision retrieve|skip` keeps only rows with that label.
+3. `--skip-sample N` adds N `skip` rows not already selected, chosen with
+   `evenly_spaced_indices` over the remaining `skip` rows in file order, so the
+   same command always picks the same rows. Fewer are added when the pool is
+   smaller.
+4. The result is put back in file order. An empty selection is refused.
+5. `--max-live-calls` applies last: below the selected count the script sends
+   an evenly spaced subset of the selected rows (`floor(N / 2)` rows in compare
+   mode).
+
+Refusals exit 2 before the Bedrock client is built. All four flags need
+`--live-model`; with the offline mode or `--live-kb` they are refused. The JSON
+`selection` block records the arguments (`ids`, `categories`,
+`expected_decision`, `skip_sample`, `compare_source_check`) and the counts
+(`messages_in_set`, `rows_selected`, `rows_after_cap`). `rows_after_cap` is the
+number of rows the cap allows; `calls.messages_attempted` is the number
+actually tried (lower if the run stopped early). The report prints the same as
+one `selection:` line (`-` means the filter was not given).
+
+Examples on the 295 gate rows (counted by `select_live_rows` in the tests):
+
+| Filter | Rows |
+|---|---|
+| `--categories greeting_thanks_chitchat --ids gm279` | 34 (gm146 to gm178, gm279) |
+| `--categories course_content,course_logistics,informal_or_multilingual,upload_question,follow_up --expected-decision retrieve --skip-sample 60` | 169 (109 `retrieve` + 60 `skip`) |
+
+### Cost of a live-model run (estimate)
+
+Estimated cost = calls × (input tokens × input price + output tokens × output
+price). The token figures are the averages the user reported from the
+Phase 3b live run, about 7,100 input and 300 output tokens per call; greeting
+rows and rows with history may differ. Prices used: Haiku 4.5 at $1.00 per
+million input tokens and $5.00 per million output tokens for the `global.`
+profile, from third-party price pages
+([usage.ai](https://instances.usage.ai/ai/claude-haiku-4-5),
+[TypingMind calculator](https://custom.typingmind.com/tools/estimate-llm-usage-costs/amazon-bedrock/anthropic-claude-haiku-4-5-20251001-v1-0)).
+Regional (EU, AU, JP) profiles are listed at $1.10 and $5.50
+([TypingMind EU](https://custom.typingmind.com/tools/estimate-llm-usage-costs/amazon-bedrock/eu-anthropic-claude-haiku-4-5-20251001-v1-0)).
+Confirm on the AWS Bedrock pricing page before relying on these. Per call:
+7,100 × $1/M + 300 × $5/M = $0.0071 + $0.0015 = $0.0086.
+
+| Run | Calls | Estimate ($1 / $5) | Estimate ($1.10 / $5.50) |
+|---|---|---|---|
+| Smoke test (`--max-live-calls 5`) | 5 | $0.04 | $0.05 |
+| Phase 3c item 1, greetings + gm279, SOURCE CHECK on and off | 68 | $0.58 | $0.64 |
+| Phase 3c item 3 subset (169 rows, one call each) | 169 | $1.45 | $1.60 |
+| Full gate set | 295 | $2.54 | $2.79 |
+
+The report prints the real token totals (`tokens.input`, `tokens.output`), so
+the real cost of a run can be checked afterwards.
+
+### Compare SOURCE CHECK on vs off for chosen rows
+
+`--compare-source-check` sends each chosen row twice, back to
 back: once with `source_need_check=True` (the SOURCE CHECK paragraph in the
 runtime rules) and once with `source_need_check=False` (production with
 `FAST_CHAT_NEEDS_SOURCES_ENABLED` off; the flag is never honoured). The cached
 fast-chat prompt and output contract are the same in both arms. Both flags need
 `--live-model`; without it they are refused.
 
-**Cap rule.** `--max-live-calls` counts model calls, applied after `--ids`.
+**Cap rule.** `--max-live-calls` counts model calls, applied after the row
+filters.
 Each row costs 2 calls, so the script sends `floor(N / 2)` rows (evenly spaced,
 as in the plain mode) and the call counter stops at N. N below 2 is refused.
 Fail-fast is unchanged: the run stops after the first auth or access error in
@@ -517,13 +593,15 @@ The JSON has `mode: live_model_compare`, `arms.source_check_on` and
 `arms.source_check_off` (each a full live-model summary with its `rows`),
 `pairs` (per id, each arm's `status`, `mode` and `failure_detail`), and
 `failed_on_only`, `failed_off_only`, `failed_both` id lists. `calls` adds
-`messages_selected` and `calls_per_message: 2`; `selection` records the ids.
-`--ids` also works without `--compare-source-check` (one call per row).
+`messages_selected` and `calls_per_message: 2`; `selection` records the
+filters. The filters also work without `--compare-source-check` (one call per
+row).
 
 **Phase 3c item 1 command (not run; costs money).** The 33
 `greeting_thanks_chitchat` rows (gm146 to gm178, which contain the 10 reported
 parse failures gm148 to gm172) plus gm279 (`ambiguous_generic`): 34 rows, 68
-calls.
+calls. `--categories greeting_thanks_chitchat --ids gm279` selects exactly the
+same 34 rows as listing the 34 ids (a test pins this).
 
 ```bash
 COACHING_MODEL_PROVIDER=bedrock \
@@ -531,12 +609,9 @@ COACHING_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0 \
 AGENTCORE_MODEL_REGION=us-west-2 \
   python scripts/evals/evaluate_retrieval.py \
   --live-model --compare-source-check \
-  --ids gm146,gm147,gm148,gm149,gm150,gm151,gm152,gm153,gm154,gm155,gm156,gm157,gm158,gm159,gm160,gm161,gm162,gm163,gm164,gm165,gm166,gm167,gm168,gm169,gm170,gm171,gm172,gm173,gm174,gm175,gm176,gm177,gm178,gm279 \
+  --categories greeting_thanks_chitchat --ids gm279 \
   --max-live-calls 68 \
   --json-output .agents/tasks/phase3c-work/live-item1-greetings-on-off.json
 ```
 
-At about 7,100 input and 300 output tokens per call (the averages the user
-reported from the Phase 3b live run) and Haiku 4.5 at $1 / $5 per million
-tokens, that is about 68 × $0.0086 ≈ $0.58 (estimate; confirm prices on the AWS
-Bedrock pricing page).
+Estimated cost 68 × $0.0086 ≈ $0.58 (see "Cost of a live-model run" above).
