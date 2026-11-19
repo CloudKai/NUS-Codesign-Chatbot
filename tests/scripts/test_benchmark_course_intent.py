@@ -12,6 +12,15 @@ import pytest
 from scripts.evals import benchmark_course_intent as bench
 
 
+@pytest.fixture(autouse=True)
+def _keep_process_state(monkeypatch) -> None:
+    """``main`` blocks sockets and sets an env var for the whole process; undo both."""
+    from scripts.evals import evaluate_retrieval
+
+    monkeypatch.setattr(evaluate_retrieval, "_block_network", lambda: None)
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+
+
 def _rows(count: int) -> list[Any]:
     return [SimpleNamespace(id=f"r{i}", message="what is a job story?", history=()) for i in range(count)]
 

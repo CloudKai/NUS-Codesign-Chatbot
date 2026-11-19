@@ -315,8 +315,10 @@ def test_probe_reports_why_laya_cannot_run(tmp_path: Path) -> None:
 
 
 def test_main_runs_offline_and_writes_json_with_run_block(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # main() blocks sockets for the whole process; keep that out of later tests.
+    monkeypatch.setattr(retrieval, "_block_network", lambda: None)
     output = tmp_path / "out.json"
     code = combined.main(["--results-dir", str(tmp_path / "none"), "--json-output", str(output)])
     assert code == 0
