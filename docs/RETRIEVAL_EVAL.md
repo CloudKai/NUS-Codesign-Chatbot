@@ -26,7 +26,9 @@ seconds. The script blocks socket connections in offline mode.
   (`needs_source_retrieval` and the opt-in `needs_sources`; both need a model)
   and image bytes. The report adds a separate block that applies three stub
   models of `needs_sources` on top of the gate. See
-  "`needs_sources` second chance" below.
+  "`needs_sources` second chance" below. A real model measures the same flag
+  with `--live-model`; see "Run the `needs_sources` eval against the live
+  model".
 
 ## Results history
 
@@ -117,7 +119,8 @@ What it does not prove: how a real Haiku call behaves. The stubs are not
 models, the labels are synthetic and single-author, and the empty-result rate
 uses the lexical stand-in for the Knowledge Base. The real flag rate, its
 precision, the added latency and the cost need a measured run with the live
-model and an approved call limit. That run is not part of this item.
+model and an approved call limit. The `--live-model` mode below is that run;
+it has not been run yet.
 
 ## Metric definitions
 
@@ -193,3 +196,117 @@ the normal credential chain.
   evaluated. Failed calls (`unavailable`) are listed in `failed_attempts`.
   Page-level recall is `n/a` because Knowledge Base results carry no page.
 - **Gate.** The gate numbers still come from the offline gate and make no call.
+
+## Run the `needs_sources` eval against the live model (opt-in, costs money)
+
+`--live-model` sends each gate message through the first Fast Chat call on the
+real Haiku model, with the SOURCE CHECK rule on, and measures the real
+`needs_sources` flag. It runs only when **both** `--live-model` and
+`--max-live-calls N` are given, with N from 1 to 500. Without both, or with
+`--live-kb` as well, or when the settings below are not a Haiku model on the
+`bedrock` provider, the script prints `refused: ...`, exits with code 2 and
+makes no call. Pytest never uses this path (it uses a stub client). Run it only
+with approval.
+
+```bash
+COACHING_MODEL_PROVIDER=bedrock \
+COACHING_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0 \
+AGENTCORE_MODEL_REGION=us-west-2 \
+  python scripts/evals/evaluate_retrieval.py --live-model --max-live-calls 295 \
+  --json-output /tmp/needs_sources_live.json
+```
+
+The three variables are the values in `.env.example`. If the shell already
+exports them (or `.env` does), only the script call is needed. AWS credentials
+come from the normal credential chain.
+
+**What is sent.** For each message the script builds the `CoachRequest` that
+`_prepare_authoritative_turn` would stamp (stage, selected sources and
+attachments as ids and titles, mode policy, `retrieval_required`,
+`allow_model_knowledge`, history) and passes it to
+`AgentCoreCoachProvider._invoke_payload`. That is the production code that
+composes the runtime rules (including the SOURCE CHECK paragraph), plans the
+history and builds the Converse messages. The script then makes the call the
+AgentCore runtime makes: system prompt from
+`agentcore_runtime.structured_coach.specialist_system_prompt` (static fast-chat
+prefix, runtime rules, output contract), the same Converse messages, and the
+`FastChatTurnOutput` schema as one forced tool (`toolChoice: any`). The reply is
+parsed with `parse_fast_chat_turn_output` and checked by
+`backend.agentcore_provider._validated_fast_chat`, so mode enforcement,
+`out_of_scope` and the rule that only a Q&A turn honours the flag are the
+production code.
+
+**Differences from production.** AgentCore Runtime is not invoked (the provider
+gets a client that raises if it is used). The call goes to `bedrock-runtime`
+`converse` directly because Strands is a runtime-only dependency. There is no
+guardrail, no prompt-cache point and no structured-output recovery turn: a reply
+without a valid tool call is recorded as a failure. There are no SDK retries.
+The tool schema is the Pydantic schema with `$ref` entries inlined; Strands'
+own conversion is not available here, so the first run also checks that Bedrock
+accepts the schema.
+
+**Which rows are sent.** All gate messages, sequentially, one call each, up to
+`--max-live-calls`. Below the row count the script sends an evenly spaced,
+deterministic subset. History is the `history` field of the row (16 follow-up
+rows have two turns). No retrieved excerpts are attached to any row. Production
+stamps the SOURCE CHECK rule only on rows the gate searched nothing for. The eval
+turns it on for every row so each row has a flag, but only **eligible** rows
+(the same `second_chance` rule as `needs_sources_stubs`) can change a metric. The
+flag on a row the gate already searched is reported in the raw flag rate only.
+
+**Metrics.** Composition is the one in `needs_sources_stubs`: a message counts as
+retrieved when the gate searched a source, or when it is eligible and the
+honoured flag is true. The honoured flag is the raw flag on a Q&A turn that is
+not `out_of_scope`. A raw flag on a coaching turn is not honoured; the report
+counts those (`raw_flags_not_honoured`, `flag_ignored`). Rows whose call failed
+are not scored; failures are counted per category.
+
+| Reported | Meaning |
+|---|---|
+| flag rate (eligible, honoured) | Honoured flags divided by eligible rows. |
+| flag rate (raw, all rows sent) | Raw flags divided by all scored rows. |
+| wrong-skip, gate only / with model | On the same scored rows. |
+| false-retrieve, gate only / with model | Also for clear rows only. A `skip`-labelled eligible message with a true flag is one false retrieve and one extra call, and is listed in `false_flags`. |
+| extra model calls | Honoured flags on eligible rows. Each one is a second model call in production. |
+| per category | The same fields for each `category`, with messages sent and failed. |
+| `missed_flags` | Retrieve-labelled eligible rows the model did not flag (the remaining wrong skips). |
+
+A stub client that uses the mock provider's rule reproduces the offline
+`mock_rule` row exactly (19/154 wrong skips, 39/141 false retrieves, 89 extra
+calls); a test pins that, so the live composition and the offline maths agree.
+
+**Failure handling and exit codes.** The script stops after the first auth or
+access error (access denied, expired or invalid credentials, missing
+credentials) because every later call would fail the same way. It prints the
+exception class and AWS error code of the first failure of any kind (never the
+message body) and saves it as `first_failure`. Exit code 0: the run completed.
+Exit 1: every call failed. Exit 3: it stopped early on an auth or access error
+after at least one success. Exit 2: refused before any call.
+
+**IAM.** The caller needs `bedrock:InvokeModel` (the Converse API is authorised
+by that action). The model id in settings is a global cross-Region inference
+profile (`global.` prefix), so an inference-profile ARN is required, plus the
+foundation-model ARNs AWS lists for global profiles. For
+`global.anthropic.claude-haiku-4-5-20251001-v1:0` called in `us-west-2`:
+
+- `arn:aws:bedrock:us-west-2:<ACCOUNT>:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0`
+- `arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`
+  (condition `bedrock:InferenceProfileArn` equal to the profile ARN above)
+- `arn:aws:bedrock:::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`
+  (same condition, `aws:RequestedRegion` equal to `unspecified`)
+
+See the three-statement policy in the AWS page
+[Global cross-Region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html).
+The script makes no other AWS call.
+
+**Cost.** One Haiku call per message. Each call sends the fast-chat system prompt
+(18,600 to 30,300 characters depending on the stage), the message, history and
+the tool schema: 22,700 to 34,500 characters in all, so roughly 5,700 to 8,600
+input tokens at 4 characters per token. It returns roughly 100 to 300 output
+tokens. At 295 calls that is about 2.1 million input tokens (measured offline by
+building all 295 requests) and under 0.1 million output tokens. At Haiku 4.5 list prices (about $1 per million input
+and $5 per million output tokens) that is a few dollars. The hard ceiling is
+295 calls at the 16,000-token input limit and the 4,000-token output cap, about
+$11. The report prints the real token totals. The run is sequential, about
+2 to 5 seconds per call, so 10 to 25 minutes. The second calls that a flag
+would trigger in production are not made; they are counted only.

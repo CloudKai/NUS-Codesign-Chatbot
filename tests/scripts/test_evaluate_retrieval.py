@@ -305,3 +305,347 @@ def test_needs_sources_stubs_do_not_change_the_first_pass_numbers() -> None:
     gate = _EVAL.evaluate_gate(rows, None)
     assert gate["wrong_skip_rate"]["numerator"] == 1
     assert gate["needs_sources_stubs"]["wrong_skips_before"] == 1
+
+
+# ---- live model mode (stub Bedrock client only) -----------------------------
+
+_HAIKU = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+_MODEL_KWARGS = {"provider": "bedrock", "model_id": _HAIKU, "region": "us-west-2"}
+
+
+def _tool_reply(*, mode="qa", needs_sources=False, out_of_scope=False) -> dict:
+    body = {
+        "mode": mode,
+        "response_text": "Short reply.",
+        "citations": [],
+        "hmw_scaffold_ready": False,
+        "needs_source_retrieval": False,
+        "needs_sources": needs_sources,
+        "out_of_scope": out_of_scope,
+    }
+    if mode == "coaching":
+        body["recommendation"] = "stay"
+    return {
+        "output": {
+            "message": {
+                "role": "assistant",
+                "content": [{"toolUse": {"toolUseId": "t", "name": "FastChatTurnOutput", "input": body}}],
+            }
+        },
+        "stopReason": "tool_use",
+        "usage": {"inputTokens": 100, "outputTokens": 20},
+    }
+
+
+def _student_message(kwargs: dict) -> str:
+    text = kwargs["messages"][-1]["content"][0]["text"]
+    return text.split("<student_message>\n", 1)[1].split("\n</student_message>", 1)[0]
+
+
+class _StubBedrock:
+    """Stand-in for the ``bedrock-runtime`` client. Never touches a network."""
+
+    def __init__(self, decide=None, error=None) -> None:
+        self.requests: list[dict] = []
+        self._decide = decide or (lambda message: _tool_reply())
+        self._error = error
+
+    def converse(self, **kwargs):
+        self.requests.append(kwargs)
+        if self._error is not None:
+            raise self._error(len(self.requests))
+        return self._decide(_student_message(kwargs))
+
+
+def _client_error(code: str):
+    from botocore.exceptions import ClientError
+
+    return ClientError({"Error": {"Code": code, "Message": "secret body"}}, "Converse")
+
+
+def _rows(*items):
+    return [dict(_row(message, expected), id=f"t{i}") for i, (message, expected) in enumerate(items, 1)]
+
+
+def _run(rows, stub, limit=None):
+    counter = _EVAL.CountingConverseClient(stub, limit or len(rows))
+    return _EVAL.run_live_model(rows, limit or len(rows), client=counter, model_id=_HAIKU, region="us-west-2")
+
+
+@pytest.fixture
+def no_boto(monkeypatch):
+    """Fail the test if the live model path builds a real AWS client."""
+    import boto3
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("an AWS client must not be created")
+
+    monkeypatch.setattr(boto3, "client", _boom)
+    monkeypatch.setattr(boto3.session.Session, "client", _boom)
+    monkeypatch.setattr(_EVAL, "_build_bedrock_runtime_client", _boom)
+    monkeypatch.setattr(_EVAL, "run_live_model", _boom)
+
+
+@pytest.fixture
+def haiku_settings(monkeypatch):
+    monkeypatch.setattr(_EVAL, "live_model_settings", lambda: ("bedrock", _HAIKU, "us-west-2"))
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--live-model"],
+        ["--live-model", "--max-live-calls", "0"],
+        ["--live-model", "--max-live-calls", str(_EVAL.LIVE_MODEL_HARD_CALL_CAP + 1)],
+        ["--live-model", "--live-kb", "--max-live-calls", "5"],
+    ],
+)
+def test_live_model_refuses_without_a_valid_call_limit(argv, no_boto, haiku_settings, capsys) -> None:
+    assert _EVAL.main(argv) == 2
+    assert "refused" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("provider", "model_id", "region", "needle"),
+    [
+        ("openai", _HAIKU, "us-west-2", "COACHING_MODEL_PROVIDER"),
+        ("bedrock", "global.anthropic.claude-sonnet-4-6", "us-west-2", "Haiku"),
+        ("bedrock", "", "us-west-2", "Haiku"),
+        ("bedrock", _HAIKU, "", "AGENTCORE_MODEL_REGION"),
+    ],
+)
+def test_live_model_refuses_when_settings_are_not_the_haiku_role(
+    provider, model_id, region, needle, no_boto, monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(_EVAL, "live_model_settings", lambda: (provider, model_id, region))
+    assert _EVAL.main(["--live-model", "--max-live-calls", "5"]) == 2
+    assert needle in capsys.readouterr().err
+
+
+def test_max_live_calls_alone_is_still_refused(no_boto, capsys) -> None:
+    assert _EVAL.main(["--max-live-calls", "5"]) == 2
+    assert "--live-model" in capsys.readouterr().err
+
+
+def test_check_live_model_request_accepts_a_limit() -> None:
+    assert _EVAL.check_live_model_request(True, False, 295, **_MODEL_KWARGS) == 295
+
+
+def test_main_live_model_runs_with_a_stub_client_and_exits_zero(
+    haiku_settings, monkeypatch, tmp_path, capsys
+) -> None:
+    stub = _StubBedrock()
+    monkeypatch.setattr(
+        _EVAL, "_build_bedrock_runtime_client", lambda region, limit: _EVAL.CountingConverseClient(stub, limit)
+    )
+    out = tmp_path / "live.json"
+    assert _EVAL.main(["--live-model", "--max-live-calls", "6", "--json-output", str(out)]) == 0
+    assert len(stub.requests) == 6
+    data = json.loads(out.read_text())
+    assert data["mode"] == "live_model" and data["calls"]["made"] == 6
+    assert "live_model" in capsys.readouterr().out
+
+
+def test_first_call_reuses_the_production_prompt_and_tool_contract() -> None:
+    from agentcore_runtime.specialists.fast_chat import fast_chat_static_prefix
+
+    stub = _StubBedrock()
+    row = _row("what questions do we ask in the JTBD interview", "retrieve")
+    _run([dict(row, id="t1", history=[
+        {"role": "user", "text": "what is dot voting?"},
+        {"role": "assistant", "text": "Each person places a few dots."},
+    ])], stub)
+    call = stub.requests[0]
+    system = call["system"][0]["text"]
+    # Runtime fast-chat prompt, output contract and the SOURCE CHECK rule.
+    assert "FAST CHAT OUTPUT CONTRACT" in system and "SOURCE CHECK" in system
+    assert system.startswith(fast_chat_static_prefix("problem_identification"))
+    assert call["modelId"] == _HAIKU
+    assert [m["role"] for m in call["messages"]] == ["user", "assistant", "user"]
+    assert _student_message(call) == "what questions do we ask in the JTBD interview"
+    tool = call["toolConfig"]["tools"][0]["toolSpec"]
+    assert tool["name"] == "FastChatTurnOutput" and call["toolConfig"]["toolChoice"] == {"any": {}}
+    schema = tool["inputSchema"]["json"]
+    assert "$defs" not in schema and "$ref" not in json.dumps(schema)
+    assert "needs_sources" in schema["properties"]
+    assert call["inferenceConfig"]["maxTokens"] == _EVAL.LIVE_MODEL_MAX_OUTPUT_TOKENS
+
+
+def test_source_check_rule_is_on_for_every_row_and_no_excerpts_are_attached() -> None:
+    rows = _rows(("hello there", "skip"), ("what is a creative matrix", "retrieve"))
+    stub = _StubBedrock()
+    _run(rows, stub)
+    for call in stub.requests:
+        assert "SOURCE CHECK" in call["system"][0]["text"]
+        assert "No retrieved source context was provided" in call["messages"][-1]["content"][0]["text"]
+
+
+def test_eligible_flagged_row_is_rescued_and_an_extra_call_is_counted() -> None:
+    rows = _rows(
+        ("what questions do we ask in the JTBD interview", "retrieve"),
+        ("I think option B is stronger.", "skip"),
+    )
+    stub = _StubBedrock(lambda message: _tool_reply(needs_sources="JTBD" in message))
+    result = _run(rows, stub)
+    overall = result["overall"]
+    assert overall["wrong_skip_gate_only"]["numerator"] == 1
+    assert overall["wrong_skip_with_model"]["numerator"] == 0
+    assert overall["false_retrieve_with_model"]["numerator"] == 0
+    assert overall["extra_model_calls"] == 1
+    assert overall["flag_rate_eligible"] == {"numerator": 1, "denominator": 2, "rate": 0.5}
+    assert result["calls"]["made"] == 2 and result["tokens"] == {"input": 200, "output": 40}
+    assert result["false_flags"] == [] and result["missed_flags"] == []
+
+
+def test_skip_labelled_message_flagged_true_is_a_false_retrieve_and_listed() -> None:
+    rows = _rows(("I think option B is stronger.", "skip"))
+    assert _EVAL.gate_decision(rows[0]).second_chance
+    result = _run(rows, _StubBedrock(lambda message: _tool_reply(needs_sources=True)))
+    assert result["overall"]["false_retrieve_gate_only"]["numerator"] == 0
+    assert result["overall"]["false_retrieve_with_model"]["numerator"] == 1
+    assert result["overall"]["extra_model_calls"] == 1
+    assert [f["id"] for f in result["false_flags"]] == ["t1"]
+
+
+def test_flag_on_a_coaching_turn_is_not_honoured() -> None:
+    rows = _rows(("what questions do we ask in the JTBD interview", "retrieve"))
+    result = _run(rows, _StubBedrock(lambda m: _tool_reply(mode="coaching", needs_sources=True)))
+    overall = result["overall"]
+    assert overall["raw_flags_not_honoured"] == 1
+    assert overall["extra_model_calls"] == 0
+    assert overall["wrong_skip_with_model"]["numerator"] == 1
+    assert result["flag_ignored"][0]["mode"] == "coaching"
+
+
+def test_non_eligible_rows_never_change_the_metrics() -> None:
+    # Retrieved by the gate already: the flag must not matter.
+    rows = _rows(("what is a creative matrix", "retrieve"))
+    decision = _EVAL.gate_decision(rows[0])
+    assert decision.retrieve and not decision.second_chance
+    result = _run(rows, _StubBedrock(lambda m: _tool_reply(needs_sources=True)))
+    assert result["overall"]["eligible_messages"] == 0
+    assert result["overall"]["extra_model_calls"] == 0
+    assert result["overall"]["flag_rate_raw_all_rows"]["numerator"] == 1
+
+
+def test_category_split_sums_to_the_overall_numbers() -> None:
+    rows = _rows(
+        ("what questions do we ask in the JTBD interview", "retrieve"),
+        ("I think option B is stronger.", "skip"),
+        ("thanks", "skip"),
+    )
+    rows[1]["category"] = "project_reasoning"
+    rows[2]["category"] = "greeting_thanks_chitchat"
+    result = _run(rows, _StubBedrock(lambda m: _tool_reply(needs_sources="JTBD" in m)))
+    assert set(result["by_category"]) == {"course_content", "project_reasoning", "greeting_thanks_chitchat"}
+    assert sum(b["extra_model_calls"] for b in result["by_category"].values()) == result["overall"]["extra_model_calls"]
+    assert sum(b["messages_sent"] for b in result["by_category"].values()) == 3
+
+
+def test_run_stops_after_the_first_auth_error_and_names_its_class(capsys) -> None:
+    rows = _rows(*[("what is a creative matrix", "retrieve")] * 5)
+    stub = _StubBedrock(error=lambda n: _client_error("AccessDeniedException"))
+    result = _run(rows, stub)
+    assert len(stub.requests) == 1
+    assert result["stopped_early_on_auth_or_access_error"]["error"] == (
+        "botocore.exceptions.ClientError (code AccessDeniedException)"
+    )
+    assert result["first_failure"]["id"] == "t1"
+    assert _EVAL.live_model_exit_code(result) == 1  # no call succeeded
+    assert "secret body" not in json.dumps(result)
+
+
+def test_auth_error_after_successes_exits_with_the_stopped_early_code() -> None:
+    rows = _rows(*[("what is a creative matrix", "retrieve")] * 4)
+
+    def error(n):
+        return _client_error("ExpiredTokenException")
+
+    class Flaky(_StubBedrock):
+        def converse(self, **kwargs):
+            if len(self.requests) >= 2:
+                self.requests.append(kwargs)
+                raise error(0)
+            return super().converse(**kwargs)
+
+    stub = Flaky()
+    result = _run(rows, stub)
+    assert len(stub.requests) == 3 and result["calls"]["succeeded"] == 2
+    assert _EVAL.live_model_exit_code(result) == 3
+
+
+def test_every_call_failing_without_an_auth_error_tries_each_row_and_exits_nonzero() -> None:
+    rows = _rows(*[("what is a creative matrix", "retrieve")] * 4)
+    stub = _StubBedrock(error=lambda n: _client_error("ThrottlingException"))
+    result = _run(rows, stub)
+    assert len(stub.requests) == 4
+    assert result["calls"]["failed"] == 4 and result["stopped_early_on_auth_or_access_error"] is None
+    assert result["first_failure"]["error"].endswith("(code ThrottlingException)")
+    assert _EVAL.live_model_exit_code(result) == 1
+
+
+def test_reply_without_a_tool_call_is_a_failure_not_a_flag() -> None:
+    rows = _rows(("what is a creative matrix", "retrieve"))
+    empty = {"output": {"message": {"role": "assistant", "content": [{"text": "hi"}]}}, "stopReason": "end_turn"}
+    result = _run(rows, _StubBedrock(lambda m: empty))
+    assert result["calls"]["failed"] == 1
+    assert "LiveStructuredOutputError" in result["first_failure"]["error"]
+
+
+def test_call_limit_sends_an_even_subset_and_never_exceeds_the_limit() -> None:
+    rows = [dict(_row("what is a creative matrix", "retrieve"), id=f"t{i}") for i in range(10)]
+    stub = _StubBedrock()
+    result = _run(rows, stub, limit=4)
+    assert len(stub.requests) == 4 and result["calls"]["messages_attempted"] == 4
+    assert [o["id"] for o in result["rows"]] == ["t0", "t2", "t5", "t7"]
+    class Bare:
+        def converse(self, **_kwargs):
+            return {}
+
+    counter = _EVAL.CountingConverseClient(Bare(), 1)
+    counter.converse(modelId="x")
+    with pytest.raises(_EVAL.LiveCallLimitExceeded):
+        counter.converse(modelId="x")
+
+
+def test_agentcore_is_never_invoked_by_the_live_model_path() -> None:
+    # The provider is built with a runtime client that raises when used; a
+    # completed run proves the AgentCore invoke path was not touched.
+    assert _run(_rows(("hello", "skip")), _StubBedrock())["calls"]["succeeded"] == 1
+
+
+def test_offline_gate_numbers_are_unchanged_by_the_new_gate_fields() -> None:
+    messages = _EVAL.load_messages()
+    gate = _EVAL.evaluate_gate(messages, None)
+    assert gate["wrong_skip_rate"]["numerator"] == 76
+    assert gate["false_retrieve_rate"]["numerator"] == 7
+    assert gate["needs_sources_stubs"]["eligible_messages"] == 189
+
+
+def test_gate_decision_carries_the_scope_fields_the_live_request_needs() -> None:
+    cleared = _EVAL.gate_decision(_row("what stage am I in", "skip"))
+    assert cleared.scope_cleared and cleared.expected_mode == "qa" and not cleared.second_chance
+    request = _EVAL.build_live_request(_row("what stage am I in", "skip"), cleared)
+    assert request.source_ids == [] and request.source_need_check is True
+    attach = dict(_row("can you review this persona", "retrieve"), attachments=[{"title": "P", "filename": "P.pdf"}])
+    request = _EVAL.build_live_request(attach, _EVAL.gate_decision(attach))
+    assert request.attachment_source_ids == ["eval-attachment-1"] and request.attachment_titles == ["P"]
+
+
+def test_live_composition_matches_the_offline_mock_rule_stub_on_the_real_gate_set() -> None:
+    """A stub model using the mock provider's rule must reproduce ``mock_rule``.
+
+    This ties the live composition (gate decision plus honoured flag) to the
+    offline ``needs_sources_stubs`` maths on all 295 messages.
+    """
+    from backend.mock_provider import mock_flags_needs_sources
+
+    messages = _EVAL.load_messages()
+    stub = _StubBedrock(lambda message: _tool_reply(needs_sources=mock_flags_needs_sources(message)))
+    result = _run(messages, stub)
+    offline = _EVAL.evaluate_gate(messages, None)["needs_sources_stubs"]["stubs"]["mock_rule"]
+    overall = result["overall"]
+    assert result["calls"]["succeeded"] == len(messages) == 295
+    assert overall["wrong_skip_with_model"] == offline["wrong_skip_rate"]
+    assert overall["false_retrieve_with_model"] == offline["false_retrieve_rate"]
+    assert overall["extra_model_calls"] == offline["second_model_calls"]

@@ -96,7 +96,10 @@ a possible follow-up.
 The SOURCE CHECK text says no excerpts were retrieved, while the runtime
 `fast_chat.md` Q&A section says FastAPI already retrieved. The SOURCE CHECK
 text states that it overrides that note. Whether the model sets and clears the
-flag as intended can only be checked in a live canary.
+flag as intended can only be checked in a live canary. The opt-in
+`evaluate_retrieval.py --live-model --max-live-calls N` run measures the real
+flag rate, wrong-skip, false-retrieve and extra calls on the 295 gate messages
+before a canary (see `docs/RETRIEVAL_EVAL.md`).
 
 `needs_sources` and `needs_source_retrieval` coexist. They share one retry, one
 budget (two invokes per turn) and one persistence path. `needs_source_retrieval`

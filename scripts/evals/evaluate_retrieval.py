@@ -14,6 +14,12 @@ It runs only with ``--live-kb`` AND ``--max-live-calls N`` (1 to 100). Without
 both the script refuses and makes no call. Pytest never uses the live path.
 Run it only with the user's approval.
 
+LIVE MODEL mode (real Bedrock ``converse`` calls to the fast-chat Haiku model)
+is also off by default. It runs only with ``--live-model`` AND
+``--max-live-calls N``. It sends each gate message through the first Fast Chat
+call with ``needs_sources`` on and reports flag rate, wrong-skip, false-retrieve
+and extra model calls by category. Tests use a stub client only.
+
 Metric definitions (also in ``scripts/evals/datasets/README.md``):
 
 * recall@4: questions whose expected material is in the top 4 results, divided
@@ -501,6 +507,13 @@ class GateDecision:
     student: bool
     classifier_retrieve: bool
     second_chance: bool = False
+    # Fields the live model mode copies onto the request it builds. They
+    # mirror what ``_prepare_authoritative_turn`` stamps for the same turn.
+    expected_mode: str | None = None
+    intent: str = ""
+    needs_retrieval: bool = False
+    scope_cleared: bool = False
+    attachment_only: bool = False
 
 
 def _titles_and_names(entries: Sequence[Mapping[str, Any]]) -> tuple[list[str], list[str]]:
@@ -577,6 +590,17 @@ def gate_decision(row: Mapping[str, Any]) -> GateDecision:
         second_chance=bool(
             not (include_course or student) and not cleared and not attachment_only
         ),
+        expected_mode=(
+            "qa"
+            if status
+            else "coaching"
+            if progression or workflow_no_retrieve
+            else policy.expected_mode
+        ),
+        intent=str(policy.intent or ""),
+        needs_retrieval=bool(needs or include_course),
+        scope_cleared=bool(cleared),
+        attachment_only=bool(attachment_only),
     )
 
 
@@ -673,7 +697,9 @@ def check_live_request(live_kb: bool, max_live_calls: int | None, environ: Mappi
             or out of range, or the Knowledge Base is not configured.
     """
     if max_live_calls is not None and not live_kb:
-        raise LiveRunRefused("--max-live-calls only applies together with --live-kb")
+        raise LiveRunRefused(
+            "--max-live-calls only applies together with --live-kb or --live-model"
+        )
     if not live_kb:
         raise LiveRunRefused("live mode was not requested")
     if max_live_calls is None:
@@ -987,6 +1013,584 @@ def run_live(
 
 
 # ---------------------------------------------------------------------------
+# Live model path: the first Fast Chat call with needs_sources (opt-in)
+# ---------------------------------------------------------------------------
+
+# One model call per message, sequential, no retries. The gate set has fewer
+# than 500 messages, so a higher limit could never be used.
+LIVE_MODEL_HARD_CALL_CAP = 500
+# Same read timeout as ``AgentCoreCoachProvider`` (``timeout_seconds=110``).
+LIVE_MODEL_TIMEOUT_SECONDS = 110.0
+# Same output reserve as the fast-chat context planner
+# (``_fast_chat_planner_from_settings``: ``output_reserve_tokens=4_000``).
+LIVE_MODEL_MAX_OUTPUT_TOKENS = 4_000
+# Never invoked: the provider is built only to reuse its payload builder.
+_EVAL_RUNTIME_ARN = "eval:runtime-never-invoked"
+
+# Codes and exception classes that mean "credentials or permission": the run
+# stops after the first one, because every later call would fail the same way.
+AUTH_ACCESS_ERROR_CODES = frozenset(
+    {
+        "AccessDeniedException",
+        "AccessDenied",
+        "UnrecognizedClientException",
+        "InvalidClientTokenId",
+        "ExpiredTokenException",
+        "ExpiredToken",
+        "AuthFailure",
+        "InvalidSignatureException",
+        "SignatureDoesNotMatch",
+        "UnauthorizedOperation",
+        "UnauthorizedException",
+    }
+)
+AUTH_ACCESS_ERROR_CLASSES = frozenset(
+    {
+        "NoCredentialsError",
+        "PartialCredentialsError",
+        "TokenRetrievalError",
+        "CredentialRetrievalError",
+        "NoAuthTokenError",
+    }
+)
+
+LIVE_MODEL_DEFINITION = (
+    "Sends each gate message through the first Fast Chat call as production "
+    "builds it (AgentCoreCoachProvider._invoke_payload: same composed runtime "
+    "rules, history planner and Converse messages; the runtime system prompt "
+    "from agentcore_runtime.structured_coach.specialist_system_prompt; the "
+    "FastChatTurnOutput tool schema; the response checked by "
+    "backend.agentcore_provider._validated_fast_chat) with the SOURCE CHECK "
+    "rule on (request.source_need_check). Composition as in needs_sources_stubs: "
+    "a message counts as retrieved when the gate searched a source, or when it "
+    "is eligible for the second chance and the model's honoured needs_sources "
+    "flag is true. The flag is honoured only on a Q&A turn. Rows whose call "
+    "failed are not scored. Eligible rows are the only rows whose flag changes "
+    "a metric; the flag on other rows is reported as raw flag rate only."
+)
+
+
+class LiveStructuredOutputError(RuntimeError):
+    """The model returned no usable ``FastChatTurnOutput`` tool call."""
+
+
+def check_live_model_request(
+    live_model: bool,
+    live_kb: bool,
+    max_live_calls: int | None,
+    *,
+    provider: str,
+    model_id: str,
+    region: str,
+) -> int:
+    """Validate the live model opt-in and return the approved call limit.
+
+    Makes no network call and imports no AWS library.
+
+    Args:
+        live_model: ``--live-model``.
+        live_kb: ``--live-kb`` (cannot be combined with the model mode).
+        max_live_calls: ``--max-live-calls``.
+        provider: Fast-chat provider from settings (``COACHING_MODEL_PROVIDER``).
+        model_id: Fast-chat model id from settings (``COACHING_MODEL_ID``).
+        region: Model region from settings.
+
+    Raises:
+        LiveRunRefused: When the limit is missing or out of range, the mode is
+            combined with ``--live-kb``, or the model settings are not a Haiku
+            model on the ``bedrock`` provider.
+    """
+    if live_kb:
+        raise LiveRunRefused("--live-model cannot be combined with --live-kb")
+    if not live_model:
+        raise LiveRunRefused("live model mode was not requested")
+    if max_live_calls is None:
+        raise LiveRunRefused(
+            "--live-model requires --max-live-calls N (1 to "
+            f"{LIVE_MODEL_HARD_CALL_CAP}); no call limit was given"
+        )
+    if not 1 <= max_live_calls <= LIVE_MODEL_HARD_CALL_CAP:
+        raise LiveRunRefused(
+            f"--max-live-calls must be between 1 and {LIVE_MODEL_HARD_CALL_CAP}"
+        )
+    if str(provider or "").strip().lower() != "bedrock":
+        raise LiveRunRefused(
+            "COACHING_MODEL_PROVIDER must be 'bedrock' for the fast-chat model "
+            f"(got {provider or 'empty'!r})"
+        )
+    if "haiku" not in str(model_id or "").lower():
+        raise LiveRunRefused(
+            "COACHING_MODEL_ID is not set to a Haiku model "
+            f"(got {model_id or 'empty'!r}); the fast-chat role is Haiku"
+        )
+    if not str(region or "").strip():
+        raise LiveRunRefused("AGENTCORE_MODEL_REGION (or AWS_REGION) is not set")
+    return max_live_calls
+
+
+def live_model_settings() -> tuple[str, str, str]:
+    """Return ``(provider, model_id, region)`` the fast-chat role uses.
+
+    Mirrors ``AgentCoreCoachProvider._role_provider_model("fast_chat")`` and
+    the runtime region rule (``AGENTCORE_MODEL_REGION``, then ``AWS_REGION``).
+    """
+    from backend.settings import settings
+
+    provider = str(settings.coaching_model_provider or "").strip().lower()
+    model_id = str(settings.coaching_model_id or "").strip()
+    if not (provider and model_id):
+        provider = str(settings.agentcore_model_provider or "").strip().lower()
+        model_id = str(settings.agentcore_model_id or "").strip()
+    region = (
+        str(settings.agentcore_model_region or "").strip()
+        or str(settings.aws_region or "").strip()
+    )
+    return provider, model_id, region
+
+
+class CountingConverseClient:
+    """Wrap a ``bedrock-runtime`` client: stop after ``limit`` calls, sum tokens."""
+
+    def __init__(self, client: Any, limit: int) -> None:
+        self._client = client
+        self._limit = limit
+        self.calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def converse(self, **kwargs: Any) -> Any:
+        if self.calls >= self._limit:
+            raise LiveCallLimitExceeded(f"call limit {self._limit} reached")
+        self.calls += 1
+        response = self._client.converse(**kwargs)
+        usage = response.get("usage") if isinstance(response, Mapping) else None
+        if isinstance(usage, Mapping):
+            self.input_tokens += int(usage.get("inputTokens") or 0)
+            self.output_tokens += int(usage.get("outputTokens") or 0)
+        return response
+
+
+def _build_bedrock_runtime_client(region: str, limit: int) -> CountingConverseClient:
+    """Create the real Bedrock Runtime client. Only called after the checks."""
+    import boto3
+    from botocore.config import Config
+
+    client = boto3.client(
+        "bedrock-runtime",
+        region_name=region,
+        config=Config(
+            retries={"total_max_attempts": 1, "mode": "standard"},
+            read_timeout=LIVE_MODEL_TIMEOUT_SECONDS,
+            connect_timeout=10,
+        ),
+    )
+    return CountingConverseClient(client, limit)
+
+
+def _inline_schema_refs(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """Inline ``$ref`` targets and drop ``$defs`` (a tool schema must be flat)."""
+    defs = dict(schema.get("$defs") or {})
+
+    def walk(node: Any) -> Any:
+        if isinstance(node, Mapping):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                return walk(defs[ref.rsplit("/", 1)[-1]])
+            return {key: walk(value) for key, value in node.items() if key != "$defs"}
+        if isinstance(node, list):
+            return [walk(item) for item in node]
+        return node
+
+    return walk(dict(schema))
+
+
+class LiveFastChatBridge:
+    """Run the AgentCore runtime's fast-chat model call straight on Bedrock.
+
+    The runtime (``agentcore_runtime/main.py::fast_chat_invoke``) builds a
+    Strands ``Agent`` with ``tools=[]`` and ``structured_output_model=
+    FastChatTurnOutput``; Strands forwards that model to Bedrock Converse as
+    one forced tool. This class sends the same system prompt, messages and
+    tool through ``bedrock-runtime`` ``converse`` without Strands or an
+    AgentCore hop. Differences from production, all recorded in the docs: no
+    Bedrock guardrail, no prompt-cache point, no structured-output recovery
+    turn (a reply without the tool call is a failure), no SDK retries.
+    """
+
+    def __init__(self, client: Any, model_id: str) -> None:
+        from agentcore_runtime.models import FastChatTurnOutput
+
+        self._client = client
+        self._model_id = model_id
+        self._schema = _inline_schema_refs(FastChatTurnOutput.model_json_schema())
+        self._description = " ".join(
+            (FastChatTurnOutput.__doc__ or "").split("\n\n")[0].split()
+        )
+
+    def request_kwargs(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Build the Converse arguments for one runtime payload."""
+        from agentcore_runtime.structured_coach import (
+            conversation_for_invoke,
+            specialist_system_prompt,
+        )
+
+        prior, prompt = conversation_for_invoke(payload)
+        current = [{"text": prompt}] if isinstance(prompt, str) else list(prompt)
+        return {
+            "modelId": self._model_id,
+            "system": [{"text": specialist_system_prompt(payload)}],
+            "messages": [*prior, {"role": "user", "content": current}],
+            "toolConfig": {
+                "tools": [
+                    {
+                        "toolSpec": {
+                            "name": "FastChatTurnOutput",
+                            "description": self._description,
+                            "inputSchema": {"json": self._schema},
+                        }
+                    }
+                ],
+                # First-cycle forced tool use, as the runtime middleware sets.
+                "toolChoice": {"any": {}},
+            },
+            "inferenceConfig": {"maxTokens": LIVE_MODEL_MAX_OUTPUT_TOKENS},
+        }
+
+    def invoke(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Return the runtime wire payload for one fast-chat turn.
+
+        Raises:
+            LiveStructuredOutputError: When the reply has no valid tool call.
+        """
+        from agentcore_runtime.models import parse_fast_chat_turn_output
+        from agentcore_runtime.structured_coach import structured_wire_payload
+
+        response = self._client.converse(**self.request_kwargs(payload))
+        message = ((response.get("output") or {}).get("message")) or {}
+        tool_input = None
+        for block in message.get("content") or []:
+            tool_use = block.get("toolUse") if isinstance(block, Mapping) else None
+            if isinstance(tool_use, Mapping) and isinstance(tool_use.get("input"), Mapping):
+                tool_input = tool_use["input"]
+                break
+        if tool_input is None:
+            raise LiveStructuredOutputError(
+                f"no tool call in reply (stopReason={response.get('stopReason')!r})"
+            )
+        try:
+            output = parse_fast_chat_turn_output(dict(tool_input))
+        except ValueError as error:
+            raise LiveStructuredOutputError(
+                f"tool input failed validation ({type(error).__name__})"
+            ) from error
+        return structured_wire_payload(output)
+
+
+def build_live_request(row: Mapping[str, Any], decision: GateDecision) -> Any:
+    """Build the ``CoachRequest`` production would hand the provider.
+
+    Mirrors the fields ``_prepare_authoritative_turn`` stamps that change the
+    first call's prompt. Retrieved excerpts are never attached: a row the gate
+    searched for is sent without them (see ``LIVE_MODEL_DEFINITION``).
+    ``source_need_check`` is forced on so every row measures the flag.
+    """
+    from backend.domain import CoachRequest
+
+    selected = list(row["selected_sources"])
+    attachments = list(row["attachments"])
+    attachment_ids = [f"eval-attachment-{i}" for i, _ in enumerate(attachments, 1)]
+    selected_ids = [f"eval-source-{i}" for i, _ in enumerate(selected, 1)]
+    if decision.scope_cleared:
+        source_ids: list[str] = []
+    elif decision.attachment_only:
+        source_ids = list(attachment_ids)
+    else:
+        source_ids = selected_ids + attachment_ids
+    return CoachRequest(
+        thread_id=f"eval-{row['id']}",
+        student_message=str(row["message"]),
+        current_stage=str(row["stage"]),
+        response_detail="short",
+        source_ids=source_ids,
+        attachment_source_ids=attachment_ids,
+        attachment_titles=[str(item.get("title") or "") for item in attachments],
+        allow_model_knowledge=not source_ids and not decision.course,
+        history=[
+            {"role": turn["role"], "content": turn["text"]} for turn in row["history"]
+        ],
+        retrieval_required=bool(decision.needs_retrieval),
+        source_need_check=True,
+        expected_response_mode=decision.expected_mode,
+        mode_policy_intent=decision.intent,
+    )
+
+
+def exception_label(error: BaseException) -> str:
+    """Return ``module.Class`` plus the AWS error code when there is one."""
+    name = f"{type(error).__module__}.{type(error).__qualname__}"
+    code = ""
+    response = getattr(error, "response", None)
+    if isinstance(response, Mapping) and isinstance(response.get("Error"), Mapping):
+        code = str(response["Error"].get("Code") or "")
+    return f"{name} (code {code})" if code else name
+
+
+def is_auth_or_access_error(error: BaseException) -> bool:
+    """Return whether *error* is a credential or permission failure."""
+    response = getattr(error, "response", None)
+    if isinstance(response, Mapping) and isinstance(response.get("Error"), Mapping):
+        if str(response["Error"].get("Code") or "") in AUTH_ACCESS_ERROR_CODES:
+            return True
+    return type(error).__name__ in AUTH_ACCESS_ERROR_CLASSES
+
+
+def _live_block(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Metrics for scored live rows (successful calls)."""
+    composed: list[tuple[str, bool]] = []
+    gate_only: list[tuple[str, bool]] = []
+    composed_clear: list[tuple[str, bool]] = []
+    eligible = [item for item in items if item["eligible"]]
+    flagged = [item for item in eligible if item["honoured"]]
+    for item in items:
+        expected = item["expected_decision"]
+        retrieved = bool(item["gate_retrieve"] or (item["eligible"] and item["honoured"]))
+        composed.append((expected, retrieved))
+        gate_only.append((expected, bool(item["gate_retrieve"])))
+        if item["certainty"] == "clear":
+            composed_clear.append((expected, retrieved))
+    return {
+        "messages_scored": len(items),
+        "eligible_messages": len(eligible),
+        "flag_rate_eligible": rate_record(len(flagged), len(eligible)),
+        "flag_rate_raw_all_rows": rate_record(
+            sum(1 for item in items if item["flag_raw"]), len(items)
+        ),
+        "raw_flags_not_honoured": sum(
+            1 for item in items if item["flag_raw"] and not item["honoured"]
+        ),
+        "wrong_skip_gate_only": wrong_skip_rate(gate_only),
+        "wrong_skip_with_model": wrong_skip_rate(composed),
+        "false_retrieve_gate_only": false_retrieve_rate(gate_only),
+        "false_retrieve_with_model": false_retrieve_rate(composed),
+        "false_retrieve_with_model_clear_rows_only": false_retrieve_rate(composed_clear),
+        "extra_model_calls": len(flagged),
+    }
+
+
+def summarize_live_model(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Turn per-message outcomes into overall and per-category metrics."""
+    scored = [o for o in outcomes if o["status"] == "ok"]
+    by_category: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for item in scored:
+        by_category[item["category"]].append(item)
+    sent_by_category: dict[str, int] = defaultdict(int)
+    failed_by_category: dict[str, int] = defaultdict(int)
+    for outcome in outcomes:
+        sent_by_category[outcome["category"]] += 1
+        if outcome["status"] != "ok":
+            failed_by_category[outcome["category"]] += 1
+    categories: dict[str, Any] = {}
+    for category in sorted(sent_by_category):
+        block = _live_block(by_category.get(category, []))
+        block["messages_sent"] = sent_by_category[category]
+        block["calls_failed"] = failed_by_category.get(category, 0)
+        categories[category] = block
+    return {
+        "overall": _live_block(scored),
+        "by_category": categories,
+        # Skip-labelled, eligible messages the model flagged: each one is a
+        # false retrieve and an extra model call.
+        "false_flags": [
+            {"id": o["id"], "category": o["category"], "certainty": o["certainty"]}
+            for o in scored
+            if o["eligible"] and o["honoured"] and o["expected_decision"] == "skip"
+        ],
+        # Retrieve-labelled, eligible messages the model did not flag: the
+        # wrong skips that remain.
+        "missed_flags": [
+            {"id": o["id"], "category": o["category"], "certainty": o["certainty"]}
+            for o in scored
+            if o["eligible"] and not o["honoured"] and o["expected_decision"] == "retrieve"
+        ],
+        # Eligible, flagged but returned as coaching or out of scope: the
+        # application ignores the flag.
+        "flag_ignored": [
+            {"id": o["id"], "mode": o["mode"], "out_of_scope": o["out_of_scope"]}
+            for o in scored
+            if o["flag_raw"] and not o["honoured"]
+        ],
+    }
+
+
+def run_live_model(
+    messages: Sequence[Mapping[str, Any]],
+    limit: int,
+    *,
+    client: Any,
+    model_id: str,
+    region: str,
+) -> dict[str, Any]:
+    """Send up to ``limit`` gate messages through the first fast-chat call.
+
+    Args:
+        messages: Validated gate rows.
+        limit: Approved call limit. Below the row count, an evenly spaced,
+            deterministic subset is sent.
+        client: A ``CountingConverseClient`` (tests pass one over a stub).
+        model_id: Fast-chat model id from settings.
+        region: Model region from settings.
+
+    Stops after the first auth or access error. Never retries a call.
+    """
+    from backend.agentcore_provider import (
+        _FAST_CHAT_CONTRACT,
+        _FAST_CHAT_PHASE,
+        AgentCoreCoachProvider,
+        _validated_fast_chat,
+    )
+    from agentcore_runtime.models import adapt_fast_chat_turn_payload
+    from backend.context_planner import CONTEXT_POLICY_FAST_CHAT
+
+    class _NoRuntime:
+        def invoke_agent_runtime(self, **_kwargs: Any) -> Any:
+            raise AssertionError("AgentCore Runtime must not be invoked by the eval")
+
+    provider = AgentCoreCoachProvider(_EVAL_RUNTIME_ARN, client=_NoRuntime())
+    bridge = LiveFastChatBridge(client, model_id)
+    chosen = [messages[i] for i in evenly_spaced_indices(len(messages), limit)]
+    outcomes: list[dict[str, Any]] = []
+    first_failure: dict[str, Any] | None = None
+    stopped_on: dict[str, Any] | None = None
+    for row in chosen:
+        decision = gate_decision(row)
+        base = {
+            "id": row["id"],
+            "category": row["category"],
+            "certainty": row["certainty"],
+            "expected_decision": row["expected_decision"],
+            "eligible": bool(decision.second_chance),
+            "gate_retrieve": bool(decision.retrieve),
+        }
+        try:
+            request = build_live_request(row, decision)
+            payload, _plan = provider._invoke_payload(
+                request,
+                _FAST_CHAT_PHASE,
+                context_policy=CONTEXT_POLICY_FAST_CHAT,
+                phase=_FAST_CHAT_PHASE,
+                output_contract=_FAST_CHAT_CONTRACT,
+            )
+            wire = bridge.invoke(payload)
+            raw = adapt_fast_chat_turn_payload(wire)
+            result = _validated_fast_chat(wire, request)
+        except LiveCallLimitExceeded:
+            break
+        except Exception as error:  # noqa: BLE001 - recorded, never swallowed
+            failure = {"id": row["id"], "error": exception_label(error)}
+            if first_failure is None:
+                first_failure = failure
+            outcomes.append({**base, "status": "failed", "error": failure["error"]})
+            if is_auth_or_access_error(error):
+                stopped_on = failure
+                break
+            continue
+        outcomes.append(
+            {
+                **base,
+                "status": "ok",
+                "flag_raw": bool(raw.needs_sources),
+                "honoured": bool(result.needs_sources),
+                "mode": str(result.specialist),
+                "out_of_scope": bool(raw.out_of_scope),
+            }
+        )
+    succeeded = sum(1 for o in outcomes if o["status"] == "ok")
+    summary = summarize_live_model(outcomes)
+    return {
+        "mode": "live_model",
+        "definition": LIVE_MODEL_DEFINITION,
+        "model": {"provider": "bedrock", "model_id": model_id, "region": region},
+        "calls": {
+            "limit": limit,
+            "made": client.calls,
+            "succeeded": succeeded,
+            "failed": len(outcomes) - succeeded,
+            "messages_in_set": len(messages),
+            "messages_attempted": len(outcomes),
+        },
+        "tokens": {
+            "input": client.input_tokens,
+            "output": client.output_tokens,
+        },
+        "first_failure": first_failure,
+        "stopped_early_on_auth_or_access_error": stopped_on,
+        **summary,
+        "rows": outcomes,
+    }
+
+
+def live_model_exit_code(result: Mapping[str, Any]) -> int:
+    """0 = ran; 1 = every call failed; 3 = stopped early on an auth/access error."""
+    if int(result["calls"]["succeeded"]) == 0:
+        return 1
+    if result.get("stopped_early_on_auth_or_access_error"):
+        return 3
+    return 0
+
+
+def format_live_model_report(result: Mapping[str, Any]) -> str:
+    """Render the live model result as plain text."""
+    calls = result["calls"]
+    model = result["model"]
+    overall = result["overall"]
+    lines = [
+        "mode: live_model (needs_sources on the first fast-chat call)",
+        f"model: {model['model_id']} in {model['region']} ({model['provider']})",
+        f"calls: made {calls['made']} of limit {calls['limit']}; succeeded "
+        f"{calls['succeeded']}; failed {calls['failed']}; messages attempted "
+        f"{calls['messages_attempted']} of {calls['messages_in_set']}",
+        f"tokens: input {result['tokens']['input']}, output {result['tokens']['output']}",
+    ]
+    if result["first_failure"]:
+        failure = result["first_failure"]
+        lines.append(f"first failure: {failure['error']} on {failure['id']}")
+    if result["stopped_early_on_auth_or_access_error"]:
+        lines.append("stopped early: auth or access error (no further calls made)")
+    lines += [
+        "",
+        f"messages scored: {overall['messages_scored']}; eligible for the second chance: "
+        f"{overall['eligible_messages']}",
+        f"flag rate (eligible, honoured): {format_rate(overall['flag_rate_eligible'])}",
+        f"flag rate (raw, all rows sent): {format_rate(overall['flag_rate_raw_all_rows'])}; "
+        f"raw flags not honoured: {overall['raw_flags_not_honoured']}",
+        f"wrong-skip: gate only {format_rate(overall['wrong_skip_gate_only'])}; "
+        f"with model {format_rate(overall['wrong_skip_with_model'])}",
+        f"false-retrieve: gate only {format_rate(overall['false_retrieve_gate_only'])}; "
+        f"with model {format_rate(overall['false_retrieve_with_model'])}; "
+        f"clear rows only {format_rate(overall['false_retrieve_with_model_clear_rows_only'])}",
+        f"extra model calls (second calls): {overall['extra_model_calls']}",
+        "",
+        "by category (sent / failed; flag rate on eligible; wrong-skip gate->model; "
+        "false-retrieve gate->model; extra calls):",
+    ]
+    for category, block in result["by_category"].items():
+        lines.append(
+            f"  {category}: {block['messages_sent']} / {block['calls_failed']}; "
+            f"flag {format_rate(block['flag_rate_eligible'])}; "
+            f"wrong-skip {format_rate(block['wrong_skip_gate_only'])} -> "
+            f"{format_rate(block['wrong_skip_with_model'])}; "
+            f"false-retrieve {format_rate(block['false_retrieve_gate_only'])} -> "
+            f"{format_rate(block['false_retrieve_with_model'])}; "
+            f"extra {block['extra_model_calls']}"
+        )
+    lines.append(
+        f"skip-labelled eligible messages flagged (false flags): {len(result['false_flags'])}; "
+        f"retrieve-labelled eligible messages not flagged: {len(result['missed_flags'])}"
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1072,16 +1676,68 @@ def build_parser() -> argparse.ArgumentParser:
         help="OPT-IN. Call the real Bedrock Knowledge Base (costs money). Needs --max-live-calls.",
     )
     parser.add_argument(
+        "--live-model",
+        action="store_true",
+        help="OPT-IN. Send each gate message through the first fast-chat call on "
+        "the real Bedrock model with needs_sources on (costs money). Needs "
+        "--max-live-calls. Cannot be combined with --live-kb.",
+    )
+    parser.add_argument(
         "--max-live-calls",
         type=int,
         default=None,
-        help=f"Mandatory with --live-kb: hard limit on Retrieve calls (1 to {HARD_LIVE_CALL_CAP}).",
+        help="Mandatory with --live-kb or --live-model: hard limit on calls "
+        f"(--live-kb: 1 to {HARD_LIVE_CALL_CAP} Retrieve calls; --live-model: "
+        f"1 to {LIVE_MODEL_HARD_CALL_CAP} model calls).",
     )
     return parser
 
 
+def _main_live_model(args: argparse.Namespace) -> int:
+    """Run ``--live-model``: refuse without a valid call limit, else call Bedrock."""
+    try:
+        provider, model_id, region = live_model_settings()
+        limit = check_live_model_request(
+            args.live_model,
+            args.live_kb,
+            args.max_live_calls,
+            provider=provider,
+            model_id=model_id,
+            region=region,
+        )
+    except LiveRunRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    materials = load_materials(args.materials)
+    questions = load_questions(args.questions, materials)
+    messages = load_messages(args.messages, materials, [q["id"] for q in questions])
+    client = _build_bedrock_runtime_client(region, limit)
+    result = run_live_model(
+        messages, limit, client=client, model_id=model_id, region=region
+    )
+    print(format_live_model_report(result))
+    if result["first_failure"]:
+        print(
+            f"first failure class: {result['first_failure']['error']}",
+            file=sys.stderr,
+        )
+    if args.json_output:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    code = live_model_exit_code(result)
+    if code == 1:
+        print("every call failed", file=sys.stderr)
+    elif code == 3:
+        print("stopped early on an auth or access error", file=sys.stderr)
+    return code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.live_model:
+        return _main_live_model(args)
     live_requested = args.live_kb or args.max_live_calls is not None
     limit = 0
     if live_requested:
