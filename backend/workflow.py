@@ -186,6 +186,10 @@ def _promote_free_mode_advance(
         return assessment
     if assessment.recommendation is None:
         return assessment
+    if assessment.recommendation_defaulted:
+        # The model never judged readiness: it omitted the recommendation and
+        # ``stay`` was recorded. That omission must not open a Next proposal.
+        return assessment
     if not str(request.student_message or "").strip():
         return assessment
     if assessment.recommendation is StageDecision.ADVANCE:

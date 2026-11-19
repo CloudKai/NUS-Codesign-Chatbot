@@ -1103,7 +1103,11 @@ def _validated_fast_chat(
         )
     if output.recommendation not in {StageDecision.STAY.value, StageDecision.ADVANCE.value}:
         raise _malformed_error()
-    if output.recommendation_defaulted or payload.get("recommendation_defaulted") is True:
+    defaulted = bool(
+        output.recommendation_defaulted
+        or payload.get("recommendation_defaulted") is True
+    )
+    if defaulted:
         # The model sent no recommendation on a coaching reply and ``stay``
         # was recorded. Rate of this field = rate of defaulted replies.
         record_field("fast_chat_recommendation_defaulted", True)
@@ -1123,6 +1127,8 @@ def _validated_fast_chat(
     )
     if assessment.recommendation is StageDecision.ADVANCE:
         assessment = assessment.model_copy(update={"readiness_candidate": True})
+    elif defaulted:
+        assessment = assessment.with_recommendation_defaulted()
     return ProviderAssessmentResult(
         response_text=output.response_text,
         assessment=assessment,

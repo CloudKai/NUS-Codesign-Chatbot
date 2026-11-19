@@ -27,6 +27,7 @@ from backend.application import CoachApplicationService
 from backend.domain import CoachRequest, StageDecision
 from backend.learning_service import LearningProgressService
 from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
+from backend.student_journey import THINKING_STAGES
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from fake_agentcore_runtime import FakeAgentCoreRuntime
@@ -313,31 +314,81 @@ def test_non_coaching_reply_is_unchanged(
     assert "fast_chat_recommendation_defaulted" not in _perf_event(caplog)
 
 
-@pytest.mark.parametrize("stage", ["concept_generation", "deep_analysis"])
-@pytest.mark.parametrize("detail", ["short", "long"])
-@pytest.mark.parametrize("message", ["hello", "I sketched two concepts for the timetable display."])
-def test_defaulted_stay_matches_explicit_stay_in_workflow_outside_the_hmw_stage(
-    tmp_path: Path, stage: str, detail: str, message: str
-) -> None:
-    """Free mode promotes ``stay`` to ``advance`` outside Problem Identification.
-
-    That promotion (``backend/workflow.py::_promote_free_mode_advance``) acts on
-    the recommendation value only, so a defaulted ``stay`` must get the same
-    outcome as a model-sent ``stay``. The pending proposal it can open still
-    needs explicit student confirmation; nothing here changes a stage.
-    """
-    store = StudentStore(tmp_path / "wf.sqlite3")
+def _workflow_turn(
+    tmp_path: Path,
+    payload: dict[str, Any],
+    *,
+    stage: str,
+    detail: str,
+    message: str,
+    sequential: bool = False,
+) -> Any:
+    """Run one turn through ``CoachWorkflow`` (graph, or the sequential path)."""
+    store = StudentStore(tmp_path / f"wf-{sequential}.sqlite3")
     transitions = SQLitePhaseTransitionRepository(store)
+    workflow = CoachWorkflow(_provider(FakeAgentCoreRuntime(payload=payload)), transitions)
+    request = CoachRequest(
+        thread_id="wf-thread",
+        student_message=message,
+        current_stage=stage,
+        response_detail=detail,
+    )
+    return workflow._run_sequential(request) if sequential else workflow.run(request)
+
+
+@pytest.mark.parametrize("sequential", [False, True])
+@pytest.mark.parametrize("stage", ["concept_generation", "deep_analysis"])
+@pytest.mark.parametrize("message", ["hello", "I sketched two concepts for the timetable display."])
+def test_defaulted_stay_is_not_promoted_to_a_proposal_in_free_mode(
+    tmp_path: Path, stage: str, message: str, sequential: bool
+) -> None:
+    """Free mode (``response_detail=long``) promotes a model-sent ``stay``.
+
+    A defaulted ``stay`` means the model never judged readiness, so the Free
+    promotion (``backend/workflow.py::_promote_free_mode_advance``) must leave
+    it alone: still ``stay``, no readiness candidate, no pending proposal.
+    """
+    turn = _workflow_turn(
+        tmp_path,
+        _coaching(recommendation=_OMIT),
+        stage=stage,
+        detail="long",
+        message=message,
+        sequential=sequential,
+    )
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.assessment.readiness_candidate is False
+    assert turn.pending_transition is None
+
+
+@pytest.mark.parametrize("sequential", [False, True])
+@pytest.mark.parametrize("stage", ["concept_generation", "deep_analysis"])
+def test_explicit_stay_is_still_promoted_in_free_mode(
+    tmp_path: Path, stage: str, sequential: bool
+) -> None:
+    """Existing Free-mode behaviour for a model-sent ``stay`` is unchanged."""
+    turn = _workflow_turn(
+        tmp_path,
+        _coaching(),
+        stage=stage,
+        detail="long",
+        message="I sketched two concepts for the timetable display.",
+        sequential=sequential,
+    )
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.assessment.readiness_candidate is True
+    assert turn.pending_transition is not None
+
+
+@pytest.mark.parametrize("stage", ["concept_generation", "deep_analysis"])
+def test_defaulted_stay_matches_explicit_stay_in_short_mode(
+    tmp_path: Path, stage: str
+) -> None:
+    """Outside Free mode a defaulted ``stay`` and a model-sent ``stay`` match."""
 
     def _run(payload: dict[str, Any]) -> tuple[Any, ...]:
-        workflow = CoachWorkflow(_provider(FakeAgentCoreRuntime(payload=payload)), transitions)
-        turn = workflow.run(
-            CoachRequest(
-                thread_id="wf-thread",
-                student_message=message,
-                current_stage=stage,
-                response_detail=detail,
-            )
+        turn = _workflow_turn(
+            tmp_path, payload, stage=stage, detail="short", message="hello"
         )
         return (
             turn.assessment.recommendation,
@@ -346,3 +397,47 @@ def test_defaulted_stay_matches_explicit_stay_in_workflow_outside_the_hmw_stage(
         )
 
     assert _run(_coaching(recommendation=_OMIT)) == _run(_coaching())
+
+
+@pytest.mark.parametrize("stage", ["concept_generation", "deep_analysis"])
+@pytest.mark.parametrize("auto_advance", [False, True])
+def test_defaulted_stay_in_free_mode_changes_no_persisted_state(
+    tmp_path: Path, stage: str, auto_advance: bool
+) -> None:
+    """Through the service in Free mode: no pending row, stage unchanged."""
+    store = StudentStore(tmp_path / f"free-{stage}-{auto_advance}.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    stage_ids = [item.id for item in THINKING_STAGES]
+    store.update_thread(
+        thread_id,
+        metadata={
+            "thinking_stage": stage,
+            "learning_journey": {
+                "current_stage": stage,
+                "completed_stages": stage_ids[: stage_ids.index(stage)],
+                "stage_notes": {},
+                "response_detail": "long",
+            },
+            "response_detail": "long",
+        },
+    )
+    turn = _service(
+        store,
+        FakeAgentCoreRuntime(payload=_coaching(recommendation=_OMIT)),
+        auto_advance=auto_advance,
+    ).submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="hello",
+            current_stage=stage,
+            response_detail="long",
+            idempotency_key="free-k",
+        )
+    )
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.pending_transition is None
+    assert turn.auto_advanced_to is None
+    assert _stage(store, thread_id) == stage
+    persisted = turn.assessment.persisted_mapping()
+    assert "recommendation_defaulted" not in persisted
+    assert "_recommendation_defaulted" not in persisted

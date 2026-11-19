@@ -9,16 +9,20 @@
   requires recommendation stay or advance". The default is never `advance`. An
   unknown token still fails, an explicit `advance` and every Q&A reply are
   unchanged, and the model-facing JSON Schema still requires the field.
-- **Why safe.** Every consumer reads the recommendation value only, so a defaulted
-  `stay` follows the same path as a model-sent `stay`: no pending transition is
-  created from it, `auto_advance_stages` acts only on `advance`, and stage
-  changes still need student confirmation. Tests compare the two cases end to
-  end (`tests/domain/test_fast_chat_recommendation_default.py`). One existing
-  behavior to know: in Free mode (`response_detail=long`) outside Problem
-  Identification the workflow promotes any coaching `stay` to a pending
-  `advance` proposal that the student must confirm. That applies to a
-  model-sent `stay` today and now also to the greeting replies that used to
-  fail.
+- **Why safe.** A defaulted `stay` follows the same path as a model-sent `stay`
+  everywhere except one place, where it is deliberately treated differently. No
+  pending transition is created from it, `auto_advance_stages` acts only on
+  `advance`, and stage changes still need student confirmation. Free mode
+  (`response_detail=long`, outside Problem Identification) promotes a
+  model-sent coaching `stay` to a pending `advance` proposal in
+  `backend/workflow.py::_promote_free_mode_advance`. That promotion skips a
+  defaulted `stay`: the provider marks the assessment with an in-memory,
+  non-persisted flag (`EducationalAssessment.recommendation_defaulted`, a
+  pydantic private attribute that `model_copy` keeps), because the model never
+  judged readiness. Tests: `tests/domain/test_fast_chat_recommendation_default.py`
+  (defaulted `stay` in Free mode stays `stay` with no pending proposal and no
+  stage change, graph and sequential paths, auto-advance on and off; explicit
+  `stay` in Free mode is still promoted).
 - **Observability.** Perf field `fast_chat_recommendation_defaulted` (set only
   when defaulted); live eval row field and summary `recommendation_defaulted`.
 - **Deploy note.** The default sits in `agentcore_runtime/models.py`, which both

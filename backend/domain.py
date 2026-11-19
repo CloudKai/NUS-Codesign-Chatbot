@@ -15,6 +15,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationError,
     field_validator,
     model_validator,
@@ -250,6 +251,21 @@ class EducationalAssessment(BaseModel):
     hmw_scaffold_guarded: bool = False
     review_stage_contract: str | None = Field(default=None, max_length=16)
     review_stage_feedback: list[dict[str, Any]] = Field(default_factory=list)
+    # In-memory only (never dumped or persisted): the model sent no
+    # recommendation and ``stay`` was recorded in its place. Free mode must not
+    # turn such a reply into a Next proposal. ``model_copy`` keeps it.
+    _recommendation_defaulted: bool = PrivateAttr(default=False)
+
+    @property
+    def recommendation_defaulted(self) -> bool:
+        """Return whether ``stay`` was recorded because the model omitted it."""
+        return self._recommendation_defaulted
+
+    def with_recommendation_defaulted(self) -> "EducationalAssessment":
+        """Return a copy marked as carrying a defaulted ``stay`` recommendation."""
+        marked = self.model_copy()
+        marked._recommendation_defaulted = True
+        return marked
 
     @model_validator(mode="before")
     @classmethod
