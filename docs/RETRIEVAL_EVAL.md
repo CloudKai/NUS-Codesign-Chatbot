@@ -803,3 +803,190 @@ exactly "the 63 misses": the 109 `retrieve` rows hold 73 of the 76 offline
 gate wrong skips (the other 3 are in `named_material`,
 `upload_and_course` and `course_with_unrelated_upload`) and 36 rows the gate
 already searches.
+
+
+## Recorded results (Phase 4 item 0)
+
+This section records outcomes that were already measured. Nothing here was
+re-run. Marks: **(file)** is a figure stored in the named JSON file;
+**(computed)** was computed in Phase 4 item 0 from counts or rows in those
+files (Wilson 95% interval, z = 1.96, or a row-level count) and is not stored
+in any file; **(docs)** appears only in the earlier status text and no
+committed file holds it. The JSON files live in `.agents/tasks/` (git-ignored
+globally and committed with `git add -f`). Every interval below is
+**(computed)**; none of the files contains an interval.
+
+### Phase 3c live gate results (Haiku 4.5, first Fast Chat call)
+
+Both runs used the same 169 rows (109 labelled `retrieve`, 60 labelled
+`skip`), one call per row, the SOURCE CHECK rule on, the five categories
+`course_content`, `course_logistics`, `informal_or_multilingual`,
+`upload_question` and `follow_up` for `retrieve`, and `--skip-sample 60`. Both
+ran at git SHA `61ff634863170f3d7c698e92e3d62cb7c90dbcd0` with a clean tree
+(`run.git_dirty: false`), model
+`global.anthropic.claude-haiku-4-5-20251001-v1:0` in `us-west-2`.
+
+| Run | File | UTC timestamp (file) | Calls made / ok / failed (file) | Tokens in / out (file) |
+|---|---|---|---|---|
+| Baseline wording | `phase3c-work/live-item3-baseline.json` | 2026-11-19T14:44:19Z | 169 / 166 / 3 | 1,198,802 / 52,750 |
+| Source-check titles (10 titles, 793 characters) | `phase3c-work/live-item3-titles.json` | 2026-11-19T14:36:07Z | 169 / 167 / 2 | 1,237,027 / 50,870 |
+
+All 5 failed calls are `skip` rows in `greeting_thanks_chitchat`, kind
+`tool_input_invalid`, with the error "coaching mode requires recommendation stay
+or advance" (file). Baseline failures: gm148, gm150, gm164. Titles failures:
+gm153, gm164 (rows in each file). No `retrieve` row failed in either run.
+
+| Metric | Gate only | Baseline wording | Titles wording |
+|---|---|---|---|
+| Wrong skip, over the 109 `retrieve` rows (file) | 73/109 = 67.0% [57.7, 75.1] | 62/109 = 56.9% [47.5, 65.8] | 51/109 = 46.8% [37.7, 56.1] |
+| False retrieve, scored rows only (file) | 2/60 gate-only reading | 2/57 = 3.5% [1.0, 11.9] | 2/58 = 3.4% [1.0, 11.7] |
+| False retrieve, failed calls in the denominator, `failed_as_gate_only` (file) | 2/60 = 3.3% [0.9, 11.4] | 2/60 | 2/60 |
+| False retrieve, failed calls in the denominator, `failed_as_error` (file) | not applicable | 5/60 = 8.3% [3.6, 18.1] | 4/60 = 6.7% [2.6, 15.9] |
+
+Denominator rules (from `definition` in the files and "Failed calls: detail and
+denominators" above). The headline figures 62/109, 51/109, 2/57 and 2/58
+leave failed calls out of `overall`. `failed_as_gate_only` keeps every failed
+row in the denominator and lets the gate decision stand. `failed_as_error`
+counts a failed `retrieve` row as a wrong skip and a failed `skip` row as a
+false retrieve. Because all failed rows are `skip` rows, the wrong-skip
+denominator is 109 in every reading, and only the false-retrieve denominator
+moves (57 or 58 scored, 60 with failures). The Phase 3c target of "failed calls
+counted in the denominator" is met by the `failed_as_error` row: 4/60 and 5/60.
+Neither run reaches the 25% wrong-skip target.
+
+By category, wrong skip with the model, baseline then titles (file):
+`course_content` 35/61 then 25/61, `course_logistics` 4/11 then 6/11,
+`informal_or_multilingual` 7/8 then 5/8, `follow_up` 5/9 then 4/9,
+`upload_question` 11/20 then 11/20 (no change; 0/20 flagged in both).
+The `course_logistics` rows got worse with titles (counts are small:
+Wilson 95% for 4/11 is 15.2 to 64.6 and for 6/11 is 28.0 to 78.7, computed).
+
+Reading the comparison. The two intervals for 62/109 and 51/109 overlap, and
+the runs are single, unseeded model calls. A row-level pairing of the two files
+(computed): 13 `retrieve` rows are missed only with the baseline wording and 2
+only with the titles wording. The flag raised no false flags in either run
+(`false_flags` is empty in both files).
+
+### Greeting on/off run (Phase 3c item 1)
+
+File `phase3c-work/live-item1-greetings-on-off.json`, mode
+`live_model_compare`, git SHA `61ff634863170f3d7c698e92e3d62cb7c90dbcd0`, UTC
+timestamp 2026-11-19T14:28:16Z, same Haiku model. Selection: the 33
+`greeting_thanks_chitchat` rows plus gm279 (34 messages, 68 calls). Tokens in
+and out: 474,584 and 16,653.
+
+| Quantity (file) | Value |
+|---|---|
+| Calls made / ok / failed | 68 / 51 / 17 |
+| Failed calls with SOURCE CHECK on | 9 of 34 |
+| Failed calls with SOURCE CHECK off | 8 of 34 |
+| Failed in both arms (same message) | 4: gm148, gm150, gm151, gm173 |
+| Failed only with the rule off | 4: gm147, gm149, gm156, gm170 |
+| Failed only with the rule on | 5: gm152, gm153, gm154, gm158, gm164 |
+| Distinct messages with a failure in either arm (computed from `pairs`) | 13 of 34 |
+| Failure kind and message | All 17: `tool_input_invalid`, "coaching mode requires recommendation stay or advance" |
+
+The 17 failures are 17 failed calls across the two arms (9 on plus 8 off), on
+13 distinct messages. They are not 17 messages. The failure rate with the rule
+on (9/34 = 26.5% [14.6, 43.1], computed) and off (8/34 = 23.5% [12.4, 40.0],
+computed) overlap, so the SOURCE CHECK rule is not shown to cause the failure.
+With failed calls counted as errors, the false-retrieve rate on these rows is
+9/34 with the rule on and 8/34 with it off (file, `failed_as_error`); with the
+gate result standing it is 0/34 in both arms. All 34 rows are `skip` rows, so
+there is no wrong-skip figure.
+
+### Laya results
+
+All Laya figures come from the Phase 3d result files in
+`.agents/tasks/phase3d-work/` and the Laya sections of
+`docs/IMPLEMENTATION_STATUS.md`. The files store the counts and the rate
+rounded to four decimals; the intervals are computed. The Laya cutoffs were
+calibrated offline on separate rows (see "Fit and evaluate Laya Learn"); the
+holdout and Phase 3c rows were examined more than once, so the figures are
+development-set evidence, not a clean test.
+
+Phase 3c rows (n = 169: 109 `retrieve`, 60 `skip`), threshold 0.8, serial
+unless noted:
+
+| Setup | File | Wrong skip (file counts) | False retrieve (file counts) | p95 inference (file) |
+|---|---|---|---|---|
+| Existing gate | `multilingual.json` `baseline` (same in the other three files) | 73/109 = 67.0% [57.7, 75.1] | 2/60 = 3.3% [0.9, 11.4] | not applicable |
+| Laya typed-decisions | `typed-decisions.json` | 73/109 = 67.0% [57.7, 75.1] | 2/60 | 450.31 ms |
+| Laya multilingual | `multilingual.json` | 62/109 = 56.9% [47.5, 65.8] | 2/60 | 211.05 ms |
+| Laya multilingual, concurrency 8 | `multilingual-concurrency8.json` | 73/109 = 67.0% [57.7, 75.1] | 2/60 | 349.55 ms |
+
+Row-level counts for the multilingual run (computed from `rows`): 11 rows the
+gate skipped were promoted to retrieval, all labelled `retrieve`; none was a
+`skip` row (the file also records `promoted_outside_course_scope: 0`). In the
+concurrency 8 run the single inference slot ran 1 inference and abstained on 93
+busy requests (file), 94 eligible in total, so Laya changed nothing there. The
+status text also says a retrospective threshold sweep "still missed at least
+42/109"; no committed file contains that sweep **(docs)**.
+
+Held-out synthetic rows (n = 84: 51 `retrieve`, 33 `skip`; 150 train, 61
+calibration; 76 trained examples), source `course-intent-by-turn.json` unless
+stated:
+
+| Setup | Wrong skip | False retrieve |
+|---|---|---|
+| Existing gate (file `baseline`) | 24/51 = 47.1% [34.1, 60.5] | 2/33 = 6.1% [1.7, 19.6] |
+| Frozen Vega (file `vega`) | 24/51 | 2/33 |
+| Laya Learn, one cutoff 0.8564 (file `learn`; also `report.json`) | 18/51 = 35.3% [23.6, 49.0] | 2/33 |
+| Laya Learn, first-turn cutoff 0.6456 then 0.8564 (file `learn_by_turn`) | 15/51 = 29.4% [18.7, 43.0] | 2/33 |
+| Laya Learn, 121 shorter-turn examples (`course-intent-compact-v2.json` `learn`) | 22/51 = 43.1% [30.5, 56.7] | 2/33 |
+
+p95 inference: 932.41 ms for the Learn run in `course-intent-by-turn.json`
+and 1,089.94 ms in `report.json` (both file). All 41 eligible holdout turns used
+the fitted head (file `head_predictions: 41`).
+
+Additional rows, source `course-intent-by-turn-extra.json` and
+`course-intent-followups-v2.json` (file counts):
+
+| Set | Single cutoff | Per-turn cutoffs |
+|---|---|---|
+| 19 course questions with IDs absent from the gate corpus (all `retrieve`) | 2/19 = 10.5% [2.9, 31.4] | 1/19 = 5.3% [0.9, 24.6] |
+| 12 follow-ups, wrong skip over 9 `retrieve` | 1/9 = 11.1% [2.0, 43.5] | 1/9 |
+| 12 follow-ups, false retrieve over 3 `skip` | 0/3 = 0.0% [0.0, 56.1] | 0/3 |
+
+`course-intent-followups-v2.json` holds a `previous` and a `revised` run on the
+same follow-ups: 1/9 and 4/9 missed (44.4% [18.9, 73.3] for 4/9, computed).
+With 9 and 3 rows the intervals are too wide to rank these setups.
+
+### Product rule: course concept questions require a course citation
+
+**Product rule (not implemented as stated).** A question about a course
+concept, framework or method requires a citation to a course excerpt. If no
+supporting excerpt is found, the coach says that it could not verify the course
+definition. It may then add a general explanation, clearly labelled as general
+and not from the course materials.
+
+This is a requirement for future work. The code check on `3060a17` found these
+parts and gaps:
+
+- Partly present: on a turn that searched the course catalogue and got no
+  excerpt, `backend/prompts/composer.py` (the `gap_note` branch, near line 364)
+  tells the model to say it "could not retrieve a validated excerpt from the
+  selected course material" and not to invent a summary. Tests pin this text
+  (`tests/domain/test_prompt_architecture.py`, `test_qa_grounding.py`).
+- Different from the rule: that text says "could not retrieve a validated
+  excerpt", not "could not verify the course definition", and it does not allow
+  a general explanation. `allow_model_knowledge` is false for course-catalogue
+  turns (`backend/coaching/execution.py`, near line 3392), and
+  `agentcore_runtime/prompts/qa.md` rule 5 allows broader knowledge only when
+  the runtime rules permit it.
+- Not present: nothing requires a citation when the gate skips retrieval. A
+  course concept question the gate skips (the wrong skips above) reaches the
+  model with no course excerpt and no rule that forces a "could not verify"
+  statement. On turns with no selected source and no course catalogue,
+  `allow_model_knowledge` is true and the composer says only "Broader knowledge
+  is allowed when sources do not answer the question", with no label
+  requirement. A label instruction exists in `backend/chat_service.py` ("clearly
+  distinguish it from source-supported claims"); this check did not trace
+  whether that module serves the current coach path.
+- Not present: no validator rejects an answer to a course concept question that
+  has no citation. A text search of `backend/`, `agentcore_runtime/`, `ui/` and
+  `frontend/src/` for "could not verify" and "general explanation" finds no
+  match in the coach prompts or reply handling.
+
+Related open decision (not implemented): labelling answers on course Q&A turns
+where no search ran as general, not from course materials.

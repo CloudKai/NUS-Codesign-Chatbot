@@ -2,6 +2,47 @@
 
 ## Current status
 
+### Recorded retrieval outcomes (Phase 4 item 0)
+
+This entry records results that were already measured; no behavior changed and
+nothing was re-run. Full tables, sources and denominators are in
+[Recorded results](RETRIEVAL_EVAL.md#recorded-results-phase-4-item-0).
+
+- **Phase 3c live gate (Haiku 4.5, 169 rows: 109 `retrieve`, 60 `skip`, git
+  SHA `61ff634`).** Wrong skip fell from 62/109 (56.9%, Wilson 95% 47.5 to
+  65.8) with the baseline wording to 51/109 (46.8%, 37.7 to 56.1) with the
+  source-check titles. The gate alone missed 73/109. False retrieve over scored
+  rows was 2/57 and 2/58. With the 3 and 2 failed calls counted as errors it
+  was 5/60 and 4/60; counted as gate-only it was 2/60. All 5 failed calls are
+  greeting rows. The 25% wrong-skip target was not met. The intervals overlap.
+  Source: `.agents/tasks/phase3c-work/live-item3-{baseline,titles}.json` (the
+  counts and rates are in the files; the intervals are computed).
+- **Greeting on/off run (34 messages, 68 calls).** 17 calls failed: 9 with the
+  SOURCE CHECK rule on and 8 with it off, on 13 distinct messages, all with
+  "coaching mode requires recommendation stay or advance". The rule is not
+  shown to cause the failure. Source:
+  `.agents/tasks/phase3c-work/live-item1-greetings-on-off.json`. The Phase 4
+  item 1 fix is a separate change.
+- **Laya.** Counts, rates and p95 times are from the files in
+  `.agents/tasks/phase3d-work/`, each with its sample size and a computed
+  Wilson interval in the linked tables. On the 169 Phase 3c rows: gate 73/109
+  (67.0%, 57.7 to 75.1), typed-decisions 73/109, multilingual 62/109 (56.9%,
+  47.5 to 65.8), false retrieve 2/60 in all. On the 84 held-out rows: gate
+  24/51 (47.1%, 34.1 to 60.5), Laya Learn 18/51 (35.3%, 23.6 to 49.0) and with
+  a first-turn cutoff 15/51 (29.4%, 18.7 to 43.0), false retrieve 2/33. The
+  "at least 42/109" threshold-sweep figure in the Local Laya entry below is in
+  no committed file.
+- **Product rule (a requirement, not implemented as stated).** A course concept
+  question requires a course citation. If no supporting excerpt is found, the
+  coach says it could not verify the course definition and may add a clearly
+  labelled general explanation. The code today only tells the model to say it
+  "could not retrieve a validated excerpt" on a course search that returned
+  nothing, and it disallows model knowledge on course-catalogue turns. Nothing
+  covers a turn where the gate skipped retrieval.
+
+Rollback: none needed, documentation only. Next action: Phase 4 item 1 (the
+coaching-mode greeting failure).
+
 ### First-turn calibration for Laya Learn
 
 The pilot can use a separate cutoff before the first saved student message.
