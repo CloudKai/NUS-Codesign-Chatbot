@@ -126,6 +126,62 @@ precision, the added latency and the cost need a measured run with the live
 model and an approved call limit. The `--live-model` mode below is that run;
 it has not been run yet.
 
+## Follow-up cases (Phase 3b item C)
+
+`retrieval_gate_followups.synthetic.jsonl` holds 12 short follow-up messages
+(9 labelled `retrieve`, 3 labelled `skip`), each with the earlier turns it
+depends on in `history`. The file is separate from the 295 gate messages, so
+the 295-message numbers above are unchanged. Row format and validation are the
+same as the gate messages (ids `gm296` to `gm307`). Each `retrieve` row links
+through `question_id` to the standalone question that asks the same thing.
+The offline run adds a `followups` block to the report and the JSON. The
+`--followups PATH` option points it at another file.
+
+**What query building does with history.** The gate reads the message only.
+For course search, `BedrockKnowledgeBaseRetriever` sends
+`contextual_course_query_text` (`backend/retrieval.py`) plus the Week/Lecture
+alias expansion. That function adds the nearest substantive earlier **user**
+message only when the current message has a course-source word ("lecture",
+"reading", "source", ...), a reference such as "that" or "what I just said",
+and a question form. Any other follow-up is sent as the bare message, and
+assistant turns are never used. The local retriever used for student uploads
+additionally weights the last two user turns, which the Knowledge Base path
+does not do.
+
+**Definition of "clearly fail"** (recorded in the item C notes before the cases
+were added or measured). Rewriting is justified only if at least 5 of the 9
+`retrieve` cases fail end to end **and** at least 5 of those failures are
+attributable to the follow-up form. End to end means the gate searches the
+course and the top 4 results for the built query hold the expected material.
+A failure is attributable when the linked standalone question passes both
+checks. The search gets only the built query text, as the Knowledge Base does.
+
+Result (offline, lexical stand-in for the Knowledge Base):
+
+| Measure | Result |
+|---|---|
+| Gate wrong-skip, `retrieve` follow-ups | 8/9 (88.9%) |
+| Gate false-retrieve, `skip` follow-ups | 0/3 (0.0%) |
+| Built query differs from the bare message (history used) | 1/9 (11.1%) |
+| Built query finds the expected material in the top 4 | 6/9 (66.7%) |
+| End to end (gate and query) | 1/9 (11.1%) |
+| Standalone control passes (gate and query) | 4/9 (44.4%) |
+| 5-and-5 rule | 8 failures, 3 attributable: **not clearly failing** |
+| If a perfect `needs_sources` model recovered every gate miss (informational) | 6/9 pass, 2 attributable failures |
+
+The cases do not clearly fail, so follow-up rewriting was not implemented. Five
+of the 8 end-to-end failures also fail the standalone question at the gate
+(no course-word cue: the known gap that `needs_sources` addresses), so
+a rewriter would not fix them. The 3 attributable failures are gm296 "what is
+it good for?", gm297 "what are the axes?" and gm303 "and the F-pattern?". Two
+of them also have a query that misses the expected material.
+
+Limits: 12 synthetic cases from one author; the offline search is lexical, so
+the query check says whether the query text carries enough content for a
+lexical match, not how the real Knowledge Base ranks it. Some passes are
+lucky matches on one distinctive word ("authority", "focus"). The Knowledge
+Base was not called.
+
 ## Metric definitions
 
 | Metric | Numerator | Denominator |
@@ -165,9 +221,10 @@ are in that folder's `README.md`.
 |---|---|
 | `retrieval_questions.jsonl` | 94 questions. Fields: `id`, `question`, `expected_material`, `expected_pages` (1-based PDF pages), `alt_expected`, `evidence`, `kind`, `note`. |
 | `retrieval_gate_messages.synthetic.jsonl` | 295 **synthetic** student messages. Fields: `id`, `message`, `stage`, `selected_sources`, `attachments`, `history`, `expected_decision` (`retrieve` or `skip`), `expected_scope`, `category`, `certainty`, `follow_up`, `question_id`, `expected_material`, `rationale`, `synthetic` (always `true`). |
+| `retrieval_gate_followups.synthetic.jsonl` | 12 **synthetic** follow-up cases, same row format as the gate messages, ids `gm296` to `gm307`, each with prior turns in `history`. Reported apart from the 295 messages. See "Follow-up cases". |
 | `course_materials.json` | One entry per lecture PDF: `material_id`, `object_key`, `local_path`, `filename`, `group`, `source_id`, `pdf_pages`. |
 
-The script validates all three files on load and stops with a `DatasetError`
+The script validates these files on load and stops with a `DatasetError`
 if a row breaks the format. `tests/scripts/test_evaluate_retrieval.py`
 checks the metric maths, the data files (60 to 100 questions, at least 200
 messages, unique ids, synthetic marker, label vocabulary) and that the live

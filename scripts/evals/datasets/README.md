@@ -85,6 +85,7 @@ The set measures the retrieval gate: the logic that decides, before the model is
 | File | Purpose |
 |---|---|
 | `retrieval_gate_messages.synthetic.jsonl` | One JSON object per line, UTF-8. |
+| `retrieval_gate_followups.synthetic.jsonl` | 12 synthetic follow-up cases (ids `gm296` to `gm307`) with the same record format, each with the prior turns it depends on in `history`. Kept apart so the 295-message numbers do not change. See `docs/RETRIEVAL_EVAL.md`, "Follow-up cases". |
 | `../../../tests/domain/test_retrieval_gate_message_set.py` | Offline schema, vocabulary and link checks. Does not run the gate. |
 
 ## Message record

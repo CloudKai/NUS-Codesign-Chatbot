@@ -729,3 +729,91 @@ def test_live_page_recall_stays_not_available_when_no_result_carries_a_page(monk
     assert retrieval["page_coverage"]["results_with_page"] == 0
     assert retrieval["page_coverage"]["questions_with_page"] == 0
     assert "n/a" in _EVAL.format_rate(retrieval["recall_at_4_page"])
+
+
+# ---- follow-up cases (phase 3b item C) --------------------------------------
+
+
+def _case(decision: str, *, passes: bool, standalone_ok: bool | None) -> dict:
+    return {
+        "expected_decision": decision,
+        "end_to_end_pass": passes,
+        "standalone_ok": standalone_ok,
+    }
+
+
+def test_followup_file_loads_and_is_kept_apart_from_the_gate_messages() -> None:
+    materials = _EVAL.load_materials()
+    ids = [q["id"] for q in _EVAL.load_questions(materials=materials)]
+    rows = _EVAL.load_followups(materials=materials, question_ids=ids)
+    gate_ids = {m["id"] for m in _EVAL.load_messages(materials=materials, question_ids=ids)}
+    assert 10 <= len(rows) <= 15
+    assert not gate_ids & {r["id"] for r in rows}
+    assert all(r["synthetic"] is True and r["follow_up"] is True and r["history"] for r in rows)
+    assert {r["expected_decision"] for r in rows} == {"retrieve", "skip"}
+    assert "synthetic" in _EVAL.FOLLOWUPS_PATH.name
+
+
+def test_followup_loader_rejects_rows_without_history_or_link(tmp_path) -> None:
+    materials = _EVAL.load_materials()
+    ids = [q["id"] for q in _EVAL.load_questions(materials=materials)]
+    rows = _EVAL.load_followups(materials=materials, question_ids=ids)
+    retrieve = next(r for r in rows if r["expected_decision"] == "retrieve")
+    for change in ({"history": []}, {"question_id": None}, {"id": "gm001"}):
+        path = tmp_path / "bad.jsonl"
+        path.write_text(json.dumps({**retrieve, **change}) + "\n", encoding="utf-8")
+        with pytest.raises(_EVAL.DatasetError):
+            _EVAL.load_followups(path, materials, ids)
+
+
+def test_followup_verdict_applies_the_recorded_threshold() -> None:
+    def cases(failures: int, attributable: int) -> list[dict]:
+        out = [_case("retrieve", passes=False, standalone_ok=i < attributable) for i in range(failures)]
+        out += [_case("retrieve", passes=True, standalone_ok=True) for _ in range(9 - failures)]
+        out += [_case("skip", passes=False, standalone_ok=None) for _ in range(3)]
+        return out
+
+    assert _EVAL.followup_verdict(cases(5, 5))["clearly_fail"] is True
+    assert _EVAL.followup_verdict(cases(4, 4))["clearly_fail"] is False
+    assert _EVAL.followup_verdict(cases(8, 4))["clearly_fail"] is False
+    verdict = _EVAL.followup_verdict(cases(8, 3))
+    assert (verdict["retrieve_cases"], verdict["end_to_end_failures"]) == (9, 8)
+    assert verdict["attributable_failures"] == 3 and verdict["clearly_fail"] is False
+
+
+def test_captured_query_comes_from_the_adapter_and_makes_no_network_call() -> None:
+    from backend.retrieval import RetrievalSource
+
+    source = RetrievalSource(
+        source_id="s1",
+        label="S1",
+        title="Week 1",
+        text="",
+        object_key="course/lectureNotes/week1.pdf",
+    )
+    history = [
+        {"role": "user", "text": "what is the rule of threes?"},
+        {"role": "assistant", "text": "Audiences remember groups of three. [S1]"},
+    ]
+    anaphoric = _EVAL.captured_kb_query("which lecture is that from?", history, source)
+    assert "what is the rule of threes?" in anaphoric
+    plain = _EVAL.captured_kb_query("what are the axes?", history, source)
+    assert plain == "what are the axes?"
+
+
+def test_followup_block_is_separate_and_leaves_the_gate_numbers_alone() -> None:
+    materials = _EVAL.load_materials()
+    questions = _EVAL.load_questions(materials=materials)
+    ids = [q["id"] for q in questions]
+    followups = _EVAL.load_followups(materials=materials, question_ids=ids)
+    search = _EVAL.OfflineCourseSearch(materials)
+    block = _EVAL.evaluate_followups(followups, questions, search)
+    assert block["cases"] == len(followups)
+    assert len(block["per_case"]) == len(followups)
+    assert block["verdict"] == _EVAL.followup_verdict(block["per_case"])
+    skip_cases = [c for c in block["per_case"] if c["expected_decision"] == "skip"]
+    assert all(c["standalone_ok"] is None for c in skip_cases)
+    # The 295-message numbers do not move.
+    gate = _EVAL.evaluate_gate(_EVAL.load_messages(), None)
+    assert gate["messages"] == 295
+    assert gate["wrong_skip_rate"]["numerator"] == 76

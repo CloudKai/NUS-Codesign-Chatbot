@@ -49,6 +49,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 DATASET_DIR = _PROJECT_ROOT / "scripts" / "evals" / "datasets"
 QUESTIONS_PATH = DATASET_DIR / "retrieval_questions.jsonl"
 MESSAGES_PATH = DATASET_DIR / "retrieval_gate_messages.synthetic.jsonl"
+FOLLOWUPS_PATH = DATASET_DIR / "retrieval_gate_followups.synthetic.jsonl"
 MATERIALS_PATH = DATASET_DIR / "course_materials.json"
 
 TOP_K = 4
@@ -117,6 +118,18 @@ MESSAGE_CATEGORIES = frozenset(
         "out_of_scope",
         "not_in_course_material",
     }
+)
+
+FOLLOWUP_DEFINITION = (
+    "Follow-up cases are reported apart from the gate messages. gate_ok: the "
+    "gate searched the course (retrieve cases) or searched nothing (skip "
+    "cases). query_ok: one of the top 4 offline results for the query the "
+    "Knowledge Base adapter builds from the message and history is in the "
+    "expected material (the search gets no history, like the Knowledge Base). "
+    "end_to_end_pass: gate_ok and query_ok. standalone_ok: the linked "
+    "standalone question passes the gate and its top 4 hold the expected "
+    "material. Rewriting is justified only when at least 5 retrieve cases "
+    "fail end to end and at least 5 of those failures have standalone_ok."
 )
 
 DEFINITIONS = {
@@ -342,6 +355,35 @@ def evenly_spaced_indices(total: int, limit: int) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+# Phase 3b item C: threshold for "clearly fail", fixed in
+# .agents/tasks/phase3b-work/item-c-notes.md before any case was measured.
+FOLLOWUP_MIN_FAILURES = 5
+FOLLOWUP_MIN_ATTRIBUTABLE = 5
+
+
+def followup_verdict(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Apply the recorded "clearly fail" rule to per-case follow-up results.
+
+    Only ``retrieve`` cases count. A case fails when its end-to-end result is
+    false. A failure is attributable to the follow-up form when the linked
+    standalone question passes. Rewriting is justified only when at least
+    ``FOLLOWUP_MIN_FAILURES`` cases fail and at least
+    ``FOLLOWUP_MIN_ATTRIBUTABLE`` of those failures are attributable.
+    """
+    retrieve_cases = [c for c in cases if c["expected_decision"] == "retrieve"]
+    failures = [c for c in retrieve_cases if not c["end_to_end_pass"]]
+    attributable = [c for c in failures if c["standalone_ok"]]
+    return {
+        "retrieve_cases": len(retrieve_cases),
+        "end_to_end_failures": len(failures),
+        "attributable_failures": len(attributable),
+        "min_failures": FOLLOWUP_MIN_FAILURES,
+        "min_attributable": FOLLOWUP_MIN_ATTRIBUTABLE,
+        "clearly_fail": len(failures) >= FOLLOWUP_MIN_FAILURES
+        and len(attributable) >= FOLLOWUP_MIN_ATTRIBUTABLE,
+    }
+
+
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as handle:
@@ -490,6 +532,34 @@ def load_messages(
     ids = question_ids if question_ids is not None else [q["id"] for q in load_questions(materials=manifest)]
     rows = _read_jsonl(path)
     validate_messages(rows, manifest, ids)
+    return rows
+
+
+def load_followups(
+    path: Path = FOLLOWUPS_PATH,
+    materials: Sequence[Mapping[str, Any]] | None = None,
+    question_ids: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Load the synthetic follow-up cases (same row format as the gate messages).
+
+    The file is kept apart from the 295 gate messages so their numbers stay
+    comparable. Every row must be a follow-up with prior history, and ids must
+    not collide with the gate messages.
+    """
+    manifest = list(materials) if materials is not None else load_materials()
+    ids = list(question_ids) if question_ids is not None else [q["id"] for q in load_questions(materials=manifest)]
+    rows = _read_jsonl(path)
+    validate_messages(rows, manifest, ids, min_count=1)
+    gate_ids = {row["id"] for row in _read_jsonl(MESSAGES_PATH)}
+    for row in rows:
+        if row["id"] in gate_ids:
+            raise DatasetError(f"{row['id']}: id also used in the gate messages")
+        if row["category"] != "follow_up" or row["follow_up"] is not True or not row["history"]:
+            raise DatasetError(f"{row['id']}: not a follow-up with history")
+        if row["expected_decision"] == "retrieve" and (
+            row["question_id"] is None or row["expected_material"] is None
+        ):
+            raise DatasetError(f"{row['id']}: retrieve follow-up needs question_id and expected_material")
     return rows
 
 
@@ -897,8 +967,177 @@ def evaluate_gate(
     }
 
 
-def run_offline(materials: Sequence[Mapping[str, Any]], questions: Sequence[Mapping[str, Any]], messages: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Run the full offline evaluation."""
+class _RecordingRetrieveClient:
+    """Stand-in ``bedrock-agent-runtime`` client: records the query, returns nothing."""
+
+    def __init__(self) -> None:
+        self.queries: list[str] = []
+
+    def retrieve(self, **kwargs: Any) -> dict[str, Any]:
+        self.queries.append(str(kwargs["retrievalQuery"]["text"]))
+        return {"retrievalResults": []}
+
+
+def captured_kb_query(
+    message: str, history: Sequence[Mapping[str, Any]], course_source: Any
+) -> str:
+    """Return the query text the Knowledge Base adapter sends for one turn.
+
+    Runs ``BedrockKnowledgeBaseRetriever`` with a recording client, so the
+    text comes from the production query building and not from a copy. No
+    network call is made.
+    """
+    from backend.bedrock_retrieve import BedrockKnowledgeBaseRetriever
+    from backend.retrieval import RetrievalQuery
+
+    client = _RecordingRetrieveClient()
+    BedrockKnowledgeBaseRetriever(
+        "OFFLINE-EVAL",
+        course_bucket="offline-eval-bucket",
+        client=client,
+        metadata_filter_mode="required",
+        knowledge_base_type="managed",
+    ).retrieve(
+        RetrievalQuery(
+            current_message=message,
+            current_stage="problem_identification",
+            sources=(course_source,),
+            recent_messages=tuple(
+                {"role": turn["role"], "content": turn["text"]} for turn in history
+            ),
+        )
+    )
+    if len(client.queries) != 1:
+        raise RuntimeError(f"expected one Retrieve call, saw {len(client.queries)}")
+    return client.queries[0]
+
+
+def _top_materials(hits: Iterable[RankedHit]) -> list[str]:
+    return [hit.material_id for hit in rank_hits(hits)[:TOP_K]]
+
+
+def evaluate_followups(
+    followups: Sequence[Mapping[str, Any]],
+    questions: Sequence[Mapping[str, Any]],
+    search: OfflineCourseSearch,
+) -> dict[str, Any]:
+    """Measure the gate and the built query on the follow-up cases.
+
+    Reported apart from the gate messages. See
+    ``.agents/tasks/phase3b-work/item-c-notes.md`` for the definitions.
+    """
+    from backend.retrieval import expand_session_query_text
+
+    question_text = {q["id"]: q["question"] for q in questions}
+    course_source = search._sources[0]
+    cases: list[dict[str, Any]] = []
+    for row in followups:
+        decision = gate_decision(row)
+        message = str(row["message"])
+        built = captured_kb_query(message, row["history"], course_source)
+        bare = expand_session_query_text(message)
+        record: dict[str, Any] = {
+            "id": row["id"],
+            "message": message,
+            "expected_decision": row["expected_decision"],
+            "gate_course": decision.course,
+            "gate_retrieve": decision.retrieve,
+            "gate_second_chance": decision.second_chance,
+            "built_query": built,
+            "query_uses_history": built != bare,
+        }
+        if row["expected_decision"] == "skip":
+            record["gate_ok"] = not decision.retrieve
+            record["end_to_end_pass"] = record["gate_ok"]
+            record["standalone_ok"] = None
+            cases.append(record)
+            continue
+        expected = str(row["expected_material"])
+        built_top = _top_materials(search.search(built))
+        contrast_top = _top_materials(search.search(message, row["history"]))
+        standalone = str(question_text[row["question_id"]])
+        standalone_row = {
+            "message": standalone,
+            "stage": "problem_identification",
+            "selected_sources": [],
+            "attachments": [],
+        }
+        standalone_decision = gate_decision(standalone_row)
+        standalone_top = _top_materials(search.search(standalone))
+        record.update(
+            {
+                "expected_material": expected,
+                "gate_ok": bool(decision.course),
+                "built_query_top4": built_top,
+                "query_ok": expected in built_top,
+                "bare_message_top4": _top_materials(search.search(message)),
+                "history_weighted_search_top4_contrast": contrast_top,
+                "history_weighted_search_ok_contrast": expected in contrast_top,
+                "standalone_question_id": row["question_id"],
+                "standalone_question": standalone,
+                "standalone_gate_course": bool(standalone_decision.course),
+                "standalone_top4": standalone_top,
+                "standalone_ok": bool(standalone_decision.course) and expected in standalone_top,
+            }
+        )
+        record["end_to_end_pass"] = record["gate_ok"] and record["query_ok"]
+        cases.append(record)
+    retrieve = [c for c in cases if c["expected_decision"] == "retrieve"]
+    skip = [c for c in cases if c["expected_decision"] == "skip"]
+    gate_failures = [c for c in retrieve if not c["gate_ok"]]
+    return {
+        "definition": FOLLOWUP_DEFINITION,
+        "cases": len(cases),
+        "retrieve_cases": len(retrieve),
+        "skip_cases": len(skip),
+        "gate_wrong_skip": rate_record(len(gate_failures), len(retrieve)),
+        "gate_wrong_skip_recoverable_by_second_chance": sum(
+            1 for c in gate_failures if c["gate_second_chance"]
+        ),
+        "gate_false_retrieve": rate_record(sum(1 for c in skip if not c["gate_ok"]), len(skip)),
+        "query_uses_history": rate_record(
+            sum(1 for c in retrieve if c["query_uses_history"]), len(retrieve)
+        ),
+        "query_ok": rate_record(sum(1 for c in retrieve if c["query_ok"]), len(retrieve)),
+        "query_ok_among_gate_passed": rate_record(
+            sum(1 for c in retrieve if c["gate_ok"] and c["query_ok"]),
+            sum(1 for c in retrieve if c["gate_ok"]),
+        ),
+        "end_to_end_pass": rate_record(sum(1 for c in retrieve if c["end_to_end_pass"]), len(retrieve)),
+        # Informational, not part of the verdict: a perfect needs_sources model
+        # would recover every gate miss that is eligible for the second call.
+        "end_to_end_pass_if_second_chance_recovers_gate": rate_record(
+            sum(1 for c in retrieve if (c["gate_ok"] or c["gate_second_chance"]) and c["query_ok"]),
+            len(retrieve),
+        ),
+        "attributable_failures_if_second_chance_recovers_gate": sum(
+            1
+            for c in retrieve
+            if not ((c["gate_ok"] or c["gate_second_chance"]) and c["query_ok"])
+            and c["standalone_ok"]
+        ),
+        "standalone_control_ok": rate_record(
+            sum(1 for c in retrieve if c["standalone_ok"]), len(retrieve)
+        ),
+        "history_weighted_search_ok_contrast": rate_record(
+            sum(1 for c in retrieve if c["history_weighted_search_ok_contrast"]), len(retrieve)
+        ),
+        "verdict": followup_verdict(cases),
+        "per_case": cases,
+    }
+
+
+def run_offline(
+    materials: Sequence[Mapping[str, Any]],
+    questions: Sequence[Mapping[str, Any]],
+    messages: Sequence[Mapping[str, Any]],
+    followups: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run the full offline evaluation.
+
+    ``followups`` adds a separate ``followups`` block. It never changes the
+    ``retrieval`` or ``gate`` numbers.
+    """
     search = OfflineCourseSearch(materials)
     outcomes = [
         score_question(
@@ -911,7 +1150,7 @@ def run_offline(materials: Sequence[Mapping[str, Any]], questions: Sequence[Mapp
         )
         for q in questions
     ]
-    return {
+    result: dict[str, Any] = {
         "mode": "offline",
         "course_search": "LocalChunkRetriever over local lecture PDFs, one chunk per page (not the Knowledge Base)",
         "network_calls": 0,
@@ -919,6 +1158,9 @@ def run_offline(materials: Sequence[Mapping[str, Any]], questions: Sequence[Mapp
         "retrieval": _question_summary(outcomes, questions),
         "gate": evaluate_gate(messages, search),
     }
+    if followups:
+        result["followups"] = evaluate_followups(followups, questions, search)
+    return result
 
 
 def run_live(
@@ -1687,6 +1929,33 @@ def format_report(result: Mapping[str, Any]) -> str:
                 f"empty {format_rate(record['empty_result_rate_course_attempts'])}; "
                 f"second model calls {record['second_model_calls']}"
             )
+    followups = result.get("followups")
+    if followups:
+        verdict = followups["verdict"]
+        lines += [
+            "",
+            f"follow-up cases (SYNTHETIC, reported apart from the {gate['messages']} gate messages): "
+            f"{followups['cases']} (retrieve {followups['retrieve_cases']}, skip {followups['skip_cases']})",
+            f"  gate wrong-skip: {format_rate(followups['gate_wrong_skip'])}; "
+            f"recoverable by needs_sources second chance: {followups['gate_wrong_skip_recoverable_by_second_chance']}",
+            f"  gate false-retrieve: {format_rate(followups['gate_false_retrieve'])}",
+            f"  built query uses history: {format_rate(followups['query_uses_history'])}",
+            f"  query_ok (built query, top 4 has expected material): {format_rate(followups['query_ok'])}",
+            f"  end-to-end pass (gate and query): {format_rate(followups['end_to_end_pass'])}",
+            f"  end-to-end pass if a perfect needs_sources model recovered every eligible gate miss (informational): "
+            f"{format_rate(followups['end_to_end_pass_if_second_chance_recovers_gate'])}; "
+            f"attributable failures then: {followups['attributable_failures_if_second_chance_recovers_gate']}",
+            f"  standalone control ok: {format_rate(followups['standalone_control_ok'])}",
+            f"  contrast, history-weighted local search ok: {format_rate(followups['history_weighted_search_ok_contrast'])}",
+            f"  verdict: {verdict['end_to_end_failures']} failures, {verdict['attributable_failures']} attributable "
+            f"(rule: {verdict['min_failures']} and {verdict['min_attributable']}); clearly fail: {verdict['clearly_fail']}",
+        ]
+        for case in followups["per_case"]:
+            lines.append(
+                f"  {case['id']} [{case['expected_decision']}] gate_ok={case['gate_ok']} "
+                f"query_ok={case.get('query_ok', 'n/a')} standalone_ok={case['standalone_ok']} "
+                f"query={case['built_query']!r}"
+            )
     return "\n".join(lines)
 
 
@@ -1697,6 +1966,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--questions", type=Path, default=QUESTIONS_PATH)
     parser.add_argument("--messages", type=Path, default=MESSAGES_PATH)
+    parser.add_argument(
+        "--followups",
+        type=Path,
+        default=FOLLOWUPS_PATH,
+        help="synthetic follow-up cases, reported apart from the gate messages (offline mode)",
+    )
     parser.add_argument("--materials", type=Path, default=MATERIALS_PATH)
     parser.add_argument("--json-output", type=Path, default=None, help="also write the full result as JSON")
     parser.add_argument(
@@ -1793,7 +2068,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if live_requested:
         result = run_live(materials, questions, messages, limit)
     else:
-        result = run_offline(materials, questions, messages)
+        followups = load_followups(args.followups, materials, [q["id"] for q in questions])
+        result = run_offline(materials, questions, messages, followups)
     print(format_report(result))
     if args.json_output:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
