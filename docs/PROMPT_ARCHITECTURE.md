@@ -147,7 +147,7 @@ changes.
 | Query | Current student message has the strongest weight. The last two student messages, project context, and learning summary provide lower-weight continuity. |
 | Chunking | `LocalChunkRetriever` uses sentence-aware ~1,800-character chunks with 220-character overlap. FastAPI hydrates selected student sources from disposable `derived/chunks.v1.json` when valid (in-process LRU); missing or invalid artifacts fall back to chunking extracted text at query time. No new database migration is needed. |
 | Ranking | Deterministic weighted lexical/BM25-style scoring uses term rarity, phrase overlap, title matches, and source diversity. Generic queries receive bounded representative excerpts. |
-| Budget | Fast chat: deterministic retrieval gate, then at most `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4) chunks and `FAST_CHAT_RETRIEVAL_MAX_CHARS` (default 8,000) characters. Deep Review may use the larger composer ceiling. |
+| Budget | Fast chat: deterministic retrieval gate, then at most `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4) chunks, split 2 course + 2 student-upload by `FAST_CHAT_RETRIEVAL_COURSE_SLOTS` (unused slots backfill), and `FAST_CHAT_RETRIEVAL_MAX_CHARS` (default 8,000) characters. Deep Review may use the larger composer ceiling. |
 | Images | Selected images travel as model image inputs; a text marker preserves their stable `[S#]` mapping. |
 | Citations | `[S#]` is stable for the selected-source order. Internal chunk IDs such as `S1-C2` are audit metadata only and are never student-facing citation syntax. |
 | Audit | The assistant message records `retrieval_refs` containing source ID, stable label, chunk ID, focused excerpt, and score. `source_refs` remains reserved for sources actually cited in the response. |

@@ -87,6 +87,16 @@ Mock mode and an empty Knowledge Base id inject `knowledge_base=None` so
 shared `course/` sources cannot become fake local chunks. Live providers with
 a Knowledge Base id inject `BedrockKnowledgeBaseRetriever`.
 
+`CompositeContextRetriever` runs the Knowledge Base call and the student-upload
+retrieval in parallel when a turn selects both (the Knowledge Base call runs on
+a worker thread with the turn's context copied, local ranking runs on the
+caller). It then reserves result slots so course hits cannot crowd out student
+uploads: of the `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4) slots,
+`FAST_CHAT_RETRIEVAL_COURSE_SLOTS` (default 2) are for course hits and the rest
+(default 2) for uploads. A side that returns fewer hits releases its unused
+slots to the other side. Course chunks stay ahead of upload chunks in the
+prompt.
+
 `BedrockKnowledgeBaseRetriever` calls **Retrieve only** (never
 RetrieveAndGenerate). Production Knowledge Base `JUQNP8AZAZ` is type
 **MANAGED**, so Retrieve uses `managedSearchConfiguration`. Classic VECTOR
@@ -135,7 +145,11 @@ Retrieve is optional evidence gathering: the adapter uses a wall-clock timeout
 (`KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS`, default 10s, justified as twice
 the previous 5s fail-closed cap and far below the 120s UI timeout),
 `total_max_attempts=1`, and `numberOfResults` equal to
-`FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4). A Python future timeout does not
+`KNOWLEDGE_BASE_RETRIEVE_CANDIDATES` (default 12, bounded 12 to 16). The adapter
+validates every candidate (bucket, object key, non-empty text), ranks the
+survivors by score, drops near-duplicates, and keeps the best
+`FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4). Hits that fail validation never
+take a kept slot. A Python future timeout does not
 cancel boto; abandoned calls reuse a shared executor
 (`KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS`, default 4). The executor queue is
 not used as a backlog: admission is a semaphore sized to the worker count, so

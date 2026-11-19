@@ -308,6 +308,11 @@ class Settings:
     knowledge_base_retrieve_timeout_seconds: int = _bounded_int(
         "KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS", 10, 2, 30
     )
+    # Retrieve over-fetches candidates, the adapter validates them (bucket, key,
+    # text), then keeps the best FAST_CHAT_RETRIEVAL_MAX_CHUNKS. Bounded 12-16.
+    knowledge_base_retrieve_candidates: int = _bounded_int(
+        "KNOWLEDGE_BASE_RETRIEVE_CANDIDATES", 12, 12, 16
+    )
     knowledge_base_retrieve_executor_workers: int = _bounded_int(
         "KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS", 4, 1, 16
     )
@@ -347,6 +352,12 @@ class Settings:
     )
     fast_chat_retrieval_max_chunks: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHUNKS", 4, 1, 8
+    )
+    # Slots reserved for course (Knowledge Base) results out of
+    # FAST_CHAT_RETRIEVAL_MAX_CHUNKS. The remainder is reserved for student
+    # uploads. A side that returns fewer hits releases its unused slots.
+    fast_chat_retrieval_course_slots: int = _bounded_int(
+        "FAST_CHAT_RETRIEVAL_COURSE_SLOTS", 2, 1, 8
     )
     fast_chat_retrieval_max_chars: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHARS", 8_000, 1_000, 24_000

@@ -360,7 +360,7 @@ def test_retrieve_sends_course_material_id_metadata_filter():
     )
     assert len(client.calls) == 1
     vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
-    assert vector["numberOfResults"] == 4
+    assert vector["numberOfResults"] == 12
     assert vector["filter"] == {
         "equals": {"key": "course_material_id", "value": "lecture_crossing"}
     }
@@ -1571,7 +1571,7 @@ def test_managed_required_empty_result_keeps_metadata_filter():
     )
     assert len(client.calls) == 1
     search = client.calls[0]["retrievalConfiguration"]["managedSearchConfiguration"]
-    assert search["numberOfResults"] == 4
+    assert search["numberOfResults"] == 12
     assert search["filter"] == {
         "equals": {"key": "course_material_id", "value": "lecture_crossing"}
     }

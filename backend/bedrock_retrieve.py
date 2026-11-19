@@ -38,6 +38,7 @@ from .settings import settings
 logger = logging.getLogger(__name__)
 
 _DEFAULT_RESULTS = 4
+_DEFAULT_CANDIDATES = 12
 _MAX_CONTEXT_CHARS = 16_000
 _DEFAULT_RETRIEVE_TIMEOUT_SECONDS = 10.0
 _RETRIEVE_CONNECT_TIMEOUT_SECONDS = 2.0
@@ -501,6 +502,7 @@ class BedrockKnowledgeBaseRetriever:
         *,
         region: str = "us-west-2",
         number_of_results: int | None = None,
+        max_results: int | None = None,
         max_context_chars: int = _MAX_CONTEXT_CHARS,
         course_bucket: str = "",
         client: Any | None = None,
@@ -514,9 +516,12 @@ class BedrockKnowledgeBaseRetriever:
         Args:
             knowledge_base_id: Bedrock Knowledge Base id (non-secret).
             region: AWS region for the data-plane client.
-            number_of_results: Retrieve ``numberOfResults``. Defaults to the
-                Fast Chat chunk budget so MANAGED search does not fetch unused
-                hits.
+            number_of_results: Retrieve ``numberOfResults``, the candidate
+                count. Defaults to ``KNOWLEDGE_BASE_RETRIEVE_CANDIDATES``
+                (12 to 16). Candidates are validated and then trimmed to
+                ``max_results``. Never lower than ``max_results``.
+            max_results: Validated chunks kept after ranking by score.
+                Defaults to the Fast Chat chunk budget.
             max_context_chars: Prompt budget after selected-source filtering.
             course_bucket: Required to accept a hit. Empty drops every hit
                 because the bucket cannot be positively confirmed.
@@ -536,8 +541,8 @@ class BedrockKnowledgeBaseRetriever:
         """
         self._knowledge_base_id = str(knowledge_base_id or "").strip()
         self._region = str(region or "").strip() or "us-west-2"
-        if number_of_results is None:
-            self._number_of_results = max(
+        if max_results is None:
+            self._max_results = max(
                 1,
                 int(
                     getattr(
@@ -548,7 +553,18 @@ class BedrockKnowledgeBaseRetriever:
                 ),
             )
         else:
-            self._number_of_results = max(1, int(number_of_results))
+            self._max_results = max(1, int(max_results))
+        if number_of_results is None:
+            candidates = int(
+                getattr(
+                    settings,
+                    "knowledge_base_retrieve_candidates",
+                    _DEFAULT_CANDIDATES,
+                )
+            )
+        else:
+            candidates = int(number_of_results)
+        self._number_of_results = max(1, candidates, self._max_results)
         self._max_context_chars = max(1, int(max_context_chars))
         self._course_bucket = str(course_bucket or "").strip()
         self._client = client
@@ -921,6 +937,13 @@ class BedrockKnowledgeBaseRetriever:
             return RetrievalResult(
                 context="", chunks=(), course_retrieval_status="empty"
             )
+        # Best candidates first so the cut to ``max_results`` keeps the top
+        # validated hits. ``sorted`` is stable, so equal scores keep the
+        # order Retrieve returned.
+        raw_hits = sorted(
+            raw_hits,
+            key=lambda hit: -_result_score(hit) if isinstance(hit, Mapping) else 0.0,
+        )
         chunks: list[RetrievedChunk] = []
         per_source: dict[str, int] = {}
         drop_bucket = 0
@@ -1016,7 +1039,9 @@ class BedrockKnowledgeBaseRetriever:
                 len(chunks),
             )
         formatted = bounded_retrieval_result(
-            chunks, max_context_chars=self._max_context_chars
+            chunks,
+            max_context_chars=self._max_context_chars,
+            max_chunks=self._max_results,
         )
         if not formatted.chunks:
             logger.info(
@@ -1077,6 +1102,9 @@ def configured_context_retriever(
             getattr(settings, "normalized_knowledge_base_type", "vector")
         ),
         number_of_results=int(
+            getattr(settings, "knowledge_base_retrieve_candidates", _DEFAULT_CANDIDATES)
+        ),
+        max_results=int(
             getattr(settings, "fast_chat_retrieval_max_chunks", _DEFAULT_RESULTS)
         ),
         retrieve_timeout_seconds=float(
