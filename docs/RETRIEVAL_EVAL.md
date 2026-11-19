@@ -909,6 +909,49 @@ unchanged. The live eval counts defaulted rows in each outcome and in
 messages now pass and how many were defaulted. The change lives in the runtime
 package, so it only reaches production after the AgentCore runtime is republished.
 
+### Laya production readiness (Phase 4 item 3)
+
+Report only. Every command below is offline: sockets are blocked and
+`HF_HUB_OFFLINE=1`. `laya`, `vegaml` and all weights are absent from this sandbox, so
+the real-model commands were not run here; the stand-in run only checks the harness.
+
+**Memory and per-turn latency harness**
+(`scripts/evals/benchmark_course_intent.py`). It scores the 147 gate rows that are
+eligible for Laya, with each row's real turn context and the course titles, then
+reports load time, resident and peak resident memory (before load, after load, after
+warm-up, after the passes), the first-call time, and p50, p95, p99 and max per call. The
+classifier runs inline before generation, so one call's time is what it adds to a turn.
+
+```bash
+# Harness check, no model (marks real_model false). Run here on 2026-11-19.
+python -m scripts.evals.benchmark_course_intent --stub-ms 5 --passes 3 --warmup 5 \
+  --json-output /tmp/laya-harness-stub.json
+
+# Laya (laya==0.4.37 or 0.4.38 installed; local checkpoint; serial)
+python -m scripts.evals.benchmark_course_intent --checkpoint /path/to/laya-multilingual \
+  --passes 3 --warmup 5 --json-output /tmp/laya-resources.json
+
+# Laya Learn (laya==0.4.38 and vegaml==0.17.1; Vega checkpoint with backbone/ and a bundle)
+python -m scripts.evals.benchmark_course_intent --checkpoint /path/to/vega \
+  --bundle /path/to/course-learner.zip --passes 3 --warmup 5 \
+  --json-output /tmp/laya-learn-resources.json
+
+# Contention: eight threads against the single inference slot
+python -m scripts.evals.benchmark_course_intent --checkpoint /path/to/laya-multilingual \
+  --passes 1 --warmup 5 --concurrency 8 --json-output /tmp/laya-concurrency8.json
+```
+
+Run it on the intended production host (the output records platform, CPU count,
+package versions and torch threads) and compare `memory.peak_rss_mib` with the container
+limit; compose sets no memory limit today. A figure from another machine is not a
+production figure.
+
+**Stand-in run in this sandbox** (script run, Linux x86_64, 8 CPUs, Python 3.12.13; the
+stand-in sleeps 5 ms, so the latency says nothing about Laya): 147 eligible rows of 295,
+10 course titles, process RSS 64.6 MiB, peak 64.7 MiB, p95 5.24 ms per call. With eight
+threads the stand-in's single slot gave 146 of 147 calls no score, the same pattern
+Phase 3d recorded for real Laya (93/94).
+
 ### Laya results
 
 All Laya figures come from the Phase 3d result files in

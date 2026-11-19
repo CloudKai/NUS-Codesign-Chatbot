@@ -2,6 +2,73 @@
 
 ## Current status
 
+### Laya production readiness (Phase 4 item 3, report only)
+
+No product behavior changed. The classifier stays off unless
+`LOCAL_COURSE_INTENT_CHECKPOINT` is set. Nothing here was run against a real
+Laya model: the `laya` and `vegaml` packages and every weight file are absent
+from this sandbox. No live command was run. The exact harness commands are in
+[RETRIEVAL_EVAL](RETRIEVAL_EVAL.md#laya-production-readiness-phase-4-item-3);
+sources for each claim below are named inline or are the PyPI JSON pages
+(`https://pypi.org/pypi/<package>/json`) read on 2026-11-19.
+
+- **Where weights live.** The code reads only local paths
+  (`LOCAL_COURSE_INTENT_CHECKPOINT`, `LOCAL_COURSE_INTENT_LEARNER_BUNDLE`) and
+  never downloads at runtime. No weight file is tracked in git. The Learn bundle
+  is fitted on the checked-in synthetic messages, so it holds no student data.
+  Options, with the one this repo's deploy model favours first: a read-only
+  host directory bind-mounted into the container (needs a compose change and a
+  deliberate edit of `tests/test_deployment_config.py`, which pins the
+  secrets-only mount), the image layer (every image and ECR pull grows; `COPY . .`
+  would copy it unless placed deliberately), S3 (needs a new sync step; the app
+  has none for models), or git (not recommended: size, and the repo rule against
+  committing generated artifacts).
+- **Packaging.** `requirements.txt` has no Laya, torch, transformers or
+  safetensors. `laya==0.4.38` requires `torch>=2.0`, `transformers>=4.48`,
+  `safetensors`, `huggingface_hub` and `vegaml>=0.17`; `vegaml==0.17.1` requires
+  `torch>=2.4` and `transformers>=5.17` (PyPI metadata). The torch 2.15.0
+  cp312 wheel is 461 MiB for aarch64 and 514 MiB for x86_64 on PyPI, and its
+  metadata also lists `nvidia-*` packages with a Linux marker, whose installed
+  size was not measured. The production image targets linux/arm64 on
+  `python:3.12-slim`. The audit workflow checks only `requirements.txt` and
+  `agentcore_runtime/requirements.txt`, so a separate Laya requirements file would
+  not be audited unless it is added to `.github/workflows/dependency-audit.yml`.
+  The mock CI installs `requirements-dev.txt` only; the Laya tests there use stand-in
+  modules.
+- **Licences (what was and was not established).** PyPI metadata gives
+  `laya` 0.4.38 Apache-2.0 and `vegaml` 0.17.1 Apache-2.0, and the `laya` PyPI
+  README states Apache 2.0 for its weights. PyPI metadata gives transformers,
+  safetensors and huggingface-hub as Apache-2.0 and lists torch's licence
+  expression (Apache-2.0, BSD-2/3-Clause, BSL-1.0, ISC, MIT, Zlib and others). The
+  Hugging Face model cards for `convaiinnovations/laya-multilingual`,
+  `laya-typed-decisions`, `nandakishorm/vega-U` and `Qwen/Qwen3.5-0.8B` could not
+  be read here (HTTP 403), so their licence terms are **not established from a
+  primary source**. Third-party cards say Apache-2.0 for Laya multilingual and for
+  Qwen3.5-0.8B; nothing was found for `laya-typed-decisions` or `vega-U`. Read each
+  model card and licence file before any deployment.
+- **Memory and latency.** Not measured on real weights. The harness
+  `scripts/evals/benchmark_course_intent.py` exists and was run here with a sleeping
+  stand-in only (harness check, `real_model: false`). Recorded earlier figures
+  (Phase 3d files, development Mac, not production hardware): multilingual load
+  6.76 s and p95 211 ms; typed-decisions load 15.15 s and p95 450 ms; Laya Learn
+  p95 about 0.93 to 1.09 s. Memory has no recorded figure anywhere in the repo.
+- **Fallback.** A failing, abstaining, busy or malformed classifier leaves the turn
+  running on the existing gate with no course search (9 new test cases, stub
+  classifier and the real adapter over a stand-in `laya.Agent`). A configured but
+  missing checkpoint or missing `laya` package does **not** fall back: it raises in
+  `OwnerResolver.__init__` and stops API startup (tested). No timeout wraps
+  `score()`, so a hung inference holds the single inference slot and its own turn.
+- **Single slot.** Production runs one uvicorn worker, so one classifier and one lock;
+  a second concurrent turn gets no score and uses the gate. Phase 3d recorded 93/94
+  eligible requests abstaining with eight workers.
+- **Dedupe of `.agents/tasks/phase3d-work/`.** All 8 JSON files have distinct sha256
+  hashes, so none was removed.
+
+Rollback: nothing to roll back for the report. Decisions left to the user: start-up
+failure versus fallback for a missing checkpoint, a classifier timeout, where the
+weights are stored, and a separate audited requirements file. Next action: Phase 4
+item 4.
+
 ### Coaching reply with no recommendation defaults to stay (Phase 4 item 1)
 
 - **Behavior.** A coaching `FastChatTurnOutput` with no recommendation (absent,
