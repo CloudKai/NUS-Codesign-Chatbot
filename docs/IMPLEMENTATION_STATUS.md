@@ -193,7 +193,15 @@ item 4.
 - **Deploy note.** The default sits in `agentcore_runtime/models.py`, which both
   the runtime and the backend import. The failure happened inside the runtime,
   so the fix takes effect after the runtime package is republished.
-  Rollback: revert the commit and republish.
+  Deploy order: the backend containing this fix (the commit that reads
+  `recommendation_defaulted`, fd7a6e2) must go out before or together with the
+  runtime republish. The republished runtime sends `stay` plus the marker; an older
+  backend ignores the marker and would see an ordinary `stay`, so in Free mode a
+  greeting whose recommendation the model omitted could open a "Next" proposal
+  (the student must still confirm; no stage changes by itself). Tested with the
+  runtime wire shape in `test_runtime_wire_shape_of_a_defaulted_stay_is_not_promoted_in_free_mode`.
+  Rollback: revert the commit and republish; reverting the backend alone
+  reintroduces the Free-mode proposal for a runtime that still sends the default.
 - **Not measured live.** No live command was run. The re-run command is in the
   Phase 4 item 1 notes.
 

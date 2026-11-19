@@ -363,6 +363,33 @@ def test_defaulted_stay_is_not_promoted_to_a_proposal_in_free_mode(
 
 @pytest.mark.parametrize("sequential", [False, True])
 @pytest.mark.parametrize("stage", ["concept_generation", "deep_analysis"])
+def test_runtime_wire_shape_of_a_defaulted_stay_is_not_promoted_in_free_mode(
+    tmp_path: Path, stage: str, sequential: bool
+) -> None:
+    """Feed the backend what a republished runtime sends, not an omitted field.
+
+    The runtime applies the default and sends ``recommendation: "stay"`` plus
+    ``recommendation_defaulted: true``. The Free-mode guard depends on the
+    backend reading that marker, so the production shape is tested directly.
+    """
+    wire = structured_wire_payload(FastChatTurnOutput.model_validate(_coaching(recommendation=_OMIT)))
+    assert wire["recommendation"] == "stay"
+    assert wire["recommendation_defaulted"] is True
+    turn = _workflow_turn(
+        tmp_path,
+        wire,
+        stage=stage,
+        detail="long",
+        message="I sketched two concepts for the timetable display.",
+        sequential=sequential,
+    )
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.assessment.readiness_candidate is False
+    assert turn.pending_transition is None
+
+
+@pytest.mark.parametrize("sequential", [False, True])
+@pytest.mark.parametrize("stage", ["concept_generation", "deep_analysis"])
 def test_explicit_stay_is_still_promoted_in_free_mode(
     tmp_path: Path, stage: str, sequential: bool
 ) -> None:

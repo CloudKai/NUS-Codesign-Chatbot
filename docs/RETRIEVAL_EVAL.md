@@ -908,6 +908,10 @@ unchanged. The live eval counts defaulted rows in each outcome and in
 `recommendation_defaulted: {count, ids}`, so the re-run shows how many of the 13
 messages now pass and how many were defaulted. The change lives in the runtime
 package, so it only reaches production after the AgentCore runtime is republished.
+Deploy the backend that reads `recommendation_defaulted` (commit fd7a6e2) before or
+together with that republish: an older backend ignores the marker, and in Free mode a
+defaulted `stay` could then open a "Next" proposal (the student still has to confirm).
+Reverting the backend alone reintroduces this.
 
 ### Laya production readiness (Phase 4 item 3)
 
