@@ -34,15 +34,25 @@ The gate numbers below are for the 295 synthetic messages. Course search is the
 offline lexical stand-in, so the recall and empty-result rows describe that
 stand-in only. Re-run the script to reproduce each column.
 
-| Metric | Phase 2 baseline | After item 1 (`definitional_question` cue) | After item 2, gate only (flag code, no model) |
-|---|---|---|---|
-| recall@4, material (94 questions) | 90/94 (95.7%) | 90/94 (95.7%) | 90/94 (95.7%) |
-| recall@4, page (94 questions) | 77/94 (81.9%) | 77/94 (81.9%) | 77/94 (81.9%) |
-| wrong-skip rate | 92/154 (59.7%) | 76/154 (49.4%) | 76/154 (49.4%) |
-| wrong-skip rate, clear rows only | 67/113 (59.3%) | 51/113 (45.1%) | 51/113 (45.1%) |
-| false-retrieve rate | 2/141 (1.4%) | 7/141 (5.0%) | 7/141 (5.0%) |
-| empty-result rate, questions track | 0/94 (0.0%) | 0/94 (0.0%) | 0/94 (0.0%) |
-| empty-result rate, gate-passed course searches | 0/40 (0.0%) | 1/63 (1.6%) | 1/63 (1.6%) |
+| Metric | Phase 2 baseline | After item 1 (`definitional_question` cue) | After item 2, gate only (flag code, no model) | After item 0 (rq024 label fix) |
+|---|---|---|---|---|
+| recall@4, material (94 questions) | 90/94 (95.7%) | 90/94 (95.7%) | 90/94 (95.7%) | 91/94 (96.8%) |
+| recall@4, page (94 questions) | 77/94 (81.9%) | 77/94 (81.9%) | 77/94 (81.9%) | 78/94 (83.0%) |
+| wrong-skip rate | 92/154 (59.7%) | 76/154 (49.4%) | 76/154 (49.4%) | 76/154 (49.4%) |
+| wrong-skip rate, clear rows only | 67/113 (59.3%) | 51/113 (45.1%) | 51/113 (45.1%) | 51/113 (45.1%) |
+| false-retrieve rate | 2/141 (1.4%) | 7/141 (5.0%) | 7/141 (5.0%) | 7/141 (5.0%) |
+| empty-result rate, questions track | 0/94 (0.0%) | 0/94 (0.0%) | 0/94 (0.0%) | 0/94 (0.0%) |
+| empty-result rate, gate-passed course searches | 0/40 (0.0%) | 1/63 (1.6%) | 1/63 (1.6%) | 1/63 (1.6%) |
+
+The item 0 column is a label change, not a retrieval improvement. Question
+rq024 ("What sections should a persona have?") gained an `alt_expected` entry
+for `reading_reading_2_engaging_personas` page 2, which lists what to include
+when describing a persona (evidence: "A few fictional personal details to make
+the persona a realistic character"). Search results did not change. The retrieved
+reading was already a correct answer and is now counted as one. Recall@4 rises
+by one question (material and page) and no other number moves, including the
+gate numbers (wrong-skip and false-retrieve), which do not read the question
+set.
 
 The item 2 column is identical to item 1 by design. `needs_sources` does not
 change the first-pass gate, so the gate numbers cannot show its effect. The
