@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -183,7 +184,12 @@ def test_lecture_notes_folder_syncs_updates_and_removes_sources(tmp_path, monkey
     with pytest.raises(ValueError, match="Course materials cannot be removed"):
         store.delete_source(thread_id, source["id"])
 
+    previous_mtime_ns = note.stat().st_mtime_ns
     note.write_text("Updated lecture evidence with a larger sample.", encoding="utf-8")
+    # The new text has the same byte size as the old text and change detection
+    # compares size and mtime_ns. The filesystem timestamp ticks about every
+    # 10 ms, so a fast rewrite can keep the old mtime. Advance it explicitly.
+    os.utime(note, ns=(previous_mtime_ns + 1_000_000_000,) * 2)
     refreshed = sync_lecture_notes_folder(store, thread_id)
     refreshed_sources = store.list_sources(thread_id)
     assert refreshed.updated == 1
