@@ -1,6 +1,6 @@
 # Retrieval question set
 
-Labelled questions for measuring course-material retrieval (recall@4, wrong-skip, empty-result). Built from the PDFs in `lecture_notes/`. The eval script that reads these files is a separate piece of work.
+Labelled questions for measuring course-material retrieval (recall@4, wrong-skip, empty-result). Built from the PDFs in `lecture_notes/`. `scripts/evals/evaluate_retrieval.py` reads these files (see `docs/RETRIEVAL_EVAL.md`).
 
 | File | Purpose |
 |---|---|
@@ -44,7 +44,7 @@ Retrieval results do not carry `course_material_id`. A `RetrievedChunk` from the
 | `filename` | `RetrievedChunk.title` (the source title is the file name). |
 | `source_id` | `RetrievedChunk.source_id`, which is `backend.sources.library.virtual_course_source_id(object_key)`. |
 
-`RetrievedChunk` has no page field today, so page-level scoring needs page metadata added to retrieval first. Until then score at material level. Whether the Knowledge Base returns page metadata for these PDFs has not been checked.
+`RetrievedChunk` has no page field today. The offline eval gets pages by using one chunk per PDF page, so page-level recall is available offline only. Live Knowledge Base results are scored at material level. Whether the Knowledge Base returns page metadata for these PDFs has not been checked.
 
 ## Coverage
 
@@ -80,7 +80,7 @@ The count of 94 is what the text supports: it spreads questions across every dec
 
 **All 295 messages in `retrieval_gate_messages.synthetic.jsonl` are synthetic.** They were written by hand for this project to look like student messages. None is a real student message, none comes from logs, and wording is cleaner and more on-topic than real traffic. Every row carries `"synthetic": true`, the file name contains `synthetic`, and `tests/domain/test_retrieval_gate_message_set.py` fails if any row is not marked synthetic. The file name drops `.synthetic` only if real, anonymised messages are added later and kept in a separate file.
 
-The set measures the retrieval gate: the logic that decides, before the model is called, whether to retrieve sources for a student message. The eval script that reads it is separate work.
+The set measures the retrieval gate: the logic that decides, before the model is called, whether to retrieve sources for a student message. `scripts/evals/evaluate_retrieval.py` reads it.
 
 | File | Purpose |
 |---|---|
