@@ -27,7 +27,6 @@ from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
 )
-from backend.source_library import add_text_source
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from fake_agentcore_runtime import FakeAgentCoreRuntime

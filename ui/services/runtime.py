@@ -21,7 +21,7 @@ import streamlit as st
 from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 from backend.upload_queue import (
-    PendingSourceUpload, SourceUploadCoordinator, UploadAdmissionError,
+    PendingSourceUpload, SourceUploadCoordinator, UploadAdmissionError,  # noqa: F401 (re-exported via ui.runtime)
 )
 from backend.api_client import LocalApiClient
 from ui.run_memo import invalidate_memo, memoized

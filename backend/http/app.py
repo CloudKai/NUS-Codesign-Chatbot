@@ -42,7 +42,6 @@ from backend.http.notebook_reader import register_notebook_reader
 from backend.upload_queue import SourceUploadCoordinator
 from starlette.concurrency import run_in_threadpool
 from backend.persistence.guest_sessions import GUEST_SESSION_TTL
-from backend.coaching.progress import PROGRESS_LABELS
 from backend.operational_metrics import (
     configure_operational_loggers,
     record_coach_rate_limit,
