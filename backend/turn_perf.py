@@ -91,6 +91,7 @@ SAFE_PERF_FIELDS = frozenset(
         "fast_chat_needs_source_retrieval",
         "source_need_check",
         "source_check_title_count",
+        "local_course_intent_retrieval",
         "upload_retrieval_policy",
         "upload_retrieval_policy_failed",
         "fast_chat_needs_sources",

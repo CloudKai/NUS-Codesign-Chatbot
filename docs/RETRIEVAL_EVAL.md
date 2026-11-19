@@ -398,6 +398,62 @@ questions scored at page level). Read page recall together with coverage. If
 recall@4 (material) is high and page recall is far lower on questions with
 good coverage, suspect an off-by-one numbering before blaming retrieval.
 
+## Local course-intent classifier
+
+Laya is an opt-in FastAPI classifier for ambiguous chat turns with no existing
+evidence route. It scores the current message against course topics and the
+notebook's locked course titles before generation. Existing source selections
+and workflow routes take precedence. When the score meets the configured
+threshold, FastAPI uses the existing course retrieval and grounded Q&A path.
+When the classifier is busy or inference fails, the original gate applies.
+
+Install `laya==0.4.37` in a separate environment with the project
+requirements and download a pinned Laya checkpoint to a local directory.
+The following benchmark blocks sockets and scores the same 169 synthetic rows
+as the Phase 3c wording comparison. It records per-row scores, baseline and
+candidate error rates, model load time, inference p95, and busy abstentions.
+
+```bash
+python scripts/evals/evaluate_course_intent.py \
+  --checkpoint /path/to/checkpoint --json-output /tmp/laya-routing.json
+```
+
+Use `--concurrency` to measure contention and `--threshold` to choose the
+course-evidence cutoff. For a local FastAPI demo, point
+`LOCAL_COURSE_INTENT_CHECKPOINT` at that directory and restart the API in the
+environment where Laya is installed. The default threshold is 0.8. To disable
+the classifier, clear the checkpoint setting and restart the API.
+
+### Fit and evaluate Laya Learn
+
+Use `laya==0.4.38` with `vegaml==0.17.1` in the experiment environment.
+Download a pinned Vega checkpoint and put the matching local reader snapshot
+at `backbone/` inside the checkpoint directory. For the default Vega-U reader,
+use `nandakishorm/vega-U` with `Qwen/Qwen3.5-0.8B`. Both directories must
+include their configuration and weights. The benchmark disables network I/O
+and reads only the checked-in synthetic labels.
+
+```bash
+python -m scripts.evals.evaluate_course_intent_learn \
+  --checkpoint /path/to/vega \
+  --bundle-output /tmp/course-learner.zip \
+  --json-output /tmp/course-learner-eval.json
+```
+
+The script groups linked questions and duplicate messages before splitting into
+training, calibration, and holdout. The learner fits turns eligible for the local classifier. Each model's threshold is chosen on calibration rows under the
+10% false-retrieve target. Holdout metrics include all routes and report whether
+the loaded learner used its fitted head or the Vega engine.
+
+For an opt-in FastAPI demo, set `LOCAL_COURSE_INTENT_CHECKPOINT` to the Vega
+directory and `LOCAL_COURSE_INTENT_LEARNER_BUNDLE` to the generated ZIP.
+Set `LOCAL_COURSE_INTENT_THRESHOLD` to the candidate cutoff under evaluation.
+To use separate calibration for opening questions, set the threshold to the
+reported `learn` value and `LOCAL_COURSE_INTENT_FIRST_TURN_THRESHOLD` to
+`learn_first_turn`. This second cutoff applies until the first student turn
+has been saved. Omitting it uses one cutoff everywhere.
+The API loads a fixed bundle. Fitting and feedback are offline.
+
 ## Run the `needs_sources` eval against the live model (opt-in, costs money)
 
 `--live-model` sends each gate message through the first Fast Chat call on the

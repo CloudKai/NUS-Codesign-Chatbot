@@ -295,8 +295,15 @@ class DeterministicCoachProvider:
         specialist = select_specialist(
             request.student_message, requested=request.specialist
         )
+        course_catalog_qa = (
+            request.expected_response_mode == "qa"
+            and request.retrieval_required
+            and not request.allow_model_knowledge
+            and not request.source_ids
+        )
         if request.interaction_intent == "lecture_help" or (
-            request.interaction_intent is None and specialist == SPECIALIST_QA
+            request.interaction_intent is None
+            and (specialist == SPECIALIST_QA or course_catalog_qa)
         ):
             return self._qa_result(request)
         if requested == SPECIALIST_REVIEW:

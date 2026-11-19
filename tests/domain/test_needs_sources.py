@@ -10,6 +10,7 @@ behaviour of the surrounding application, not a model's judgement.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
@@ -28,6 +29,7 @@ from backend.coaching.execution import (
     source_check_course_titles,
 )
 from backend.domain import CoachRequest
+from backend.course_intent import CourseIntentClassifier
 from backend.learning_service import LearningProgressService
 from backend.mock_provider import DeterministicCoachProvider, mock_flags_needs_sources
 from backend.prompts import compose_coach_prompt
@@ -154,7 +156,12 @@ def _agentcore_service(
     )
 
 
-def _mock_service(store: StudentStore, retriever: Any) -> CoachApplicationService:
+def _mock_service(
+    store: StudentStore,
+    retriever: Any,
+    *,
+    course_intent_classifier: CourseIntentClassifier | None = None,
+) -> CoachApplicationService:
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
     return CoachApplicationService(
@@ -164,7 +171,88 @@ def _mock_service(store: StudentStore, retriever: Any) -> CoachApplicationServic
         LearningProgressService(store, notebooks, transitions),
         auto_advance_stages=False,
         retriever=retriever,
+        course_intent_classifier=course_intent_classifier,
     )
+
+
+class _CourseIntentStub:
+    """Record routing calls and return a fixed score or a failure."""
+
+    def __init__(self, value: float | None | Exception) -> None:
+        self.value = value
+        self.messages: list[str] = []
+
+    def score(
+        self, message: str, history: Sequence[Mapping[str, Any]], titles: Sequence[str]
+    ) -> float | None:
+        self.messages.append(message)
+        assert titles == ["Week 2 JTBD"]
+        if isinstance(self.value, Exception):
+            raise self.value
+        return self.value
+
+
+@pytest.mark.parametrize("score", [0.95, 0.2, None, RuntimeError("unavailable")])
+def test_local_course_classifier_routes_ambiguous_turns_before_generation(
+    tmp_path, monkeypatch, score: float | None | Exception
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "local_course_intent_threshold", 0.8)
+    retriever = _CourseRetriever()
+    classifier = _CourseIntentStub(score)
+    coach = _mock_service(store, retriever, course_intent_classifier=classifier)
+    prepared = coach._authoritative_request(
+        _request(thread_id, _NO_CUE_COURSE_QUESTION, "local-course-test")
+    )
+    assert classifier.messages == [_NO_CUE_COURSE_QUESTION]
+    assert len(retriever.queries) == int(score == 0.95)
+    assert prepared.allow_model_knowledge is (score != 0.95)
+    if score == 0.95:
+        assert prepared.expected_response_mode == "qa"
+        assert prepared.retrieved_chunks
+
+
+@pytest.mark.parametrize("prior_student_turn", [False, True])
+def test_first_turn_cutoff_uses_persisted_student_history(
+    tmp_path, monkeypatch, prior_student_turn: bool
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    store.add_message(thread_id, "assistant", "Welcome to your notebook.")
+    if prior_student_turn:
+        store.add_message(thread_id, "user", "I have a project idea.")
+    monkeypatch.setattr(settings, "local_course_intent_threshold", 0.85)
+    monkeypatch.setattr(settings, "local_course_intent_first_turn_threshold", 0.65)
+    retriever = _CourseRetriever()
+    classifier = _CourseIntentStub(0.70)
+    coach = _mock_service(store, retriever, course_intent_classifier=classifier)
+    coach._authoritative_request(_request(thread_id, _NO_CUE_COURSE_QUESTION, "cutoff"))
+    assert classifier.messages == [_NO_CUE_COURSE_QUESTION]
+    assert bool(retriever.queries) == (not prior_student_turn)
+
+
+def test_local_course_classifier_returns_grounded_qa_without_stage_transition(
+    tmp_path, monkeypatch
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    coach = _mock_service(
+        store, _CourseRetriever(), course_intent_classifier=_CourseIntentStub(0.99)
+    )
+    turn = coach.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "local-course-reply"))
+    assert turn.assessment.response_mode == "qa"
+    assert turn.assessment.citations
+    assert turn.pending_transition is None
+    assert turn.auto_advanced_to is None
+
+
+@pytest.mark.parametrize("message", ["hello", "what stage am I in?", "what is covered in Week 2?"])
+def test_existing_route_bypasses_local_course_classifier(
+    tmp_path, monkeypatch, message: str
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    classifier = _CourseIntentStub(1.0)
+    coach = _mock_service(store, _CourseRetriever(), course_intent_classifier=classifier)
+    coach._authoritative_request(_request(thread_id, message, "local-course-bypass"))
+    assert classifier.messages == []
 
 
 def _request(thread_id: str, message: str, key: str) -> CoachRequest:

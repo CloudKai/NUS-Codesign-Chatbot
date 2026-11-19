@@ -381,6 +381,19 @@ class Settings:
     fast_chat_source_check_titles_enabled: bool = _boolean(
         "FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED", False
     )
+    local_course_intent_checkpoint: str = os.getenv(
+        "LOCAL_COURSE_INTENT_CHECKPOINT", ""
+    ).strip()
+    local_course_intent_learner_bundle: str = os.getenv(
+        "LOCAL_COURSE_INTENT_LEARNER_BUNDLE", ""
+    ).strip()
+    local_course_intent_threshold: float = _unit_interval(
+        "LOCAL_COURSE_INTENT_THRESHOLD", 0.8
+    )
+    local_course_intent_first_turn_threshold: float | None = (
+        _unit_interval("LOCAL_COURSE_INTENT_FIRST_TURN_THRESHOLD", local_course_intent_threshold)
+        if os.getenv("LOCAL_COURSE_INTENT_FIRST_TURN_THRESHOLD", "").strip() else None
+    )
     # Search the selected student uploads when the regex gate skipped
     # retrieval and the turn is not navigation or chit-chat. The excerpt
     # ranking is local (no Bedrock or Knowledge Base call), but loading the

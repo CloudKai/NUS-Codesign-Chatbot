@@ -1,0 +1,1728 @@
+{
+  "checkpoint": "/tmp/codesign-laya.fa6Lgo/hf/hub/models--convaiinnovations--laya-multilingual/snapshots/92d22143468d8af669dc1a5a0480a2b21b4fe56e",
+  "rows_evaluated": 169,
+  "threshold": 0.8,
+  "concurrency": 8,
+  "load_ms": 6271.29,
+  "wall_seconds": 0.35,
+  "inferences": 1,
+  "busy_abstentions": 93,
+  "inference_p95_ms": 349.55,
+  "baseline": {
+    "wrong_skip": {
+      "numerator": 73,
+      "denominator": 109,
+      "rate": 0.6697
+    },
+    "false_retrieve": {
+      "numerator": 2,
+      "denominator": 60,
+      "rate": 0.0333
+    }
+  },
+  "with_laya": {
+    "wrong_skip": {
+      "numerator": 73,
+      "denominator": 109,
+      "rate": 0.6697
+    },
+    "false_retrieve": {
+      "numerator": 2,
+      "denominator": 60,
+      "rate": 0.0333
+    },
+    "promoted_outside_course_scope": 0
+  },
+  "rows": [
+    {
+      "id": "gm001",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": 0.5685,
+      "classifier_ms": 349.54658299830044,
+      "promoted": false
+    },
+    {
+      "id": "gm002",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm003",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0012089949450455606,
+      "promoted": false
+    },
+    {
+      "id": "gm004",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0006249974831007421,
+      "promoted": false
+    },
+    {
+      "id": "gm005",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0017079946701414883,
+      "promoted": false
+    },
+    {
+      "id": "gm006",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm007",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0012499949662014842,
+      "promoted": false
+    },
+    {
+      "id": "gm008",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0006249974831007421,
+      "promoted": false
+    },
+    {
+      "id": "gm009",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm010",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0036659985198639333,
+      "promoted": false
+    },
+    {
+      "id": "gm011",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033300602808594704,
+      "promoted": false
+    },
+    {
+      "id": "gm012",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033300602808594704,
+      "promoted": false
+    },
+    {
+      "id": "gm013",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm014",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm015",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.002583001332823187,
+      "promoted": false
+    },
+    {
+      "id": "gm016",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0008330025593750179,
+      "promoted": false
+    },
+    {
+      "id": "gm017",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm018",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm019",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm020",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm021",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0007499984349124134,
+      "promoted": false
+    },
+    {
+      "id": "gm022",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00037500285543501377,
+      "promoted": false
+    },
+    {
+      "id": "gm023",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.000333995558321476,
+      "promoted": false
+    },
+    {
+      "id": "gm024",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm025",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm026",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033299875212833285,
+      "promoted": false
+    },
+    {
+      "id": "gm027",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm028",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm029",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm030",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00037500285543501377,
+      "promoted": false
+    },
+    {
+      "id": "gm031",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm032",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm033",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002910019247792661,
+      "promoted": false
+    },
+    {
+      "id": "gm034",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm035",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00024999462766572833,
+      "promoted": false
+    },
+    {
+      "id": "gm036",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm037",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm038",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm039",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033299875212833285,
+      "promoted": false
+    },
+    {
+      "id": "gm040",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033400283427909017,
+      "promoted": false
+    },
+    {
+      "id": "gm041",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm042",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm043",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029099464882165194,
+      "promoted": false
+    },
+    {
+      "id": "gm044",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm045",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002079978003166616,
+      "promoted": false
+    },
+    {
+      "id": "gm046",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm047",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm048",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm049",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm050",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.001957996573764831,
+      "promoted": false
+    },
+    {
+      "id": "gm051",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm052",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0010410003596916795,
+      "promoted": false
+    },
+    {
+      "id": "gm053",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.003082997864112258,
+      "promoted": false
+    },
+    {
+      "id": "gm054",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.001167005393654108,
+      "promoted": false
+    },
+    {
+      "id": "gm055",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.000667001586407423,
+      "promoted": false
+    },
+    {
+      "id": "gm056",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0007080016075633466,
+      "promoted": false
+    },
+    {
+      "id": "gm057",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.001500004145782441,
+      "promoted": false
+    },
+    {
+      "id": "gm058",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0004169996827840805,
+      "promoted": false
+    },
+    {
+      "id": "gm059",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm060",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.000500003807246685,
+      "promoted": false
+    },
+    {
+      "id": "gm061",
+      "category": "course_content",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm062",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033400283427909017,
+      "promoted": false
+    },
+    {
+      "id": "gm063",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00024999462766572833,
+      "promoted": false
+    },
+    {
+      "id": "gm064",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm065",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm066",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002910019247792661,
+      "promoted": false
+    },
+    {
+      "id": "gm067",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm068",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033400283427909017,
+      "promoted": false
+    },
+    {
+      "id": "gm069",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033299875212833285,
+      "promoted": false
+    },
+    {
+      "id": "gm070",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00024999462766572833,
+      "promoted": false
+    },
+    {
+      "id": "gm071",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm072",
+      "category": "course_logistics",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002090018824674189,
+      "promoted": false
+    },
+    {
+      "id": "gm086",
+      "category": "informal_or_multilingual",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0004159956006333232,
+      "promoted": false
+    },
+    {
+      "id": "gm087",
+      "category": "informal_or_multilingual",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm088",
+      "category": "informal_or_multilingual",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0028330032364465296,
+      "promoted": false
+    },
+    {
+      "id": "gm089",
+      "category": "informal_or_multilingual",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.000833999365568161,
+      "promoted": false
+    },
+    {
+      "id": "gm090",
+      "category": "informal_or_multilingual",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033400283427909017,
+      "promoted": false
+    },
+    {
+      "id": "gm091",
+      "category": "informal_or_multilingual",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033299875212833285,
+      "promoted": false
+    },
+    {
+      "id": "gm092",
+      "category": "informal_or_multilingual",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033300602808594704,
+      "promoted": false
+    },
+    {
+      "id": "gm093",
+      "category": "informal_or_multilingual",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm097",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm098",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm099",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm100",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm101",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm102",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm103",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm104",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm105",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm106",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm107",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm108",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm109",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm110",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm111",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm112",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm113",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm114",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm115",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm116",
+      "category": "upload_question",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm146",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm148",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm150",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm153",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0011250012903474271,
+      "promoted": false
+    },
+    {
+      "id": "gm155",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0005419933586381376,
+      "promoted": false
+    },
+    {
+      "id": "gm157",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm160",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0004169996827840805,
+      "promoted": false
+    },
+    {
+      "id": "gm162",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033400283427909017,
+      "promoted": false
+    },
+    {
+      "id": "gm164",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm167",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm169",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033300602808594704,
+      "promoted": false
+    },
+    {
+      "id": "gm171",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm174",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm176",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm178",
+      "category": "greeting_thanks_chitchat",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm181",
+      "category": "procedural_ui",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029200600693002343,
+      "promoted": false
+    },
+    {
+      "id": "gm183",
+      "category": "procedural_ui",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm185",
+      "category": "procedural_ui",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm188",
+      "category": "procedural_ui",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm190",
+      "category": "procedural_ui",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029099464882165194,
+      "promoted": false
+    },
+    {
+      "id": "gm193",
+      "category": "procedural_ui",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029200600693002343,
+      "promoted": false
+    },
+    {
+      "id": "gm195",
+      "category": "procedural_ui",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm197",
+      "category": "procedural_ui",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002910019247792661,
+      "promoted": false
+    },
+    {
+      "id": "gm200",
+      "category": "stage_navigation",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm202",
+      "category": "stage_navigation",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm204",
+      "category": "stage_navigation",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm207",
+      "category": "stage_navigation",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm209",
+      "category": "stage_navigation",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm211",
+      "category": "stage_meta_guidance",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm214",
+      "category": "stage_meta_guidance",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm216",
+      "category": "stage_meta_guidance",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm218",
+      "category": "stage_meta_guidance",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm221",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm223",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0004579997039400041,
+      "promoted": false
+    },
+    {
+      "id": "gm225",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm228",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033299875212833285,
+      "promoted": false
+    },
+    {
+      "id": "gm230",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033299875212833285,
+      "promoted": false
+    },
+    {
+      "id": "gm232",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm235",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm237",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm240",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm242",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm244",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm247",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002910019247792661,
+      "promoted": false
+    },
+    {
+      "id": "gm249",
+      "category": "project_reasoning",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm251",
+      "category": "project_mentions_course",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00037500285543501377,
+      "promoted": false
+    },
+    {
+      "id": "gm254",
+      "category": "project_mentions_course",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002910019247792661,
+      "promoted": false
+    },
+    {
+      "id": "gm256",
+      "category": "project_mentions_course",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm258",
+      "category": "project_mentions_course",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00020800507627427578,
+      "promoted": false
+    },
+    {
+      "id": "gm260",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00024999462766572833,
+      "promoted": false
+    },
+    {
+      "id": "gm261",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm262",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029099464882165194,
+      "promoted": false
+    },
+    {
+      "id": "gm263",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0003749955794773996,
+      "promoted": false
+    },
+    {
+      "id": "gm264",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm265",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": true,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm266",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "course",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm267",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm268",
+      "category": "follow_up",
+      "expected": "retrieve",
+      "expected_scope": "student_upload",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm270",
+      "category": "follow_up",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033299875212833285,
+      "promoted": false
+    },
+    {
+      "id": "gm272",
+      "category": "follow_up",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029200600693002343,
+      "promoted": false
+    },
+    {
+      "id": "gm274",
+      "category": "follow_up",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002500019036233425,
+      "promoted": false
+    },
+    {
+      "id": "gm277",
+      "category": "ambiguous_generic",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": null,
+      "promoted": false
+    },
+    {
+      "id": "gm279",
+      "category": "ambiguous_generic",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00033299875212833285,
+      "promoted": false
+    },
+    {
+      "id": "gm281",
+      "category": "ambiguous_generic",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0002090018824674189,
+      "promoted": false
+    },
+    {
+      "id": "gm284",
+      "category": "ambiguous_generic",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00024999462766572833,
+      "promoted": false
+    },
+    {
+      "id": "gm286",
+      "category": "out_of_scope",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00029199873097240925,
+      "promoted": false
+    },
+    {
+      "id": "gm288",
+      "category": "out_of_scope",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.00024999462766572833,
+      "promoted": false
+    },
+    {
+      "id": "gm291",
+      "category": "not_in_course_material",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.0004159956006333232,
+      "promoted": false
+    },
+    {
+      "id": "gm293",
+      "category": "not_in_course_material",
+      "expected": "skip",
+      "expected_scope": "none",
+      "baseline_retrieve": false,
+      "course_score": null,
+      "classifier_ms": 0.000500003807246685,
+      "promoted": false
+    }
+  ]
+}

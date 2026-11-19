@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from backend.context_planner import memory_from_metadata
+from backend.course_intent import CourseIntentClassifier, is_first_student_turn
 from backend.coaching.deep_review_context import (
     DEEP_REVIEW_CHECKPOINT_VERSION,
     bind_supporting_message_ids,
@@ -33,7 +34,7 @@ from backend.coaching.mode_policy import (
     resolve_mode_policy,
     should_author_qa_evidence_gap,
 )
-from backend.retrieval_gate import classify_retrieval_intent
+from backend.retrieval_gate import INTENT_AMBIGUOUS, classify_retrieval_intent
 from backend.specialists.routing import looks_like_course_question
 from backend.coaching.workflow_navigation import (
     apply_progression_effect,
@@ -334,6 +335,18 @@ def is_chit_chat(student_message: str) -> bool:
     return is_greeting_or_acknowledgement(
         student_message
     ) and not looks_like_information_request(student_message)
+
+
+def local_course_intent_candidate(
+    message: str, *, intent: str, evidence_scoped: bool, searched: bool
+) -> bool:
+    """Allow local classification only on ambiguous turns with no evidence route."""
+    return (
+        intent == INTENT_AMBIGUOUS
+        and not evidence_scoped
+        and not searched
+        and not is_chit_chat(message)
+    )
 
 
 def _wants_student_upload_retrieval(
@@ -753,6 +766,7 @@ class CoachApplicationService:
         auto_advance_stages: bool = False,
         retriever: ContextRetriever | None = None,
         generation_admission: GenerationAdmission | None = None,
+        course_intent_classifier: CourseIntentClassifier | None = None,
     ) -> None:
         self._store = store
         self._notebooks = notebooks
@@ -761,6 +775,7 @@ class CoachApplicationService:
         self._auto_advance_stages = auto_advance_stages
         self._retriever = retriever or LocalChunkRetriever()
         self._generation_admission = generation_admission or configured_generation_admission()
+        self._course_intent_classifier = course_intent_classifier
 
     def _rate_limit_user_key(self) -> str:
         """Return the authenticated store owner key for coach rate limiting.
@@ -3211,6 +3226,32 @@ class CoachApplicationService:
             or attachment_only_question
             or missing_image_qa
         )
+        if self._course_intent_classifier is not None and local_course_intent_candidate(
+            request.student_message,
+            intent=mode_policy.intent,
+            evidence_scoped=bool(
+                evidence_scoped or effective_source_ids or request.interaction_intent
+                or frozen_history_revision is not None
+            ),
+            searched=include_course_catalog,
+        ):
+            titles = source_check_course_titles(snapshot.visible_sources)
+            if titles:
+                try:
+                    score = self._course_intent_classifier.score(
+                        request.student_message, store_history, titles
+                    )
+                except Exception as exc:
+                    logger.warning("local_course_intent_failed category=%s", type(exc).__name__)
+                    score = None
+                cutoff = runtime_settings.local_course_intent_threshold
+                first_cutoff = runtime_settings.local_course_intent_first_turn_threshold
+                if first_cutoff is not None and is_first_student_turn(store_history):
+                    cutoff = first_cutoff
+                if score is not None and score >= cutoff:
+                    include_course_catalog = needs_retrieval = True
+                    mode_policy = replace(mode_policy, expected_mode="qa", retrieve=True)
+                    record_field("local_course_intent_retrieval", True)
         # Local student-upload search on gate skips (opt-in). Decided after
         # the course-catalog step, so it can never add the Knowledge Base:
         # hydration below keeps include_course_catalog false.

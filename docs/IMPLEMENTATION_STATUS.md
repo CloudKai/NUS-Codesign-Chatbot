@@ -2,6 +2,74 @@
 
 ## Current status
 
+### First-turn calibration for Laya Learn
+
+The pilot can use a separate cutoff before the first saved student message.
+Offline calibration on 61 synthetic rows chose 0.6455845832824707 for opening
+turns and 0.8563768182025443 thereafter. On the same 84-row comparison set,
+wrong-skips fell from 18/51 to 15/51 (29.4%) with 2/33 false retrieves
+(6.1%) in both runs. This set was previously examined. On 19 additional
+course questions with IDs absent from the gate corpus, misses fell from two
+to one. All 19 required retrieval. On the separate 12 follow-ups both
+policies missed 1/9 retrieve cases and falsely retrieved on 0/3 skip cases.
+
+A trial using shorter turn inputs and 121 training examples missed 22/51
+on the main comparison, so the pilot retains the original learner format
+and 76-example training set. Serial CPU inference p95 was 932 ms in the
+final run. Focused tests and the full mock build passed. The change requires
+no data migration. Clear `LOCAL_COURSE_INTENT_FIRST_TURN_THRESHOLD` to return
+to the single cutoff. The classroom feature remains disabled. The pilot did
+not reach the 25% wrong-skip target. Proceed to Phase 4 streaming with the
+existing classroom gate. [Evaluation instructions](RETRIEVAL_EVAL.md#fit-and-evaluate-laya-learn)
+
+### Laya Learn retrieval pilot
+
+The local FastAPI classifier can load a fixed Laya Learn bundle. The
+benchmark fitted on 76 eligible synthetic messages from the training split,
+selected cutoffs on 61 calibration rows, then evaluated 84 held-out rows.
+Question IDs and duplicate messages stay within one split. On holdout, the
+existing gate and frozen Vega both missed 24/51 retrieve cases (47.1%).
+The learned head missed 18/51 (35.3%), with false retrieves steady at 2/33
+(6.1%). The learned head was used for all 41 eligible holdout turns. Its
+CPU inference p95 was 1.09 seconds on the development Mac.
+
+Focused tests and the full mock build passed. A disposable FastAPI run loaded
+the real fitted bundle, returned cited course Q&A with mock generation, and
+replayed the saved turn after restart. The learned classifier needs no data
+migration and builds its bundle from synthetic labels. To roll back an
+opt-in process, clear the checkpoint and bundle settings and restart
+FastAPI. Keep this pilot disabled for classroom use because it missed the
+25% wrong-skip target. If work resumes, test on independently labelled
+course questions and measure concurrency on the intended host.
+[Fitting and configuration](RETRIEVAL_EVAL.md#fit-and-evaluate-laya-learn)
+
+### Local Laya retrieval pilot
+
+FastAPI can use a local Laya checkpoint to route ambiguous chat turns to the
+existing course retrieval and grounded Q&A path. A missing checkpoint setting
+keeps the existing gate. Existing evidence scopes take precedence and a busy
+or failed classifier falls back to the existing gate.
+
+On the same 169 synthetic Phase 3c rows with a 0.8 cutoff, the gate missed
+73/109 retrieve cases and falsely retrieved 2/60 skip cases. Laya
+typed-decisions also missed 73/109. Multilingual Laya missed 62/109 and
+kept false-retrieves at 2/60. CPU inference p95 was 450 ms and 211 ms,
+respectively, on the development Mac. With eight benchmark workers, the
+single-slot multilingual classifier bypassed 93/94 eligible requests in an
+unpaced burst. A retrospective threshold sweep still missed at least 42/109
+with false-retrieves below 10%. Neither checkpoint met the 25% wrong-skip
+target.
+
+The frontend build, compilation, and full mock suite passed. A disposable
+FastAPI run using the real multilingual checkpoint and the mock response
+provider retrieved a local lecture excerpt, returned cited Q&A, and replayed
+the saved turn after an API restart. No migration is required. To roll back
+an opt-in process, clear
+`LOCAL_COURSE_INTENT_CHECKPOINT` and restart FastAPI. Keep the pilot disabled
+for classroom use. If routing work resumes, use the local benchmark and a
+held-out set for a course-trained classifier, then repeat burst testing on
+the intended host. [Benchmark and configuration](RETRIEVAL_EVAL.md#local-course-intent-classifier)
+
 ### Local workspace
 
 React serves the student workspace at `/`, with `/pilot/` as an alias.
