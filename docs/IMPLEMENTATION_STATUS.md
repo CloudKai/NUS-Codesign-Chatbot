@@ -2,6 +2,40 @@
 
 ## Current status
 
+### AgentCore vs direct Converse benchmark harness (Phase 4 item 5, built, not run)
+
+New script `scripts/evals/benchmark_agentcore_vs_converse.py`; no new setting, no
+backend change. **No live command was run**: the harness was built and tested with
+stub clients only (script run: 41 new tests in
+`tests/scripts/test_benchmark_agentcore_vs_converse.py`). Full write-up (exact
+paths, commands, IAM, cap counting, cost estimate): `docs/RETRIEVAL_EVAL.md`,
+"AgentCore vs direct Bedrock Converse benchmark".
+
+- **Turn set.** The existing synthetic gate messages, rows `i * 295 // 50`
+  (`evenly_spaced_indices`), 50 turns, pinned by SHA-256 of the id list so a dataset
+  change fails loudly. No new data file.
+- **Paths.** `InvokeAgentRuntime` with the Fast Chat payload vs `Converse` (or
+  `ConverseStream` with `--converse-stream`) with the same payload, system prompt,
+  history and forced `FastChatTurnOutput` tool, both validated by
+  `_validated_fast_chat`. The Converse arm has no guardrail, event loop or recovery turn.
+- **Measures.** `total_ms`, `first_text_ms` (equal to total unless `--converse-stream`;
+  AgentCore cannot show early text), input/output/cache-read/cache-write tokens as
+  reported (missing is `null`, not zero), parse failures vs call failures, estimated
+  model-token cost.
+- **Safety.** Refuses with exit 2 before any client is built without `--live-benchmark`
+  and `--max-live-calls` (1 to 100, one shared counter over both paths, 2 calls per turn).
+  Stops after the first auth or access error. Records exception classes, exit code and
+  a `run` block (git SHA, UTC timestamp); never message text.
+- **IAM (documented, not tested in an account).** AgentCore: `bedrock-agentcore:InvokeAgentRuntime`
+  on the runtime ARN and its `runtime-endpoint/DEFAULT` ARN. Converse: `bedrock:InvokeModel` on the
+  three global-profile resources (Phase 3c report section 9.3); `InvokeModelWithResponseStream` too
+  for `--converse-stream`.
+- **Cost (estimate, hand arithmetic).** About $0.0086 per call at $1/$5 per million tokens and
+  7,100 in / 300 out; about $0.86 for the full 100 calls, range $0.3 to $1.3. Prices are from
+  third-party pages and unconfirmed on the AWS page.
+- **Rollback.** Delete the script, its test and the docs rows. Nothing else depends on them.
+- **Next action.** The user decides whether to run the smoke (cap 2) and then the full run.
+
 ### Reply text streaming (Phase 4 item 4, partly blocked)
 
 New setting `COACH_STREAM_REPLY_DELTAS_ENABLED` (default off, in `.env.example`).

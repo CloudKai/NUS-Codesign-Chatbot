@@ -1242,3 +1242,227 @@ parts and gaps:
 
 Related open decision (not implemented): labelling answers on course Q&A turns
 where no search ran as general, not from course materials.
+
+## AgentCore vs direct Bedrock Converse benchmark (Phase 4 item 5, built, not run)
+
+`scripts/evals/benchmark_agentcore_vs_converse.py` sends the same 50 fixed turns
+through two paths and records latency, tokens, parse failures and an estimated
+cost. It is a paid live tool. **It has not been run.** No AWS, Bedrock or
+AgentCore call was made while building it; its tests (`tests/scripts/test_benchmark_agentcore_vs_converse.py`,
+41 tests, script run) use stub clients and fail if a real client is built. It
+lives beside `evaluate_retrieval.py` because it reuses that script's gate, request
+builder, Converse bridge, failure labels and run metadata. This document is the
+home for it because the turns and the Fast Chat call come from the retrieval eval.
+
+### The 50 turns (decision recorded)
+
+Choice: derive them from the existing gate dataset, not a new file.
+`select_benchmark_turns` takes `evenly_spaced_indices(295, 50)` over
+`retrieval_gate_messages.synthetic.jsonl` in file order (row `i * 295 // 50`).
+Every row is marked `synthetic: true`. The id list is pinned by SHA-256
+(`TURN_IDS_SHA256`, first 12 characters `a79b9d5a5c9f`); the script refuses to
+run if the dataset ever yields a different list. Deterministic: no random seed,
+no clock, no network.
+
+Composition (script run): 18 of the 19 categories (none from `not_in_course_material`);
+11 `course_content`, 6 `greeting_thanks_chitchat`, 5 `project_reasoning`, the rest 1 to 3 each;
+27 labelled `retrieve` and 23 `skip`. Three turns carry history, three carry
+attachments, five have selected sources (script run). The set is not a sample of
+real student traffic; it is a fixed, repeatable mix of turn shapes.
+
+Both paths get the turn as `evaluate_retrieval --live-model` builds it, with
+`source_need_check` off (production with `FAST_CHAT_NEEDS_SOURCES_ENABLED` off) and
+no retrieved excerpts attached.
+
+### Exact paths compared
+
+| | AgentCore path | Direct Converse path |
+|---|---|---|
+| Call | `bedrock-agentcore` `invoke_agent_runtime(agentRuntimeArn=AGENTCORE_RUNTIME_ARN, qualifier=AGENTCORE_QUALIFIER, runtimeSessionId=stateless-<uuid>, payload=<Fast Chat payload JSON>, accept=application/json)` | `bedrock-runtime` `converse(modelId=COACHING_MODEL_ID, ...)`, or `converse_stream` with `--converse-stream` |
+| Prompt and history | Built inside the runtime from the payload (`agent_system_prompt`) | The same payload through `LiveFastChatBridge.request_kwargs`; system prompt from `agent_system_prompt`, so the prefix cache point appears exactly when `FAST_CHAT_PROMPT_CACHE_ENABLED` is true in the benchmark process |
+| Structured output | Strands agent, forced `FastChatTurnOutput` tool, up to 2 generations | Forced `toolChoice: {"any": {}}` with the same inlined `FastChatTurnOutput` schema, one generation |
+| Extras | Bedrock guardrail on the output, event loop, recovery turn | None |
+| Check | `_payload_from_runtime_response` then `_validated_fast_chat` | `LiveFastChatBridge.invoke` then `_validated_fast_chat` |
+| Retries | `total_max_attempts` 1 | `total_max_attempts` 1 |
+
+The differences in the last rows are the thing being priced, so they stay.
+Both calls go to the model in `COACHING_MODEL_ID` only if the runtime is
+configured with the same model; the result records the runtime's reported model id
+(`runtime_model_ids_seen`) so a mismatch is visible.
+
+What the numbers mean:
+
+- `total_ms`: from just before the call to the complete response body, before
+  local validation. Client-side wall time, including network and any runtime cold start.
+- `first_text_ms`: equals `total_ms` for both paths by default, and the row says
+  so (`first_text_basis`). The runtime returns one JSON object and a non-streaming
+  Converse call returns one response, so neither can show text early (Phase 4
+  item 4). `--converse-stream` makes the Converse arm report the time of the first
+  `response_text` fragment. The AgentCore arm cannot. The runtime also reports
+  its own `model_first_reply_text_ms`, recorded as `runtime_first_reply_text_ms`
+  (inside the runtime, excludes network and cold start).
+- Tokens: what each path reports. AgentCore: `model_input_tokens`,
+  `model_output_tokens`, `cache_read_input_tokens`, `cache_write_input_tokens`
+  from the runtime payload. Converse: `usage.inputTokens`, `outputTokens`,
+  `cacheReadInputTokens`, `cacheWriteInputTokens`. A missing figure is `null`
+  and the row is not priced; it is never counted as zero.
+- Parse failure: no valid `FastChatTurnOutput` tool call, or a reply the Fast Chat
+  contract rejects. Any other failed call (throttling, timeout, access) is a
+  call failure. Failed calls still count against the cap.
+- Order: even turns send AgentCore first, odd turns Converse first, so a prompt
+  cache written by one path does not always benefit the same path. Both paths use
+  the same model and prefix, so the second call of a turn can read what the first
+  wrote. Cached-token comparisons are indicative, not clean.
+
+### How `--max-live-calls` counts
+
+One counter is shared by both paths and counts every call, successful or not.
+Each turn costs 2 calls. A cap of N sends `N // 2` turns, evenly spaced over the
+50 (`turns_for_limit`), so a pair is never split and an odd leftover call is not
+used. N must be 1 to 100; the script also refuses N=1 because one turn needs 2.
+
+| `--max-live-calls` | Turns | Calls |
+|---|---|---|
+| 2 | 1 | 2 (one AgentCore, one Converse) |
+| 10 | 5 | 10 |
+| 40 | 20 | 40 |
+| 100 | 50 (the full set) | 100 (50 per path) |
+
+The cap counts invokes, not model calls: the AgentCore runtime can make a second
+model call inside one invoke (recovery turn). That second call is not capped by
+the script; it appears in the reported tokens and in `runtime_cycle_count`.
+
+### Safety rules
+
+- Without `--max-live-calls`, or without `--live-benchmark`, the script prints
+  `refused: ...` and exits 2 before any client is built. `--max-live-calls` outside
+  1 to 100 also exits 2.
+- It also refuses (exit 2, before any client) when `COACHING_MODEL_PROVIDER` is not
+  `bedrock`, `COACHING_MODEL_ID` is not a Haiku model, the region is empty,
+  `AGENTCORE_RUNTIME_ARN` is missing or not a `runtime/` ARN, or `AWS_REGION` differs
+  from the region in that ARN.
+- It stops after the first auth or access error in either path, records the first
+  failure's exception class (and AWS error code), the exit code and a `run` block
+  (git SHA, dirty flag, UTC timestamp). No message, reply or tool-input text is
+  stored or printed in errors.
+- Exit codes: 0 ran, 1 every call failed, 2 refused, 3 stopped early on an auth or
+  access error. `--dry-run` (still needs `--max-live-calls`) prints the turn ids and
+  the call count, builds no client.
+
+### Exact commands
+
+Run from the repo root with a Python environment that has `boto3`, the credentials
+of an identity that holds the IAM below, and the production settings in the
+environment (`COACHING_MODEL_PROVIDER=bedrock`, `COACHING_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`,
+`AGENTCORE_RUNTIME_ARN`, `AGENTCORE_QUALIFIER`, `AWS_REGION=us-west-2`,
+`AGENTCORE_MODEL_REGION=us-west-2`). Set `FAST_CHAT_PROMPT_CACHE_ENABLED` to the same
+value as the deployed runtime. Do not run these without approval.
+
+```sh
+# 1. Free check of the plan: no client, no call.
+python scripts/evals/benchmark_agentcore_vs_converse.py --dry-run --max-live-calls 100
+
+# 2. Smoke: 1 turn, 2 calls (one per path).
+python scripts/evals/benchmark_agentcore_vs_converse.py --live-benchmark \
+  --max-live-calls 2 --json-output .agents/tasks/phase4-work/bench-smoke.json
+
+# 3. Full set: 50 turns, 100 calls.
+python scripts/evals/benchmark_agentcore_vs_converse.py --live-benchmark \
+  --max-live-calls 100 --json-output .agents/tasks/phase4-work/bench-full.json
+
+# 4. Same, with a measured first-text time on the Converse arm (needs the extra IAM action).
+python scripts/evals/benchmark_agentcore_vs_converse.py --live-benchmark --converse-stream \
+  --max-live-calls 100 --json-output .agents/tasks/phase4-work/bench-full-stream.json
+```
+
+### IAM required, per path
+
+Not tested against a real account. Both paths use the credentials of whoever runs
+the script; the runtime role's own grants do not apply to the caller.
+
+**AgentCore path.** Action `bedrock-agentcore:InvokeAgentRuntime`. The AWS service
+authorization reference lists two resource types for this action, `runtime`
+(`arn:${Partition}:bedrock-agentcore:${Region}:${Account}:runtime/${RuntimeId}`) and
+`runtime-endpoint` (`.../runtime/${RuntimeId}/runtime-endpoint/${Name}`). Grant both,
+with the endpoint the qualifier names (`DEFAULT` here). The repo's own deployment
+notes say the same ("runtime ... and its `DEFAULT` endpoint",
+`docs/deploy/AWS_STATELESS_EC2.md` IAM section; `docs/SECURITY_BOUNDARIES.md`).
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "bedrock-agentcore:InvokeAgentRuntime",
+  "Resource": [
+    "arn:aws:bedrock-agentcore:us-west-2:<ACCOUNT>:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7",
+    "arn:aws:bedrock-agentcore:us-west-2:<ACCOUNT>:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7/runtime-endpoint/DEFAULT"
+  ]
+}
+```
+
+Per `docs/SECURITY_BOUNDARIES.md`, this action is a privileged generation backdoor
+(the runtime dispatches on `phase`); give it only to a short-lived operator
+identity, and remove it afterwards. The script sends `phase=fast_chat` only.
+Sources: [Service authorization reference, Amazon Bedrock AgentCore](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonbedrockagentcore.html),
+[InvokeAgentRuntime API](https://docs.aws.amazon.com/bedrock-agentcore/latest/APIReference/API_InvokeAgentRuntime.html).
+
+**Converse path.** Action `bedrock:InvokeModel` (it authorises `Converse`;
+[Converse API guide](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html)).
+The model id is a global cross-Region inference profile, so it needs the
+three-resource form from the Phase 3c report section 9.3 (which cites the
+[global cross-Region inference page](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html)):
+
+1. `arn:aws:bedrock:us-west-2:<ACCOUNT>:inference-profile/global.anthropic.claude-haiku-4-5-20251001-v1:0`
+2. `arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`, with condition `bedrock:InferenceProfileArn` equal to resource 1 (and `aws:RequestedRegion` = `us-west-2`)
+3. `arn:aws:bedrock:::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0`, with condition `bedrock:InferenceProfileArn` equal to resource 1 and `aws:RequestedRegion` = `unspecified`
+
+With `--converse-stream`, add `bedrock:InvokeModelWithResponseStream` on the same
+three resources (AWS: ConverseStream needs that action, Converse needs `InvokeModel`).
+
+### Cost estimate (estimate, not a measurement)
+
+Prices (estimate; confirm on the [AWS Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/),
+which did not render when I looked): Claude Haiku 4.5 on the `global.` profile
+$1.00 per million input and $5.00 per million output tokens, from third-party
+pages ([Usage AI](https://instances.usage.ai/ai/claude-haiku-4-5),
+[TypingMind](https://custom.typingmind.com/tools/estimate-llm-usage-costs/amazon-bedrock/anthropic-claude-haiku-4-5-20251001-v1-0));
+cache read at 0.1x and cache write at 1.25x the input rate (assumed from Anthropic's published ratios;
+a [Requesty page](https://www.requesty.ai/models/bedrock/claude-haiku-4-5-eu-west-3) shows a $0.11
+cache read for the $1.10 regional price, which fits 0.1x). AWS says only that cached tokens are billed at
+separate rates ([prompt caching](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html)).
+AgentCore Runtime compute: the example on the [AgentCore pricing page](https://aws.amazon.com/bedrock/agentcore/pricing/)
+uses $0.1276 per vCPU-hour and $0.0169 per GB-hour. The script's price constants are
+`PRICE_USD_PER_MTOK`; its output labels every cost an estimate and prices model tokens only.
+
+Tokens per call: about 7,100 input and 300 output (user-reported from the Phase 3b live
+run). Cross-check (script run, characters / 4, offline, no call): the 50 turns average
+about 6,900 estimated input tokens (median 6,500, range from 22,929 to 34,427 characters
+of system prompt, history and tool schema).
+
+Hand arithmetic, no cache hits: 7,100 x $1.00 / 1e6 + 300 x $5.00 / 1e6 = $0.0071 + $0.0015 = $0.0086 per call.
+
+| Run | Calls | Model tokens, no cache | Notes |
+|---|---|---|---|
+| Smoke (cap 2) | 2 | about $0.017 | 1 turn |
+| Full (cap 100) | 100 | about $0.86 | 50 per path |
+| Full, runtime makes a second model call on every invoke | 100 (plus 50 uncapped) | about $1.29 | upper bound; recovery turn is rare |
+| Full, prefix cache hits on all but the first call | 100 | about $0.34 | needs the cache point on in both arms; static prefix is about 23,100 characters (about 5,800 estimated tokens, script run), above the 4,096-token Haiku 4.5 minimum ([prompt caching](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html)) |
+| AgentCore Runtime compute, 50 invokes | 50 | about $0.02 | assumes 10 s of wall time at 1 vCPU and 2 GB per invoke (an assumption, not measured) |
+
+Not priced: the guardrail the runtime applies, CloudWatch, data transfer. Expected total
+for the full run: about $0.9 (range $0.3 to $1.3), all hand arithmetic from the figures above.
+
+Wall time is not estimated: no latency was measured. The worst case is 100 calls x
+the 110-second read timeout, about 3 hours, if every call hung.
+
+### Risks
+
+- The two paths are not identical by design (guardrail, event loop, recovery turn); a
+  latency or token gap is the sum of those, not one cause.
+- Cache state is shared between the paths and across turns inside the 5-minute TTL,
+  so cached-token and latency differences are partly an order effect (order alternates).
+- 50 turns on one day describe one sample of the service, not a distribution; a
+  single cold start or throttle can move a median at n=50.
+- The runtime must be configured with the same model id as `COACHING_MODEL_ID` for the
+  comparison to mean anything; check `runtime_model_ids_seen`.
+- First-text latency is measurable on the Converse arm only with `--converse-stream`;
+  there is no AgentCore equivalent while the runtime returns one JSON object.
