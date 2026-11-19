@@ -82,6 +82,19 @@ an evidence gap, not a fallback onto `LocalChunkRetriever`. The local
 retriever never ranks the display placeholder
 `[This source is stored but has no analyzable text.]` as retrieved evidence.
 
+The course catalog joins a turn only when the gate classifies the message as a
+retrieve and the classifier reports a cue in `_COURSE_CATALOG_RETRIEVAL_CUES`
+(`backend/coaching/execution.py`). The cues are `conservative_course_question`,
+`week_or_session`, `course_grounding`, `according_to_source`,
+`what_source_says`, `based_on_source`, `material_noun`, `compare_to_source` and
+`definitional_question`. The last one covers impersonal concept questions such
+as "what is a creative matrix" or "explain the prioritisation matrix" that name
+no week, lecture or source. Messages with a first- or second-person pronoun
+never count as definitional. The same rule also fires for an impersonal
+question that is not about the course ("what is the capital of Australia"), so
+some off-topic questions now reach course search, which can return nothing and
+produce an evidence gap. See `docs/RETRIEVAL_EVAL.md` for the measured effect.
+
 `configured_context_retriever()` always returns `CompositeContextRetriever`.
 Mock mode and an empty Knowledge Base id inject `knowledge_base=None` so
 shared `course/` sources cannot become fake local chunks. Live providers with

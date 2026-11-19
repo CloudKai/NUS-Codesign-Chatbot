@@ -25,6 +25,32 @@ seconds. The script blocks socket connections in offline mode.
 - **Not modelled.** The second-call `needs_source_retrieval` fallback (it
   needs a model) and image bytes.
 
+## Results history
+
+The gate numbers below are for the 295 synthetic messages. Course search is the
+offline lexical stand-in, so the recall and empty-result rows describe that
+stand-in only. Re-run the script to reproduce each column.
+
+| Metric | Phase 2 baseline | After item 1 (`definitional_question` cue) |
+|---|---|---|
+| recall@4, material (94 questions) | 90/94 (95.7%) | 90/94 (95.7%) |
+| recall@4, page (94 questions) | 77/94 (81.9%) | 77/94 (81.9%) |
+| wrong-skip rate | 92/154 (59.7%) | 76/154 (49.4%) |
+| wrong-skip rate, clear rows only | 67/113 (59.3%) | 51/113 (45.1%) |
+| false-retrieve rate | 2/141 (1.4%) | 7/141 (5.0%) |
+| empty-result rate, questions track | 0/94 (0.0%) | 0/94 (0.0%) |
+| empty-result rate, gate-passed course searches | 0/40 (0.0%) | 1/63 (1.6%) |
+
+Item 1 added `definitional_question` to `_COURSE_CATALOG_RETRIEVAL_CUES`. All 16
+known wrong skips of that kind now search the course catalog (for example "what
+is a creative matrix"). The cost is 5 new false retrieves, all impersonal
+"what is / explain / what does X mean" messages that are not course questions:
+"what does the stage bar mean", "explain that more simply", "explain", "what is
+the capital of Australia" and "what does stakeholder mean". Four of the five
+are `borderline` rows. The capital question is `clear` and is also the one new
+empty result. Recall@4 does not move, because it scores
+each question sent straight to course search and never passes through the gate.
+
 ## Metric definitions
 
 | Metric | Numerator | Denominator |

@@ -327,6 +327,86 @@ def test_week_two_question_uses_course_catalog_retrieve(tmp_path, monkeypatch) -
     assert course_ids & retrieved_ids
 
 
+@pytest.mark.parametrize(
+    "message",
+    (
+        "what is a creative matrix",
+        "what is the card index method",
+        "what's the difference between a speculator and a rentier",
+        "explain the axes of the prioritisation matrix",
+    ),
+)
+def test_definitional_question_wants_course_catalog(message: str) -> None:
+    from backend.coaching.execution import (
+        _COURSE_CATALOG_RETRIEVAL_CUES,
+        _wants_course_catalog_retrieval,
+    )
+
+    assert "definitional_question" in _COURSE_CATALOG_RETRIEVAL_CUES
+    assert _wants_course_catalog_retrieval(message, mode_retrieve=True) is True
+    # The mode-policy flag stays authoritative: overrides that clear it win.
+    assert _wants_course_catalog_retrieval(message, mode_retrieve=False) is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "what assumption am I making here",
+        "can you give me feedback on my problem statement",
+        "I think our users are students",
+    ),
+)
+def test_project_reasoning_does_not_want_course_catalog(message: str) -> None:
+    from backend.coaching.execution import _wants_course_catalog_retrieval
+
+    assert _wants_course_catalog_retrieval(message, mode_retrieve=True) is False
+
+
+def test_definitional_question_uses_course_catalog_retrieve(
+    tmp_path, monkeypatch
+) -> None:
+    store, thread_id = _make_notebook(tmp_path)
+    _local_course_sync(tmp_path, monkeypatch, store, thread_id)
+    client = FakeAgentCoreRuntime(payload=_qa_payload(text="A creative matrix [S1]."))
+    retriever = _RecordingRetriever()
+    service = _service(store, client, retriever=retriever)
+    prepared, _ = service._prepare_authoritative_turn(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="what is a creative matrix",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="definitional-creative-matrix",
+        )
+    )
+    assert prepared.retrieval_required is True
+    assert prepared.allow_model_knowledge is False
+    assert prepared.expected_response_mode == "qa"
+    assert len(retriever.queries) == 1
+    course_ids = {
+        item["id"] for item in list_course_library_sources(store, thread_id)
+    }
+    retrieved_ids = {item.source_id for item in retriever.queries[0].sources}
+    assert course_ids & retrieved_ids
+
+
+def test_personal_reasoning_still_skips_course_catalog(tmp_path, monkeypatch) -> None:
+    store, thread_id = _make_notebook(tmp_path)
+    _local_course_sync(tmp_path, monkeypatch, store, thread_id)
+    client = FakeAgentCoreRuntime(payload=_coaching_payload())
+    service = _service(store, client, retriever=_NoRetrieve())
+    prepared, _ = service._prepare_authoritative_turn(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="what assumption am I making here",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="personal-reasoning-no-rag",
+        )
+    )
+    assert prepared.retrieval_required is False
+
+
 def test_local_and_virtual_routing_parity_for_work_phrase() -> None:
     message = "I would like to work on Concept Generation."
     local_policy = resolve_mode_policy(message, has_selected_sources=False)

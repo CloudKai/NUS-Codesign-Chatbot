@@ -175,6 +175,7 @@ _COURSE_CATALOG_RETRIEVAL_CUES = frozenset(
         "based_on_source",
         "material_noun",
         "compare_to_source",
+        "definitional_question",
     }
 )
 
