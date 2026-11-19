@@ -199,6 +199,17 @@ a fast-chat turn, the runtime rules also carry a SOURCE CHECK paragraph
 prefix does not depend on the setting. No shared stage file changed, so
 `tests/domain/test_prompt_stage_drift.py` is unchanged.
 
+With `FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED=true` as well (default false), a
+COURSE MATERIAL TITLES block follows the SOURCE CHECK paragraph. It lists the
+notebook's Lecture Notes and Readings titles (`source_check_course_titles` in
+`backend/coaching/execution.py`, from the notebook's locked course sources) and
+says that a question about a concept, framework, method or term covered by
+those titles needs sources, while navigation, UI help, greetings and the
+student's own project reasoning do not. It is part of the per-turn runtime
+rules, after the cache point, and is fitted into `MAX_RUNTIME_CHARS` by
+dropping titles from the end, so the rule text is never clipped. Neither
+prompt copy changed.
+
 Retrieved content is explicitly untrusted evidence. It cannot override shared,
 stage, authorization, workflow, or runtime instructions. The shared prompt
 includes an internal Interpret → Assumption/V&V check → one Socratic probe →

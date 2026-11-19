@@ -116,6 +116,36 @@ def test_enabled_fast_chat_caches_only_the_static_eligible_prefix(monkeypatch) -
     assert "".join(block.get("text", "") for block in result) == specialist_system_prompt(payload)
 
 
+def test_source_check_titles_stay_in_the_uncached_suffix(monkeypatch) -> None:
+    from backend.domain import CoachRequest
+    from backend.prompts import compose_coach_prompt
+
+    monkeypatch.setenv("FAST_CHAT_PROMPT_CACHE_ENABLED", "true")
+    request = CoachRequest(
+        thread_id="t",
+        student_message="what is a persona",
+        current_stage="problem_identification",
+        response_detail="short",
+        source_need_check=True,
+        course_material_titles=["Week 2 JTBD Framework"],
+    )
+    runtime = compose_coach_prompt(
+        request, include_recent_messages=False, context_policy="fast_chat"
+    ).runtime_instructions
+    assert "COURSE MATERIAL TITLES" in runtime
+    payload = {
+        "phase": "fast_chat",
+        "topic": "problem_identification",
+        "output_contract": "fast_chat_turn",
+        "trusted_instructions": runtime,
+    }
+    result = agent_system_prompt(payload)
+    assert isinstance(result, list)
+    assert result[0] == {"text": fast_chat_static_prefix("problem_identification")}
+    assert "COURSE MATERIAL TITLES" not in result[0]["text"]
+    assert "Week 2 JTBD Framework" in result[2]["text"]
+
+
 def test_cache_usage_is_not_fabricated() -> None:
     assert cache_usage_from_agent_result(None) == {}
     empty = SimpleNamespace(metrics=SimpleNamespace(accumulated_usage={}))

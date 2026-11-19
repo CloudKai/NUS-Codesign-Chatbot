@@ -1343,7 +1343,9 @@ LIVE_MODEL_DEFINITION = (
     "stands) and failed_as_error (a failed retrieve row is a wrong skip, a "
     "failed skip row is a false retrieve). Eligible rows are the only rows "
     "whose flag changes a metric; the flag on other rows is reported as raw "
-    "flag rate only."
+    "flag rate only. With FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED on, the "
+    "course material titles from the manifest are added to the rule "
+    "(see source_check_titles)."
 )
 
 LIVE_MODEL_COMPARE_DEFINITION = (
@@ -1616,8 +1618,60 @@ class LiveFastChatBridge:
         return structured_wire_payload(output)
 
 
+def eval_course_titles(materials: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Course titles for the SOURCE CHECK rule, built from the eval manifest.
+
+    Each manifest entry is projected into the locked course source shape
+    production lists for a notebook, then passed to the production helper
+    ``source_check_course_titles``, so the eval and production share the
+    title rules (order, clipping, de-duplication).
+    """
+    from backend.coaching.execution import source_check_course_titles
+
+    return source_check_course_titles(
+        [
+            {
+                "title": str(entry["filename"]),
+                "metadata": {
+                    "origin": "lecture_notes_folder",
+                    "locked_source": True,
+                    "course_material_group": str(entry.get("group") or ""),
+                },
+            }
+            for entry in materials
+        ]
+    )
+
+
+def live_source_check_titles(
+    materials: Sequence[Mapping[str, Any]] | None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Return (titles, record) for a live run.
+
+    Titles are used only when ``FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED`` is on,
+    as in production. The record goes into the result's
+    ``source_check_titles`` block.
+    """
+    from backend.prompts.composer import source_check_titles_block
+    from backend.settings import settings
+
+    enabled = bool(settings.fast_chat_source_check_titles_enabled)
+    titles: list[str] = []
+    if enabled:
+        titles = eval_course_titles(materials if materials is not None else load_materials())
+    return titles, {
+        "enabled": enabled,
+        "count": len(titles),
+        "block_chars": len(source_check_titles_block(titles)),
+    }
+
+
 def build_live_request(
-    row: Mapping[str, Any], decision: GateDecision, *, source_check: bool = True
+    row: Mapping[str, Any],
+    decision: GateDecision,
+    *,
+    source_check: bool = True,
+    course_titles: Sequence[str] = (),
 ) -> Any:
     """Build the ``CoachRequest`` production would hand the provider.
 
@@ -1627,6 +1681,8 @@ def build_live_request(
     ``source_need_check`` is on by default so every row measures the flag;
     ``source_check=False`` sends the turn as production does with
     ``FAST_CHAT_NEEDS_SOURCES_ENABLED`` off (the compare mode's off arm).
+    ``course_titles`` are attached only when ``source_check`` is on, as
+    production stamps them only on turns with ``source_need_check``.
     """
     from backend.domain import CoachRequest
 
@@ -1654,6 +1710,7 @@ def build_live_request(
         ],
         retrieval_required=bool(decision.needs_retrieval),
         source_need_check=bool(source_check),
+        course_material_titles=list(course_titles) if source_check else [],
         expected_response_mode=decision.expected_mode,
         mode_policy_intent=decision.intent,
     )
@@ -1925,6 +1982,7 @@ def _live_model_outcome(
     provider: Any,
     bridge: LiveFastChatBridge,
     source_check: bool = True,
+    course_titles: Sequence[str] = (),
 ) -> tuple[dict[str, Any], BaseException | None]:
     """Send one row through the first fast-chat call; return (outcome, error).
 
@@ -1948,7 +2006,9 @@ def _live_model_outcome(
         "gate_retrieve": bool(decision.retrieve),
     }
     try:
-        request = build_live_request(row, decision, source_check=source_check)
+        request = build_live_request(
+            row, decision, source_check=source_check, course_titles=course_titles
+        )
         payload, _plan = provider._invoke_payload(
             request,
             _FAST_CHAT_PHASE,
@@ -2014,6 +2074,7 @@ def run_live_model(
     model_id: str,
     region: str,
     selection: Mapping[str, Any] | None = None,
+    materials: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Send up to ``limit`` gate messages through the first fast-chat call.
 
@@ -2026,18 +2087,24 @@ def run_live_model(
         region: Model region from settings.
         selection: Optional record of the row filter (copied into the result;
             ``messages_in_set`` there is the size of the unfiltered set).
+        materials: Course manifest for the SOURCE CHECK titles (used only
+            when ``FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED`` is on; defaults to
+            the eval manifest).
 
     Stops after the first auth or access error. Never retries a call.
     """
     provider = _live_eval_provider()
     bridge = LiveFastChatBridge(client, model_id)
+    titles, titles_record = live_source_check_titles(materials)
     chosen = [messages[i] for i in evenly_spaced_indices(len(messages), limit)]
     outcomes: list[dict[str, Any]] = []
     first_failure: dict[str, Any] | None = None
     stopped_on: dict[str, Any] | None = None
     for row in chosen:
         try:
-            outcome, error = _live_model_outcome(row, provider=provider, bridge=bridge)
+            outcome, error = _live_model_outcome(
+                row, provider=provider, bridge=bridge, course_titles=titles
+            )
         except LiveCallLimitExceeded:
             break
         outcomes.append(outcome)
@@ -2061,6 +2128,7 @@ def run_live_model(
         },
         "first_failure": first_failure,
         "stopped_early_on_auth_or_access_error": stopped_on,
+        "source_check_titles": titles_record,
         **summary,
         "rows": outcomes,
     }
@@ -2080,6 +2148,7 @@ def run_live_model_compare(
     model_id: str,
     region: str,
     selection: Mapping[str, Any] | None = None,
+    materials: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Send each chosen message with the SOURCE CHECK rule on, then off.
 
@@ -2093,6 +2162,7 @@ def run_live_model_compare(
     pair_limit = check_compare_limit(limit)
     provider = _live_eval_provider()
     bridge = LiveFastChatBridge(client, model_id)
+    titles, titles_record = live_source_check_titles(materials)
     chosen = [messages[i] for i in evenly_spaced_indices(len(messages), pair_limit)]
     arms: dict[str, list[dict[str, Any]]] = {name: [] for name, _ in _COMPARE_ARMS}
     pairs: list[dict[str, Any]] = []
@@ -2104,7 +2174,11 @@ def run_live_model_compare(
         for name, source_check in _COMPARE_ARMS:
             try:
                 outcome, error = _live_model_outcome(
-                    row, provider=provider, bridge=bridge, source_check=source_check
+                    row,
+                    provider=provider,
+                    bridge=bridge,
+                    source_check=source_check,
+                    course_titles=titles,
                 )
             except LiveCallLimitExceeded:
                 stop = True
@@ -2151,6 +2225,7 @@ def run_live_model_compare(
         "tokens": {"input": client.input_tokens, "output": client.output_tokens},
         "first_failure": first_failure,
         "stopped_early_on_auth_or_access_error": stopped_on,
+        "source_check_titles": titles_record,
         "arms": {
             name: {**summarize_live_model(arms[name]), "rows": arms[name]}
             for name, _ in _COMPARE_ARMS
@@ -2219,6 +2294,12 @@ def _calls_lines(result: Mapping[str, Any]) -> list[str]:
     selection = result.get("selection")
     if selection:
         lines.insert(1, _selection_line(selection))
+    titles = result.get("source_check_titles")
+    if titles:
+        lines.append(
+            f"source check titles: {'on' if titles['enabled'] else 'off'} "
+            f"({titles['count']} titles, block {titles['block_chars']} chars)"
+        )
     if result["first_failure"]:
         failure = result["first_failure"]
         arm = f" ({failure['arm']})" if failure.get("arm") else ""
@@ -2578,12 +2659,24 @@ def _main_live_model(args: argparse.Namespace) -> int:
     client = _build_bedrock_runtime_client(region, limit)
     if args.compare_source_check:
         result = run_live_model_compare(
-            selected, limit, client=client, model_id=model_id, region=region, selection=selection
+            selected,
+            limit,
+            client=client,
+            model_id=model_id,
+            region=region,
+            selection=selection,
+            materials=materials,
         )
         print(format_live_model_compare_report(result))
     else:
         result = run_live_model(
-            selected, limit, client=client, model_id=model_id, region=region, selection=selection
+            selected,
+            limit,
+            client=client,
+            model_id=model_id,
+            region=region,
+            selection=selection,
+            materials=materials,
         )
         print(format_live_model_report(result))
     if result["first_failure"]:

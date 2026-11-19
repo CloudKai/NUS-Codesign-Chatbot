@@ -90,6 +90,7 @@ SAFE_PERF_FIELDS = frozenset(
         "context_policy",
         "fast_chat_needs_source_retrieval",
         "source_need_check",
+        "source_check_title_count",
         "fast_chat_needs_sources",
         "fast_chat_needs_sources_ignored_coaching",
         "rag_fallback_trigger",

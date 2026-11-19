@@ -1230,3 +1230,61 @@ def test_followup_block_is_separate_and_leaves_the_gate_numbers_alone() -> None:
     gate = _EVAL.evaluate_gate(_EVAL.load_messages(), None)
     assert gate["messages"] == 295
     assert gate["wrong_skip_rate"]["numerator"] == 76
+
+
+# --- SOURCE CHECK course titles (FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED) ------
+
+_TITLES_LEAD = "COURSE MATERIAL TITLES"
+
+
+def _system_text(call: dict) -> str:
+    return "".join(block.get("text", "") for block in call["system"])
+
+
+@pytest.fixture
+def titles_on(monkeypatch):
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "fast_chat_source_check_titles_enabled", True)
+
+
+def test_eval_course_titles_come_from_the_manifest_lecture_notes_first() -> None:
+    materials = _EVAL.load_materials()
+    titles = _EVAL.eval_course_titles(materials)
+    assert len(titles) == len(materials) == 10
+    assert titles[0] == "Week 1 Introduction to innovation v3"
+    assert titles.index("Week 2 JTBD Framework Term 1 2026") < titles.index("Week 10 Storytelling")
+    assert [t.startswith("Reading") for t in titles] == [False] * 7 + [True] * 3
+
+
+def test_titles_setting_on_puts_every_manifest_title_in_the_prompt(titles_on) -> None:
+    stub = _StubBedrock()
+    result = _run(_rows(("what is a persona", "retrieve")), stub)
+    system = _system_text(stub.requests[0])
+    assert _TITLES_LEAD in system
+    for title in _EVAL.eval_course_titles(_EVAL.load_materials()):
+        assert title in system
+    record = result["source_check_titles"]
+    assert record["enabled"] is True and record["count"] == 10
+    assert record["block_chars"] > 0
+    assert "source check titles: on (10 titles" in _EVAL.format_live_model_report(result)
+
+
+def test_titles_setting_off_sends_the_old_rule(monkeypatch) -> None:
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "fast_chat_source_check_titles_enabled", False)
+    stub = _StubBedrock()
+    result = _run(_rows(("what is a persona", "retrieve")), stub)
+    system = _system_text(stub.requests[0])
+    assert "SOURCE CHECK" in system and _TITLES_LEAD not in system
+    assert result["source_check_titles"] == {"enabled": False, "count": 0, "block_chars": 0}
+
+
+def test_compare_off_arm_never_has_titles(titles_on) -> None:
+    stub = _StubBedrock()
+    result = _compare(_rows(("what is a persona", "retrieve")), stub, 2)
+    on, off = (_system_text(call) for call in stub.requests)
+    assert _TITLES_LEAD in on
+    assert _TITLES_LEAD not in off and _SOURCE_CHECK_TEXT not in off
+    assert result["source_check_titles"]["count"] == 10

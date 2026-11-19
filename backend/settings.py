@@ -374,6 +374,13 @@ class Settings:
     fast_chat_needs_sources_enabled: bool = _boolean(
         "FAST_CHAT_NEEDS_SOURCES_ENABLED", False
     )
+    # Add the notebook's Lecture Notes / Readings titles to the SOURCE CHECK
+    # rule on turns already stamped with ``source_need_check`` (so only when
+    # FAST_CHAT_NEEDS_SOURCES_ENABLED is on). Default OFF: the live run
+    # measured the wording without titles; only a live run can measure this.
+    fast_chat_source_check_titles_enabled: bool = _boolean(
+        "FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED", False
+    )
     fast_chat_retrieval_max_chars: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHARS", 8_000, 1_000, 24_000
     )

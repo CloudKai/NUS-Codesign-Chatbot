@@ -448,6 +448,10 @@ class CoachRequest(BaseModel):
     # cannot make this authoritative; ``_prepare_authoritative_turn`` always
     # overwrites it.
     source_need_check: bool = False
+    # Server-filled course material titles for the SOURCE CHECK rule
+    # (``FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED``). Clients cannot make this
+    # authoritative; ``_prepare_authoritative_turn`` always overwrites it.
+    course_material_titles: list[str] = Field(default_factory=list, max_length=50)
     # Server-filled Q&A/coaching mode policy. Clients cannot make these
     # authoritative; ``_authoritative_request`` overwrites both from the
     # student message and selected-source metadata.

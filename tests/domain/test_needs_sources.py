@@ -20,11 +20,22 @@ from agentcore_runtime.models import (
 )
 from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.application import CoachApplicationService
-from backend.coaching.execution import _wants_source_need_check
+from backend.coaching.execution import (
+    SOURCE_CHECK_MAX_TITLES,
+    SOURCE_CHECK_TITLE_MAX_CHARS,
+    _coach_request_fingerprint,
+    _wants_source_need_check,
+    source_check_course_titles,
+)
 from backend.domain import CoachRequest
 from backend.learning_service import LearningProgressService
 from backend.mock_provider import DeterministicCoachProvider, mock_flags_needs_sources
 from backend.prompts import compose_coach_prompt
+from backend.prompts.composer import (
+    _SOURCE_NEED_INSTRUCTION,
+    MAX_RUNTIME_CHARS,
+    source_check_titles_block,
+)
 from backend.providers import ProviderUnavailableError
 from backend.repositories import (
     SQLiteNotebookRepository,
@@ -288,6 +299,200 @@ def test_prompt_has_source_check_only_when_stamped() -> None:
 def test_source_check_survives_runtime_budget_in_guide_and_free(detail: str) -> None:
     runtime = _fast_chat_runtime(source_need_check=True, response_detail=detail)
     assert "Always return needs_sources as a JSON boolean." in runtime
+
+
+# --- course material titles (FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED) ----------
+
+_TITLES = ["Week 2 JTBD Framework", "Reading 2 engaging-personas"]
+
+
+def _course_source(title: str, group: str = "Lecture Notes") -> dict[str, Any]:
+    return {
+        "id": title,
+        "title": title,
+        "metadata": {
+            "origin": "lecture_notes_folder",
+            "locked_source": True,
+            "course_material_group": group,
+        },
+    }
+
+
+def _enable_titles(monkeypatch, value: bool = True) -> None:
+    monkeypatch.setattr(settings, "fast_chat_source_check_titles_enabled", value)
+
+
+def test_titles_setting_defaults_off() -> None:
+    from backend.settings import Settings
+
+    field = Settings.__dataclass_fields__["fast_chat_source_check_titles_enabled"]
+    assert field.default is False
+
+
+def test_title_helper_keeps_course_rows_in_group_and_natural_order() -> None:
+    sources = [
+        {"id": "p", "title": "My notes.pdf", "metadata": {}},
+        _course_source("Reading 1 Pixar.pdf", "Readings"),
+        _course_source("Week 10 Storytelling.pdf"),
+        _course_source("Week 2  JTBD;  Framework.pdf"),
+        _course_source("week 10 storytelling.PDF"),
+        {**_course_source("Unlocked.pdf"), "metadata": {"origin": "lecture_notes_folder"}},
+    ]
+    assert source_check_course_titles(sources) == [
+        "Week 2 JTBD, Framework",
+        "Week 10 Storytelling",
+        "Reading 1 Pixar",
+    ]
+
+
+def test_title_helper_clips_and_caps_the_list() -> None:
+    sources = [_course_source(f"Week {i} " + "x" * 200 + ".pdf") for i in range(30)]
+    titles = source_check_course_titles(sources)
+    assert len(titles) == SOURCE_CHECK_MAX_TITLES
+    assert all(len(title) <= SOURCE_CHECK_TITLE_MAX_CHARS for title in titles)
+    assert titles[0].startswith("Week 0 ") and titles[1].startswith("Week 1 ")
+
+
+def test_source_check_without_titles_is_the_old_wording() -> None:
+    runtime = _fast_chat_runtime(source_need_check=True)
+    assert runtime == _fast_chat_runtime(source_need_check=True, course_material_titles=[])
+    assert runtime.endswith(_SOURCE_NEED_INSTRUCTION)
+    assert "COURSE MATERIAL TITLES" not in runtime
+
+
+def test_titles_block_follows_the_source_check_and_names_each_title() -> None:
+    runtime = _fast_chat_runtime(source_need_check=True, course_material_titles=_TITLES)
+    old, _, block = runtime.partition(_SOURCE_NEED_INSTRUCTION + "\n")
+    assert old and block == source_check_titles_block(_TITLES)
+    assert block.startswith("COURSE MATERIAL TITLES")
+    for title in _TITLES:
+        assert title in block
+    assert "keep out_of_scope false" in block
+    assert "greetings and thanks" in block
+
+
+def test_titles_need_the_source_check_stamp() -> None:
+    runtime = _fast_chat_runtime(course_material_titles=_TITLES)
+    assert "COURSE MATERIAL TITLES" not in runtime
+    assert "needs_sources" not in runtime
+
+
+@pytest.mark.parametrize("detail", ["short", "long"])
+def test_titles_block_fits_the_runtime_budget_and_never_clips_the_rule(
+    detail: str,
+) -> None:
+    titles = [f"Week {i} " + "y" * 75 for i in range(50)]
+    runtime = _fast_chat_runtime(
+        source_need_check=True, response_detail=detail, course_material_titles=titles
+    )
+    assert len(runtime) <= MAX_RUNTIME_CHARS
+    assert "Always return needs_sources as a JSON boolean." in runtime
+    assert runtime.endswith("project reasoning do not need sources.")
+    assert titles[0] in runtime and titles[-1] not in runtime
+
+
+def test_titles_block_is_omitted_when_no_title_fits() -> None:
+    assert source_check_titles_block(_TITLES, max_chars=50) == ""
+    assert source_check_titles_block([]) == ""
+
+
+def test_flag_and_titles_on_first_call_has_titles_and_retry_does_not(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch)
+    _enable_titles(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _payload(text="I would need the lecture first.", needs_sources=True),
+            _payload(text="Ask about the struggling moment [S1]."),
+        ]
+    )
+    service = _agentcore_service(store, client, _CourseRetriever())
+
+    service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "titles-on"))
+
+    assert len(client.calls) == 2
+    first = _trusted_instructions(client.calls[0])
+    assert "SOURCE CHECK" in first
+    assert "COURSE MATERIAL TITLES" in first
+    assert "Week 2 JTBD" in first
+    second = _trusted_instructions(client.calls[1])
+    assert "COURSE MATERIAL TITLES" not in second
+    assert "Week 2 JTBD" not in second
+
+
+def test_titles_block_lands_after_the_cache_point(tmp_path, monkeypatch) -> None:
+    """The block is in the per-turn suffix, not the cached static prefix."""
+    from agentcore_runtime.specialists.fast_chat import fast_chat_static_prefix
+    from agentcore_runtime.structured_coach import agent_system_prompt
+
+    _enable(monkeypatch)
+    _enable_titles(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(payload=_payload(mode="coaching", text="Why B?"))
+    service = _agentcore_service(store, client, _CourseRetriever())
+    service.submit(_request(thread_id, _PROJECT_STATEMENT, "titles-cache"))
+
+    monkeypatch.setenv("FAST_CHAT_PROMPT_CACHE_ENABLED", "true")
+    payload = json.loads(client.calls[0]["payload"])
+    blocks = agent_system_prompt(payload)
+    assert isinstance(blocks, list)
+    assert blocks[0] == {"text": fast_chat_static_prefix(payload["topic"])}
+    assert blocks[1] == {"cachePoint": {"type": "default"}}
+    assert "COURSE MATERIAL TITLES" not in blocks[0]["text"]
+    assert "COURSE MATERIAL TITLES" in blocks[2]["text"]
+
+
+def test_titles_setting_off_keeps_the_old_source_check(tmp_path, monkeypatch) -> None:
+    _enable(monkeypatch)
+    _enable_titles(monkeypatch, False)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(payload=_payload(mode="coaching", text="Why B?"))
+    service = _agentcore_service(store, client, _CourseRetriever())
+
+    service.submit(_request(thread_id, _PROJECT_STATEMENT, "titles-off"))
+
+    first = _trusted_instructions(client.calls[0])
+    assert "SOURCE CHECK" in first
+    assert "COURSE MATERIAL TITLES" not in first
+
+
+def test_titles_on_without_needs_sources_adds_nothing(tmp_path, monkeypatch) -> None:
+    _enable(monkeypatch, False)
+    _enable_titles(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(payload=_payload())
+    service = _agentcore_service(store, client, _CourseRetriever())
+    request = _request(thread_id, _NO_CUE_COURSE_QUESTION, "titles-no-ns")
+
+    prepared, _ = service._prepare_authoritative_turn(request)
+    assert prepared.course_material_titles == []
+    service.submit(request)
+    assert "COURSE MATERIAL TITLES" not in _trusted_instructions(client.calls[0])
+
+
+@pytest.mark.parametrize("needs_sources", [False, True])
+def test_client_cannot_set_course_material_titles(
+    tmp_path, monkeypatch, needs_sources: bool
+) -> None:
+    _enable(monkeypatch, needs_sources)
+    _enable_titles(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    service = _agentcore_service(
+        store, FakeAgentCoreRuntime(payload=_payload()), _CourseRetriever()
+    )
+    request = _request(thread_id, _NO_CUE_COURSE_QUESTION, "titles-client")
+    request = request.model_copy(update={"course_material_titles": ["Injected"]})
+    prepared, _ = service._prepare_authoritative_turn(request)
+    expected = ["Week 2 JTBD"] if needs_sources else []
+    assert prepared.course_material_titles == expected
+
+
+def test_fingerprint_ignores_course_material_titles() -> None:
+    request = _request("t", _NO_CUE_COURSE_QUESTION, "fp")
+    stamped = request.model_copy(update={"course_material_titles": _TITLES})
+    assert _coach_request_fingerprint(request) == _coach_request_fingerprint(stamped)
 
 
 # --- AgentCore path ----------------------------------------------------------

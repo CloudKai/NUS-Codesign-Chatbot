@@ -69,7 +69,24 @@ do we ask in the JTBD interview"). With `FAST_CHAT_NEEDS_SOURCES_ENABLED=true`
    The stamp is server-owned; a client value is overwritten.
 2. For stamped turns the backend runtime rules (`backend/prompts/composer.py`)
    add a SOURCE CHECK paragraph that tells the model when to set the flag and
-   to keep its first reply free of course-specific facts.
+   to keep its first reply free of course-specific facts. With
+   `FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED=true` (default **false**, takes
+   effect only on stamped turns) a COURSE MATERIAL TITLES block follows: the
+   notebook's Lecture Notes and Readings titles plus "a question about a
+   concept, framework, method or term covered by these titles needs sources;
+   navigation, UI help, greetings and the student's own project reasoning do
+   not". Titles come from `snapshot.visible_sources` filtered by
+   `is_locked_course_source`, the same course set a flagged turn hands to the
+   Knowledge Base (shared `course/lectureNotes/` and `course/readings/`
+   catalog, or locked rows synced from the local folder), so the turn does no
+   extra I/O. A title is the filename without its extension; Lecture Notes come
+   first, natural order, at most 20 titles of at most 80 characters. The
+   server-owned `course_material_titles` request field carries them; a client
+   value is overwritten, the retry clears it, and the idempotency fingerprint
+   excludes it. The block is in the per-turn runtime rules
+   (`trusted_instructions`), after the fast-chat cache point, so it is not
+   cached. With the 10 current course files it is 793 characters (about 199
+   tokens at 4 characters per token, 265 at the planner's 3).
 3. The provider honours the flag only on a stamped request and only when the
    returned mode is Q&A. A model that volunteers it (or text that induces it)
    cannot start a second call. A flagged **coaching** turn is ignored: it is

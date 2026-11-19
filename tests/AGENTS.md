@@ -93,7 +93,7 @@ modules.
 | `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |
 | `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
 | `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
-| `domain/test_needs_sources.py` | Opt-in first-call `needs_sources` flag: contract, stamp rules, flag on/off, retry with course catalog, mock-provider behaviour |
+| `domain/test_needs_sources.py` | Opt-in first-call `needs_sources` flag: contract, stamp rules, flag on/off, retry with course catalog, mock-provider behaviour; opt-in course titles in the SOURCE CHECK rule (title helper, setting, prompt text, runtime budget, retry clears them, client value dropped, cache placement) |
 | `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, whole-history input, stage-aware `stage_reviews`, checkpoint persistence, counter, no transcript rows, cross-stage snapshot replacement, stale-worker completion guard |
 | `domain/test_deep_review_context.py` | Deep Review `full_history` vs `checkpoint_delta` planning, exposed-only `M#` validation, readiness-evidence compact body, absolute+ratio savings gates, revision/source invalidation, synthetic token comparison |
 | `domain/test_deep_review_review_projection.py` | Review-tab merge of `stage_reviews` onto matching stages, legacy `reviewed_stage_id` fallback, HMW attribution, latest-snapshot replacement |
@@ -101,7 +101,7 @@ modules.
 | `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |
 | `domain/test_prompt_cache.py` | SystemContentBlock prefix cache; no CacheConfig auto on student text |
 | `scripts/test_evaluate_fast_chat_regression.py` | Dry-run and mocked live-candidate regression CLI; no live Claude |
-| `scripts/test_evaluate_retrieval.py` | Retrieval eval metric maths, data-file validity, refusal of the live Knowledge Base path and the live model path without opt-in and call limit, and the live model run against a stub Bedrock client, including failure detail, failed calls in the denominator, row selection (`--ids`, `--categories`, `--expected-decision`, `--skip-sample`), the SOURCE CHECK on/off compare mode and the `run` block (git SHA, UTC timestamp) in every `--json-output` file; no network |
+| `scripts/test_evaluate_retrieval.py` | Retrieval eval metric maths, data-file validity, refusal of the live Knowledge Base path and the live model path without opt-in and call limit, and the live model run against a stub Bedrock client, including failure detail, failed calls in the denominator, row selection (`--ids`, `--categories`, `--expected-decision`, `--skip-sample`), the SOURCE CHECK on/off compare mode, the course titles from the manifest with `FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED` and the `run` block (git SHA, UTC timestamp) in every `--json-output` file; no network |
 | `domain/test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection |
 | `domain/test_qa_grounding.py` | Failed Q&A authors the evidence-gap copy with zero AgentCore invokes; successful Q&A cites retrieved excerpts without coaching |
 | `domain/test_bedrock_provider.py` | Bedrock Converse adapter contract with an injected fake client |

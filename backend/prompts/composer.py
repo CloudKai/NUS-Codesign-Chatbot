@@ -25,7 +25,7 @@ retrieved_course_context holds KNOWLEDGE for the turn.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -93,6 +93,7 @@ class PromptContext(BaseModel):
     deep_review_compact_context: str = ""
     deep_review_context_mode: str = ""
     source_need_check: bool = False
+    course_material_titles: tuple[str, ...] = ()
 
 
 _SOURCE_NEED_INSTRUCTION = (
@@ -109,6 +110,37 @@ _SOURCE_NEED_INSTRUCTION = (
     "will retrieve excerpts and ask you again. Always return needs_sources "
     "as a JSON boolean."
 )
+# Appended after _SOURCE_NEED_INSTRUCTION when the server stamped course
+# material titles (FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED). Titles come from
+# the notebook's course sources, never from this module.
+_SOURCE_CHECK_TITLES_LEAD = "COURSE MATERIAL TITLES (titles only, not their content): "
+_SOURCE_CHECK_TITLES_RULE = (
+    " A question about a concept, framework, method or term covered by these "
+    "titles needs sources: set needs_sources true, use mode qa and keep "
+    "out_of_scope false. Navigation, UI help, greetings and thanks, and the "
+    "student's own project reasoning do not need sources."
+)
+
+
+def source_check_titles_block(
+    titles: Sequence[str], max_chars: int | None = None
+) -> str:
+    """Return the SOURCE CHECK course-titles block, or ``""``.
+
+    Titles are kept in order and dropped from the end until the block fits
+    ``max_chars``; the lead and rule sentences are never clipped. Returns
+    ``""`` when no title is given or not even one title fits.
+    """
+    kept = [" ".join(str(title).split()) for title in titles]
+    kept = [title for title in kept if title]
+    while kept:
+        block = (
+            f"{_SOURCE_CHECK_TITLES_LEAD}{'; '.join(kept)}.{_SOURCE_CHECK_TITLES_RULE}"
+        )
+        if max_chars is None or len(block) <= max_chars:
+            return block
+        kept.pop()
+    return ""
 
 
 class PreparedCoachPrompt(BaseModel):
@@ -352,6 +384,16 @@ def _runtime_instructions(context: PromptContext) -> str:
         )
     if context.source_need_check and context.context_policy == "fast_chat":
         parts.append(_SOURCE_NEED_INSTRUCTION)
+        if context.course_material_titles:
+            # Last fast-chat part: fit the titles into the remaining budget
+            # so the final clip never cuts the rule.
+            used = len("\n".join(parts).strip())
+            block = source_check_titles_block(
+                context.course_material_titles,
+                max_chars=MAX_RUNTIME_CHARS - used - 1,
+            )
+            if block:
+                parts.append(block)
     if context.context_policy != "fast_chat":
         parts.append(
             "Return only the required one-call structured JSON envelope containing "
@@ -787,6 +829,9 @@ def prompt_context_from_request(
             getattr(request, "deep_review_context_mode", "") or ""
         ),
         source_need_check=bool(getattr(request, "source_need_check", False)),
+        course_material_titles=tuple(
+            str(title) for title in (getattr(request, "course_material_titles", None) or ())
+        ),
     )
 
 

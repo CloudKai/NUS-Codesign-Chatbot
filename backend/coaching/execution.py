@@ -10,7 +10,7 @@ import time
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from backend.context_planner import memory_from_metadata
 from backend.coaching.deep_review_context import (
@@ -296,6 +296,57 @@ def _wants_source_need_check(
     return bool(enabled) and not searched and not evidence_scoped
 
 
+SOURCE_CHECK_MAX_TITLES = 20
+SOURCE_CHECK_TITLE_MAX_CHARS = 80
+_COURSE_TITLE_GROUP_ORDER = {"lecture notes": 0, "readings": 1}
+_FILE_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+_TITLE_NUMBER = re.compile(r"(\d+)")
+
+
+def _natural_title_key(title: str) -> list[Any]:
+    """Sort key that puts ``Week 2`` before ``Week 10``."""
+    return [
+        int(part) if index % 2 else part
+        for index, part in enumerate(_TITLE_NUMBER.split(title.casefold()))
+    ]
+
+
+def source_check_course_titles(sources: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Return compact course material titles for the SOURCE CHECK rule.
+
+    Uses the notebook's locked course sources (Lecture Notes / Readings),
+    the same set a flagged turn hands to the Knowledge Base. A title is the
+    filename without its extension, whitespace collapsed, ``;`` replaced
+    (it separates titles in the prompt) and clipped to
+    ``SOURCE_CHECK_TITLE_MAX_CHARS``. Duplicates (case-insensitive) are
+    dropped. Lecture Notes come before Readings, natural order inside each
+    group, at most ``SOURCE_CHECK_MAX_TITLES`` titles.
+
+    Args:
+        sources: Visible notebook sources (``TurnSnapshot.visible_sources``).
+
+    Returns:
+        Ordered titles; empty when the notebook has no course sources.
+    """
+    entries: list[tuple[int, list[Any], str]] = []
+    seen: set[str] = set()
+    for source in sources:
+        if not is_locked_course_source(source):
+            continue
+        raw = " ".join(str(source.get("title") or "").split())
+        title = _FILE_EXTENSION.sub("", raw).replace(";", ",").strip()
+        title = title[:SOURCE_CHECK_TITLE_MAX_CHARS].rstrip()
+        key = title.casefold()
+        if not title or key in seen:
+            continue
+        seen.add(key)
+        group = str((source.get("metadata") or {}).get("course_material_group") or "")
+        order = _COURSE_TITLE_GROUP_ORDER.get(group.strip().casefold(), 2)
+        entries.append((order, _natural_title_key(title), title))
+    entries.sort(key=lambda entry: (entry[0], entry[1]))
+    return [title for _, _, title in entries[:SOURCE_CHECK_MAX_TITLES]]
+
+
 def _quote_offsets(text: str, quote: str) -> tuple[int, int] | None:
     """Locate one exact provider quotation in persisted student-message text."""
     bounded_text = str(text or "").strip()
@@ -411,6 +462,8 @@ def _coach_request_fingerprint(
             "idempotency_key",
             "expected_response_mode",
             "mode_policy_intent",
+            # Server-filled; excluded so existing markers keep their digest.
+            "course_material_titles",
         },
     )
     # Existing saved retry markers predate this additive public field.
@@ -2607,6 +2660,7 @@ class CoachApplicationService:
             "source_context": context,
             "retrieval_required": True,
             "source_need_check": False,
+            "course_material_titles": [],
         }
         if source_need:
             # Course-catalog turns fail closed instead of using model
@@ -3153,6 +3207,12 @@ class CoachApplicationService:
         )
         if source_need_check:
             record_field("source_need_check", True)
+        course_material_titles: list[str] = []
+        if source_need_check and runtime_settings.fast_chat_source_check_titles_enabled:
+            course_material_titles = source_check_course_titles(
+                snapshot.visible_sources
+            )
+            record_field("source_check_title_count", len(course_material_titles))
         response_language = " ".join(
             str(metadata.get("response_language") or "English").split()
         )[:50]
@@ -3215,6 +3275,7 @@ class CoachApplicationService:
                 "specialist": None,
                 "retrieval_required": bool(needs_retrieval),
                 "source_need_check": source_need_check,
+                "course_material_titles": course_material_titles,
                 "expected_response_mode": (
                     "qa" if missing_image_qa else mode_policy.expected_mode
                 ),

@@ -568,6 +568,7 @@ Confirm on the AWS Bedrock pricing page before relying on these. Per call:
 | Smoke test (`--max-live-calls 5`) | 5 | $0.04 | $0.05 |
 | Phase 3c item 1, greetings + gm279, SOURCE CHECK on and off | 68 | $0.58 | $0.64 |
 | Phase 3c item 3 subset (169 rows, one call each) | 169 | $1.45 | $1.60 |
+| Phase 3c item 3 subset with the course titles on (about 199 to 265 more input tokens per call) | 169 | $1.49 to $1.50 | $1.64 to $1.65 |
 | Full gate set | 295 | $2.54 | $2.79 |
 
 The report prints the real token totals (`tokens.input`, `tokens.output`), so
@@ -615,3 +616,63 @@ AGENTCORE_MODEL_REGION=us-west-2 \
 ```
 
 Estimated cost 68 × $0.0086 ≈ $0.58 (see "Cost of a live-model run" above).
+
+### Course titles in the SOURCE CHECK rule (Phase 3c item 3)
+
+`FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED` (default **false**) adds a COURSE
+MATERIAL TITLES block after the SOURCE CHECK paragraph, on turns that already
+carry the SOURCE CHECK (so only with `FAST_CHAT_NEEDS_SOURCES_ENABLED` on in
+production). The block lists the course's Lecture Notes and Readings titles
+and says that a question about a concept, framework, method or term covered by
+them needs sources (needs_sources true, mode qa, out_of_scope false), while
+navigation, UI help, greetings and thanks, and the student's own project
+reasoning do not. The old SOURCE CHECK paragraph is unchanged. Production
+builds the titles from the notebook's locked course sources (see
+`docs/RAG_ARCHITECTURE.md`); the eval builds them from `course_materials.json`
+through the same helper (`eval_course_titles` → `source_check_course_titles`).
+
+With the setting on, `--live-model` adds the block to every row it sends with
+the SOURCE CHECK (in compare mode the off arm gets neither) and writes
+`source_check_titles: {enabled, count, block_chars}` to the JSON; the report
+prints one `source check titles:` line.
+
+Size, measured with the 10 manifest titles (script run): the block is 793
+characters (794 with its line break), about 199 tokens at 4 characters per
+token (`agentcore_runtime/prompt_cache.py`) and 265 at the planner's 3
+(`backend/context_planner.estimate_tokens`). It lands in the per-turn runtime
+rules after the fast-chat cache point, not in the cached prefix (pinned by
+tests). Runtime rules with SOURCE CHECK on: 1,230 to 4,712 characters before,
+2,024 to 5,498 after, across the 295 rows; on the 189 eligible rows every row
+gets the full list. The block is fitted into `MAX_RUNTIME_CHARS` (5,500) by
+dropping titles from the end; gm126 and gm127 (attachment questions the gate
+already searches, so production never stamps them) keep 9 of the 10 titles.
+
+**Offline comparison.** The three stub models (`oracle`, `mock_rule`,
+`flag_all`) never read the prompt, so the old and the new wording give the
+same stub bounds by construction (the offline JSON is unchanged). Only a live
+run can measure whether the titles change the model's flag rate.
+
+**Phase 3c item 3 command (not run; costs money).** The five categories that
+hold the reported 63 live misses, filtered to `retrieve` labels, plus a
+deterministic 60-row skip sample: 169 rows, 169 calls.
+
+```bash
+FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED=true \
+COACHING_MODEL_PROVIDER=bedrock \
+COACHING_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0 \
+AGENTCORE_MODEL_REGION=us-west-2 \
+  python scripts/evals/evaluate_retrieval.py \
+  --live-model \
+  --categories course_content,course_logistics,informal_or_multilingual,upload_question,follow_up \
+  --expected-decision retrieve --skip-sample 60 \
+  --max-live-calls 169 \
+  --json-output .agents/tasks/phase3c-work/live-item3-titles.json
+```
+
+The same command without `FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED=true` (and
+another `--json-output`) is the old-wording baseline on the same 169 rows.
+The per-row Phase 3b live output is not available, so the subset cannot be
+exactly "the 63 misses": the 109 `retrieve` rows hold 73 of the 76 offline
+gate wrong skips (the other 3 are in `named_material`,
+`upload_and_course` and `course_with_unrelated_upload`) and 36 rows the gate
+already searches.
