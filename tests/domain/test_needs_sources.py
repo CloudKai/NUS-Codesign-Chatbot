@@ -10,7 +10,9 @@ behaviour of the surrounding application, not a model's judgement.
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Mapping, Sequence
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -29,8 +31,10 @@ from backend.coaching.execution import (
     source_check_course_titles,
 )
 from backend.domain import CoachRequest
+from backend import course_intent
 from backend.course_intent import CourseIntentClassifier
 from backend.learning_service import LearningProgressService
+from backend.owner_context import OwnerResolver
 from backend.mock_provider import DeterministicCoachProvider, mock_flags_needs_sources
 from backend.prompts import compose_coach_prompt
 from backend.prompts.composer import (
@@ -46,6 +50,7 @@ from backend.repositories import (
 from backend.retrieval import RetrievalQuery, RetrievalResult, RetrievedChunk
 from backend.settings import settings
 from backend.source_library import (
+    CourseMaterialSyncCoordinator,
     add_text_source,
     list_course_library_sources,
     sync_lecture_notes_folder,
@@ -210,6 +215,136 @@ def test_local_course_classifier_routes_ambiguous_turns_before_generation(
     if score == 0.95:
         assert prepared.expected_response_mode == "qa"
         assert prepared.retrieved_chunks
+
+
+def _fake_laya_classifier(monkeypatch, tmp_path, predict) -> course_intent.LayaCourseIntentClassifier:
+    """Build the real adapter over a stand-in ``laya.Agent``; no weights are read."""
+
+    class _Agent:
+        def __init__(self, checkpoint: str, *, device: str) -> None:
+            assert device == "cpu"
+
+        def predict(self, state: str, questions: Mapping[str, Any]) -> Any:
+            return predict(state, questions)
+
+    laya = ModuleType("laya")
+    laya.Agent = _Agent
+    monkeypatch.setitem(sys.modules, "laya", laya)
+    checkpoint = tmp_path / "laya-checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "model.safetensors").touch()
+    return course_intent.LayaCourseIntentClassifier(checkpoint)
+
+
+def _valid_answer(_state: str, _questions: Mapping[str, Any]) -> dict[str, Any]:
+    return {"answers": {"retrieval": {"probabilities": {"course_evidence": 0.95}}}}
+
+
+def _raise_runtime(_state: str, _questions: Mapping[str, Any]) -> dict[str, Any]:
+    raise RuntimeError("inference failed")
+
+
+@pytest.mark.parametrize("score", [None, RuntimeError("unavailable"), ValueError("bad score")])
+def test_turn_continues_without_course_search_when_classifier_has_no_score(
+    tmp_path, monkeypatch, score: None | Exception
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    coach = _mock_service(
+        store, retriever, course_intent_classifier=_CourseIntentStub(score)
+    )
+    turn = coach.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "no-score-turn"))
+    assert turn.response_text
+    assert retriever.queries == []
+    assert turn.pending_transition is None
+    assert turn.auto_advanced_to is None
+    assert len(_assistant_messages(store, thread_id)) == 1
+
+
+@pytest.mark.parametrize(
+    "predict",
+    [
+        _raise_runtime,
+        lambda _state, _questions: {"answers": {}},
+        lambda _state, _questions: {
+            "answers": {"retrieval": {"probabilities": {"course_evidence": 2.0}}}
+        },
+    ],
+    ids=["inference-raises", "answer-missing", "score-out-of-range"],
+)
+def test_turn_continues_when_laya_inference_fails_or_returns_bad_output(
+    tmp_path, monkeypatch, predict
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    classifier = _fake_laya_classifier(monkeypatch, tmp_path, predict)
+    retriever = _CourseRetriever()
+    coach = _mock_service(store, retriever, course_intent_classifier=classifier)
+    turn = coach.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "laya-failure-turn"))
+    assert turn.response_text
+    assert retriever.queries == []
+    assert len(_assistant_messages(store, thread_id)) == 1
+    # The adapter released its single slot, so the next call still runs.
+    assert classifier._inference.acquire(blocking=False)
+    classifier._inference.release()
+
+
+def test_turn_continues_when_laya_slot_is_busy_and_valid_answer_still_retrieves(
+    tmp_path, monkeypatch
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    classifier = _fake_laya_classifier(monkeypatch, tmp_path, _valid_answer)
+    retriever = _CourseRetriever()
+    coach = _mock_service(store, retriever, course_intent_classifier=classifier)
+    assert classifier._inference.acquire(blocking=False)
+    try:
+        busy = coach.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "laya-busy-turn"))
+    finally:
+        classifier._inference.release()
+    assert busy.response_text
+    assert retriever.queries == []
+    # Control: with the slot free the same adapter scores 0.95 and the turn searches.
+    coach._authoritative_request(_request(thread_id, _NO_CUE_COURSE_QUESTION, "laya-free"))
+    assert len(retriever.queries) == 1
+
+
+def test_missing_laya_weights_or_package_fail_at_startup_not_per_turn(
+    tmp_path, monkeypatch
+) -> None:
+    missing = tmp_path / "no-checkpoint"
+    with pytest.raises(ValueError, match="model.safetensors"):
+        course_intent.LayaCourseIntentClassifier(missing)
+    with pytest.raises(ValueError, match="learner bundle"):
+        course_intent.LayaLearnCourseIntentClassifier(tmp_path, tmp_path / "no-bundle.zip")
+    present = tmp_path / "present"
+    present.mkdir()
+    (present / "model.safetensors").touch()
+    monkeypatch.setitem(sys.modules, "laya", None)
+    with pytest.raises(ImportError):
+        course_intent.LayaCourseIntentClassifier(present)
+    # The API builds the classifier while constructing its owner resolver, so a
+    # configured but unusable checkpoint stops startup; it never reaches a turn.
+    monkeypatch.setattr(settings, "local_course_intent_checkpoint", str(missing))
+    monkeypatch.setattr(settings, "local_course_intent_learner_bundle", "")
+    store = StudentStore(tmp_path / "startup.sqlite3")
+    with pytest.raises(ValueError, match="model.safetensors"):
+        OwnerResolver(
+            store,
+            oidc=object(),
+            course_sync=CourseMaterialSyncCoordinator(),
+            auto_advance_stages=False,
+        )
+
+
+def test_unset_checkpoint_builds_no_classifier(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "local_course_intent_checkpoint", "")
+    store = StudentStore(tmp_path / "unset.sqlite3")
+    resolver = OwnerResolver(
+        store,
+        oidc=object(),
+        course_sync=CourseMaterialSyncCoordinator(),
+        auto_advance_stages=False,
+    )
+    assert resolver._course_intent is None
 
 
 @pytest.mark.parametrize("prior_student_turn", [False, True])
