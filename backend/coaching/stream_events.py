@@ -24,6 +24,23 @@ class StatusEvent(BaseModel):
     label: str
 
 
+class ReplyDeltaEvent(BaseModel):
+    """Carry one unvalidated, ephemeral fragment of the reply being generated.
+
+    Sent only to clients that opted in. Fragments append in order. They are
+    never saved and may be withdrawn by ``reply_discard``.
+    """
+
+    event: Literal["reply_delta"] = "reply_delta"
+    text: str = Field(min_length=1)
+
+
+class ReplyDiscardEvent(BaseModel):
+    """Withdraw all ``reply_delta`` text so far: the attempt failed or is redone."""
+
+    event: Literal["reply_discard"] = "reply_discard"
+
+
 class ReplyEvent(BaseModel):
     """Carry a validated but unsaved, ephemeral reply preview."""
 
@@ -57,7 +74,7 @@ class GraphEvent(BaseModel):
 
 
 CoachStreamEvent = Annotated[
-    StartedEvent | StatusEvent | ReplyEvent | SavedEvent | ErrorEvent | GraphEvent,
+    StartedEvent | StatusEvent | ReplyDeltaEvent | ReplyDiscardEvent | ReplyEvent | SavedEvent | ErrorEvent | GraphEvent,
     Field(discriminator="event"),
 ]
 COACH_EVENT_ADAPTER: TypeAdapter[CoachStreamEvent] = TypeAdapter(CoachStreamEvent)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from .coaching.progress import emit_coach_reply_delta, reply_delta_sink_bound
 from .domain import (
     ClearCode,
     CoachRequest,
@@ -244,6 +245,21 @@ def _mock_review_feedback(
     return strengths, improvements
 
 
+def _emit_mock_reply_deltas(text: str, words_per_chunk: int = 4) -> None:
+    """Send the finished mock reply as preview fragments when a client wants them.
+
+    This is a simulation for offline tests and demos: the mock builds the whole
+    reply at once, so these fragments prove the transport, not model timing.
+    Real providers send only text a model has produced. A no-op without a sink.
+    """
+    if not reply_delta_sink_bound():
+        return
+    words = text.split(" ")
+    for start in range(0, len(words), words_per_chunk):
+        last = start + words_per_chunk >= len(words)
+        emit_coach_reply_delta(" ".join(words[start : start + words_per_chunk]) + ("" if last else " "))
+
+
 class DeterministicCoachProvider:
     """Return predictable structured coaching output without contacting a model.
 
@@ -274,6 +290,7 @@ class DeterministicCoachProvider:
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Return the mock turn, plus the mock ``needs_sources`` stand-in."""
         result = self._assess_turn(request)
+        _emit_mock_reply_deltas(result.response_text)
         if mock_needs_sources(request):
             return result.model_copy(update={"needs_sources": True})
         return result

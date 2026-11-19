@@ -34,6 +34,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | Module | Responsibility |
 |---|---|
 | `domain.py` | Pydantic contracts: `CoachRequest`, `CoachTurn`, `EducationalAssessment`, `PendingPhaseTransition`, citations |
+| `coaching/reply_text.py` / `coaching/streaming.py` | Opt-in reply text streaming: `reply_text.py` decodes the top-level `response_text` from streamed tool-input JSON; `streaming.py` maps provider fragments to `reply_delta` / `reply_discard` events only for clients that asked. Fragments are unvalidated and never persisted. |
 | `application.py` / `coaching/` | Compatibility import plus durable `CoachApplicationService` execution, including research-observation persist. `coaching/deep_review_context.py` owns Deep Review `full_history` vs `checkpoint_delta` planning. |
 | `api.py` / `http/app.py` | Compatibility import plus FastAPI app factory/composition, student and professor routes, and HTTP error mapping |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |

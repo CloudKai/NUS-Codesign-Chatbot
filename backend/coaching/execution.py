@@ -48,8 +48,10 @@ from backend.coaching.progress import (
     PROGRESS_THINKING,
     CoachProgressCallback,
     CoachReplyCallback,
+    CoachReplyDeltaCallback,
     coach_progress,
     emit_coach_progress,
+    emit_coach_reply_discard,
     emit_coach_reply_ready,
 )
 from backend.coaching.progress_fields import meaningful_progress_fields
@@ -976,6 +978,7 @@ class CoachApplicationService:
         server_owned_specialist: str | None = None,
         progress: CoachProgressCallback | None = None,
         reply: CoachReplyCallback | None = None,
+        reply_delta: CoachReplyDeltaCallback | None = None,
     ) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
 
@@ -995,8 +998,12 @@ class CoachApplicationService:
         events. It must not receive student text.
         *reply* receives the validated, final response text before persistence;
         callers must discard that preview if the turn fails to save.
+        *reply_delta* receives unvalidated partial reply fragments from
+        providers that can stream them, and ``None`` when the fragments so far
+        are withdrawn (the retry after a source check). It is ephemeral and is
+        never persisted.
         """
-        with usage_operation("chat", request.thread_id, admission=self._generation_admission) as usage, coach_progress(progress, reply):
+        with usage_operation("chat", request.thread_id, admission=self._generation_admission) as usage, coach_progress(progress, reply, reply_delta):
             turn = self._submit_body(
                 request,
                 execution_lease_held=execution_lease_held,
@@ -2764,6 +2771,7 @@ class CoachApplicationService:
         retried = request.model_copy(update=update)
         if self._generation_admission is None:
             emit_coach_progress(PROGRESS_THINKING)
+        emit_coach_reply_discard()  # the first pass is replaced, not shown
         agent_started = time.perf_counter()
         turn = self._workflow.run(retried)
         perf = current_perf()

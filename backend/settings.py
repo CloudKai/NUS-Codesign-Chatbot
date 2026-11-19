@@ -405,6 +405,15 @@ class Settings:
     fast_chat_upload_retrieval_enabled: bool = _boolean(
         "FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED", False
     )
+    # Allow ``/api/v1/coach/turn/stream`` to send ``reply_delta`` events when
+    # the browser also asks for them (header ``X-Coach-Reply-Deltas: 1``). The
+    # text is unvalidated and ephemeral; ``reply_ready`` and ``done`` stay the
+    # only validated and saved events. Only providers that can produce partial
+    # reply text emit deltas (mock, direct Bedrock Converse). The AgentCore
+    # Runtime path returns one JSON object and emits none. Default OFF.
+    coach_stream_reply_deltas_enabled: bool = _boolean(
+        "COACH_STREAM_REPLY_DELTAS_ENABLED", False
+    )
     fast_chat_retrieval_max_chars: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHARS", 8_000, 1_000, 24_000
     )

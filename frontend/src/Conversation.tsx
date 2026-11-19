@@ -5,7 +5,7 @@ import { ThinkingPath } from './ThinkingPath';
 import { Icon } from './Icon';
 import { CoachText } from './CoachText';
 import { ReasoningPrompts } from './ReasoningPrompts';
-import { citationText, isTurn, readStream, type Citation, type Event } from './stream';
+import { REPLY_DELTAS_HEADER, citationText, isTurn, readStream, type Citation, type Event } from './stream';
 
 type Intent = 'lecture' | 'project';
 interface Attachment { id: string; title: string }
@@ -185,7 +185,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       await verify();
       const response = await fetch(receipt.message ? `${path}/messages/${encodeURIComponent(receipt.message)}/revise` : `${path}/${receipt.intent || 'lecture'}/stream`, {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
-        headers: { 'Content-Type': 'application/json' },
+        headers: receipt.message ? { 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json', ...REPLY_DELTAS_HEADER },
         body: JSON.stringify(receipt.message ? { content: receipt.text, idempotency_key: receipt.key }
           : { student_message: receipt.text, idempotency_key: receipt.key, attachment_source_ids: receipt.attachments?.map(file => file.id) ?? [] }),
       });
@@ -196,6 +196,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         if (!active.current) return;
         if (event.event === 'started') setStatus('Question accepted.');
         if (event.event === 'status') setStatus(({ queued: 'Waiting for capacity…', retrieving: 'Finding evidence…', thinking: 'Preparing an answer…', saving: 'Saving answer…' })[event.phase]);
+        // Deltas are unvalidated and unsaved: they only ever feed the preview, never saved messages.
+        if (event.event === 'reply_delta') { setPreview(current => current + event.text); setStatus('Writing a reply — not saved yet.'); }
+        if (event.event === 'reply_discard') setPreview('');
         if (event.event === 'reply_ready') { setPreview(event.text); setStatus('Preview — waiting for saved completion.'); }
         if (event.event === 'error') { terminalError = event; setPreview(''); }
       });

@@ -1,4 +1,4 @@
-/** Shared NDJSON coach lifecycle: preview is ephemeral; only done means saved. */
+/** Shared NDJSON coach lifecycle: previews are ephemeral; only done means saved. */
 export interface Citation { source_id: string; label: string; title: string; excerpt: string; page?: number | null }
 
 /** Citation text: "S1 · Title", plus ", p. 4" only when the saved citation has a page. */
@@ -6,10 +6,14 @@ export function citationText(citation: Citation): string {
   const page = typeof citation.page === 'number' && Number.isInteger(citation.page) && citation.page >= 1 ? `, p. ${citation.page}` : '';
   return `${citation.label} · ${citation.title}${page}`;
 }
+/** Sent on the stream request so the server may add reply_delta and reply_discard events. */
+export const REPLY_DELTAS_HEADER = { 'X-Coach-Reply-Deltas': '1' };
 export interface Turn { response_text: string; assessment: { citations: Citation[]; response_mode: string } }
 export type Event =
   | { event: 'started'; thread_id: string; idempotency_key: string; stage: string }
   | { event: 'status'; phase: 'queued' | 'retrieving' | 'thinking' | 'saving'; label: string }
+  | { event: 'reply_delta'; text: string }
+  | { event: 'reply_discard' }
   | { event: 'reply_ready'; text: string }
   | { event: 'graph'; steps: string[]; mode: string | null }
   | { event: 'done'; turn: Turn }
@@ -33,6 +37,8 @@ function decode(line: string): Event {
   const valid = value && (
     (value.event === 'started' && text('thread_id') && text('idempotency_key') && text('stage')) ||
     (value.event === 'status' && ['queued', 'retrieving', 'thinking', 'saving'].includes(value.phase) && text('label')) ||
+    (value.event === 'reply_delta' && text('text') && value.text.length > 0) ||
+    (value.event === 'reply_discard') ||
     (value.event === 'reply_ready' && text('text') && value.text.length > 0) ||
     (value.event === 'graph' && Array.isArray(value.steps) && value.steps.every((step: unknown) => typeof step === 'string') && (value.mode === null || text('mode'))) ||
     (value.event === 'done' && isTurn(value.turn)) ||

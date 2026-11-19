@@ -81,6 +81,7 @@ modules.
 | `domain/test_fast_chat_schema.py` | Slim FastChatTurnOutput; coaching/Q&A contract matrix; generated JSON Schema rejects coaching+null recommendation and citations=null; citations required as array |
 | `domain/test_fast_chat_recommendation_default.py` | Coaching reply with no recommendation is recorded as `stay` (never `advance`): schema, adapter, provider, perf field, Free mode does not promote a defaulted `stay` (explicit `stay` still promoted), no pending transition or stage change, explicit `advance` and Q&A unchanged |
 | `domain/test_coach_turn_perf.py` | Privacy-safe `coach_turn_perf` JSON and `TIMING` service-latency lines |
+| `domain/test_reply_streaming.py` | Opt-in `reply_delta` / `reply_discard` stream events: incremental `response_text` extraction (any fragment size, escapes, surrogate pairs, nested key ignored), event order, nothing saved while text streams, discard then error on failure after streamed text, unchanged event set without opt-in, idempotent replay streams no text, discard before the source-check retry, HTTP needs both the setting and the `X-Coach-Reply-Deltas: 1` header; Bedrock `converse_stream` path with stub client in `test_bedrock_provider.py` |
 | `domain/test_coach_progress.py` | retrieving/thinking/saving execution-boundary events; slim persist |
 | `domain/test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
 | `domain/test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding |

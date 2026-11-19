@@ -22,12 +22,18 @@ PROGRESS_LABELS = {
 
 CoachProgressCallback = Callable[[str], None]
 CoachReplyCallback = Callable[[str], None]
+# A string is an unvalidated partial reply fragment; ``None`` withdraws every
+# fragment sent so far (the attempt will be redone or has failed).
+CoachReplyDeltaCallback = Callable[[str | None], None]
 
 _progress_callback: ContextVar[CoachProgressCallback | None] = ContextVar(
     "coach_progress_callback", default=None
 )
 _reply_callback: ContextVar[CoachReplyCallback | None] = ContextVar(
     "coach_reply_callback", default=None
+)
+_reply_delta_callback: ContextVar[CoachReplyDeltaCallback | None] = ContextVar(
+    "coach_reply_delta_callback", default=None
 )
 
 
@@ -43,15 +49,19 @@ class coach_progress:
         self,
         callback: CoachProgressCallback | None,
         reply: CoachReplyCallback | None = None,
+        reply_delta: CoachReplyDeltaCallback | None = None,
     ) -> None:
         self._callback = callback
         self._reply = reply
+        self._reply_delta = reply_delta
         self._token: Token[CoachProgressCallback | None] | None = None
         self._reply_token: Token[CoachReplyCallback | None] | None = None
+        self._delta_token: Token[CoachReplyDeltaCallback | None] | None = None
 
     def __enter__(self) -> coach_progress:
         self._token = _progress_callback.set(self._callback)
         self._reply_token = _reply_callback.set(self._reply)
+        self._delta_token = _reply_delta_callback.set(self._reply_delta)
         return self
 
     def __exit__(self, *_exc: object) -> bool:
@@ -61,6 +71,9 @@ class coach_progress:
         if self._reply_token is not None:
             _reply_callback.reset(self._reply_token)
             self._reply_token = None
+        if self._delta_token is not None:
+            _reply_delta_callback.reset(self._delta_token)
+            self._delta_token = None
         return False
 
 
@@ -88,3 +101,28 @@ def emit_coach_reply_ready(response_text: str) -> None:
     callback = _reply_callback.get()
     if callback is not None and response_text.strip():
         callback(response_text)
+
+
+def reply_delta_sink_bound() -> bool:
+    """Report whether this request wants partial reply text from its provider."""
+    return _reply_delta_callback.get() is not None
+
+
+def emit_coach_reply_delta(text: str) -> None:
+    """Send one unvalidated partial reply fragment to this request's preview.
+
+    Providers call this only with text the model produced for the final reply.
+    It is ephemeral: the validated ``reply_ready`` text and the saved turn stay
+    authoritative, and no caller may persist a fragment. A no-op when no
+    callback is bound or the fragment is empty.
+    """
+    callback = _reply_delta_callback.get()
+    if callback is not None and text:
+        callback(text)
+
+
+def emit_coach_reply_discard() -> None:
+    """Withdraw every fragment sent so far, before another attempt is made."""
+    callback = _reply_delta_callback.get()
+    if callback is not None:
+        callback(None)
