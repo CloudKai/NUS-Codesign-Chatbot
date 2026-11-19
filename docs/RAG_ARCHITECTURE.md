@@ -66,6 +66,8 @@ do we ask in the JTBD interview"). With `FAST_CHAT_NEEDS_SOURCES_ENABLED=true`
    when the gate searched nothing and no override fixed the evidence scope.
    Stage status, stage navigation, meta-guidance, private-attachment scope,
    forced retrieval, Lecture Help and missing-image turns are never stamped.
+   A turn searched by the opt-in upload retrieval policy ("Student-upload
+   RAG" below) has searched, so it is not stamped either.
    The stamp is server-owned; a client value is overwritten.
 2. For stamped turns the backend runtime rules (`backend/prompts/composer.py`)
    add a SOURCE CHECK paragraph that tells the model when to set the flag and
@@ -315,6 +317,62 @@ Selected student sources are hydrated from `derived/chunks.v1.json` when that
 artifact is valid; otherwise extracted text is chunked at query time.
 Normal fast chat then keeps at most 4 chunks / 8,000 characters. Student
 uploads keep extracted text; they do not use the shared course Knowledge Base.
+
+### Upload retrieval policy (opt-in)
+
+`FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED` (default false) searches the selected
+student uploads on turns the regex gate skipped. The search is local, so it
+has no AWS call and no network wait. `_prepare_authoritative_turn` applies
+`_wants_student_upload_retrieval` (`backend/coaching/execution.py`) after the
+course-catalog step. It fires only when all of these hold:
+
+- the setting is on and the gate decided no retrieval;
+- at least one selected or attached source left after scoping is the
+  student's own and not an image (`searchable_student_uploads`: course
+  library rows and image sources are dropped; images reach the model as image
+  input);
+- no gate override fixed the evidence scope. Navigation reuses the existing
+  overrides: current-stage status, stage progression or terminal completion,
+  and `workflow_skips_retrieval` (meta-guidance). These turns already clear
+  the selected sources. Lecture Help, forced retrieval, private-attachment
+  questions and missing-image Q&A already retrieve or are fixed too;
+- the turn is not chit-chat (`is_chit_chat`): a bare acknowledgement from the
+  set recent-message grounding already uses (`ok`, `okay`, `thanks`, `yes`,
+  `no`, `sure`, trailing `.!?` ignored) or a message starting with a greeting
+  (`hi`, `hello`, `hey`, `good morning|afternoon|evening`), unless it is also
+  an information request (`looks_like_information_request`), so "hi, what
+  does my survey say?" still searches. No new pattern was added. Known limits:
+  `thank you`, `thx`, `haha nice` and `ok will try` are not chit-chat, and
+  navigation phrased outside the existing overrides (for example "move me to
+  the next stage") is not navigation, so both would search. A greeting
+  followed by a statement or a command without `?` ("hello, summarise my
+  file") is chit-chat, so it does not search.
+
+Effects:
+
+- **Course Knowledge Base unchanged.** The rule runs only when the gate's
+  retrieve flag is false, so `include_course_catalog` is already false and
+  hydration adds personal sources only; `CompositeContextRetriever` sends them
+  to `LocalChunkRetriever`.
+- **Slots.** With no course hits, the 2 course slots backfill to the student
+  side (`_merge_with_reserved_slots`), so a policy turn carries up to
+  `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (4) upload chunks, at most 2 per file,
+  within `FAST_CHAT_RETRIEVAL_MAX_CHARS` (8,000). The slot code is unchanged.
+- **`needs_sources`.** A policy turn has searched, so it gets no SOURCE CHECK
+  (that text says no excerpts were retrieved) and `_maybe_rag_fallback`
+  returns early. With both settings on, an upload-selected course question
+  without a gate cue therefore loses the course-catalog second chance. The
+  legacy `needs_source_retrieval` retry would only re-search the same files.
+- **Failures.** A policy-only search adds no new error. A non-`ValueError`
+  retriever failure continues the turn as if the rule had not fired (no
+  excerpts, `retrieval_required` false, retrieval sources reset, so the
+  `needs_sources` check and its catalog retry still apply) and records
+  `upload_retrieval_policy_failed`. `ValueError` (authorization or catalog
+  integrity) still fails closed.
+- Perf fields: `upload_retrieval_policy`, `upload_retrieval_policy_failed`.
+
+Offline measurement on the 295 gate messages: `docs/RETRIEVAL_EVAL.md`,
+"Upload retrieval policy".
 
 ## Unified evidence
 

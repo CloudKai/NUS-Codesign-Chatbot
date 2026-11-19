@@ -931,6 +931,287 @@ def _needs_sources_stubs(
     return out
 
 
+UPLOAD_POLICY_DEFINITION = (
+    "Models FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED (default off) on top of the "
+    "gate, with the production rule _wants_student_upload_retrieval: a row "
+    "the gate searched nothing for is searched locally when it still has a "
+    "non-image student upload in scope, no gate override fixed its evidence "
+    "scope, and it is not chit-chat. The course catalog is never added. A "
+    "row 'retrieves' when a source is searched (the gate's definition), so a "
+    "course-scope row that only searches an unrelated upload counts as "
+    "retrieved; 'fixed_wrong_skips_course_scope_only' lists those. Student "
+    "file text is not in the gate set, so no search runs: extra prompt "
+    "characters are an ESTIMATE (upper bound), the payload growth when "
+    "min(FAST_CHAT_RETRIEVAL_MAX_CHUNKS, 2 x non-image uploads) full-size "
+    "local chunks with the row's real titles are attached, measured on the "
+    "provider payload builder. Tokens use 4 and 3 characters per token."
+)
+
+
+def _eval_upload_entries(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Project the row's selected and attached files into source dicts.
+
+    Rows hold only a title and a filename, so ``mime`` is guessed from the
+    filename extension (``.png`` is an image).
+    """
+    import mimetypes
+
+    entries: list[dict[str, Any]] = []
+    for entry in [*row["selected_sources"], *row["attachments"]]:
+        filename = str(entry.get("filename") or "")
+        mime = mimetypes.guess_type(filename)[0] or ""
+        entries.append(
+            {
+                "title": str(entry.get("title") or filename),
+                "filename": filename,
+                "kind": "image" if mime.startswith("image/") else "file",
+                "mime": mime,
+            }
+        )
+    return entries
+
+
+def _payload_text_chars(payload: Mapping[str, Any]) -> int:
+    """Characters the model reads from one provider payload.
+
+    Counts ``trusted_instructions``, every string inside ``messages`` and the
+    compact JSON of ``runtime_context`` (where the allowed citation labels
+    go).
+    """
+
+    def strings(value: Any) -> int:
+        if isinstance(value, str):
+            return len(value)
+        if isinstance(value, Mapping):
+            return sum(strings(item) for item in value.values())
+        if isinstance(value, (list, tuple)):
+            return sum(strings(item) for item in value)
+        return 0
+
+    return (
+        len(str(payload.get("trusted_instructions") or ""))
+        + strings(payload.get("messages") or [])
+        + len(json.dumps(payload.get("runtime_context") or {}, separators=(",", ":")))
+    )
+
+
+def upload_policy_prompt_estimate(
+    row: Mapping[str, Any],
+    decision: GateDecision,
+    uploads: Sequence[Mapping[str, Any]],
+    *,
+    provider: Any = None,
+) -> dict[str, Any]:
+    """ESTIMATE the extra prompt characters one policy search adds.
+
+    Builds the request production would send without excerpts, then the same
+    request with ``min(max_chunks, 2 x uploads)`` full-size chunks
+    (``LocalChunkRetriever`` defaults) formatted by the production
+    ``bounded_retrieval_result`` with the real titles, and measures both
+    payloads with the provider's payload builder (never invoked). Upper
+    bound: real files can be shorter or match fewer chunks.
+    """
+    from backend.agentcore_provider import _FAST_CHAT_CONTRACT, _FAST_CHAT_PHASE
+    from backend.context_planner import CONTEXT_POLICY_FAST_CHAT
+    from backend.domain import RetrievalChunkReference
+    from backend.retrieval import LocalChunkRetriever, RetrievedChunk, bounded_retrieval_result
+    from backend.settings import settings
+
+    local = LocalChunkRetriever()
+    max_chunks = int(settings.fast_chat_retrieval_max_chunks)
+    chunks: list[RetrievedChunk] = []
+    for index, upload in enumerate(uploads, 1):
+        for chunk_index in range(local.max_chunks_per_source):
+            text = (f"excerpt {index}.{chunk_index} " * local.chunk_chars)[: local.chunk_chars]
+            chunks.append(
+                RetrievedChunk(
+                    source_id=f"eval-upload-{index}",
+                    label=f"S{index}",
+                    title=" ".join(str(upload.get("title") or "").split())[:180],
+                    chunk_id=f"S{index}-C{chunk_index}",
+                    text=text,
+                    score=1.0,
+                    source_index=index - 1,
+                    chunk_index=chunk_index,
+                )
+            )
+    # Best-first order interleaves files, as the per-source cap would.
+    chunks.sort(key=lambda chunk: (chunk.chunk_index, chunk.source_index))
+    bounded = bounded_retrieval_result(
+        chunks,
+        max_context_chars=int(settings.fast_chat_retrieval_max_chars),
+        max_chunks=max_chunks,
+    )
+    base = build_live_request(row, decision, source_check=False)
+    with_excerpts = base.model_copy(
+        update={
+            "retrieval_required": True,
+            "source_context": bounded.context,
+            "retrieved_chunks": [
+                RetrievalChunkReference(
+                    source_id=chunk.source_id,
+                    label=chunk.label,
+                    title=chunk.title,
+                    chunk_id=chunk.chunk_id,
+                    excerpt=chunk.text[:600],
+                    score=chunk.score,
+                )
+                for chunk in bounded.chunks
+            ],
+        }
+    )
+    provider = provider if provider is not None else _live_eval_provider()
+
+    def size(request: Any) -> int:
+        payload, _plan = provider._invoke_payload(
+            request,
+            _FAST_CHAT_PHASE,
+            context_policy=CONTEXT_POLICY_FAST_CHAT,
+            phase=_FAST_CHAT_PHASE,
+            output_contract=_FAST_CHAT_CONTRACT,
+        )
+        return _payload_text_chars(payload)
+
+    extra = size(with_excerpts) - size(base)
+    return {
+        "chunks": len(bounded.chunks),
+        "context_chars": len(bounded.context),
+        "extra_prompt_chars": extra,
+        "extra_tokens_4cpt": round(extra / 4),
+        "extra_tokens_3cpt": round(extra / 3),
+    }
+
+
+def _upload_retrieval_policy(
+    scored: Sequence[tuple[Mapping[str, Any], GateDecision]],
+    *,
+    estimate: bool = True,
+) -> dict[str, Any]:
+    """Apply the upload retrieval policy rule to every gate row (no search).
+
+    Args:
+        scored: ``(message row, first-pass gate decision)`` per message.
+        estimate: When False, skip the prompt-size estimate (tests).
+    """
+    from backend.coaching.execution import (
+        _wants_student_upload_retrieval,
+        searchable_student_uploads,
+    )
+
+    before: list[tuple[str, bool]] = []
+    after: list[tuple[str, bool]] = []
+    per_category: dict[str, dict[str, Any]] = {}
+    fired_rows: list[dict[str, Any]] = []
+    fixed: list[str] = []
+    fixed_course_only: list[str] = []
+    new_false: list[str] = []
+    lost_second_chance: list[str] = []
+    lost_course_scope: list[str] = []
+    provider = _live_eval_provider() if estimate else None
+    for row, decision in scored:
+        uploads = (
+            [] if decision.scope_cleared else searchable_student_uploads(_eval_upload_entries(row))
+        )
+        fired = _wants_student_upload_retrieval(
+            enabled=True,
+            needs_retrieval=bool(decision.needs_retrieval),
+            has_student_upload=bool(uploads),
+            evidence_scoped=bool(decision.scope_cleared or decision.attachment_only),
+            student_message=str(row["message"]),
+        )
+        label = row["expected_decision"]
+        retrieved = bool(decision.retrieve or fired)
+        before.append((label, decision.retrieve))
+        after.append((label, retrieved))
+        bucket = per_category.setdefault(
+            row["category"],
+            {
+                "retrieve_rows": 0,
+                "skip_rows": 0,
+                "wrong_skips_before": 0,
+                "wrong_skips_after": 0,
+                "false_retrieves_before": 0,
+                "false_retrieves_after": 0,
+                "policy_fired": 0,
+                "extra_prompt_chars_estimate": 0,
+            },
+        )
+        if label == "retrieve":
+            bucket["retrieve_rows"] += 1
+            bucket["wrong_skips_before"] += int(not decision.retrieve)
+            bucket["wrong_skips_after"] += int(not retrieved)
+        else:
+            bucket["skip_rows"] += 1
+            bucket["false_retrieves_before"] += int(decision.retrieve)
+            bucket["false_retrieves_after"] += int(retrieved)
+        if not fired:
+            continue
+        bucket["policy_fired"] += 1
+        scope = str(row.get("expected_scope") or "")
+        record: dict[str, Any] = {
+            "id": row["id"],
+            "category": row["category"],
+            "expected_decision": label,
+            "expected_scope": scope,
+            "uploads": len(uploads),
+        }
+        if provider is not None:
+            record.update(
+                upload_policy_prompt_estimate(row, decision, uploads, provider=provider)
+            )
+            bucket["extra_prompt_chars_estimate"] += record["extra_prompt_chars"]
+        fired_rows.append(record)
+        if label == "retrieve":
+            fixed.append(row["id"])
+            if scope == "course":
+                fixed_course_only.append(row["id"])
+        else:
+            new_false.append(row["id"])
+        if decision.second_chance:
+            lost_second_chance.append(row["id"])
+            if scope in {"course", "both"}:
+                lost_course_scope.append(row["id"])
+    upload_misses_before = per_category.get("upload_question", {}).get("wrong_skips_before", 0)
+    upload_misses_after = per_category.get("upload_question", {}).get("wrong_skips_after", 0)
+    total_chars = sum(int(item.get("extra_prompt_chars") or 0) for item in fired_rows)
+    out: dict[str, Any] = {
+        "definition": UPLOAD_POLICY_DEFINITION,
+        "rows_fired": len(fired_rows),
+        "wrong_skip_rate_before": wrong_skip_rate(before),
+        "wrong_skip_rate_after": wrong_skip_rate(after),
+        "false_retrieve_rate_before": false_retrieve_rate(before),
+        "false_retrieve_rate_after": false_retrieve_rate(after),
+        "fixed_wrong_skips": fixed,
+        "fixed_wrong_skips_course_scope_only": fixed_course_only,
+        "new_false_retrieves": new_false,
+        "upload_question_misses_fixed": {
+            "fixed": upload_misses_before - upload_misses_after,
+            "misses_before": upload_misses_before,
+        },
+        "second_chance_eligible_lost": {
+            "rows": len(lost_second_chance),
+            "ids": lost_second_chance,
+            "expected_scope_course_or_both": len(lost_course_scope),
+            "expected_scope_course_or_both_ids": lost_course_scope,
+        },
+        "by_category": dict(sorted(per_category.items())),
+        "fired_rows": fired_rows,
+    }
+    if provider is not None:
+        out["extra_prompt_estimate"] = {
+            "total_chars": total_chars,
+            "per_fired_row_chars_max": max(
+                (int(item["extra_prompt_chars"]) for item in fired_rows), default=0
+            ),
+            "per_fired_row_chars_mean": round(total_chars / len(fired_rows), 1)
+            if fired_rows
+            else 0.0,
+            "total_tokens_4cpt": round(total_chars / 4),
+            "total_tokens_3cpt": round(total_chars / 3),
+        }
+    return out
+
+
 def evaluate_gate(
     messages: Sequence[Mapping[str, Any]], search: OfflineCourseSearch | None
 ) -> dict[str, Any]:
@@ -971,6 +1252,8 @@ def evaluate_gate(
         "empty_result_rate_course_attempts": empty_result_rate(course_attempt_counts),
         "student_file_only_passes_not_searched": student_only_passes,
         "needs_sources_stubs": _needs_sources_stubs(scored, search),
+        # Additive: the numbers above are with the policy off (its default).
+        "upload_retrieval_policy": _upload_retrieval_policy(scored),
     }
 
 
@@ -2497,6 +2780,42 @@ def format_report(result: Mapping[str, Any]) -> str:
                 f"false-retrieve {format_rate(record['false_retrieve_rate'])}; "
                 f"empty {format_rate(record['empty_result_rate_course_attempts'])}; "
                 f"second model calls {record['second_model_calls']}"
+            )
+    policy = gate.get("upload_retrieval_policy")
+    if policy:
+        lost = policy["second_chance_eligible_lost"]
+        misses = policy["upload_question_misses_fixed"]
+        lines += [
+            "",
+            "upload retrieval policy (FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED, rule only, no file search):",
+            f"  rows fired: {policy['rows_fired']}; "
+            f"upload_question misses fixed: {misses['fixed']} of {misses['misses_before']}",
+            f"  wrong-skip: {format_rate(policy['wrong_skip_rate_before'])} -> "
+            f"{format_rate(policy['wrong_skip_rate_after'])}",
+            f"  false-retrieve: {format_rate(policy['false_retrieve_rate_before'])} -> "
+            f"{format_rate(policy['false_retrieve_rate_after'])}",
+            f"  fixed wrong skips: {', '.join(policy['fixed_wrong_skips']) or 'none'}"
+            f" (course scope only, searched an unrelated upload: "
+            f"{', '.join(policy['fixed_wrong_skips_course_scope_only']) or 'none'})",
+            f"  new false retrieves: {', '.join(policy['new_false_retrieves']) or 'none'}",
+            f"  needs_sources second chance lost (both settings on): {lost['rows']} rows, "
+            f"{lost['expected_scope_course_or_both']} with course or both scope",
+        ]
+        estimate = policy.get("extra_prompt_estimate")
+        if estimate:
+            lines.append(
+                f"  extra prompt chars (ESTIMATE, upper bound): mean {estimate['per_fired_row_chars_mean']}, "
+                f"max {estimate['per_fired_row_chars_max']} per fired row; total {estimate['total_chars']} "
+                f"(~{estimate['total_tokens_4cpt']} to {estimate['total_tokens_3cpt']} tokens)"
+            )
+        for category, record in policy["by_category"].items():
+            if not record["policy_fired"]:
+                continue
+            lines.append(
+                f"  {category}: wrong-skip {record['wrong_skips_before']} -> {record['wrong_skips_after']}"
+                f" of {record['retrieve_rows']}; false-retrieve {record['false_retrieves_before']} -> "
+                f"{record['false_retrieves_after']} of {record['skip_rows']}; fired {record['policy_fired']}; "
+                f"extra chars (estimate) {record['extra_prompt_chars_estimate']}"
             )
     followups = result.get("followups")
     if followups:

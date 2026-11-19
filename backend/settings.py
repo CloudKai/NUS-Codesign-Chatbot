@@ -381,6 +381,14 @@ class Settings:
     fast_chat_source_check_titles_enabled: bool = _boolean(
         "FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED", False
     )
+    # Search the selected student uploads (local, no AWS call) when the
+    # regex gate skipped retrieval and the turn is not navigation or
+    # chit-chat. Never adds the course Knowledge Base. Default OFF: it sends
+    # upload excerpts on turns that do not need them (up to
+    # FAST_CHAT_RETRIEVAL_MAX_CHARS more prompt characters per turn).
+    fast_chat_upload_retrieval_enabled: bool = _boolean(
+        "FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED", False
+    )
     fast_chat_retrieval_max_chars: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHARS", 8_000, 1_000, 24_000
     )

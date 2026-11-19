@@ -42,6 +42,10 @@ python -c "import json,sys;a,b=(json.load(open(p)) for p in sys.argv[1:]);[d.pop
   "`needs_sources` second chance" below. A real model measures the same flag
   with `--live-model`; see "Run the `needs_sources` eval against the live
   model".
+- **Upload retrieval policy.** The gate numbers are with
+  `FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED` off (its default). A separate block,
+  `gate.upload_retrieval_policy`, applies the policy rule to every row. See
+  "Upload retrieval policy" below.
 
 ## Results history
 
@@ -138,6 +142,70 @@ uses the lexical stand-in for the Knowledge Base. The real flag rate, its
 precision, the added latency and the cost need a measured run with the live
 model and an approved call limit. The `--live-model` mode below is that run;
 it has not been run yet.
+
+## Upload retrieval policy (Phase 3c item 4, offline)
+
+`FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED` (default off; rule in
+`docs/RAG_ARCHITECTURE.md`, "Upload retrieval policy") searches the selected
+student uploads locally when the gate skipped and the turn is not navigation
+or chit-chat. The report's `gate.upload_retrieval_policy` block applies the
+production rule (`_wants_student_upload_retrieval`, imported, not copied) to
+every gate row. The row's selected and attached files are projected into
+source dicts, with the image check taken from the filename extension (rows
+hold only a title and a filename). The main gate numbers and
+`needs_sources_stubs` stay computed with the policy off.
+
+A row counts as retrieved when a source is searched, the gate's existing
+definition. No file is searched offline: the gate rows hold file names, not
+file text. So the block cannot say whether the search finds the right
+passage, and a course-scope row that only searches an unrelated upload
+(gm142, "what is dot voting") counts as fixed. The block lists those rows in
+`fixed_wrong_skips_course_scope_only`.
+
+Results on the 295 synthetic messages (script run). The policy fires on 18
+rows, each with one upload:
+
+| Category | Wrong-skip before → after | False-retrieve before → after | Rows fired | Extra prompt chars (estimate) |
+|---|---|---|---|---|
+| upload_question | 11 → 0 of 20 | n/a (no skip rows) | 11 | 43,184 |
+| follow_up | 7 → 5 of 9 | 1 → 1 of 7 | 2 | 7,856 |
+| upload_and_course | 1 → 0 of 12 | n/a | 1 | 3,928 |
+| course_with_unrelated_upload | 1 → 0 of 4 (course scope only) | n/a | 1 | 3,928 |
+| ambiguous_generic | n/a (no retrieve rows) | 1 → 4 of 9 | 3 | 11,778 |
+| every other category | unchanged | unchanged | 0 | 0 |
+| **Overall** | **76/154 (49.4%) → 61/154 (39.6%)** | **7/141 (5.0%) → 10/141 (7.1%)** | **18** | **70,674** |
+
+- Upload question misses fixed: 11 of 11.
+- Wrong skips fixed (15): gm098, gm099, gm101, gm102, gm103, gm104, gm107,
+  gm108, gm109, gm111, gm114, gm137, gm142, gm267, gm268. gm142 is a course
+  question with an unrelated upload: only the Knowledge Base can answer it,
+  and the policy does not add the Knowledge Base.
+- New false retrieves (3): gm276 "what do you think?", gm277 "?" and gm282
+  "any feedback?", all `ambiguous_generic` with an upload selected. They get
+  upload excerpts they do not need. The reply stays a coaching reply; no
+  evidence-gap text is added, because that text is used only for Q&A turns
+  and course gaps.
+- `needs_sources` interaction: all 18 rows are eligible for the second chance
+  today, and a policy turn is not sent the source check. With both settings
+  on, 2 of them (gm137 `both`, gm142 `course`) lose the course-catalog second
+  chance.
+
+**Extra prompt characters are an estimate (upper bound).** For each fired
+row the script builds the request production would send, then the same
+request with `min(FAST_CHAT_RETRIEVAL_MAX_CHUNKS, 2 x uploads)` full-size
+chunks (`LocalChunkRetriever` defaults: 1,800 characters, at most 2 per file)
+with the row's real titles, formatted by `bounded_retrieval_result` within
+`FAST_CHAT_RETRIEVAL_MAX_CHARS` (8,000). Both requests go through the
+provider's payload builder (never invoked). The difference counts
+`trusted_instructions` (the "Grounding mode" paragraph), the message text
+(the excerpt block replaces the empty-context placeholder) and the compact
+`runtime_context` JSON (allowed citation labels). Results: 3,916 to 3,928
+characters per fired turn with one file (mean 3,926.3), about 980 tokens at 4
+characters per token and about 1,310 at 3. With two or more files: 4 chunks,
+about 7,650 characters (about 1,910 to 2,550 tokens). Averaged over all 295
+rows: 240 characters per turn (70,674 / 295), about 60 to 80 tokens. Real
+files can be shorter or match fewer chunks. The excerpts are per-turn
+content, so none of it is cached.
 
 ## Follow-up cases (Phase 3b item C)
 

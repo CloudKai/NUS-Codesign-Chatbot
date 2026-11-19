@@ -1035,6 +1035,69 @@ def test_offline_gate_numbers_are_unchanged_by_the_new_gate_fields() -> None:
     assert gate["needs_sources_stubs"]["eligible_messages"] == 189
 
 
+def _upload_row(row_id: str, message: str, expected: str, scope: str, *, image: bool = False) -> dict:
+    filename = "Survey.png" if image else "Survey results.pdf"
+    return dict(
+        _row(message, expected),
+        id=row_id,
+        category="upload_question",
+        expected_scope=scope,
+        selected_sources=[{"title": "Survey results", "filename": filename}],
+    )
+
+
+def test_upload_policy_fixes_upload_questions_and_skips_chit_chat_and_navigation() -> None:
+    rows = [
+        _upload_row("u1", "what does the survey say about peak hours", "retrieve", "student_upload"),
+        _upload_row("u2", "thanks", "skip", "none"),
+        _upload_row("u3", "let's go to concept generation", "skip", "none"),
+        _upload_row("u4", "what do you think?", "skip", "none"),
+        _upload_row("u5", "what does the survey say about peak hours", "retrieve", "student_upload", image=True),
+        _upload_row("u6", "what is dot voting", "retrieve", "course"),
+    ]
+    scored = [(row, _EVAL.gate_decision(row)) for row in rows]
+    assert not any(decision.retrieve for _, decision in scored[:5])
+    policy = _EVAL._upload_retrieval_policy(scored, estimate=False)
+    assert policy["fixed_wrong_skips"] == ["u1", "u6"]
+    assert policy["fixed_wrong_skips_course_scope_only"] == ["u6"]
+    assert policy["new_false_retrieves"] == ["u4"]
+    assert policy["rows_fired"] == 3
+    assert policy["upload_question_misses_fixed"] == {"fixed": 2, "misses_before": 3}
+    assert policy["second_chance_eligible_lost"]["ids"] == ["u1", "u4", "u6"]
+    assert policy["second_chance_eligible_lost"]["expected_scope_course_or_both_ids"] == ["u6"]
+    assert "extra_prompt_estimate" not in policy
+
+
+def test_upload_policy_prompt_estimate_is_the_excerpt_payload_growth() -> None:
+    row = _upload_row("u1", "what does the survey say about peak hours", "retrieve", "student_upload")
+    decision = _EVAL.gate_decision(row)
+    one = _EVAL.upload_policy_prompt_estimate(row, decision, [{"title": "Survey results"}])
+    two = _EVAL.upload_policy_prompt_estimate(
+        row, decision, [{"title": "Survey results"}, {"title": "Interview notes"}]
+    )
+    assert one["chunks"] == 2 and two["chunks"] == 4
+    assert one["extra_prompt_chars"] > one["context_chars"] > 2 * 1_800
+    assert two["context_chars"] <= 8_000
+    assert one["extra_tokens_4cpt"] == round(one["extra_prompt_chars"] / 4)
+
+
+def test_upload_policy_block_on_the_real_gate_set_sums_and_leaves_gate_numbers_alone() -> None:
+    gate = _EVAL.evaluate_gate(_EVAL.load_messages(), None)
+    policy = gate["upload_retrieval_policy"]
+    assert gate["wrong_skip_rate"]["numerator"] == 76
+    assert gate["false_retrieve_rate"]["numerator"] == 7
+    assert gate["needs_sources_stubs"]["eligible_messages"] == 189
+    assert policy["wrong_skip_rate_before"] == gate["wrong_skip_rate"]
+    assert policy["false_retrieve_rate_before"] == gate["false_retrieve_rate"]
+    by_category = policy["by_category"].values()
+    assert sum(r["wrong_skips_after"] for r in by_category) == policy["wrong_skip_rate_after"]["numerator"]
+    assert sum(r["false_retrieves_after"] for r in by_category) == policy["false_retrieve_rate_after"]["numerator"]
+    assert sum(r["policy_fired"] for r in by_category) == policy["rows_fired"]
+    assert sum(r["extra_prompt_chars_estimate"] for r in by_category) == policy["extra_prompt_estimate"]["total_chars"]
+    assert len(policy["fixed_wrong_skips"]) == 76 - policy["wrong_skip_rate_after"]["numerator"]
+    assert len(policy["new_false_retrieves"]) == policy["false_retrieve_rate_after"]["numerator"] - 7
+
+
 def test_gate_decision_carries_the_scope_fields_the_live_request_needs() -> None:
     cleared = _EVAL.gate_decision(_row("what stage am I in", "skip"))
     assert cleared.scope_cleared and cleared.expected_mode == "qa" and not cleared.second_chance

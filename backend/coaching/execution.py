@@ -82,6 +82,7 @@ from backend.retrieval import (
     RetrievalSource,
     bounded_retrieval_result,
     focused_excerpt,
+    is_greeting_or_acknowledgement,
     with_course_evidence_gap,
 )
 from backend.settings import (
@@ -294,6 +295,82 @@ def _wants_source_need_check(
         application may honour it.
     """
     return bool(enabled) and not searched and not evidence_scoped
+
+
+def searchable_student_uploads(
+    sources: Iterable[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """Return the student's own non-image sources from *sources*.
+
+    Course library rows (Lecture Notes / Readings) are dropped: they are
+    searched only through the Knowledge Base. Images are dropped: their
+    evidence reaches the model as image input, not as text retrieval.
+
+    Args:
+        sources: Selected (and attached) notebook sources after scoping.
+
+    Returns:
+        The sources local text retrieval can search, in input order.
+    """
+    return [
+        source
+        for source in sources
+        if not is_locked_course_source(source)
+        and str(source.get("kind") or "").lower() != "image"
+        and not str(source.get("mime") or "").lower().startswith("image/")
+    ]
+
+
+def is_chit_chat(student_message: str) -> bool:
+    """Return whether the turn is a bare greeting or acknowledgement.
+
+    Reuses existing signals only: :func:`is_greeting_or_acknowledgement`
+    (the acknowledgement set and greeting prefix that recent-message
+    grounding already uses) and :func:`looks_like_information_request`, so
+    ``hi, what does my survey say?`` is not chit-chat. Known limit: short
+    replies outside that set (``thx``, ``haha nice``, ``ok will try``) are
+    not chit-chat.
+    """
+    return is_greeting_or_acknowledgement(
+        student_message
+    ) and not looks_like_information_request(student_message)
+
+
+def _wants_student_upload_retrieval(
+    *,
+    enabled: bool,
+    needs_retrieval: bool,
+    has_student_upload: bool,
+    evidence_scoped: bool,
+    student_message: str,
+) -> bool:
+    """Return whether to search the selected student uploads on this turn.
+
+    The upload retrieval policy (``FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED``) is a
+    local search with no AWS call. It applies only when the regex gate chose
+    not to retrieve, a non-image student upload is still in scope, no gate
+    override fixed the evidence scope (stage status, stage navigation,
+    meta-guidance, forced or lecture-help retrieval), and the turn is not
+    chit-chat. It never adds the course Knowledge Base.
+
+    Args:
+        enabled: ``FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED``.
+        needs_retrieval: The gate's decision after its overrides.
+        has_student_upload: True when :func:`searchable_student_uploads`
+            found at least one source in the turn's selected sources.
+        evidence_scoped: True when a gate override fixed the evidence scope.
+        student_message: Current student contribution. Not logged.
+
+    Returns:
+        True when the turn should run the local student-upload search.
+    """
+    return (
+        bool(enabled)
+        and not needs_retrieval
+        and bool(has_student_upload)
+        and not evidence_scoped
+        and not is_chit_chat(student_message)
+    )
 
 
 SOURCE_CHECK_MAX_TITLES = 20
@@ -3122,6 +3199,30 @@ class CoachApplicationService:
         )
         if include_course_catalog:
             needs_retrieval = True
+        evidence_scoped = bool(
+            lecture_help
+            or force_retrieval
+            or stage_status_request
+            or progression_request
+            or workflow_no_retrieve
+            or attachment_only_question
+            or missing_image_qa
+        )
+        # Local student-upload search on gate skips (opt-in). Decided after
+        # the course-catalog step, so it can never add the Knowledge Base:
+        # hydration below keeps include_course_catalog false.
+        upload_policy_only = _wants_student_upload_retrieval(
+            enabled=bool(runtime_settings.fast_chat_upload_retrieval_enabled),
+            needs_retrieval=needs_retrieval,
+            has_student_upload=bool(
+                searchable_student_uploads(snapshot.selected_sources)
+            ),
+            evidence_scoped=evidence_scoped,
+            student_message=request.student_message,
+        )
+        if upload_policy_only:
+            needs_retrieval = True
+            record_field("upload_retrieval_policy", True)
         record_field("retrieval_gate_ms", elapsed_ms(gate_started))
         record_field("retrieval_required", bool(needs_retrieval))
         record_field("mode_policy_intent", mode_policy.intent)
@@ -3170,21 +3271,34 @@ class CoachApplicationService:
                 # "no matching excerpt" response.
                 raise
             except Exception:
-                # A source Q&A turn cannot fall through to the provider when
-                # retrieval itself fails: doing so would let model knowledge or
-                # prior assistant prose become an unsupported course answer.
-                # Image-only Q&A remains provider-owned because its evidence is
-                # the resolved image input, not textual retrieval. A mixed turn
-                # with any textual selected source must still fail closed.
-                image_only = bool(image_inputs) and all(
-                    str(source.kind or "").lower() == "image"
-                    or str(source.mime or "").lower().startswith("image/")
-                    for source in retrieval_sources
-                )
-                if mode_policy.expected_mode != "qa" or image_only:
-                    raise
-                retrieved_chunks = []
-                retrieval_result_context = COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
+                if upload_policy_only:
+                    # The gate did not ask for this search, so its failure
+                    # must not fail the turn. Continue as if the policy had
+                    # not fired (the needs_sources check may still apply).
+                    record_field("upload_retrieval_policy_failed", True)
+                    record_field("retrieval_required", False)
+                    needs_retrieval = False
+                    retrieved_chunks = []
+                    retrieval_result_context = ""
+                    snapshot = replace(snapshot, retrieval_sources=())
+                    retrieval_sources = ()
+                else:
+                    # A source Q&A turn cannot fall through to the provider
+                    # when retrieval itself fails: doing so would let model
+                    # knowledge or prior assistant prose become an
+                    # unsupported course answer. Image-only Q&A remains
+                    # provider-owned because its evidence is the resolved
+                    # image input, not textual retrieval. A mixed turn with
+                    # any textual selected source must still fail closed.
+                    image_only = bool(image_inputs) and all(
+                        str(source.kind or "").lower() == "image"
+                        or str(source.mime or "").lower().startswith("image/")
+                        for source in retrieval_sources
+                    )
+                    if mode_policy.expected_mode != "qa" or image_only:
+                        raise
+                    retrieved_chunks = []
+                    retrieval_result_context = COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
         else:
             record_field("retrieval_total_ms", 0)
             record_field("course_kb_retrieval_ms", 0)
@@ -3195,15 +3309,7 @@ class CoachApplicationService:
         source_need_check = _wants_source_need_check(
             enabled=bool(runtime_settings.fast_chat_needs_sources_enabled),
             searched=bool(needs_retrieval and retrieval_sources),
-            evidence_scoped=bool(
-                lecture_help
-                or force_retrieval
-                or stage_status_request
-                or progression_request
-                or workflow_no_retrieve
-                or attachment_only_question
-                or missing_image_qa
-            ),
+            evidence_scoped=evidence_scoped,
         )
         if source_need_check:
             record_field("source_need_check", True)

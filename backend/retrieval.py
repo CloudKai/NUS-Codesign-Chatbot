@@ -149,6 +149,29 @@ def _compact_message_text(value: object) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
+def is_greeting_or_acknowledgement(message: str) -> bool:
+    """Return whether *message* is a bare acknowledgement or starts with a greeting.
+
+    Uses the same two checks as :func:`_is_substantive_recent_user_message`:
+    the message without trailing ``.!?`` is one of
+    ``_CONTEXT_ACKNOWLEDGEMENTS``, or it starts with ``_CONTEXT_GREETINGS``.
+    A greeting followed by a question still returns True; callers that need
+    chit-chat only combine this with an information-request check.
+
+    Args:
+        message: Current student contribution. Not logged.
+
+    Returns:
+        True for ``ok.``, ``Thanks!``, ``hello there``; False for empty text.
+    """
+    text = _compact_message_text(message)
+    if not text:
+        return False
+    if text.casefold().rstrip(".!?") in _CONTEXT_ACKNOWLEDGEMENTS:
+        return True
+    return bool(_CONTEXT_GREETINGS.search(text))
+
+
 def is_anaphoric_course_lookup(message: str) -> bool:
     """Return whether a source question refers back to earlier student work.
 
