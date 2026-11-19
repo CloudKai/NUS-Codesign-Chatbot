@@ -966,6 +966,201 @@ Additional rows, source `course-intent-by-turn-extra.json` and
 same follow-ups: 1/9 and 4/9 missed (44.4% [18.9, 73.3] for 4/9, computed).
 With 9 and 3 rows the intervals are too wide to rank these setups.
 
+### Combined gate evaluation (Phase 4 item 2)
+
+`scripts/evals/evaluate_combined_gate.py` runs three arms over all 295 gate
+messages, offline, with no network, no AWS and no model call. It is a new script
+that imports the gate, loaders and rate helpers from `evaluate_retrieval.py`. It
+is separate because the Laya arm needs stored or optional-dependency inputs that
+the main offline report does not, and `evaluate_retrieval.py` is already large.
+
+| Arm | What it is |
+|---|---|
+| (a) | The existing rules-based gate. |
+| (b) | Arm (a) plus the local course-intent classifier (Laya). An ambiguous turn the gate skipped is promoted to course retrieval when the score meets the cutoff. |
+| (c) | Arm (b) plus the SOURCE CHECK rule with course titles. The wording effect is a **stub model bound, not a measurement**: `oracle` flags exactly the rows labelled `retrieve`, `mock_rule` is the repo's keyword rule, `flag_all` flags every turn that carries the rule. Only a live run measures wording. |
+
+```bash
+python -m scripts.evals.evaluate_combined_gate \
+  --json-output .agents/tasks/phase4-work/item2-combined-gate.json
+# optional re-run with local weights (needs laya, not installed in this sandbox):
+python -m scripts.evals.evaluate_combined_gate --checkpoint /path/to/checkpoint \
+  [--bundle /path/to/bundle.zip] [--threshold 0.8] [--first-turn-threshold X]
+```
+
+**Cutoffs.** The existing cutoffs were used and not tuned on these rows: the 0.8
+default, and for Laya Learn the two cutoffs (0.8564 and 0.6456) that were
+selected earlier on the calibration split. The script reads them from the stored
+files or the setting and never fits or searches a cutoff. The files do not
+record how the 0.8 default was first chosen, and the Phase 3c rows were
+examined more than once (see "Laya results"), so these are development-set
+figures, not a clean test.
+
+**Laya arm: from stored results, not re-run.** The `laya` and `vegaml` packages
+are not installed in this sandbox, and no `model.safetensors`, `vega_config.json`
+or bundle file exists on it, so the classifier cannot run here. The script falls
+back to the stored per-row decisions in `.agents/tasks/phase3d-work/`. Those
+files do contain per-row decisions: `multilingual.json` and
+`typed-decisions.json` store `promoted` per row (169 rows), and
+`course-intent-by-turn.json` stores a Learn score and a first-turn flag per row
+(this script uses only its 84 `holdout_rows`; the calibration rows chose the
+cutoffs and the training rows were fitted on). `multilingual-concurrency8.json`
+is not used because 93 of its 94 inferences were busy abstentions.
+
+**Coverage.** 147 of the 295 rows are eligible for Laya (ambiguous intent, no
+evidence scope, nothing searched, not chit-chat); the other 148 are never
+scored, so arm (b) equals arm (a) on them by construction. The stored files
+hold a decision for 94 of the 147 eligible rows (the two 0.8 runs) or 41 (Learn).
+The rest cannot be evaluated here, so every number is reported in three modes:
+
+- `floor`: unscored eligible rows are not promoted (the least Laya can do), all 295 rows.
+- `ceiling`: unscored eligible rows are all promoted (the most Laya can do), all 295 rows. This is a bound, not a result; its false-retrieve figures are what promoting every eligible row would cost.
+- `scored_only`: unscored eligible rows are left out, so every kept row has an exact decision. The kept set is not a random sample (for Learn it drops all training and calibration rows).
+
+Checks the script records: the gate at this commit reproduces every stored
+`baseline_retrieve` and every stored eligibility flag (no mismatch in 169, 169
+and 84 rows), and the composed arm (b) reproduces each file's own summary
+(62/109 and 2/60 for multilingual, 73/109 and 2/60 for typed-decisions, 15/51
+and 2/33 for Learn).
+
+**Extra calls and tokens.** "Extra searches" counts rows searched in the arm but
+not by the gate. "Extra model calls" counts stub flags on rows that carry the
+rule, one second call each. Laya adds only local CPU inference (no tokens, no
+AWS). Token figures are estimates: rule plus titles are 798 + 794 characters per
+turn that carries the rule; excerpts are an upper bound (the 8,000-character
+`FAST_CHAT_RETRIEVAL_MAX_CHARS` cap per newly searched turn); each second call
+uses the user-reported mean of 7,100 input and 300 output tokens. The JSON holds
+the per-category token estimates.
+
+**Marks.** Every figure below is **script run** from
+`.agents/tasks/phase4-work/item2-combined-gate.json` (git SHA `21d19ce`, clean
+tree, 2026-11-19T16:48:40Z). Intervals are Wilson 95%. `S` marks a denominator
+under 30 rows and `VS` one under 10 (a rule of thumb chosen for this report).
+Most categories are small; read them as counts, not rates.
+
+**Arm (a), the existing gate, by category (script run, all 295 rows)**
+
+| Category | Retrieve rows | Wrong skip | Skip rows | False retrieve |
+|---|---|---|---|---|
+| ambiguous_generic | 0 | n/a | 9 | 1/9 = 11.1% [2.0, 43.5] VS |
+| attachment_question | 13 | 0/13 = 0.0% [0.0, 22.8] S | 0 | n/a |
+| course_content | 61 | 38/61 = 62.3% [49.8, 73.4] | 0 | n/a |
+| course_logistics | 11 | 10/11 = 90.9% [62.3, 98.4] S | 0 | n/a |
+| course_with_unrelated_upload | 4 | 1/4 = 25.0% [4.6, 69.9] VS | 0 | n/a |
+| follow_up | 9 | 7/9 = 77.8% [45.3, 93.7] VS | 7 | 1/7 = 14.3% [2.6, 51.3] VS |
+| greeting_thanks_chitchat | 0 | n/a | 33 | 0/33 = 0.0% [0.0, 10.4] |
+| informal_or_multilingual | 8 | 7/8 = 87.5% [52.9, 97.8] VS | 0 | n/a |
+| mixed_project_and_course | 3 | 0/3 = 0.0% [0.0, 56.1] VS | 0 | n/a |
+| named_material | 13 | 1/13 = 7.7% [1.4, 33.3] S | 0 | n/a |
+| not_in_course_material | 0 | n/a | 4 | 1/4 = 25.0% [4.6, 69.9] VS |
+| out_of_scope | 0 | n/a | 7 | 1/7 = 14.3% [2.6, 51.3] VS |
+| procedural_ui | 0 | n/a | 20 | 2/20 = 10.0% [2.8, 30.1] S |
+| project_mentions_course | 0 | n/a | 9 | 1/9 = 11.1% [2.0, 43.5] VS |
+| project_reasoning | 0 | n/a | 31 | 0/31 = 0.0% [0.0, 11.0] |
+| stage_meta_guidance | 0 | n/a | 10 | 0/10 = 0.0% [0.0, 27.8] S |
+| stage_navigation | 0 | n/a | 11 | 0/11 = 0.0% [0.0, 25.9] S |
+| upload_and_course | 12 | 1/12 = 8.3% [1.5, 35.4] S | 0 | n/a |
+| upload_question | 20 | 11/20 = 55.0% [34.2, 74.2] S | 0 | n/a |
+| **all rows** | 154 | 76/154 = 49.4% [41.6, 57.2] | 141 | 7/141 = 5.0% [2.4, 9.9] |
+
+**Overall, per Laya source and mode** (script run; rows in brackets)
+
+| Laya source | Mode (rows) | Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns |
+|---|---|---|---|---|---|---|---|
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | `floor` (295) | (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 |
+|  | `floor` (295) | (b) gate + Laya | 67/154 = 43.5% [35.9, 51.4] | 7/141 = 5.0% [2.4, 9.9] | 9 | 0 | 0 |
+|  | `floor` (295) | (c) stub `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 180 | 180 |
+|  | `floor` (295) | (c) stub `mock_rule` | 18/154 = 11.7% [7.5, 17.7] | 39/141 = 27.7% [20.9, 35.6] | 90 | 81 | 180 |
+|  | `floor` (295) | (c) stub `oracle` | 0/154 = 0.0% [0.0, 2.4] | 7/141 = 5.0% [2.4, 9.9] | 76 | 67 | 180 |
+|  | `ceiling` (295) | (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 |
+|  | `ceiling` (295) | (b) gate + Laya | 27/154 = 17.5% [12.3, 24.3] | 73/141 = 51.8% [43.6, 59.9] | 115 | 0 | 0 |
+|  | `ceiling` (295) | (c) stub `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 74 | 74 |
+|  | `ceiling` (295) | (c) stub `mock_rule` | 9/154 = 5.8% [3.1, 10.7] | 84/141 = 59.6% [51.3, 67.3] | 144 | 29 | 74 |
+|  | `ceiling` (295) | (c) stub `oracle` | 0/154 = 0.0% [0.0, 2.4] | 73/141 = 51.8% [43.6, 59.9] | 142 | 27 | 74 |
+|  | `scored_only` (189) | (a) gate | 36/114 = 31.6% [23.8, 40.6] | 7/75 = 9.3% [4.6, 18.0] | 0 | 0 | 0 |
+|  | `scored_only` (189) | (b) gate + Laya | 27/114 = 23.7% [16.8, 32.3] | 7/75 = 9.3% [4.6, 18.0] | 9 | 0 | 0 |
+|  | `scored_only` (189) | (c) stub `flag_all` | 0/114 = 0.0% [0.0, 3.3] | 54/75 = 72.0% [61.0, 80.9] | 83 | 74 | 74 |
+|  | `scored_only` (189) | (c) stub `mock_rule` | 9/114 = 7.9% [4.2, 14.3] | 18/75 = 24.0% [15.8, 34.8] | 38 | 29 | 74 |
+|  | `scored_only` (189) | (c) stub `oracle` | 0/114 = 0.0% [0.0, 3.3] | 7/75 = 9.3% [4.6, 18.0] | 36 | 27 | 74 |
+| Laya multilingual, cutoff 0.8 | `floor` (295) | (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 |
+|  | `floor` (295) | (b) gate + Laya | 65/154 = 42.2% [34.7, 50.1] | 7/141 = 5.0% [2.4, 9.9] | 11 | 0 | 0 |
+|  | `floor` (295) | (c) stub `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 178 | 178 |
+|  | `floor` (295) | (c) stub `mock_rule` | 16/154 = 10.4% [6.5, 16.2] | 39/141 = 27.7% [20.9, 35.6] | 92 | 81 | 178 |
+|  | `floor` (295) | (c) stub `oracle` | 0/154 = 0.0% [0.0, 2.4] | 7/141 = 5.0% [2.4, 9.9] | 76 | 65 | 178 |
+|  | `ceiling` (295) | (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 |
+|  | `ceiling` (295) | (b) gate + Laya | 64/154 = 41.6% [34.1, 49.5] | 59/141 = 41.8% [34.0, 50.1] | 64 | 0 | 0 |
+|  | `ceiling` (295) | (c) stub `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 125 | 125 |
+|  | `ceiling` (295) | (c) stub `mock_rule` | 15/154 = 9.7% [6.0, 15.4] | 76/141 = 53.9% [45.7, 61.9] | 130 | 66 | 125 |
+|  | `ceiling` (295) | (c) stub `oracle` | 0/154 = 0.0% [0.0, 2.4] | 59/141 = 41.8% [34.0, 50.1] | 128 | 64 | 125 |
+|  | `scored_only` (242) | (a) gate | 75/153 = 49.0% [41.2, 56.9] | 7/89 = 7.9% [3.9, 15.4] | 0 | 0 | 0 |
+|  | `scored_only` (242) | (b) gate + Laya | 64/153 = 41.8% [34.3, 49.8] | 7/89 = 7.9% [3.9, 15.4] | 11 | 0 | 0 |
+|  | `scored_only` (242) | (c) stub `flag_all` | 0/153 = 0.0% [0.0, 2.5] | 68/89 = 76.4% [66.6, 84.0] | 136 | 125 | 125 |
+|  | `scored_only` (242) | (c) stub `mock_rule` | 15/153 = 9.8% [6.0, 15.6] | 24/89 = 27.0% [18.8, 37.0] | 77 | 66 | 125 |
+|  | `scored_only` (242) | (c) stub `oracle` | 0/153 = 0.0% [0.0, 2.5] | 7/89 = 7.9% [3.9, 15.4] | 75 | 64 | 125 |
+| Laya typed-decisions, cutoff 0.8 | `floor` (295) | (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 |
+|  | `floor` (295) | (b) gate + Laya | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 |
+|  | `floor` (295) | (c) stub `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 189 | 189 |
+|  | `floor` (295) | (c) stub `mock_rule` | 19/154 = 12.3% [8.0, 18.5] | 39/141 = 27.7% [20.9, 35.6] | 89 | 89 | 189 |
+|  | `floor` (295) | (c) stub `oracle` | 0/154 = 0.0% [0.0, 2.4] | 7/141 = 5.0% [2.4, 9.9] | 76 | 76 | 189 |
+|  | `ceiling` (295) | (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 |
+|  | `ceiling` (295) | (b) gate + Laya | 75/154 = 48.7% [40.9, 56.5] | 59/141 = 41.8% [34.0, 50.1] | 53 | 0 | 0 |
+|  | `ceiling` (295) | (c) stub `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 136 | 136 |
+|  | `ceiling` (295) | (c) stub `mock_rule` | 18/154 = 11.7% [7.5, 17.7] | 76/141 = 53.9% [45.7, 61.9] | 127 | 74 | 136 |
+|  | `ceiling` (295) | (c) stub `oracle` | 0/154 = 0.0% [0.0, 2.4] | 59/141 = 41.8% [34.0, 50.1] | 128 | 75 | 136 |
+|  | `scored_only` (242) | (a) gate | 75/153 = 49.0% [41.2, 56.9] | 7/89 = 7.9% [3.9, 15.4] | 0 | 0 | 0 |
+|  | `scored_only` (242) | (b) gate + Laya | 75/153 = 49.0% [41.2, 56.9] | 7/89 = 7.9% [3.9, 15.4] | 0 | 0 | 0 |
+|  | `scored_only` (242) | (c) stub `flag_all` | 0/153 = 0.0% [0.0, 2.5] | 68/89 = 76.4% [66.6, 84.0] | 136 | 136 | 136 |
+|  | `scored_only` (242) | (c) stub `mock_rule` | 18/153 = 11.8% [7.6, 17.8] | 24/89 = 27.0% [18.8, 37.0] | 74 | 74 | 136 |
+|  | `scored_only` (242) | (c) stub `oracle` | 0/153 = 0.0% [0.0, 2.5] | 7/89 = 7.9% [3.9, 15.4] | 75 | 75 | 136 |
+
+**Arm (b) by category, only where Laya changes a row in either bracket**
+
+| Laya source | Category | Metric | (a) gate | (b) floor | (b) ceiling | Extra searches floor / ceiling |
+|---|---|---|---|---|---|---|
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | ambiguous_generic | false retrieve | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 4/9 = 44.4% [18.9, 73.3] VS | 0 / 3 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | course_content | wrong skip | 38/61 = 62.3% [49.8, 73.4] | 32/61 = 52.5% [40.2, 64.5] | 7/61 = 11.5% [5.7, 21.8] | 6 / 31 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | course_logistics | wrong skip | 10/11 = 90.9% [62.3, 98.4] S | 8/11 = 72.7% [43.4, 90.2] S | 0/11 = 0.0% [0.0, 25.9] S | 2 / 10 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | follow_up | wrong skip | 7/9 = 77.8% [45.3, 93.7] VS | 7/9 = 77.8% [45.3, 93.7] VS | 4/9 = 44.4% [18.9, 73.3] VS | 0 / 8 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | follow_up | false retrieve | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 6/7 = 85.7% [48.7, 97.4] VS | 0 / 8 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | greeting_thanks_chitchat | false retrieve | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 15/33 = 45.5% [29.8, 62.0] | 0 / 15 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | informal_or_multilingual | wrong skip | 7/8 = 87.5% [52.9, 97.8] VS | 6/8 = 75.0% [40.9, 92.8] VS | 3/8 = 37.5% [13.7, 69.4] VS | 1 / 4 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | named_material | wrong skip | 1/13 = 7.7% [1.4, 33.3] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S | 0 / 1 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | not_in_course_material | false retrieve | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 3/4 = 75.0% [30.1, 95.4] VS | 0 / 2 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | out_of_scope | false retrieve | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 7/7 = 100.0% [64.6, 100.0] VS | 0 / 6 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | procedural_ui | false retrieve | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 14/20 = 70.0% [48.1, 85.5] S | 0 / 12 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | project_mentions_course | false retrieve | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 7/9 = 77.8% [45.3, 93.7] VS | 0 / 6 |
+| Laya Learn, per-turn cutoffs 0.8564 / 0.6456 | project_reasoning | false retrieve | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 17/31 = 54.8% [37.8, 70.8] | 0 / 17 |
+| Laya multilingual, cutoff 0.8 | ambiguous_generic | false retrieve | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 3/9 = 33.3% [12.1, 64.6] VS | 0 / 2 |
+| Laya multilingual, cutoff 0.8 | course_content | wrong skip | 38/61 = 62.3% [49.8, 73.4] | 33/61 = 54.1% [41.7, 66.0] | 33/61 = 54.1% [41.7, 66.0] | 5 / 5 |
+| Laya multilingual, cutoff 0.8 | course_logistics | wrong skip | 10/11 = 90.9% [62.3, 98.4] S | 7/11 = 63.6% [35.4, 84.8] S | 7/11 = 63.6% [35.4, 84.8] S | 3 / 3 |
+| Laya multilingual, cutoff 0.8 | follow_up | false retrieve | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 4/7 = 57.1% [25.1, 84.2] VS | 0 / 3 |
+| Laya multilingual, cutoff 0.8 | greeting_thanks_chitchat | false retrieve | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 12/33 = 36.4% [22.2, 53.4] | 0 / 12 |
+| Laya multilingual, cutoff 0.8 | informal_or_multilingual | wrong skip | 7/8 = 87.5% [52.9, 97.8] VS | 4/8 = 50.0% [21.5, 78.5] VS | 4/8 = 50.0% [21.5, 78.5] VS | 3 / 3 |
+| Laya multilingual, cutoff 0.8 | named_material | wrong skip | 1/13 = 7.7% [1.4, 33.3] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S | 0 / 1 |
+| Laya multilingual, cutoff 0.8 | not_in_course_material | false retrieve | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 2/4 = 50.0% [15.0, 85.0] VS | 0 / 1 |
+| Laya multilingual, cutoff 0.8 | out_of_scope | false retrieve | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 5/7 = 71.4% [35.9, 91.8] VS | 0 / 4 |
+| Laya multilingual, cutoff 0.8 | procedural_ui | false retrieve | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 14/20 = 70.0% [48.1, 85.5] S | 0 / 12 |
+| Laya multilingual, cutoff 0.8 | project_mentions_course | false retrieve | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 5/9 = 55.6% [26.7, 81.1] VS | 0 / 4 |
+| Laya multilingual, cutoff 0.8 | project_reasoning | false retrieve | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 14/31 = 45.2% [29.2, 62.2] | 0 / 14 |
+| Laya typed-decisions, cutoff 0.8 | ambiguous_generic | false retrieve | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 3/9 = 33.3% [12.1, 64.6] VS | 0 / 2 |
+| Laya typed-decisions, cutoff 0.8 | follow_up | false retrieve | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 4/7 = 57.1% [25.1, 84.2] VS | 0 / 3 |
+| Laya typed-decisions, cutoff 0.8 | greeting_thanks_chitchat | false retrieve | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 12/33 = 36.4% [22.2, 53.4] | 0 / 12 |
+| Laya typed-decisions, cutoff 0.8 | named_material | wrong skip | 1/13 = 7.7% [1.4, 33.3] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S | 0 / 1 |
+| Laya typed-decisions, cutoff 0.8 | not_in_course_material | false retrieve | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 2/4 = 50.0% [15.0, 85.0] VS | 0 / 1 |
+| Laya typed-decisions, cutoff 0.8 | out_of_scope | false retrieve | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 5/7 = 71.4% [35.9, 91.8] VS | 0 / 4 |
+| Laya typed-decisions, cutoff 0.8 | procedural_ui | false retrieve | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 14/20 = 70.0% [48.1, 85.5] S | 0 / 12 |
+| Laya typed-decisions, cutoff 0.8 | project_mentions_course | false retrieve | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 5/9 = 55.6% [26.7, 81.1] VS | 0 / 4 |
+| Laya typed-decisions, cutoff 0.8 | project_reasoning | false retrieve | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 14/31 = 45.2% [29.2, 62.2] | 0 / 14 |
+
+Reading the results (script run unless noted):
+
+- Gate alone: wrong skip 76/154 = 49.4% [41.6, 57.2] and false retrieve 7/141 = 5.0% [2.4, 9.9]. These match the earlier offline numbers.
+- Laya multilingual at 0.8 turns 11 wrong skips into retrievals (65/154 = 42.2% [34.7, 50.1] in the `floor` reading) with no new false retrieve on the scored rows. The intervals for arm (a) and arm (b) overlap, so the 295-row data do not show a clear difference. Laya typed-decisions promotes nothing.
+- Laya Learn lowers misses from 36/114 to 27/114 on the exact-decision rows (23.7% [16.8, 32.3]) with false retrieves unchanged at 7/75. That subset excludes the 106 eligible rows that were trained on, used for calibration or never scored, so it does not describe the full set. Over all 295 rows with unscored rows left unpromoted it is 67/154 = 43.5% [35.9, 51.4].
+- No reading that uses stored Laya decisions on all 295 rows reaches the 25% wrong-skip target while keeping false retrieves under 10%. The `ceiling` reading of Laya Learn reaches 27/154 = 17.5% [12.3, 24.3] only with 73/141 = 51.8% false retrieves, so it is a bound and not an operating point.
+- Stub bounds for arm (c) on top of Laya: `oracle` reaches 0 wrong skips and keeps false retrieves at the gate's 7/141 by definition, so it is the best case. `mock_rule` gives 16/154 and 39/141 (27.7% [20.9, 35.6]) and `flag_all` gives 0/154 and 120/141 (85.1% [78.3, 90.0]). The real model sits somewhere in this range. The phase 3c live run (62/109 wrong skip baseline, 51/109 with titles, in the Recorded results above) is the only measurement of wording.
+- Laya cuts extra model calls from the stub arm by 11 (`oracle` 76 to 65 second calls on the multilingual floor) because promoted rows no longer carry the rule, at the cost of the same 11 first-pass searches.
+
 ### Product rule: course concept questions require a course citation
 
 **Product rule (not implemented as stated).** A question about a course
