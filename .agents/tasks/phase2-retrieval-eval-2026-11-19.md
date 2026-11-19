@@ -204,4 +204,15 @@ COURSE_MATERIALS_BUCKET=<course bucket> AWS_REGION=<region> \
 
 ## Pushed commits
 
-Filled in after push.
+Part A (Phase 1 follow-up, base was `4b46822`):
+
+- `a40e4f0` test: add drift test for shared stage prompt files, record item 4 as Option 1
+
+Part B (Phase 2):
+
+- `a79b36b` feat: add 94 labelled retrieval questions from lecture notes
+- `6188b16` feat: add 295 synthetic retrieval-gate messages with labels
+- `540a120` fix: make lecture-notes sync test advance mtime explicitly
+- `1d0d677` feat: add offline retrieval eval script, tests, docs and Phase 2 report
+
+All of these are on `origin/improvement/backend`. The commit that adds this section is not listed here.
