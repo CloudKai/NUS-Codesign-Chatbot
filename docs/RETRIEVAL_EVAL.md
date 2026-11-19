@@ -72,7 +72,7 @@ catalog).
 | Stub | Flags | Role |
 |---|---|---|
 | `oracle` | exactly the messages labelled `retrieve` | Best case: a perfect model. |
-| `mock_rule` | eligible messages phrased as a question or information request | The mock provider's deterministic rule. Crude. |
+| `mock_rule` | eligible messages phrased as a question or information request, except first-person or project reasoning | The mock provider's deterministic rule. Crude. |
 | `flag_all` | every eligible message | Worst case: a model that over-flags. |
 
 Results on the 295 synthetic messages (189 are eligible, and all 76 current
@@ -80,10 +80,23 @@ wrong skips are eligible):
 
 | Metric | Gate only | `oracle` | `mock_rule` | `flag_all` |
 |---|---|---|---|---|
-| wrong-skip rate | 76/154 (49.4%) | 0/154 (0.0%) | 18/154 (11.7%) | 0/154 (0.0%) |
-| false-retrieve rate | 7/141 (5.0%) | 7/141 (5.0%) | 48/141 (34.0%) | 120/141 (85.1%) |
-| empty-result rate, course searches | 1/63 (1.6%) | 2/139 (1.4%) | 7/162 (4.3%) | 18/252 (7.1%) |
-| second model calls | 0 | 76 | 99 | 189 |
+| wrong-skip rate | 76/154 (49.4%) | 0/154 (0.0%) | 19/154 (12.3%) | 0/154 (0.0%) |
+| false-retrieve rate | 7/141 (5.0%) | 7/141 (5.0%) | 39/141 (27.7%) | 120/141 (85.1%) |
+| empty-result rate, course searches | 1/63 (1.6%) | 2/139 (1.4%) | 7/152 (4.6%) | 18/252 (7.1%) |
+| second model calls | 0 | 76 | 89 | 189 |
+
+The eligible count (189) is an approximation. The eval's `second_chance`
+flag mirrors the server stamp rule but leaves out three overrides that the
+application applies: Lecture Help, forced retrieval and missing-image Q&A.
+The real eligible count can differ slightly.
+
+The flag is honoured only when the model returns a Q&A turn. A flagged
+coaching turn is ignored and keeps its first reply, assessment and
+recommendation (see `docs/RAG_ARCHITECTURE.md`). The stubs do not model the
+returned mode, so `mock_rule` approximates "the model judged this a coaching
+turn" with the project-reasoning exclusion. A real model that labels a
+no-cue course question as coaching would not get the second chance, so the
+real wrong-skip reduction can be smaller than the stub rows suggest.
 
 What this proves: every current wrong skip is reachable by the second chance,
 so the flag can in principle close the gap. The cost scales with how often the

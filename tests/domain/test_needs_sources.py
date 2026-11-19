@@ -48,6 +48,8 @@ _RUNTIME_ARN = (
 # skips it, so the model never sees course excerpts on the first call.
 _NO_CUE_COURSE_QUESTION = "what questions do we ask in the JTBD interview"
 _PROJECT_STATEMENT = "I think option B is stronger."
+# Question-shaped, so the mock rule would flag it, but it is project coaching.
+_COACHING_QUESTION = "Should I pick option B?"
 
 
 def _payload(
@@ -336,6 +338,58 @@ def test_flag_on_model_says_false_stays_one_call(tmp_path, monkeypatch) -> None:
     assert "SOURCE CHECK" in _trusted_instructions(client.calls[0])
 
 
+def test_flag_true_on_a_coaching_turn_is_ignored_and_keeps_the_first_turn(
+    tmp_path, monkeypatch
+) -> None:
+    """A flagged coaching turn is not retried; its assessment is persisted."""
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payload=_payload(
+            mode="coaching",
+            text="What would B change for your users?",
+            needs_sources=True,
+        )
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    turn = service.submit(_request(thread_id, _COACHING_QUESTION, "ns-coaching"))
+
+    assert len(client.calls) == 1
+    assert "SOURCE CHECK" in _trusted_instructions(client.calls[0])
+    assert retriever.queries == []
+    assert turn.response_text == "What would B change for your users?"
+    assert turn.assessment.response_mode == "coaching"
+    assert turn.assessment.recommendation.value == "stay"
+    assert turn.assessment.recommendation_rationale == "More evidence is needed."
+    assistants = _assistant_messages(store, thread_id)
+    assert len(assistants) == 1
+    assert assistants[0]["content"] == "What would B change for your users?"
+
+
+def test_flag_true_without_any_retrieval_source_keeps_the_first_reply(
+    tmp_path, monkeypatch
+) -> None:
+    """Documented limit: with nothing to search, the brief first reply stands."""
+    _enable(monkeypatch)
+    store = StudentStore(tmp_path / "no-sources.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payload=_payload(text="Brief reply with no course facts.", needs_sources=True)
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    turn = service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "ns-nosrc"))
+
+    assert len(client.calls) == 1
+    assert retriever.queries == []
+    assert turn.response_text == "Brief reply with no course facts."
+    assistants = _assistant_messages(store, thread_id)
+    assert [m["content"] for m in assistants] == ["Brief reply with no course facts."]
+
+
 def test_flag_off_has_no_prompt_text_and_ignores_a_volunteered_flag(
     tmp_path, monkeypatch
 ) -> None:
@@ -539,6 +593,24 @@ def test_mock_provider_flag_on_project_statement_does_not_retrieve(
 
     assert retriever.queries == []
     assert turn.response_text
+    assert len(_assistant_messages(store, thread_id)) == 1
+
+
+def test_mock_provider_flag_on_coaching_question_does_not_retrieve(
+    tmp_path, monkeypatch
+) -> None:
+    """A question-shaped project message is not retried with course evidence."""
+    _enable(monkeypatch)
+    assert mock_flags_needs_sources(_COACHING_QUESTION) is False
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    service = _mock_service(store, retriever)
+
+    turn = service.submit(_request(thread_id, _COACHING_QUESTION, "mock-coaching-q"))
+
+    assert retriever.queries == []
+    assert "struggling moment" not in turn.response_text
+    assert turn.assessment.response_mode == "coaching"
     assert len(_assistant_messages(store, thread_id)) == 1
 
 

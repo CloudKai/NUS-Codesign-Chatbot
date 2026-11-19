@@ -1060,12 +1060,6 @@ def _validated_fast_chat(
     ]
     if output.needs_source_retrieval:
         record_field("fast_chat_needs_source_retrieval", True)
-    # Honour needs_sources only when FastAPI asked for the check this turn, so
-    # a model that volunteers the flag (or student text that induces it)
-    # cannot start a second call on its own.
-    needs_sources = bool(output.needs_sources) and bool(request.source_need_check)
-    if needs_sources:
-        record_field("fast_chat_needs_sources", True)
     record_field("mode_returned", output.mode)
     policy = policy_from_request(request)
     enforcement = enforce_model_mode(policy.expected_mode, output.mode)
@@ -1080,6 +1074,15 @@ def _validated_fast_chat(
     )
     if enforcement.effective_mode == SPECIALIST_QA:
         record_field("hmw_scaffold_ready_model", False)
+        # Honour needs_sources only when FastAPI asked for the check this
+        # turn, so a model that volunteers the flag (or student text that
+        # induces it) cannot start a second call on its own. Coaching turns
+        # never honour it (see the coaching branch below).
+        needs_sources = bool(output.needs_sources) and bool(
+            request.source_need_check
+        )
+        if needs_sources:
+            record_field("fast_chat_needs_sources", True)
         return ProviderAssessmentResult(
             response_text=output.response_text,
             assessment=_fast_chat_assessment(
@@ -1100,6 +1103,11 @@ def _validated_fast_chat(
         )
     if output.recommendation not in {StageDecision.STAY.value, StageDecision.ADVANCE.value}:
         raise _malformed_error()
+    if output.needs_sources and request.source_need_check:
+        # A coaching turn is never retried for course evidence: the retry
+        # would rewrite it into a fail-closed course turn and discard the
+        # first assessment and recommendation. Recorded for the canary.
+        record_field("fast_chat_needs_sources_ignored_coaching", True)
     record_field("hmw_scaffold_ready_model", bool(output.hmw_scaffold_ready))
     assessment = _fast_chat_assessment(
         request,
@@ -1120,7 +1128,6 @@ def _validated_fast_chat(
         deep_review_succeeded=False,
         review_trigger=None,
         needs_source_retrieval=bool(output.needs_source_retrieval),
-        needs_sources=needs_sources,
     )
 
 

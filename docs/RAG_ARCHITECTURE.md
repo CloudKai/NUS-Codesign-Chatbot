@@ -70,14 +70,33 @@ do we ask in the JTBD interview"). With `FAST_CHAT_NEEDS_SOURCES_ENABLED=true`
 2. For stamped turns the backend runtime rules (`backend/prompts/composer.py`)
    add a SOURCE CHECK paragraph that tells the model when to set the flag and
    to keep its first reply free of course-specific facts.
-3. The provider honours the flag only on a stamped request, so a model that
-   volunteers it (or text that induces it) cannot start a second call.
+3. The provider honours the flag only on a stamped request and only when the
+   returned mode is Q&A. A model that volunteers it (or text that induces it)
+   cannot start a second call. A flagged **coaching** turn is ignored: it is
+   not retried, so its first reply, assessment and stay/advance
+   recommendation are persisted as without the setting. The retry would
+   otherwise rewrite the turn into a fail-closed course turn and discard
+   that assessment. The SOURCE CHECK text tells the model to use mode qa when
+   it sets the flag. The ignored case is recorded as
+   `fast_chat_needs_sources_ignored_coaching` in `coach_turn_perf`.
 4. When the flag is true, `_maybe_rag_fallback` retrieves from selected
    sources **and the course catalog**, clears `source_need_check`, sets
    `retrieval_required` and `allow_model_knowledge=false`, and runs the one
    retry. The first result is not persisted. If that retrieve fails, the retry
    still runs with the "retrieval unavailable" context so the reply states the
    evidence gap.
+
+Limit: when the flag is true but nothing can be retrieved (no course library
+synced and no selected source, or the two-invoke budget is spent), the retry is
+skipped and the brief first reply, written to assert no course facts, is shown
+and persisted. It is not an evidence-gap reply. A flagged turn with a failed
+retrieve does get an evidence-gap reply. Authoring one for the skipped case is
+a possible follow-up.
+
+The SOURCE CHECK text says no excerpts were retrieved, while the runtime
+`fast_chat.md` Q&A section says FastAPI already retrieved. The SOURCE CHECK
+text states that it overrides that note. Whether the model sets and clears the
+flag as intended can only be checked in a live canary.
 
 `needs_sources` and `needs_source_retrieval` coexist. They share one retry, one
 budget (two invokes per turn) and one persistence path. `needs_source_retrieval`

@@ -56,13 +56,20 @@ def mock_flags_needs_sources(student_message: str) -> bool:
 
     This is a deterministic rule, not a judgement about course relevance: a
     message phrased as a question or information request is reported as
-    needing sources. It exists so offline tests and the offline eval can drive
-    the real two-call fallback. It says nothing about how often a real model
-    sets the flag.
+    needing sources, unless it reads as first-person or project reasoning.
+    That exclusion stands in for the real provider, which never honours the
+    flag on a coaching turn. It exists so offline tests and the offline eval
+    can drive the real two-call fallback. It says nothing about how often a
+    real model sets the flag.
     """
-    from .coaching.mode_policy import looks_like_information_request
+    from .coaching.mode_policy import (
+        looks_like_information_request,
+        looks_like_project_reasoning,
+    )
 
-    return looks_like_information_request(student_message)
+    return looks_like_information_request(
+        student_message
+    ) and not looks_like_project_reasoning(student_message)
 
 
 def mock_needs_sources(request: CoachRequest) -> bool:

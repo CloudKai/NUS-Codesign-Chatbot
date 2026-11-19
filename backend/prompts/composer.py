@@ -102,9 +102,12 @@ _SOURCE_NEED_INSTRUCTION = (
     "assessment or policy) or on the student's own selected files that you "
     "were not given. Set it false for project coaching, general conversation, "
     "stage questions, and anything you can answer without course-specific "
-    "facts. When true, keep response_text to a brief reply that asserts no "
-    "course-specific facts; the application will retrieve excerpts and ask "
-    "you again. Always return needs_sources as a JSON boolean."
+    "facts. Use mode qa when you set it: a coaching reply is never retried, "
+    "so return false for a coaching turn. This overrides any earlier note "
+    "that retrieval was already performed. When true, keep response_text to "
+    "a brief reply that asserts no course-specific facts; the application "
+    "will retrieve excerpts and ask you again. Always return needs_sources "
+    "as a JSON boolean."
 )
 
 
