@@ -321,8 +321,14 @@ uploads keep extracted text; they do not use the shared course Knowledge Base.
 ### Upload retrieval policy (opt-in)
 
 `FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED` (default false) searches the selected
-student uploads on turns the regex gate skipped. The search is local, so it
-has no AWS call and no network wait. `_prepare_authoritative_turn` applies
+student uploads on turns the regex gate skipped. The excerpt ranking
+(`LocalChunkRetriever`) is local and makes no Bedrock or Knowledge Base call.
+Loading the uploads is not always local: on a turn the gate skipped it can add
+one S3 GET per selected upload on a chunk-cache miss (the chunk artifact), or
+on every such turn when the source falls back to extracted text (no
+`extracted_text_sha256`, or a missing or invalid artifact; that read is not
+cached). The latency and cost of those reads are not measured.
+`_prepare_authoritative_turn` applies
 `_wants_student_upload_retrieval` (`backend/coaching/execution.py`) after the
 course-catalog step. It fires only when all of these hold:
 
@@ -364,7 +370,8 @@ Effects:
   without a gate cue therefore loses the course-catalog second chance. The
   legacy `needs_source_retrieval` retry would only re-search the same files.
 - **Failures.** A policy-only search adds no new error. A non-`ValueError`
-  retriever failure continues the turn as if the rule had not fired (no
+  failure while loading the uploads (for example an S3 AccessDenied or
+  throttling error from `get_bytes`) or while ranking them continues the turn as if the rule had not fired (no
   excerpts, `retrieval_required` false, retrieval sources reset, so the
   `needs_sources` check and its catalog retry still apply) and records
   `upload_retrieval_policy_failed`. `ValueError` (authorization or catalog

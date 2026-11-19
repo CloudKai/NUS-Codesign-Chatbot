@@ -359,6 +359,42 @@ def test_retrieval_failure_continues_as_if_the_policy_had_not_fired(
     assert "could not retrieve" not in _trusted(client.calls[0])
 
 
+class _FailingStorage:
+    """Object storage whose reads fail like an S3 AccessDenied or throttle."""
+
+    def __init__(self) -> None:
+        self.get_keys: list[str] = []
+
+    def get_bytes(self, key: str) -> bytes:
+        self.get_keys.append(key)
+        raise PermissionError("AccessDenied")
+
+
+def test_storage_failure_while_loading_uploads_does_not_fail_the_turn(
+    tmp_path, monkeypatch
+) -> None:
+    from backend.sources.chunk_cache import reset_student_source_chunk_cache
+
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    storage = _FailingStorage()
+    reset_student_source_chunk_cache()
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_file_storage", lambda: storage
+    )
+    retriever = _Retriever()
+    client = FakeAgentCoreRuntime(payload=_payload(text="What did you expect?"))
+    service = _service(store, client, retriever)
+
+    turn = service.submit(_request(thread_id, _UPLOAD_QUESTION, "up-storage-fail"))
+
+    assert storage.get_keys
+    assert retriever.queries == []
+    assert len(client.calls) == 1
+    assert turn.response_text == "What did you expect?"
+    assert "could not retrieve" not in _trusted(client.calls[0])
+
+
 def test_retrieval_value_error_still_raises(tmp_path, monkeypatch) -> None:
     _enable(monkeypatch)
     store, thread_id = _store(tmp_path, monkeypatch)

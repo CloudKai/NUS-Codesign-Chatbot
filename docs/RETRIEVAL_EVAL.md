@@ -147,8 +147,11 @@ it has not been run yet.
 
 `FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED` (default off; rule in
 `docs/RAG_ARCHITECTURE.md`, "Upload retrieval policy") searches the selected
-student uploads locally when the gate skipped and the turn is not navigation
-or chit-chat. The report's `gate.upload_retrieval_policy` block applies the
+student uploads when the gate skipped and the turn is not navigation or
+chit-chat. The excerpt ranking is local (no Bedrock or Knowledge Base call);
+loading the uploads can add one S3 GET per selected upload on a chunk-cache
+miss, or every such turn on the extracted-text fallback. This block does not
+measure those reads. The report's `gate.upload_retrieval_policy` block applies the
 production rule (`_wants_student_upload_retrieval`, imported, not copied) to
 every gate row. The row's selected and attached files are projected into
 source dicts, with the image check taken from the filename extension (rows

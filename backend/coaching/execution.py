@@ -346,8 +346,11 @@ def _wants_student_upload_retrieval(
 ) -> bool:
     """Return whether to search the selected student uploads on this turn.
 
-    The upload retrieval policy (``FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED``) is a
-    local search with no AWS call. It applies only when the regex gate chose
+    The upload retrieval policy (``FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED``) ranks
+    excerpts locally, with no Bedrock or Knowledge Base call; loading the
+    uploads can still read object storage (one S3 GET per selected upload on a
+    chunk-cache miss, or every turn on the extracted-text fallback). It
+    applies only when the regex gate chose
     not to retrieve, a non-image student upload is still in scope, no gate
     override fixed the evidence scope (stage status, stage navigation,
     meta-guidance, forced or lecture-help retrieval), and the turn is not
@@ -3228,7 +3231,27 @@ class CoachApplicationService:
         record_field("mode_policy_intent", mode_policy.intent)
         retrieved_chunks: list[RetrievalChunkReference] = []
         retrieval_result_context = ""
-        if needs_retrieval:
+        if upload_policy_only:
+            # Loading the uploads can read object storage (S3 on a chunk-cache
+            # miss or the extracted-text fallback). The gate did not ask for
+            # this search, so a storage failure must not fail the turn.
+            try:
+                snapshot = self._hydrate_retrieval_sources(
+                    snapshot,
+                    include_course_catalog=include_course_catalog,
+                )
+            except ValueError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "upload_retrieval_policy_hydrate_failed category=%s",
+                    type(exc).__name__,
+                )
+                record_field("upload_retrieval_policy_failed", True)
+                record_field("retrieval_required", False)
+                needs_retrieval = False
+                snapshot = replace(snapshot, retrieval_sources=())
+        elif needs_retrieval:
             snapshot = self._hydrate_retrieval_sources(
                 snapshot,
                 include_course_catalog=include_course_catalog,

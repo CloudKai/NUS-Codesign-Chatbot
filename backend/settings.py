@@ -381,10 +381,13 @@ class Settings:
     fast_chat_source_check_titles_enabled: bool = _boolean(
         "FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED", False
     )
-    # Search the selected student uploads (local, no AWS call) when the
-    # regex gate skipped retrieval and the turn is not navigation or
-    # chit-chat. Never adds the course Knowledge Base. Default OFF: it sends
-    # upload excerpts on turns that do not need them (up to
+    # Search the selected student uploads when the regex gate skipped
+    # retrieval and the turn is not navigation or chit-chat. The excerpt
+    # ranking is local (no Bedrock or Knowledge Base call), but loading the
+    # uploads can add one storage GET (S3 in production) per selected upload
+    # on a chunk-cache miss, or every turn on the extracted-text fallback.
+    # Never adds the course Knowledge Base. Default OFF: it sends upload
+    # excerpts on turns that do not need them (up to
     # FAST_CHAT_RETRIEVAL_MAX_CHARS more prompt characters per turn).
     fast_chat_upload_retrieval_enabled: bool = _boolean(
         "FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED", False
