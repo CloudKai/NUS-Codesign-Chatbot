@@ -8,6 +8,16 @@ mock, OpenAI, and Bedrock Converse, and is the token-budget stand-in for
 AgentCore planning. Do not treat those two packages as competing curricula
 on the live AgentCore path.
 
+The two copies are kept on purpose, and the stage files with the same name
+in both (`problem_identification`, `concept_generation`,
+`design_specification`, `reflection`) are guarded by
+`tests/domain/test_prompt_stage_drift.py`. `problem_identification.md` must stay
+byte-identical. The other three differ only by the runtime-only CORE FOCUS and
+READINESS SIGNALS blocks (pinned by hash), plus the position of the Facione
+paragraph in `reflection.md`. Editing a shared paragraph in only one copy, or
+changing a pinned block, fails the test. Change both copies together, or update
+the pinned values in the test when a divergence is intended.
+
 ## Ownership
 
 ```text
