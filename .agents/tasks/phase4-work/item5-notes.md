@@ -74,7 +74,7 @@ What the 41 tests cover: pinned set and refusal on dataset change; cap math for 
 
 ## Commit SHAs
 
-Filled in by the final message and `git log` (see the last line of this file after the commit).
+Code, tests and docs: `e77b60b`. This notes file is amended in a second commit.
 
 ## Risks
 
@@ -85,3 +85,5 @@ Filled in by the final message and `git log` (see the last line of this file aft
 - IAM resource forms come from AWS documentation, not from a test against the account; a `runtime-endpoint` grant is needed for the qualifier used.
 - Prices are unconfirmed on the AWS page. The AgentCore runtime compute figure rests on an assumed 10 s per invoke.
 - AgentCore arm costs the real runtime; nothing here bounds a runtime-internal second model call.
+
+Commit: `e77b60b` (author and committer CloudKai <kaiming_01@live.com>, script-checked). Pushed to origin improvement/backend; see final message for the push result.
