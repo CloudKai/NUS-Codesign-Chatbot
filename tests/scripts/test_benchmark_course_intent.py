@@ -83,6 +83,7 @@ def test_main_with_stub_writes_marked_json(tmp_path, capsys) -> None:
     assert data["classifier_kind"] == "stub" and data["real_model"] is False
     assert data["eligible_rows"] > 0 and data["gate_messages"] == 295
     assert len(data["passes"]) == 2
+    assert data["warmup_calls"] == 1 and data["first_call_ms"] is not None
     assert data["passes"][0]["scored"] == data["eligible_rows"]
     assert data["memory"]["peak_rss_mib"] > 0
     assert "not production hardware" in data["environment"]["measured_on"]

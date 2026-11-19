@@ -194,8 +194,11 @@ def run_benchmark(args: argparse.Namespace, rows: Sequence[Any], titles: Sequenc
     classifier, kind = build_classifier(args)
     load_ms = (perf_counter() - load_started) * 1000
     memory_loaded = memory_snapshot()
+    warmup_ms: list[float] = []
     for row in rows[: args.warmup]:
+        started = perf_counter()
         classifier.score(row.message, row.history, titles)
+        warmup_ms.append(round((perf_counter() - started) * 1000, 2))
     memory_warm = memory_snapshot()
     passes = [
         score_rows(classifier, rows, titles, concurrency=args.concurrency)
@@ -206,7 +209,9 @@ def run_benchmark(args: argparse.Namespace, rows: Sequence[Any], titles: Sequenc
         "classifier_kind": kind,
         "real_model": kind != "stub",
         "load_ms": round(load_ms, 2),
-        "warmup_calls": min(args.warmup, len(rows)),
+        "warmup_calls": len(warmup_ms),
+        "first_call_ms": warmup_ms[0] if warmup_ms else None,
+        "warmup_call_ms": warmup_ms,
         "memory": {
             "before_load": memory_before,
             "after_load": memory_loaded,
