@@ -2,6 +2,53 @@
 
 ## Current status
 
+### Phase 4 status (items 0 to 5 complete; branch `improvement/backend`)
+
+No live command (AWS, Bedrock, AgentCore, Knowledge Base, OpenAI or any paid call)
+was run in this phase. Every figure below is a script run unless marked. Detailed
+entries for items 0 to 5 follow; the full report is
+`.agents/tasks/phase4-2026-11-19.md` (git-ignored, committed with `git add -f`).
+
+| Item | State | Commits |
+|---|---|---|
+| 0 Record Phase 3c and Laya outcomes, product rule | Done, docs only | `f79f08f` |
+| 1 Coaching reply with no recommendation defaults to `stay` | Done; needs a runtime republish; review finding F2 fixed (deploy order note, wire-shape test) | `ec3d87f`, `fd7a6e2`, `860eced` |
+| 2 Combined offline gate evaluation (295 rows) | Done; no arm reaches the 25% wrong-skip target on all rows | `21d19ce`, `fabb2f2` |
+| 3 Laya production readiness | Report and offline harness only; weight licences and memory not established | `343c8b4`, `5640ab8`, `53c001c`, `825cd2f` |
+| 4 Reply text streaming | Mock and direct Bedrock only (opt-in, default off); AgentCore path blocked | `d49767e`, `b8893ec`, `3d375c3`, `2692c81` |
+| 5 AgentCore vs Converse benchmark | Harness built and stub-tested, not run | `e77b60b`, `88c9914` |
+
+- **Item 2 headline (script run, Wilson 95%).** Gate alone, all 295 rows: wrong skip
+  76/154 = 49.4% [41.6, 57.2], false retrieve 7/141 = 5.0% [2.4, 9.9]. Gate plus
+  Laya (multilingual, stored results, floor reading): 65/154 = 42.2% [34.7, 50.1];
+  Laya Learn floor 67/154 = 43.5% [35.9, 51.4]; false retrieve unchanged. The
+  intervals overlap in every reading. The title-wording arm is a stub-model bound
+  only (oracle 0/154, rule stub 16/154, flag-all 120/141 false retrieve); only a
+  live run measures wording. Cutoffs were the existing calibrated ones and were not
+  tuned on these rows. Laya itself was not re-run (the package and weights are
+  absent from the sandbox), so its arm uses the Phase 3d stored per-row decisions.
+  Details: [RETRIEVAL_EVAL](RETRIEVAL_EVAL.md).
+- **Validation (script run).** Starting baseline at `3060a17`: 2593 passed, 2 failed,
+  1 skipped. Final: 2746 passed, 2 failed, 1 skipped (+153 tests). The 2 failures are
+  the known `tests/http/test_notebook_reader.py` pair, which need a built
+  `frontend/dist` (absent; with a built dist the suite had 0 failures during item 4).
+  The skip is the missing `strands` package. No new failures. `ruff check .` passed.
+- **Compatibility and rollback.** No schema or stored-data change. New settings
+  (`COACH_STREAM_REPLY_DELTAS_ENABLED`) default off; every earlier opt-in setting is
+  unchanged and off. Item 1 is the only unconditional behavior change and is
+  reverted by reverting `ec3d87f` and `fd7a6e2` (and republishing the runtime).
+  Deploy the backend before or with the runtime republish.
+- **Open decision, not implemented.** Labelling answers on course Q&A turns where no
+  search ran as "general, not from course materials". Described in the report.
+- **Next exact action.** The user decides: (1) the item 1 live re-run (13 messages,
+  26 calls, about $0.21); (2) whether to run the item 5 smoke (cap 2) and full run
+  (cap 100); (3) the open labelling decision; (4) Laya deployment questions (weight
+  licences, storage, memory, timeout, startup failure versus fallback);
+  (5) whether to pursue AgentCore streaming (a runtime contract change). Entry point
+  for the next phase: Phase 5, to be defined from those answers; the first code
+  entry point is `backend/coaching/execution.py` (retrieval gate, around line 3190)
+  if the labelling decision is approved.
+
 ### AgentCore vs direct Converse benchmark harness (Phase 4 item 5, built, not run)
 
 New script `scripts/evals/benchmark_agentcore_vs_converse.py`; no new setting, no
