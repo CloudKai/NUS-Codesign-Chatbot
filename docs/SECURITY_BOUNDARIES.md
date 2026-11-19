@@ -3,7 +3,7 @@
 This describes **enforced** application boundaries, not prompt-only rules.
 
 ```text
-Student → Streamlit → FastAPI
+Student → React or protected Streamlit → FastAPI
                          │
             Cognito identity / notebook ownership
                          │
@@ -34,6 +34,35 @@ Student → Streamlit → FastAPI
   Review is `POST /api/v1/threads/{thread_id}/deep-review`, which loads
   owner, notebook, stage, history, sources, and eligibility from server
   state and stamps `specialist=review` only after that sanitization.
+
+## Guest workspaces
+
+FastAPI resolves a verified Cognito account before considering a guest session.
+Guest access is enabled explicitly with `GUEST_ACCESS_ENABLED`. A guest
+credential authorizes only its own workspace. Lecturer and admin access
+requires a verified account and a staff role.
+
+FastAPI issues an opaque HttpOnly, SameSite=Lax guest cookie, stores its digest
+and checks expiry and revocation on each request. The same-origin browser
+renewal endpoint can extend the rolling 400-day expiry. A lost browser cookie
+can make an unclaimed workspace inaccessible.
+
+After a successful Cognito sign-in, a valid guest cookie from the same browser
+allows automatic append into the verified account. The transfer verifies
+owner-scoped file copies before committing ownership and source references.
+It preserves IDs, messages, citations and learning state. A failed transfer
+leaves the guest credential usable so the same account can retry. Lecturer
+views show guest pseudonyms. [Original rollout and tests](https://github.com/CloudKai/NUS-Codesign-Chatbot/blob/948162e1eba9d0de3fbda7cbfce1d00731001158/docs/GUEST_ACCESS_PHASE_HANDOFF.md)
+
+## Course material publication
+
+Ten course PDFs are tracked in `lecture_notes/` and available in Git history.
+Check the owner's permission to distribute them before publishing a clone or
+new copy. Local Compose bind-mounts the corpus. Production retrieves official
+materials through S3 and the Bedrock Knowledge Base, with `lecture_notes/`
+excluded from the image. If the owner chooses removal, distinguish removal
+from the current tree from a separately coordinated history rewrite.
+[Original content inventory](https://github.com/CloudKai/NUS-Codesign-Chatbot/blob/948162e1eba9d0de3fbda7cbfce1d00731001158/docs/security/PUBLIC_REPOSITORY_CONTENT_AUDIT.md)
 
 ## AgentCore `InvokeAgentRuntime` IAM boundary
 

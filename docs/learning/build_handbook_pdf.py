@@ -2,7 +2,7 @@
 
 This is a deliberately small Markdown renderer for this repository's teaching
 documents. It handles the prose, headings, lists, tables, fenced code, and
-Mermaid source blocks used in chapters 01-08 plus CODEBASE_STRUCTURE.md. It
+Mermaid source blocks used in the handbook and codebase structure guide. It
 does not execute Markdown, diagram, or application code.
 """
 
@@ -33,16 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEARNING_DIR = Path(__file__).resolve().parent
 OUTPUT = PROJECT_ROOT / "output/pdf/co-design-chatbot-learning-handbook.pdf"
 SOURCES = [
-    *(LEARNING_DIR / f"{number:02d}-{name}.md" for number, name in (
-        (1, "system-and-services"),
-        (2, "frontend-api-and-turns"),
-        (3, "rag-and-context"),
-        (4, "database-and-idempotency"),
-        (5, "agentcore-and-workflow"),
-        (6, "without-aws-and-langgraph"),
-        (7, "scaling-and-tradeoffs"),
-        (8, "interview-and-study"),
-    )),
+    LEARNING_DIR / "README.md",
     PROJECT_ROOT / "docs/CODEBASE_STRUCTURE.md",
 ]
 
@@ -305,7 +296,7 @@ def build() -> None:
             st["subtitle"],
         ),
         Spacer(1, 0.8 * cm),
-        Paragraph("Source set: learning chapters 01-08 and CODEBASE_STRUCTURE.md", st["subtitle"]),
+        Paragraph("Source set: learning handbook and codebase structure", st["subtitle"]),
         Spacer(1, 2.8 * cm),
         Paragraph("Generated from the local repository Markdown sources.", st["caption"]),
         PageBreak(),
@@ -316,8 +307,7 @@ def build() -> None:
         ),
         Paragraph("Included sections", st["h2"]),
     ]
-    for source in SOURCES:
-        label = source.stem.replace("-", " ") if source.name != "CODEBASE_STRUCTURE.md" else "Codebase structure appendix"
+    for label in ("Learning handbook, chapters 1–8", "Codebase structure appendix"):
         story.append(Paragraph(clean_text(label), st["bullet"], bulletText="•"))
     story.append(PageBreak())
     for source_index, source in enumerate(SOURCES):

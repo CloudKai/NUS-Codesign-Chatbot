@@ -20,6 +20,9 @@ OpenAI remains an optional provider. Future AWS adapters may provide Bedrock,
 S3, DynamoDB/Aurora, Cognito, and CloudWatch behind the same ports. Do not add
 AWS services to the required local runtime.
 
+The [AWS topology](deploy/AWS_STATELESS_EC2.md#topology) describes the adapters
+selected by production Compose and the current deployment boundaries.
+
 ## Compatibility baseline
 
 Preserve the current Streamlit NotebookLM-inspired UI and its existing

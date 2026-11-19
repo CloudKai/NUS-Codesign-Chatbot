@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-17T00:00:00Z",
+  "title": "Co-design React workspace",
+  "tokenSource": "frontend/DESIGN.md",
+  "extensions": {
+    "breakpoints": [
+      {
+        "name": "navigation-drawer",
+        "value": "760px"
+      },
+      {
+        "name": "path-drawer",
+        "value": "1100px"
+      },
+      {
+        "name": "compact-rails",
+        "value": "1200px"
+      }
+    ],
+    "motion": [
+      {
+        "name": "composer-focus",
+        "value": "border-color 180ms ease-out",
+        "purpose": "Focus feedback; disabled under reduced motion."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Reasoning starter",
+      "kind": "button",
+      "html": "<button class=\"ds-starter\">Test an assumption</button>",
+      "css": ".ds-starter { font: 500 12px \"IBM Plex Sans\", sans-serif; padding: 8px 12px; min-height: 40px; border: 1px solid #dce2ec; border-radius: 9px; color: #345bc4; background: #f8faff; } .ds-starter:hover { border-color: #345bc4; } .ds-starter:focus-visible { outline: 3px solid #345bc4; outline-offset: 3px; }"
+    }
+  ],
+  "narrative": {
+    "overview": "Chat-first workspace with a collapsible directory, central conversation and visible Thinking Path.",
+    "dos": [
+      "Use icons for familiar actions and labels for learning choices."
+    ],
+    "donts": [
+      "Do not fabricate progress or show unavailable tools as working."
+    ]
+  }
+}

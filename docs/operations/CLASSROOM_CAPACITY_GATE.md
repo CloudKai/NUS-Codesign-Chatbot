@@ -4,6 +4,11 @@ Ticket local15 / GitHub #28. Local mock characterization is separate from a
 classroom-readiness decision. **Live readiness and the S$30 plan are unresolved.**
 No hosting, storage, model or default-interface migration is authorized here.
 
+For the current post-promotion hosting/OpenAI shortlist, remaining owner decisions,
+off-host rehearsal steps and study scheduling materials, use the
+[readiness decision sheet](CLASSROOM_READINESS_DECISIONS.md). It records research
+and preparation only; all external release gates remain open.
+
 ## Repeat the disposable local rehearsal
 
 ```sh
@@ -63,7 +68,7 @@ Metrics have deliberately limited meanings:
   abort the rehearsal; a successful script exit alone is not a capacity pass.
 
 The output always says `live_ready: false`. Inspect actual outcomes and risks in
-[handoff15](../../new_docs/ticket_handoffs/15.md); do not infer 80-provider capacity
+[handoff15](https://github.com/CloudKai/NUS-Codesign-Chatbot/blob/948162e1eba9d0de3fbda7cbfce1d00731001158/new_docs/ticket_handoffs/15.md); do not infer 80-provider capacity
 from 80 sessions, fake delays, a configured ceiling, or passing mock tests.
 
 ## Independent backup and restart rehearsal
@@ -230,5 +235,5 @@ overlapped these runs. These are authenticated HTTP clients, not rendered browse
 tabs or Streamlit WebSockets. No true off-host recovery, paid/model/region/KB
 capacity, approved classroom wait, complete cost/headroom or student-study claim.
 #28 remains OPEN/#29 blocked. All funding and external gates above still apply.
-See [continuation handoff](../../new_docs/ticket_handoffs/15-continuation.md) for
+See [continuation handoff](https://github.com/CloudKai/NUS-Codesign-Chatbot/blob/948162e1eba9d0de3fbda7cbfce1d00731001158/new_docs/ticket_handoffs/15-continuation.md) for
 validation, compatibility, local-only Git and the next exact action.

@@ -4,6 +4,10 @@
 .github/
 .cursor/
 .cursorignore
+.impeccable/
+
+# Documentation, historical artifacts and planning stay in the source tree.
+docs/
 
 .env
 .env.*
@@ -35,8 +39,8 @@ logs/
 tmp/
 temp/
 
-# Keep large instructor PDFs out of runtime images. Local compose bind-mounts
-# ./lecture_notes for the demo; production disables course-material sync.
+# Local Compose bind-mounts ./lecture_notes for the demo. Production syncs
+# official course materials from S3.
 lecture_notes/
 
 .DS_Store

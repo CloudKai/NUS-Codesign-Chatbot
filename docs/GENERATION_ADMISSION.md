@@ -10,7 +10,7 @@ provider/runtime bounds, shared topology and an acceptable maximum wait.
 Ticket15's [classroom rehearsal](operations/CLASSROOM_CAPACITY_GATE.md) observed
 queue-expiry and admission-unavailable outcomes at80 submissions with a synthetic
 four-running/80-queued policy. All admitted normal turns were saved once, but
-acceptable classroom throughput/wait remains unproven. The [local continuation](../new_docs/ticket_handoffs/15-continuation.md) reproduces
+acceptable classroom throughput/wait remains unproven. The [local continuation](https://github.com/CloudKai/NUS-Codesign-Chatbot/blob/948162e1eba9d0de3fbda7cbfce1d00731001158/new_docs/ticket_handoffs/15-continuation.md) reproduces
 an abandoned uninvoked FIFO waiter with a native SQLite busy fault and fixes its
 cleanup. Read polling reduces writer-lock pressure; the final synthetic rehearsal
 saves all three80-request waves. This does not establish live provider capacity.

@@ -37,12 +37,12 @@ relevant module only. For backend or migration work, read
 
 - `AGENTS.md` does not select or switch the Codex model. Model selection is
   manual in the Codex client.
-- Use GPT-5.6 Terra with medium reasoning for normal implementation, tests,
-  documentation, and routine debugging.
-- Use GPT-5.6 Sol with high reasoning for architecture planning, data
-  migrations, security review, or final high-risk review.
-- If the current model is not appropriate, state the recommended escalation or
-  downgrade; do not claim to have changed it automatically.
+- User-selected routing overrides earlier model defaults: `gpt-6.1-sol`
+  implements tickets; `gpt-6-luna` performs read-only discovery;
+  `gpt-6-astra` investigates concrete blockers. These roles are authorized.
+  Use one writer and a fresh Sol session per ticket; read
+  [ticket execution](docs/CONTRIBUTING.md#ticket-execution) before ticket work. The client selects models;
+  report unavailable routing rather than claiming a switch occurred.
 - Use targeted searches (`rg`) and focused reads. Do not repeatedly load large
   files, redo a completed audit, or generate duplicate documentation.
 - Run focused tests after local changes. Run the full applicable suite only at
@@ -50,7 +50,7 @@ relevant module only. For backend or migration work, read
 - Do not use subagents unless the user explicitly requests delegation and the
   work can proceed independently.
 - After two evidence-based attempts at the same failure, stop retrying,
-  summarize the evidence, and recommend a Sol-level review.
+  summarize the evidence, and route the concrete blocker to `gpt-6-astra`.
 
 ## Safety, data, and Git
 
@@ -62,8 +62,9 @@ relevant module only. For backend or migration work, read
   private artifacts, or local virtual environments.
 - Preserve existing entrypoints and local data. Make schema changes through
   explicit, tested migrations with a backup and rollback path.
-- Paid OpenAI calls are prohibited unless the user explicitly approves a live
-  smoke test and specifies a request/token or cost cap.
+- Paid application API calls across providers are prohibited unless the user
+  explicitly approves the live test and specifies a request/token or cost cap.
+- Do not stage, commit, or deploy without explicit authorization.
 - Automated tests must use deterministic mock providers.
 
 ## Architecture constraints
@@ -137,3 +138,12 @@ Do not claim completion from code inspection alone. Completion requires
 working local startup, mock-mode tests, source retrieval/citations, streaming,
 graph-state resumption, confirmed stage progression, restart recovery, and
 existing-data compatibility.
+
+## Agent skills
+
+- **Tracker:** Read [GitHub issues](docs/CONTRIBUTING.md#github-issues) before
+  reading or publishing tickets.
+- **Triage:** Read [triage labels](docs/CONTRIBUTING.md#triage-labels) before
+  assigning triage states.
+- **Domain:** Read [domain terms](docs/CONTRIBUTING.md#domain-terms) before
+  domain exploration or architecture decisions.

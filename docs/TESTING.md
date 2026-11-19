@@ -7,10 +7,10 @@ public webpages, or any other live service. `tests/conftest.py`
 clears the OpenAI key, forces the mock provider, and gives each test an isolated
 temporary database/files tree.
 
-The `live` marker is excluded by the default pytest addopts
-(`-m "not live"`). There are no live-marked tests today. Any future live test
-must also self-skip without a separate opt-in environment flag and require the
-appropriate cost/write approval.
+The current suite contains no live-marked tests. Any future live test must
+self-skip without an explicit opt-in environment flag and require approval for
+costs or writes. Use `-m "not live"` when selecting deterministic tests from a
+suite that includes live cases.
 
 ## Standard commands
 
@@ -40,7 +40,7 @@ APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet
 git diff --check
 ```
 
-`scripts/build.sh` runs compileall (including `scripts/`) plus pytest.
+`scripts/build.sh` builds React, compiles Python, and runs pytest.
 
 ## Coverage map
 

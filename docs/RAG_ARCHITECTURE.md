@@ -243,3 +243,61 @@ Course PDFs, student uploads, websites, extracted text, project context, and
 prior student messages are untrusted. Instructions inside that text cannot
 override shared coaching rules, stage rules, authorization, output schema, or
 runtime rules.
+
+## Library files and notebook Sources
+
+The Library is private to one verified student or guest. Uploads from the
+Library, notebook Sources, and the chat composer all appear there. Official
+lecture notes and readings remain a separate shared curriculum corpus.
+
+```mermaid
+flowchart LR
+    Upload[Library, notebook or chat upload] --> Validate[Size and image-format checks]
+    Validate --> Store[One original in the student's Library]
+    Store --> Text[Extracted text and chunks]
+    Store --> Link[Notebook source membership and enabled state]
+    Store --> Turn[Chat attachment IDs for the current turn]
+    Link --> Context[Authorized turn evidence]
+    Turn --> Context
+    Course[Official CDE2300 material] --> Context
+    Text --> Context
+```
+
+| Entry point | Stored in Library | Used for retrieval |
+| --- | --- | --- |
+| Library upload | Yes | After the student adds and enables it in Sources |
+| Notebook Sources upload | Yes | Enabled in that notebook once processing succeeds |
+| Chat composer attachment | Yes | For that submitted message. Add it from Library to reuse it as a notebook source |
+
+- **Storage and indexing.** The implementation reuses the existing source
+  records, upload coordinator, extraction and object adapters. New browser
+  uploads are anchored in a private internal Library record. Notebook records
+  hold source IDs and enabled state, leaving original bytes and derived text
+  at one location. Source identity is independent of notebook membership.
+  Existing owned uploads are projected into the Library without rewriting
+  their storage keys. Their original conversation remains their storage anchor.
+  The Library does not put student files into the official Bedrock index.
+- **Evidence scope.** FastAPI builds each turn from explicit attachments, the
+  conversation's enabled sources, and the enabled sources of its currently
+  assigned owned notebook. The full Library is never searched merely because
+  the student owns it. Moving a chat ends inheritance from its previous
+  notebook on later turns. Official course evidence still uses the existing
+  gated Bedrock retrieval path for course questions. Student evidence is
+  supplemental and citations identify the sources actually used.
+- **Images.** The upload boundary decodes the raster file, checks its format
+  against its extension, and enforces the file-size and 24-megapixel limits
+  before ingestion. Checked images are validated again before vision context
+  and use the existing model capability checks and five-image per-turn budget.
+  There is no Library-wide OCR index.
+- **Removal and citations.** Removing a notebook source detaches its link.
+  Confirmed Library deletion removes the original and its derived content;
+  notebook links no longer resolve. A saved citation can open an existing
+  owned original after detach or after moving the chat. A deleted original
+  shows as unavailable; the historical citation label remains.
+- **Compatibility and rollout.** This is an additive metadata change with no
+  schema migration. New Library-backed originals survive conversation deletion.
+  Deleting a legacy conversation still deletes original files anchored to it;
+  those files need a separate storage migration to outlive that operation.
+  A turn already in progress may finish with the evidence captured at submission.
+  Verify ownership, upload/retry behavior, citation identity, and attachment
+  scope locally before a rollout. No production data was migrated.

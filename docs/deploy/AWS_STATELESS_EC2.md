@@ -10,19 +10,17 @@ complete.** Passing unit tests alone is not sufficient.
 ## Topology
 
 ```text
-Students
-  → https://d1sxfuoybzedj5.cloudfront.net
-  → CloudFront (viewer TLS, caching disabled, WebSocket forwarding)
-  → T4g.small EC2 :80 / Docker
-       ├── Caddy (HTTP origin; public auth/health allow-list)
-       ├── app (prebuilt linux/arm64 image from ECR)
-       │     ├── Streamlit :8501 (internal)
-       │     └── FastAPI :8000 (internal)
-       │           ├── Cognito
-       │           ├── Aurora DSQL (structured state, role co_design_app)
-       │           ├── S3 (user uploads under users/; shared course/ keys)
-       │           └── AgentCore Runtime (production coach) or OpenAI / Bedrock Converse
+Browser → CloudFront → Caddy on EC2
+  ├─ React and allowlisted browser API routes → FastAPI
+  └─ Protected workspace → Streamlit → FastAPI
+      FastAPI → Cognito, Aurora DSQL, S3, Bedrock Knowledge Base, AgentCore
 ```
+
+The origin runs an ARM64 app image from ECR. CloudFront terminates HTTPS and
+forwards cookies and WebSocket upgrades. FastAPI applies owner authorization,
+resolves citations and saves the authoritative turn. See the
+[application architecture](../LOCAL_DEMO_IMPLEMENTATION.md) for package boundaries
+and [RAG](../RAG_ARCHITECTURE.md) for evidence scope.
 
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
@@ -615,9 +613,10 @@ list. Do not expose TCP 443 on the host; Caddy does not own production TLS.
 
 ## Edge route checks (CloudFront → Caddy)
 
-CloudFront terminates viewer TLS. Caddy exposes only Cognito auth routes,
-health, and Streamlit from the HTTP origin. Coaching/CRUD `/api/*` paths must
-remain blocked at Caddy. Security headers (HSTS, nosniff, Referrer-Policy,
+CloudFront terminates viewer TLS. Caddy exposes React, protected Streamlit
+and the explicitly allowlisted reader, auth and health routes. Direct
+internal coaching and CRUD routes must return 404 at the public edge.
+Security headers (HSTS, nosniff, Referrer-Policy,
 Permissions-Policy) are set in the site block and passed through CloudFront;
 Content-Security-Policy is intentionally not configured.
 
@@ -625,13 +624,15 @@ From a laptop (replace the host if the domain changes):
 
 ```sh
 # Public auth/health should reach FastAPI (expect 2xx/3xx/401/403 — not 404).
-curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/health | head -n 1
-curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/me | head -n 1
+origin=https://d1sxfuoybzedj5.cloudfront.net
+curl -sS -o /dev/null -w '%{http_code}\n' "$origin/api/v1/health"
+curl -sS -o /dev/null -w '%{http_code}\n' "$origin/api/v1/auth/me"
+curl -sS -o /dev/null -w '%{http_code}\n' "$origin/api/v1/reader/session"
 
 # Coaching/CRUD must be blocked at Caddy (expect HTTP 404 Not Found).
-curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/coach/turn | head -n 1
-curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/threads | head -n 1
-curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/ready | head -n 1
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$origin/api/v1/coach/turn"
+curl -sS -o /dev/null -w '%{http_code}\n' "$origin/api/v1/threads"
+curl -sS -o /dev/null -w '%{http_code}\n' "$origin/api/v1/ready"
 ```
 
 Readiness stays host-/container-internal via Docker healthcheck; do not publish
