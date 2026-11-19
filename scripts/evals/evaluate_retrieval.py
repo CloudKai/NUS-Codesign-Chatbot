@@ -18,7 +18,10 @@ LIVE MODEL mode (real Bedrock ``converse`` calls to the fast-chat Haiku model)
 is also off by default. It runs only with ``--live-model`` AND
 ``--max-live-calls N``. It sends each gate message through the first Fast Chat
 call with ``needs_sources`` on and reports flag rate, wrong-skip, false-retrieve
-and extra model calls by category. Tests use a stub client only.
+and extra model calls by category. ``--ids`` limits it to chosen rows, and
+``--compare-source-check`` sends each chosen row with the SOURCE CHECK rule on
+and then off (two calls per row, both counted by ``--max-live-calls``). Tests
+use a stub client only.
 
 Metric definitions (also in ``scripts/evals/datasets/README.md``):
 
@@ -1330,13 +1333,38 @@ LIVE_MODEL_DEFINITION = (
     "a message counts as retrieved when the gate searched a source, or when it "
     "is eligible for the second chance and the model's honoured needs_sources "
     "flag is true. The flag is honoured only on a Q&A turn. Rows whose call "
-    "failed are not scored. Eligible rows are the only rows whose flag changes "
-    "a metric; the flag on other rows is reported as raw flag rate only."
+    "failed are not scored in 'overall' and 'by_category'; "
+    "'overall_failed_in_denominator' keeps them in two readings: "
+    "failed_as_gate_only (a failed call raises no flag, the gate result "
+    "stands) and failed_as_error (a failed retrieve row is a wrong skip, a "
+    "failed skip row is a false retrieve). Eligible rows are the only rows "
+    "whose flag changes a metric; the flag on other rows is reported as raw "
+    "flag rate only."
+)
+
+LIVE_MODEL_COMPARE_DEFINITION = (
+    "Sends each chosen gate message twice through the first Fast Chat call, "
+    "built as in live_model: once with the SOURCE CHECK rule on "
+    "(source_need_check=True, as with FAST_CHAT_NEEDS_SOURCES_ENABLED on) and "
+    "once with it off (source_need_check=False, as production sends every "
+    "turn with the setting off). Each arm is scored as live_model. Each "
+    "message costs two model calls; --max-live-calls counts calls, so "
+    "floor(limit / 2) messages are sent, evenly spaced. The run stops after "
+    "the first auth or access error in either arm."
 )
 
 
 class LiveStructuredOutputError(RuntimeError):
-    """The model returned no usable ``FastChatTurnOutput`` tool call."""
+    """The model returned no usable ``FastChatTurnOutput`` tool call.
+
+    ``detail`` holds only safe, structural facts (failure kind, stop reason,
+    pydantic error locations and types); never message, reply or tool input
+    values.
+    """
+
+    def __init__(self, message: str, detail: Mapping[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.detail: dict[str, Any] = dict(detail or {})
 
 
 def check_live_model_request(
@@ -1487,6 +1515,8 @@ class LiveFastChatBridge:
 
         self._client = client
         self._model_id = model_id
+        # Bedrock ``stopReason`` of the last call (an enum value, not text).
+        self.last_stop_reason: str | None = None
         self._schema = _inline_schema_refs(FastChatTurnOutput.model_json_schema())
         self._description = " ".join(
             (FastChatTurnOutput.__doc__ or "").split("\n\n")[0].split()
@@ -1527,37 +1557,72 @@ class LiveFastChatBridge:
         Raises:
             LiveStructuredOutputError: When the reply has no valid tool call.
         """
+        from pydantic import ValidationError
+
         from agentcore_runtime.models import parse_fast_chat_turn_output
         from agentcore_runtime.structured_coach import structured_wire_payload
 
+        self.last_stop_reason = None
         response = self._client.converse(**self.request_kwargs(payload))
+        stop_reason = response.get("stopReason")
+        self.last_stop_reason = None if stop_reason is None else str(stop_reason)[:40]
         message = ((response.get("output") or {}).get("message")) or {}
+        content = message.get("content") or []
         tool_input = None
-        for block in message.get("content") or []:
+        for block in content:
             tool_use = block.get("toolUse") if isinstance(block, Mapping) else None
             if isinstance(tool_use, Mapping) and isinstance(tool_use.get("input"), Mapping):
                 tool_input = tool_use["input"]
                 break
         if tool_input is None:
             raise LiveStructuredOutputError(
-                f"no tool call in reply (stopReason={response.get('stopReason')!r})"
+                f"no tool call in reply (stopReason={response.get('stopReason')!r})",
+                {
+                    "kind": "no_tool_call",
+                    "stop_reason": self.last_stop_reason,
+                    "text_blocks": sum(
+                        1 for block in content if isinstance(block, Mapping) and "text" in block
+                    ),
+                },
             )
         try:
             output = parse_fast_chat_turn_output(dict(tool_input))
         except ValueError as error:
+            errors: list[dict[str, Any]] = []
+            if isinstance(error, ValidationError):
+                # Locations, types and pydantic's static messages only: no input values.
+                errors = [
+                    {
+                        "loc": [str(part) for part in item.get("loc", ())],
+                        "type": str(item.get("type") or ""),
+                        "msg": str(item.get("msg") or ""),
+                    }
+                    for item in error.errors(
+                        include_url=False, include_context=False, include_input=False
+                    )
+                ]
             raise LiveStructuredOutputError(
-                f"tool input failed validation ({type(error).__name__})"
+                f"tool input failed validation ({type(error).__name__})",
+                {
+                    "kind": "tool_input_invalid",
+                    "stop_reason": self.last_stop_reason,
+                    "errors": errors,
+                },
             ) from error
         return structured_wire_payload(output)
 
 
-def build_live_request(row: Mapping[str, Any], decision: GateDecision) -> Any:
+def build_live_request(
+    row: Mapping[str, Any], decision: GateDecision, *, source_check: bool = True
+) -> Any:
     """Build the ``CoachRequest`` production would hand the provider.
 
     Mirrors the fields ``_prepare_authoritative_turn`` stamps that change the
     first call's prompt. Retrieved excerpts are never attached: a row the gate
     searched for is sent without them (see ``LIVE_MODEL_DEFINITION``).
-    ``source_need_check`` is forced on so every row measures the flag.
+    ``source_need_check`` is on by default so every row measures the flag;
+    ``source_check=False`` sends the turn as production does with
+    ``FAST_CHAT_NEEDS_SOURCES_ENABLED`` off (the compare mode's off arm).
     """
     from backend.domain import CoachRequest
 
@@ -1584,10 +1649,31 @@ def build_live_request(row: Mapping[str, Any], decision: GateDecision) -> Any:
             {"role": turn["role"], "content": turn["text"]} for turn in row["history"]
         ],
         retrieval_required=bool(decision.needs_retrieval),
-        source_need_check=True,
+        source_need_check=bool(source_check),
         expected_response_mode=decision.expected_mode,
         mode_policy_intent=decision.intent,
     )
+
+
+def live_failure_detail(error: BaseException) -> dict[str, Any]:
+    """Return safe, structural facts about one failed live call.
+
+    Kinds: ``no_tool_call`` and ``tool_input_invalid`` (from the bridge),
+    ``fast_chat_contract`` (the wire adapter's fixed reason token),
+    ``contract_rejected`` (``_validated_fast_chat`` category), ``other``
+    (for example an AWS error; ``error`` on the row names its class).
+    Never message, reply or tool input text.
+    """
+    from agentcore_runtime.models import FastChatContractError
+    from backend.providers import ProviderUnavailableError
+
+    if isinstance(error, LiveStructuredOutputError) and error.detail:
+        return dict(error.detail)
+    if isinstance(error, FastChatContractError):
+        return {"kind": "fast_chat_contract", "reason": str(error.reason)}
+    if isinstance(error, ProviderUnavailableError):
+        return {"kind": "contract_rejected", "category": str(error.category or "")}
+    return {"kind": "other"}
 
 
 def exception_label(error: BaseException) -> str:
@@ -1642,6 +1728,56 @@ def _live_block(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _failed_in_denominator(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Wrong-skip and false-retrieve with every sent row in the denominator.
+
+    ``failed_as_gate_only``: a failed call raises no flag, so the gate result
+    stands. ``failed_as_error``: a failed retrieve row counts as a wrong skip
+    and a failed skip row as a false retrieve.
+    """
+    gate_only: list[tuple[str, bool]] = []
+    as_error: list[tuple[str, bool]] = []
+    for item in outcomes:
+        expected = item["expected_decision"]
+        if item["status"] == "ok":
+            retrieved = bool(item["gate_retrieve"] or (item["eligible"] and item["honoured"]))
+            gate_only.append((expected, retrieved))
+            as_error.append((expected, retrieved))
+        else:
+            gate_only.append((expected, bool(item["gate_retrieve"])))
+            as_error.append((expected, expected == "skip"))
+    return {
+        "calls_failed": sum(1 for item in outcomes if item["status"] != "ok"),
+        "failed_as_gate_only": {
+            "wrong_skip": wrong_skip_rate(gate_only),
+            "false_retrieve": false_retrieve_rate(gate_only),
+        },
+        "failed_as_error": {
+            "wrong_skip": wrong_skip_rate(as_error),
+            "false_retrieve": false_retrieve_rate(as_error),
+        },
+    }
+
+
+def _failures_by_kind(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Count failed rows per ``failure_detail.kind``, overall and per category."""
+    overall: dict[str, int] = defaultdict(int)
+    by_category: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for item in outcomes:
+        if item["status"] == "ok":
+            continue
+        kind = str((item.get("failure_detail") or {}).get("kind") or "other")
+        overall[kind] += 1
+        by_category[item["category"]][kind] += 1
+    return {
+        "overall": dict(sorted(overall.items())),
+        "by_category": {
+            category: dict(sorted(kinds.items()))
+            for category, kinds in sorted(by_category.items())
+        },
+    }
+
+
 def summarize_live_model(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Turn per-message outcomes into overall and per-category metrics."""
     scored = [o for o in outcomes if o["status"] == "ok"]
@@ -1662,6 +1798,8 @@ def summarize_live_model(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any
         categories[category] = block
     return {
         "overall": _live_block(scored),
+        "overall_failed_in_denominator": _failed_in_denominator(outcomes),
+        "failures_by_kind": _failures_by_kind(outcomes),
         "by_category": categories,
         # Skip-labelled, eligible messages the model flagged: each one is a
         # false retrieve and an extra model call.
@@ -1687,6 +1825,142 @@ def summarize_live_model(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any
     }
 
 
+def select_live_rows(
+    messages: Sequence[Mapping[str, Any]], *, ids: Sequence[str] | None = None
+) -> list[Mapping[str, Any]]:
+    """Keep the rows whose id is listed, in file order (``None`` keeps all).
+
+    Raises:
+        LiveRunRefused: When an id is not in the set, or nothing is selected.
+    """
+    if ids is None:
+        return list(messages)
+    wanted = list(dict.fromkeys(ids))
+    if not wanted:
+        raise LiveRunRefused("--ids was given but names no id")
+    known = {str(row["id"]) for row in messages}
+    unknown = [item for item in wanted if item not in known]
+    if unknown:
+        more = f" and {len(unknown) - 5} more" if len(unknown) > 5 else ""
+        raise LiveRunRefused(f"unknown id(s) in --ids: {', '.join(unknown[:5])}{more}")
+    chosen = set(wanted)
+    selected = [row for row in messages if str(row["id"]) in chosen]
+    if not selected:
+        raise LiveRunRefused("--ids selected no rows")
+    return selected
+
+
+def check_compare_limit(limit: int) -> int:
+    """Return the message count a compare run sends: ``limit // 2``.
+
+    Raises:
+        LiveRunRefused: When the limit is below 2 (one message costs 2 calls).
+    """
+    if limit < 2:
+        raise LiveRunRefused(
+            "--compare-source-check sends each message twice; --max-live-calls must be at least 2"
+        )
+    return limit // 2
+
+
+def _live_eval_provider() -> Any:
+    """Build the provider only to reuse its payload builder (never invoked)."""
+    from backend.agentcore_provider import AgentCoreCoachProvider
+
+    class _NoRuntime:
+        def invoke_agent_runtime(self, **_kwargs: Any) -> Any:
+            raise AssertionError("AgentCore Runtime must not be invoked by the eval")
+
+    return AgentCoreCoachProvider(_EVAL_RUNTIME_ARN, client=_NoRuntime())
+
+
+def _live_model_outcome(
+    row: Mapping[str, Any],
+    *,
+    provider: Any,
+    bridge: LiveFastChatBridge,
+    source_check: bool = True,
+) -> tuple[dict[str, Any], BaseException | None]:
+    """Send one row through the first fast-chat call; return (outcome, error).
+
+    ``LiveCallLimitExceeded`` propagates so the caller can stop the run.
+    """
+    from backend.agentcore_provider import (
+        _FAST_CHAT_CONTRACT,
+        _FAST_CHAT_PHASE,
+        _validated_fast_chat,
+    )
+    from agentcore_runtime.models import adapt_fast_chat_turn_payload
+    from backend.context_planner import CONTEXT_POLICY_FAST_CHAT
+
+    decision = gate_decision(row)
+    base = {
+        "id": row["id"],
+        "category": row["category"],
+        "certainty": row["certainty"],
+        "expected_decision": row["expected_decision"],
+        "eligible": bool(decision.second_chance),
+        "gate_retrieve": bool(decision.retrieve),
+    }
+    try:
+        request = build_live_request(row, decision, source_check=source_check)
+        payload, _plan = provider._invoke_payload(
+            request,
+            _FAST_CHAT_PHASE,
+            context_policy=CONTEXT_POLICY_FAST_CHAT,
+            phase=_FAST_CHAT_PHASE,
+            output_contract=_FAST_CHAT_CONTRACT,
+        )
+        wire = bridge.invoke(payload)
+        raw = adapt_fast_chat_turn_payload(wire)
+        result = _validated_fast_chat(wire, request)
+    except LiveCallLimitExceeded:
+        raise
+    except Exception as error:  # noqa: BLE001 - recorded, never swallowed
+        return (
+            {
+                **base,
+                "status": "failed",
+                "error": exception_label(error),
+                "failure_detail": live_failure_detail(error),
+            },
+            error,
+        )
+    return (
+        {
+            **base,
+            "status": "ok",
+            "flag_raw": bool(raw.needs_sources),
+            "honoured": bool(result.needs_sources),
+            "mode": str(result.specialist),
+            "out_of_scope": bool(raw.out_of_scope),
+            "stop_reason": bridge.last_stop_reason,
+        },
+        None,
+    )
+
+
+def _calls_record(
+    limit: int,
+    client: Any,
+    outcomes: Sequence[Mapping[str, Any]],
+    messages: Sequence[Mapping[str, Any]],
+    selection: Mapping[str, Any] | None,
+    messages_attempted: int,
+) -> dict[str, Any]:
+    succeeded = sum(1 for o in outcomes if o["status"] == "ok")
+    in_set = (selection or {}).get("messages_in_set", len(messages))
+    return {
+        "limit": limit,
+        "made": client.calls,
+        "succeeded": succeeded,
+        "failed": len(outcomes) - succeeded,
+        "messages_in_set": int(in_set),
+        "messages_selected": len(messages),
+        "messages_attempted": messages_attempted,
+    }
+
+
 def run_live_model(
     messages: Sequence[Mapping[str, Any]],
     limit: int,
@@ -1694,95 +1968,48 @@ def run_live_model(
     client: Any,
     model_id: str,
     region: str,
+    selection: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Send up to ``limit`` gate messages through the first fast-chat call.
 
     Args:
-        messages: Validated gate rows.
+        messages: Validated gate rows (already filtered by ``select_live_rows``).
         limit: Approved call limit. Below the row count, an evenly spaced,
             deterministic subset is sent.
         client: A ``CountingConverseClient`` (tests pass one over a stub).
         model_id: Fast-chat model id from settings.
         region: Model region from settings.
+        selection: Optional record of the row filter (copied into the result;
+            ``messages_in_set`` there is the size of the unfiltered set).
 
     Stops after the first auth or access error. Never retries a call.
     """
-    from backend.agentcore_provider import (
-        _FAST_CHAT_CONTRACT,
-        _FAST_CHAT_PHASE,
-        AgentCoreCoachProvider,
-        _validated_fast_chat,
-    )
-    from agentcore_runtime.models import adapt_fast_chat_turn_payload
-    from backend.context_planner import CONTEXT_POLICY_FAST_CHAT
-
-    class _NoRuntime:
-        def invoke_agent_runtime(self, **_kwargs: Any) -> Any:
-            raise AssertionError("AgentCore Runtime must not be invoked by the eval")
-
-    provider = AgentCoreCoachProvider(_EVAL_RUNTIME_ARN, client=_NoRuntime())
+    provider = _live_eval_provider()
     bridge = LiveFastChatBridge(client, model_id)
     chosen = [messages[i] for i in evenly_spaced_indices(len(messages), limit)]
     outcomes: list[dict[str, Any]] = []
     first_failure: dict[str, Any] | None = None
     stopped_on: dict[str, Any] | None = None
     for row in chosen:
-        decision = gate_decision(row)
-        base = {
-            "id": row["id"],
-            "category": row["category"],
-            "certainty": row["certainty"],
-            "expected_decision": row["expected_decision"],
-            "eligible": bool(decision.second_chance),
-            "gate_retrieve": bool(decision.retrieve),
-        }
         try:
-            request = build_live_request(row, decision)
-            payload, _plan = provider._invoke_payload(
-                request,
-                _FAST_CHAT_PHASE,
-                context_policy=CONTEXT_POLICY_FAST_CHAT,
-                phase=_FAST_CHAT_PHASE,
-                output_contract=_FAST_CHAT_CONTRACT,
-            )
-            wire = bridge.invoke(payload)
-            raw = adapt_fast_chat_turn_payload(wire)
-            result = _validated_fast_chat(wire, request)
+            outcome, error = _live_model_outcome(row, provider=provider, bridge=bridge)
         except LiveCallLimitExceeded:
             break
-        except Exception as error:  # noqa: BLE001 - recorded, never swallowed
-            failure = {"id": row["id"], "error": exception_label(error)}
-            if first_failure is None:
-                first_failure = failure
-            outcomes.append({**base, "status": "failed", "error": failure["error"]})
-            if is_auth_or_access_error(error):
-                stopped_on = failure
-                break
+        outcomes.append(outcome)
+        if error is None:
             continue
-        outcomes.append(
-            {
-                **base,
-                "status": "ok",
-                "flag_raw": bool(raw.needs_sources),
-                "honoured": bool(result.needs_sources),
-                "mode": str(result.specialist),
-                "out_of_scope": bool(raw.out_of_scope),
-            }
-        )
-    succeeded = sum(1 for o in outcomes if o["status"] == "ok")
+        failure = {"id": row["id"], "error": outcome["error"]}
+        if first_failure is None:
+            first_failure = failure
+        if is_auth_or_access_error(error):
+            stopped_on = failure
+            break
     summary = summarize_live_model(outcomes)
-    return {
+    result = {
         "mode": "live_model",
         "definition": LIVE_MODEL_DEFINITION,
         "model": {"provider": "bedrock", "model_id": model_id, "region": region},
-        "calls": {
-            "limit": limit,
-            "made": client.calls,
-            "succeeded": succeeded,
-            "failed": len(outcomes) - succeeded,
-            "messages_in_set": len(messages),
-            "messages_attempted": len(outcomes),
-        },
+        "calls": _calls_record(limit, client, outcomes, messages, selection, len(outcomes)),
         "tokens": {
             "input": client.input_tokens,
             "output": client.output_tokens,
@@ -1792,6 +2019,105 @@ def run_live_model(
         **summary,
         "rows": outcomes,
     }
+    if selection is not None:
+        result["selection"] = dict(selection)
+    return result
+
+
+_COMPARE_ARMS = (("source_check_on", True), ("source_check_off", False))
+
+
+def run_live_model_compare(
+    messages: Sequence[Mapping[str, Any]],
+    limit: int,
+    *,
+    client: Any,
+    model_id: str,
+    region: str,
+    selection: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Send each chosen message with the SOURCE CHECK rule on, then off.
+
+    ``limit`` counts model calls: ``limit // 2`` messages are chosen with
+    ``evenly_spaced_indices`` and the client never makes more than ``limit``
+    calls. Stops after the first auth or access error in either arm.
+
+    Raises:
+        LiveRunRefused: When ``limit`` is below 2.
+    """
+    pair_limit = check_compare_limit(limit)
+    provider = _live_eval_provider()
+    bridge = LiveFastChatBridge(client, model_id)
+    chosen = [messages[i] for i in evenly_spaced_indices(len(messages), pair_limit)]
+    arms: dict[str, list[dict[str, Any]]] = {name: [] for name, _ in _COMPARE_ARMS}
+    pairs: list[dict[str, Any]] = []
+    first_failure: dict[str, Any] | None = None
+    stopped_on: dict[str, Any] | None = None
+    stop = False
+    for row in chosen:
+        pair: dict[str, Any] = {"id": row["id"], "category": row["category"]}
+        for name, source_check in _COMPARE_ARMS:
+            try:
+                outcome, error = _live_model_outcome(
+                    row, provider=provider, bridge=bridge, source_check=source_check
+                )
+            except LiveCallLimitExceeded:
+                stop = True
+                break
+            arms[name].append(outcome)
+            pair[name] = {
+                "status": outcome["status"],
+                "mode": outcome.get("mode"),
+                "failure_detail": outcome.get("failure_detail"),
+            }
+            if error is None:
+                continue
+            failure = {"id": row["id"], "arm": name, "error": outcome["error"]}
+            if first_failure is None:
+                first_failure = failure
+            if is_auth_or_access_error(error):
+                stopped_on = failure
+                stop = True
+                break
+        if any(name in pair for name, _ in _COMPARE_ARMS):
+            pairs.append(pair)
+        if stop:
+            break
+
+    def _ids(on_failed: bool, off_failed: bool) -> list[str]:
+        return [
+            pair["id"]
+            for pair in pairs
+            if "source_check_on" in pair
+            and "source_check_off" in pair
+            and (pair["source_check_on"]["status"] != "ok") == on_failed
+            and (pair["source_check_off"]["status"] != "ok") == off_failed
+        ]
+
+    all_outcomes = [o for name, _ in _COMPARE_ARMS for o in arms[name]]
+    result: dict[str, Any] = {
+        "mode": "live_model_compare",
+        "definition": LIVE_MODEL_COMPARE_DEFINITION,
+        "model": {"provider": "bedrock", "model_id": model_id, "region": region},
+        "calls": {
+            **_calls_record(limit, client, all_outcomes, messages, selection, len(pairs)),
+            "calls_per_message": 2,
+        },
+        "tokens": {"input": client.input_tokens, "output": client.output_tokens},
+        "first_failure": first_failure,
+        "stopped_early_on_auth_or_access_error": stopped_on,
+        "arms": {
+            name: {**summarize_live_model(arms[name]), "rows": arms[name]}
+            for name, _ in _COMPARE_ARMS
+        },
+        "pairs": pairs,
+        "failed_on_only": _ids(True, False),
+        "failed_off_only": _ids(False, True),
+        "failed_both": _ids(True, True),
+    }
+    if selection is not None:
+        result["selection"] = dict(selection)
+    return result
 
 
 def live_model_exit_code(result: Mapping[str, Any]) -> int:
@@ -1803,24 +2129,79 @@ def live_model_exit_code(result: Mapping[str, Any]) -> int:
     return 0
 
 
-def format_live_model_report(result: Mapping[str, Any]) -> str:
-    """Render the live model result as plain text."""
+def _failure_lines(summary: Mapping[str, Any]) -> list[str]:
+    """Failed calls in the denominator (both readings) and failure kinds."""
+    full = summary["overall_failed_in_denominator"]
+    gate_only = full["failed_as_gate_only"]
+    as_error = full["failed_as_error"]
+    kinds = summary["failures_by_kind"]["overall"]
+    kind_text = ", ".join(f"{kind} {count}" for kind, count in kinds.items()) or "none"
+    return [
+        f"with failed calls in the denominator ({full['calls_failed']} failed): "
+        f"failed_as_gate_only wrong-skip {format_rate(gate_only['wrong_skip'])}, "
+        f"false-retrieve {format_rate(gate_only['false_retrieve'])}; "
+        f"failed_as_error wrong-skip {format_rate(as_error['wrong_skip'])}, "
+        f"false-retrieve {format_rate(as_error['false_retrieve'])}",
+        f"failure kinds: {kind_text}",
+    ]
+
+
+def _calls_lines(result: Mapping[str, Any]) -> list[str]:
     calls = result["calls"]
     model = result["model"]
-    overall = result["overall"]
     lines = [
-        "mode: live_model (needs_sources on the first fast-chat call)",
         f"model: {model['model_id']} in {model['region']} ({model['provider']})",
         f"calls: made {calls['made']} of limit {calls['limit']}; succeeded "
         f"{calls['succeeded']}; failed {calls['failed']}; messages attempted "
-        f"{calls['messages_attempted']} of {calls['messages_in_set']}",
+        f"{calls['messages_attempted']} of {calls['messages_selected']} selected "
+        f"({calls['messages_in_set']} in set)",
         f"tokens: input {result['tokens']['input']}, output {result['tokens']['output']}",
     ]
     if result["first_failure"]:
         failure = result["first_failure"]
-        lines.append(f"first failure: {failure['error']} on {failure['id']}")
+        arm = f" ({failure['arm']})" if failure.get("arm") else ""
+        lines.append(f"first failure: {failure['error']} on {failure['id']}{arm}")
     if result["stopped_early_on_auth_or_access_error"]:
         lines.append("stopped early: auth or access error (no further calls made)")
+    return lines
+
+
+def format_live_model_compare_report(result: Mapping[str, Any]) -> str:
+    """Render the SOURCE CHECK on/off compare result as plain text."""
+    lines = [
+        "mode: live_model_compare (SOURCE CHECK on vs off, first fast-chat call)",
+        *_calls_lines(result),
+        f"calls per message: {result['calls']['calls_per_message']} (on, then off)",
+    ]
+    for name, arm in result["arms"].items():
+        overall = arm["overall"]
+        lines += [
+            "",
+            f"{name}: messages scored {overall['messages_scored']}; "
+            f"flag rate (eligible, honoured) {format_rate(overall['flag_rate_eligible'])}",
+            f"  wrong-skip with model {format_rate(overall['wrong_skip_with_model'])}; "
+            f"false-retrieve with model {format_rate(overall['false_retrieve_with_model'])}",
+            *(f"  {line}" for line in _failure_lines(arm)),
+        ]
+        for category, kinds in arm["failures_by_kind"]["by_category"].items():
+            text = ", ".join(f"{kind} {count}" for kind, count in kinds.items())
+            lines.append(f"  failed in {category}: {text}")
+    lines += [
+        "",
+        f"failed with SOURCE CHECK on only: {', '.join(result['failed_on_only']) or 'none'}",
+        f"failed with SOURCE CHECK off only: {', '.join(result['failed_off_only']) or 'none'}",
+        f"failed in both arms: {', '.join(result['failed_both']) or 'none'}",
+    ]
+    return "\n".join(lines)
+
+
+def format_live_model_report(result: Mapping[str, Any]) -> str:
+    """Render the live model result as plain text."""
+    overall = result["overall"]
+    lines = [
+        "mode: live_model (needs_sources on the first fast-chat call)",
+        *_calls_lines(result),
+    ]
     lines += [
         "",
         f"messages scored: {overall['messages_scored']}; eligible for the second chance: "
@@ -1834,6 +2215,7 @@ def format_live_model_report(result: Mapping[str, Any]) -> str:
         f"with model {format_rate(overall['false_retrieve_with_model'])}; "
         f"clear rows only {format_rate(overall['false_retrieve_with_model_clear_rows_only'])}",
         f"extra model calls (second calls): {overall['extra_model_calls']}",
+        *_failure_lines(result),
         "",
         "by category (sent / failed; flag rate on eligible; wrong-skip gate->model; "
         "false-retrieve gate->model; extra calls):",
@@ -1994,7 +2376,30 @@ def build_parser() -> argparse.ArgumentParser:
         f"(--live-kb: 1 to {HARD_LIVE_CALL_CAP} Retrieve calls; --live-model: "
         f"1 to {LIVE_MODEL_HARD_CALL_CAP} model calls).",
     )
+    parser.add_argument(
+        "--ids",
+        action="append",
+        default=None,
+        metavar="ID[,ID...]",
+        help="--live-model only: send only these gate message ids (comma-separated, "
+        "may be repeated; kept in file order). An unknown id is refused. "
+        "--max-live-calls applies after this filter.",
+    )
+    parser.add_argument(
+        "--compare-source-check",
+        action="store_true",
+        help="--live-model only: send each chosen message twice, with the SOURCE "
+        "CHECK rule on and then off. --max-live-calls counts calls, so "
+        "floor(N / 2) messages are sent; N must be at least 2.",
+    )
     return parser
+
+
+def parse_ids(values: Sequence[str] | None) -> list[str] | None:
+    """Flatten repeated, comma-separated ``--ids`` values (``None`` if absent)."""
+    if values is None:
+        return None
+    return [part.strip() for value in values for part in value.split(",") if part.strip()]
 
 
 def _main_live_model(args: argparse.Namespace) -> int:
@@ -2015,11 +2420,29 @@ def _main_live_model(args: argparse.Namespace) -> int:
     materials = load_materials(args.materials)
     questions = load_questions(args.questions, materials)
     messages = load_messages(args.messages, materials, [q["id"] for q in questions])
+    ids = parse_ids(args.ids)
+    # Select and check before the client exists: a refusal makes no client.
+    try:
+        selected = select_live_rows(messages, ids=ids)
+        if args.compare_source_check:
+            check_compare_limit(limit)
+    except LiveRunRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    selection = None
+    if ids is not None:
+        selection = {"ids": [str(row["id"]) for row in selected], "messages_in_set": len(messages)}
     client = _build_bedrock_runtime_client(region, limit)
-    result = run_live_model(
-        messages, limit, client=client, model_id=model_id, region=region
-    )
-    print(format_live_model_report(result))
+    if args.compare_source_check:
+        result = run_live_model_compare(
+            selected, limit, client=client, model_id=model_id, region=region, selection=selection
+        )
+        print(format_live_model_compare_report(result))
+    else:
+        result = run_live_model(
+            selected, limit, client=client, model_id=model_id, region=region, selection=selection
+        )
+        print(format_live_model_report(result))
     if result["first_failure"]:
         print(
             f"first failure class: {result['first_failure']['error']}",
@@ -2042,6 +2465,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.live_model:
         return _main_live_model(args)
+    if args.ids is not None or args.compare_source_check:
+        print("refused: --ids and --compare-source-check need --live-model", file=sys.stderr)
+        return 2
     live_requested = args.live_kb or args.max_live_calls is not None
     limit = 0
     if live_requested:

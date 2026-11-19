@@ -373,7 +373,9 @@ retrieved when the gate searched a source, or when it is eligible and the
 honoured flag is true. The honoured flag is the raw flag on a Q&A turn that is
 not `out_of_scope`. A raw flag on a coaching turn is not honoured; the report
 counts those (`raw_flags_not_honoured`, `flag_ignored`). Rows whose call failed
-are not scored; failures are counted per category.
+are not scored in `overall` and `by_category`; failures are counted per
+category. `overall_failed_in_denominator` keeps every sent row in the
+denominator in two readings (see "Failed calls" below).
 
 | Reported | Meaning |
 |---|---|
@@ -424,3 +426,117 @@ and $5 per million output tokens) that is a few dollars. The hard ceiling is
 $11. The report prints the real token totals. The run is sequential, about
 2 to 5 seconds per call, so 10 to 25 minutes. The second calls that a flag
 would trigger in production are not made; they are counted only.
+
+### Failed calls: detail and denominators
+
+Each failed row stores `error` (exception class and AWS code) and
+`failure_detail`, which holds structural facts only, never message, reply or
+tool input text:
+
+| `kind` | Meaning |
+|---|---|
+| `no_tool_call` | The reply had no `FastChatTurnOutput` tool call. Also stores `stop_reason` (Bedrock `stopReason`) and `text_blocks` (count). |
+| `tool_input_invalid` | The tool input failed `parse_fast_chat_turn_output`. Also stores `stop_reason` and `errors`: pydantic `loc`, `type` and its static `msg` per error (input values excluded). A coaching reply without `recommendation` shows as `type: value_error` with an empty `loc`. |
+| `fast_chat_contract` | `adapt_fast_chat_turn_payload` rejected the wire payload; `reason` is its fixed token. |
+| `contract_rejected` | `_validated_fast_chat` rejected it; `category` is the provider category. |
+| `other` | Anything else, for example an AWS error (see `error`). |
+
+Successful rows store `stop_reason` too. `failures_by_kind` counts kinds overall
+and per category.
+
+`overall_failed_in_denominator` reports wrong-skip and false-retrieve over
+**all** sent rows, in two readings:
+
+- `failed_as_gate_only`: a failed call raises no flag, so the gate decision
+  stands. This is what production would do with the flag if the student retried
+  and the retry had no flag.
+- `failed_as_error`: a failed `retrieve` row counts as a wrong skip and a failed
+  `skip` row counts as a false retrieve (the strictest reading).
+
+Before Phase 3c the live report had only the scored-row figures, so with 11
+failed `skip` rows the false-retrieve denominator was 141 − 11 = 130.
+
+### Production vs eval when the first call has no valid structured output
+
+Production (file references at Phase 3c item 1):
+
+1. The runtime forces tool use on cycle 1 for `fast_chat`
+   (`_install_first_cycle_structured_output`, `agentcore_runtime/main.py:381`).
+   Strands gets the repair prompt `"Please use the output tool now."`
+   (`STRUCTURED_OUTPUT_REPAIR_PROMPT`, `agentcore_runtime/structured_coach.py:76`)
+   and `limits={"turns": 2}` (`FAST_CHAT_INVOKE_LIMITS`, `:90`), so one
+   generation plus at most one recovery turn (`main.py:510-520`, call at
+   `main.py:625-629`). Throttling retries are separate
+   (`FAST_CHAT_MODEL_RETRY`, `max_attempts=2`, `structured_coach.py:241-243`).
+   Strands is not installed in the backend venv, so this recovery is described
+   from the code and its docstrings, not executed here.
+2. If the result still does not parse, `structured_from_agent_result` fails
+   closed (`structured_coach.py:1242-1291`) and the runtime returns
+   `{"ok": false, "error": true, "category": "structured_output_failure"}`
+   (`main.py:653-689`, `harness_error_payload` at `structured_coach.py:937`).
+3. The backend maps that envelope to a transient `structured_output_failure`
+   (`_raise_if_harness_error_envelope`, `backend/agentcore_provider.py:377-403`)
+   and `_assess_fast_chat` makes one fresh stateless re-invoke if the turn's
+   two-invoke budget allows (`agentcore_provider.py:2107-2133`,
+   `FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN = 2`, `backend/settings.py:75`).
+   A reply that parses at the runtime but fails `_validated_fast_chat` is not
+   retried (`_is_transient_structured_output_failure`, `:302-311`).
+4. When both invokes fail the student gets a 503 with category
+   `structured_output_failure` (`backend/coaching/streaming.py:29-31`; non-stream
+   body `backend/http/app.py:117-122`). No assistant turn is saved. The React
+   pilot shows "The answer was not confirmed saved. Your question is kept. Check
+   saved answer before retrying." (`frontend/src/Conversation.tsx:217`);
+   Streamlit shows "The coach couldn't complete that reply. Please try again."
+   (`ui/panels/chat.py:328-329`). No `needs_sources` second call runs.
+
+The eval makes one Converse call with `toolChoice: any`, no recovery turn, no
+fresh re-invoke and no SDK retry (`total_max_attempts: 1`). Production allows up
+to two generations per invoke and two invokes per turn before the student sees
+the error. An eval parse failure therefore marks a first generation that
+production would try to recover. The eval failure rate is an upper bound on the
+student-facing rate, not a measure of it.
+
+### Compare SOURCE CHECK on vs off for chosen ids
+
+`--ids ID[,ID...]` (comma-separated, may be repeated) keeps only those gate
+rows, in file order. An unknown id or an empty list is refused (exit 2, no
+client built). `--compare-source-check` sends each chosen row twice, back to
+back: once with `source_need_check=True` (the SOURCE CHECK paragraph in the
+runtime rules) and once with `source_need_check=False` (production with
+`FAST_CHAT_NEEDS_SOURCES_ENABLED` off; the flag is never honoured). The cached
+fast-chat prompt and output contract are the same in both arms. Both flags need
+`--live-model`; without it they are refused.
+
+**Cap rule.** `--max-live-calls` counts model calls, applied after `--ids`.
+Each row costs 2 calls, so the script sends `floor(N / 2)` rows (evenly spaced,
+as in the plain mode) and the call counter stops at N. N below 2 is refused.
+Fail-fast is unchanged: the run stops after the first auth or access error in
+either arm.
+
+The JSON has `mode: live_model_compare`, `arms.source_check_on` and
+`arms.source_check_off` (each a full live-model summary with its `rows`),
+`pairs` (per id, each arm's `status`, `mode` and `failure_detail`), and
+`failed_on_only`, `failed_off_only`, `failed_both` id lists. `calls` adds
+`messages_selected` and `calls_per_message: 2`; `selection` records the ids.
+`--ids` also works without `--compare-source-check` (one call per row).
+
+**Phase 3c item 1 command (not run; costs money).** The 33
+`greeting_thanks_chitchat` rows (gm146 to gm178, which contain the 10 reported
+parse failures gm148 to gm172) plus gm279 (`ambiguous_generic`): 34 rows, 68
+calls.
+
+```bash
+COACHING_MODEL_PROVIDER=bedrock \
+COACHING_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0 \
+AGENTCORE_MODEL_REGION=us-west-2 \
+  python scripts/evals/evaluate_retrieval.py \
+  --live-model --compare-source-check \
+  --ids gm146,gm147,gm148,gm149,gm150,gm151,gm152,gm153,gm154,gm155,gm156,gm157,gm158,gm159,gm160,gm161,gm162,gm163,gm164,gm165,gm166,gm167,gm168,gm169,gm170,gm171,gm172,gm173,gm174,gm175,gm176,gm177,gm178,gm279 \
+  --max-live-calls 68 \
+  --json-output .agents/tasks/phase3c-work/live-item1-greetings-on-off.json
+```
+
+At about 7,100 input and 300 output tokens per call (the averages the user
+reported from the Phase 3b live run) and Haiku 4.5 at $1 / $5 per million
+tokens, that is about 68 × $0.0086 ≈ $0.58 (estimate; confirm prices on the AWS
+Bedrock pricing page).

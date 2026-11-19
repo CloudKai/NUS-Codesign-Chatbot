@@ -101,7 +101,7 @@ modules.
 | `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |
 | `domain/test_prompt_cache.py` | SystemContentBlock prefix cache; no CacheConfig auto on student text |
 | `scripts/test_evaluate_fast_chat_regression.py` | Dry-run and mocked live-candidate regression CLI; no live Claude |
-| `scripts/test_evaluate_retrieval.py` | Retrieval eval metric maths, data-file validity, refusal of the live Knowledge Base path and the live model path without opt-in and call limit, and the live model run against a stub Bedrock client; no network |
+| `scripts/test_evaluate_retrieval.py` | Retrieval eval metric maths, data-file validity, refusal of the live Knowledge Base path and the live model path without opt-in and call limit, and the live model run against a stub Bedrock client, including failure detail, failed calls in the denominator, `--ids` row selection and the SOURCE CHECK on/off compare mode; no network |
 | `domain/test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection |
 | `domain/test_qa_grounding.py` | Failed Q&A authors the evidence-gap copy with zero AgentCore invokes; successful Q&A cites retrieved excerpts without coaching |
 | `domain/test_bedrock_provider.py` | Bedrock Converse adapter contract with an injected fake client |

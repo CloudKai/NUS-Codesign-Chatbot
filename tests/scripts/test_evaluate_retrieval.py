@@ -608,6 +608,226 @@ def test_call_limit_sends_an_even_subset_and_never_exceeds_the_limit() -> None:
         counter.converse(modelId="x")
 
 
+def _reply_with(body: dict, stop_reason: str = "tool_use") -> dict:
+    return {
+        "output": {
+            "message": {
+                "role": "assistant",
+                "content": [{"toolUse": {"toolUseId": "t", "name": "FastChatTurnOutput", "input": body}}],
+            }
+        },
+        "stopReason": stop_reason,
+        "usage": {"inputTokens": 100, "outputTokens": 20},
+    }
+
+
+def test_invalid_tool_input_records_error_locations_but_no_text() -> None:
+    rows = _rows(("hello there, secret-student-words", "skip"))
+    body = _tool_reply(mode="coaching")["output"]["message"]["content"][0]["toolUse"]["input"]
+    body = dict(body, response_text="secret-reply-words")
+    del body["recommendation"]
+    result = _run(rows, _StubBedrock(lambda m: _reply_with(body)))
+    row = result["rows"][0]
+    assert row["status"] == "failed"
+    detail = row["failure_detail"]
+    assert detail["kind"] == "tool_input_invalid" and detail["stop_reason"] == "tool_use"
+    assert detail["errors"] and {"loc", "type", "msg"} <= set(detail["errors"][0])
+    assert detail["errors"][0]["type"] == "value_error"
+    dumped = json.dumps(result)
+    assert "secret-student-words" not in dumped and "secret-reply-words" not in dumped
+    assert result["failures_by_kind"] == {
+        "overall": {"tool_input_invalid": 1},
+        "by_category": {"course_content": {"tool_input_invalid": 1}},
+    }
+
+
+def test_text_only_reply_records_no_tool_call_and_the_stop_reason() -> None:
+    rows = _rows(("hello", "skip"))
+    text_only = {
+        "output": {"message": {"role": "assistant", "content": [{"text": "secret-reply-words"}]}},
+        "stopReason": "end_turn",
+    }
+    result = _run(rows, _StubBedrock(lambda m: text_only))
+    detail = result["rows"][0]["failure_detail"]
+    assert detail == {"kind": "no_tool_call", "stop_reason": "end_turn", "text_blocks": 1}
+    assert "secret-reply-words" not in json.dumps(result)
+
+
+def test_ok_rows_record_the_stop_reason() -> None:
+    result = _run(_rows(("hello", "skip")), _StubBedrock())
+    assert result["rows"][0]["stop_reason"] == "tool_use"
+    assert "failure_detail" not in result["rows"][0]
+
+
+def test_failed_calls_in_the_denominator_give_both_readings() -> None:
+    rows = _rows(("I think option B is stronger.", "skip"), ("I think option C is stronger.", "skip"))
+    good = _tool_reply()
+    bad = {"output": {"message": {"role": "assistant", "content": [{"text": "x"}]}}, "stopReason": "end_turn"}
+    result = _run(rows, _StubBedrock(lambda m: bad if "option B" in m else good))
+    assert result["overall"]["false_retrieve_with_model"]["denominator"] == 1
+    full = result["overall_failed_in_denominator"]
+    assert full["calls_failed"] == 1
+    assert full["failed_as_gate_only"]["false_retrieve"] == {"numerator": 0, "denominator": 2, "rate": 0.0}
+    assert full["failed_as_error"]["false_retrieve"] == {"numerator": 1, "denominator": 2, "rate": 0.5}
+    report = _EVAL.format_live_model_report(result)
+    assert "failed_as_gate_only" in report and "failure kinds: no_tool_call 1" in report
+
+
+def test_failed_retrieve_row_is_a_wrong_skip_only_when_failed_as_error() -> None:
+    rows = _rows(("what questions do we ask in the JTBD interview", "retrieve"))
+    bad = {"output": {"message": {"role": "assistant", "content": []}}, "stopReason": "max_tokens"}
+    full = _run(rows, _StubBedrock(lambda m: bad))["overall_failed_in_denominator"]
+    # The gate skipped it, so both readings count it as a wrong skip.
+    assert full["failed_as_gate_only"]["wrong_skip"]["numerator"] == 1
+    assert full["failed_as_error"]["wrong_skip"]["numerator"] == 1
+    gate_hit = _rows(("what is a creative matrix", "retrieve"))
+    assert _EVAL.gate_decision(gate_hit[0]).retrieve
+    full = _run(gate_hit, _StubBedrock(lambda m: bad))["overall_failed_in_denominator"]
+    assert full["failed_as_gate_only"]["wrong_skip"]["numerator"] == 0
+    assert full["failed_as_error"]["wrong_skip"]["numerator"] == 1
+
+
+# ---- row selection and SOURCE CHECK on/off compare (stub client only) -------
+
+_SOURCE_CHECK_TEXT = "SOURCE CHECK: no course or source excerpts were retrieved"
+
+
+def _compare(rows, stub, limit):
+    counter = _EVAL.CountingConverseClient(stub, limit)
+    return _EVAL.run_live_model_compare(rows, limit, client=counter, model_id=_HAIKU, region="us-west-2")
+
+
+def test_ids_selection_keeps_file_order_and_parses_commas() -> None:
+    rows = _rows(("a", "skip"), ("b", "skip"), ("c", "skip"))
+    assert _EVAL.parse_ids(["t3, t1", " t2 ,"]) == ["t3", "t1", "t2"]
+    assert _EVAL.parse_ids(None) is None
+    assert [r["id"] for r in _EVAL.select_live_rows(rows, ids=["t3", "t1"])] == ["t1", "t3"]
+    assert _EVAL.select_live_rows(rows) == rows
+    with pytest.raises(_EVAL.LiveRunRefused, match="t9"):
+        _EVAL.select_live_rows(rows, ids=["t1", "t9"])
+    with pytest.raises(_EVAL.LiveRunRefused):
+        _EVAL.select_live_rows(rows, ids=[])
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--live-model", "--max-live-calls", "4", "--ids", "gm001,not-an-id"],
+        ["--live-model", "--max-live-calls", "4", "--ids", ","],
+        ["--live-model", "--max-live-calls", "1", "--compare-source-check", "--ids", "gm001"],
+    ],
+)
+def test_bad_selection_or_compare_cap_is_refused_before_a_client_exists(
+    argv, no_boto, haiku_settings, capsys
+) -> None:
+    assert _EVAL.main(argv) == 2
+    assert "refused" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["--ids", "gm001"], ["--compare-source-check"], ["--live-kb", "--max-live-calls", "2", "--ids", "gm001"]])
+def test_selection_and_compare_flags_need_live_model(argv, no_boto, capsys) -> None:
+    assert _EVAL.main(argv) == 2
+    assert "--live-model" in capsys.readouterr().err
+
+
+def test_compare_sends_each_row_with_the_rule_on_then_off() -> None:
+    rows = _rows(("hello", "skip"), ("thanks", "skip"), ("what is a creative matrix", "retrieve"))
+    stub = _StubBedrock()
+    result = _compare(rows, stub, 6)
+    assert len(stub.requests) == 6 and result["calls"]["made"] == 6
+    systems = [call["system"][0]["text"] for call in stub.requests]
+    assert [_SOURCE_CHECK_TEXT in s for s in systems] == [True, False] * 3
+    assert result["mode"] == "live_model_compare" and result["calls"]["messages_attempted"] == 3
+    assert [p["id"] for p in result["pairs"]] == ["t1", "t2", "t3"]
+    for arm in ("source_check_on", "source_check_off"):
+        assert result["arms"][arm]["overall"]["messages_scored"] == 3
+    assert result["failed_on_only"] == result["failed_off_only"] == result["failed_both"] == []
+    assert "SOURCE CHECK on only: none" in _EVAL.format_live_model_compare_report(result)
+
+
+def test_compare_cap_counts_calls_and_sends_floor_half_the_rows() -> None:
+    rows = _rows(*[("hello", "skip")] * 4)
+    stub = _StubBedrock()
+    result = _compare(rows, stub, 5)
+    assert len(stub.requests) == 4 <= 5
+    assert [p["id"] for p in result["pairs"]] == ["t1", "t3"]
+    with pytest.raises(_EVAL.LiveRunRefused):
+        _compare(rows, _StubBedrock(), 1)
+
+
+def test_compare_stops_on_an_auth_error_in_the_off_arm() -> None:
+    rows = _rows(*[("hello", "skip")] * 3)
+
+    class OffArmDenied(_StubBedrock):
+        def converse(self, **kwargs):
+            if len(self.requests) == 1:
+                self.requests.append(kwargs)
+                raise _client_error("AccessDeniedException")
+            return super().converse(**kwargs)
+
+    stub = OffArmDenied()
+    result = _compare(rows, stub, 6)
+    assert len(stub.requests) == 2
+    assert result["stopped_early_on_auth_or_access_error"]["arm"] == "source_check_off"
+    assert result["pairs"][0]["source_check_off"]["status"] == "failed"
+    assert _EVAL.live_model_exit_code(result) == 3
+    assert "secret body" not in json.dumps(result)
+
+
+def test_flag_is_never_honoured_on_the_off_arm() -> None:
+    rows = _rows(("what questions do we ask in the JTBD interview", "retrieve"))
+    result = _compare(rows, _StubBedrock(lambda m: _tool_reply(needs_sources=True)), 2)
+    on, off = result["arms"]["source_check_on"], result["arms"]["source_check_off"]
+    assert on["overall"]["wrong_skip_with_model"]["numerator"] == 0
+    assert off["overall"]["wrong_skip_with_model"]["numerator"] == 1
+    assert off["rows"][0]["flag_raw"] is True and off["rows"][0]["honoured"] is False
+
+
+def test_compare_lists_ids_that_fail_in_one_arm_only() -> None:
+    rows = _rows(("hello", "skip"), ("thanks", "skip"))
+    text_only = {"output": {"message": {"role": "assistant", "content": [{"text": "hi"}]}}, "stopReason": "end_turn"}
+
+    class FailsWithRuleOnForHello(_StubBedrock):
+        def converse(self, **kwargs):
+            self.requests.append(kwargs)
+            rule_on = _SOURCE_CHECK_TEXT in kwargs["system"][0]["text"]
+            return text_only if rule_on and _student_message(kwargs) == "hello" else _tool_reply()
+
+    result = _compare(rows, FailsWithRuleOnForHello(), 4)
+    assert result["failed_on_only"] == ["t1"]
+    assert result["failed_off_only"] == [] and result["failed_both"] == []
+    assert result["pairs"][0]["source_check_on"]["failure_detail"]["kind"] == "no_tool_call"
+    assert result["arms"]["source_check_on"]["failures_by_kind"]["overall"] == {"no_tool_call": 1}
+    assert _EVAL.live_model_exit_code(result) == 0
+
+
+def test_main_compare_with_ids_runs_on_a_stub_client(haiku_settings, monkeypatch, tmp_path, capsys) -> None:
+    stub = _StubBedrock()
+    monkeypatch.setattr(
+        _EVAL, "_build_bedrock_runtime_client", lambda region, limit: _EVAL.CountingConverseClient(stub, limit)
+    )
+    out = tmp_path / "compare.json"
+    argv = ["--live-model", "--compare-source-check", "--ids", "gm279,gm146", "--ids", "gm147",
+            "--max-live-calls", "6", "--json-output", str(out)]
+    assert _EVAL.main(argv) == 0
+    assert len(stub.requests) == 6
+    data = json.loads(out.read_text())
+    assert data["mode"] == "live_model_compare"
+    assert data["selection"] == {"ids": ["gm146", "gm147", "gm279"], "messages_in_set": 295}
+    assert data["calls"]["messages_selected"] == 3 and data["calls"]["messages_in_set"] == 295
+    assert "live_model_compare" in capsys.readouterr().out
+
+
+def test_main_live_model_with_ids_sends_only_those_rows(haiku_settings, monkeypatch, capsys) -> None:
+    stub = _StubBedrock()
+    monkeypatch.setattr(
+        _EVAL, "_build_bedrock_runtime_client", lambda region, limit: _EVAL.CountingConverseClient(stub, limit)
+    )
+    assert _EVAL.main(["--live-model", "--ids", "gm146,gm279", "--max-live-calls", "10"]) == 0
+    assert len(stub.requests) == 2
+    assert "2 selected (295 in set)" in capsys.readouterr().out
+
+
 def test_agentcore_is_never_invoked_by_the_live_model_path() -> None:
     # The provider is built with a runtime client that raises when used; a
     # completed run proves the AgentCore invoke path was not touched.
