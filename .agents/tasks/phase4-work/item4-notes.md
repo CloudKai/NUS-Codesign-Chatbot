@@ -4,7 +4,7 @@ No live command was run (no AWS, Bedrock, AgentCore, KB, OpenAI or paid call). W
 
 Marks: **(script run)**, **(hand)** read or counted by hand, **(doc)** from AWS or Strands documentation, **(not run)** could not be run here.
 
-Commits (author and committer `CloudKai <kaiming_01@live.com>` on each, script-checked with `git log -1 --format`): `d49767e` (measurement script and the "before" run), `b8893ec` (implementation, tests, frontend, AGENTS rows), plus the docs/notes commit that follows it (see `git log`). Push result is in the final message. No `gate-item4.json` existed, so this was the implementation pass.
+Commits (author and committer `CloudKai <kaiming_01@live.com>` on each, script-checked with `git log -1 --format`): `d49767e` (measurement script and the "before" run), `b8893ec` (implementation, tests, frontend, AGENTS rows), `3d375c3` (docs, notes, after-run JSON), and a final small fix-up commit for a line reference (see `git log`). Push result is in the final message. No `gate-item4.json` existed, so this was the implementation pass.
 
 ## 1. AgentCore streaming support: can partial reply text pass through the current path?
 

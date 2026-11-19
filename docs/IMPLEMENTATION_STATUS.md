@@ -31,7 +31,7 @@ No live command was run. Marks: **(script run)**, **(hand)**, **(doc)**.
   returns an error payload (805-815); `backend/agentcore_provider.py` calls
   `invoke_agent_runtime(..., accept="application/json")` (line 1886) and
   parses one response body (`_payload_from_runtime_response`). The runtime does
-  see partial reply text (its `_first_text_timing_callback`, `main.py` 169-203,
+  see partial reply text (its `_first_text_timing_callback`, `main.py` 169-206,
   finds `response_text` in streamed tool-input JSON), but only for timing. AWS
   documents streaming for AgentCore Runtime (`InvokeAgentRuntime` "supports
   streaming responses"; entrypoints may `yield`) (doc), so the platform can do it.
