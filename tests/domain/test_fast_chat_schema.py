@@ -139,9 +139,13 @@ def test_coaching_advance_passes_pydantic() -> None:
     assert parsed.recommendation == "advance"
 
 
-def test_coaching_null_recommendation_fails_pydantic() -> None:
-    with pytest.raises(ValidationError):
-        FastChatTurnOutput.model_validate(_coaching(recommendation=None))
+def test_coaching_null_recommendation_defaults_to_stay() -> None:
+    # Phase 4 item 1: was ``..._fails_pydantic``. A null recommendation on a
+    # coaching reply is now recorded as stay (see
+    # test_fast_chat_recommendation_default.py for the full matrix).
+    parsed = FastChatTurnOutput.model_validate(_coaching(recommendation=None))
+    assert parsed.recommendation == "stay"
+    assert parsed.recommendation_defaulted is True
 
 
 def test_null_needs_source_retrieval_fails_pydantic() -> None:
@@ -150,11 +154,14 @@ def test_null_needs_source_retrieval_fails_pydantic() -> None:
         FastChatTurnOutput.model_validate(_qa(needs_source_retrieval=None))
 
 
-def test_coaching_missing_recommendation_fails() -> None:
-    with pytest.raises(ValidationError):
-        FastChatTurnOutput.model_validate(
-            {"mode": "coaching", "response_text": _TEXT}
-        )
+def test_coaching_missing_recommendation_defaults_to_stay() -> None:
+    # Phase 4 item 1: was ``..._fails``. The live greeting failures were
+    # coaching replies with no recommendation.
+    parsed = FastChatTurnOutput.model_validate(
+        {"mode": "coaching", "response_text": _TEXT}
+    )
+    assert parsed.recommendation == "stay"
+    assert parsed.recommendation_defaulted is True
 
 
 def test_invalid_recommendation_enum_fails() -> None:
@@ -312,11 +319,12 @@ def test_qa_schema_drops_recommendation() -> None:
     assert parsed.recommendation_rationale is None
 
 
-def test_coaching_without_recommendation_fails() -> None:
-    with pytest.raises(ValidationError):
-        FastChatTurnOutput.model_validate(
-            {"mode": "coaching", "response_text": "Hello"}
-        )
+def test_coaching_without_recommendation_never_defaults_to_advance() -> None:
+    # Phase 4 item 1: was ``..._fails``.
+    parsed = FastChatTurnOutput.model_validate(
+        {"mode": "coaching", "response_text": "Hello"}
+    )
+    assert parsed.recommendation == "stay"
 
 
 def test_legacy_full_assessment_still_parses() -> None:

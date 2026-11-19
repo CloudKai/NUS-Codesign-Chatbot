@@ -96,6 +96,7 @@ SAFE_PERF_FIELDS = frozenset(
         "upload_retrieval_policy_failed",
         "fast_chat_needs_sources",
         "fast_chat_needs_sources_ignored_coaching",
+        "fast_chat_recommendation_defaulted",
         "rag_fallback_trigger",
         "fast_chat_recent_message_count",
         "estimated_recent_history_tokens",

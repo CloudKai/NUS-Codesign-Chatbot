@@ -895,6 +895,20 @@ With failed calls counted as errors, the false-retrieve rate on these rows is
 gate result standing it is 0/34 in both arms. All 34 rows are `skip` rows, so
 there is no wrong-skip figure.
 
+### Coaching reply with no recommendation (Phase 4 item 1)
+
+The 17 failed calls are coaching replies whose `recommendation` was missing. The
+model-facing tool schema requires it, but Claude Haiku omitted it on greeting
+and thanks messages. `FastChatTurnOutput` now records `stay` for a coaching
+reply whose recommendation is absent, null or blank (never `advance`), marks it
+with `recommendation_defaulted`, and the backend writes the perf field
+`fast_chat_recommendation_defaulted` (true only when it happened). An unknown
+token such as `maybe` still fails. A Q&A reply and an explicit `advance` are
+unchanged. The live eval counts defaulted rows in each outcome and in
+`recommendation_defaulted: {count, ids}`, so the re-run shows how many of the 13
+messages now pass and how many were defaulted. The change lives in the runtime
+package, so it only reaches production after the AgentCore runtime is republished.
+
 ### Laya results
 
 All Laya figures come from the Phase 3d result files in

@@ -624,8 +624,9 @@ def _reply_with(body: dict, stop_reason: str = "tool_use") -> dict:
 def test_invalid_tool_input_records_error_locations_but_no_text() -> None:
     rows = _rows(("hello there, secret-student-words", "skip"))
     body = _tool_reply(mode="coaching")["output"]["message"]["content"][0]["toolUse"]["input"]
-    body = dict(body, response_text="secret-reply-words")
-    del body["recommendation"]
+    # Phase 4 item 1: a missing recommendation now defaults to stay, so an
+    # unrecognized token is used to keep a coaching reply invalid.
+    body = dict(body, response_text="secret-reply-words", recommendation="maybe")
     result = _run(rows, _StubBedrock(lambda m: _reply_with(body)))
     row = result["rows"][0]
     assert row["status"] == "failed"
@@ -639,6 +640,18 @@ def test_invalid_tool_input_records_error_locations_but_no_text() -> None:
         "overall": {"tool_input_invalid": 1},
         "by_category": {"course_content": {"tool_input_invalid": 1}},
     }
+
+
+def test_missing_coaching_recommendation_is_counted_not_failed() -> None:
+    rows = _rows(("hello there", "skip"), ("hi", "skip"))
+    body = _tool_reply(mode="coaching")["output"]["message"]["content"][0]["toolUse"]["input"]
+    missing = {k: v for k, v in body.items() if k != "recommendation"}
+    replies = iter([_reply_with(missing), _reply_with(dict(body))])
+    result = _run(rows, _StubBedrock(lambda m: next(replies)))
+    assert [r["status"] for r in result["rows"]] == ["ok", "ok"]
+    assert [r["recommendation_defaulted"] for r in result["rows"]] == [True, False]
+    assert result["recommendation_defaulted"] == {"count": 1, "ids": [rows[0]["id"]]}
+    assert result["calls"]["failed"] == 0
 
 
 def test_text_only_reply_records_no_tool_call_and_the_stop_reason() -> None:

@@ -1103,6 +1103,10 @@ def _validated_fast_chat(
         )
     if output.recommendation not in {StageDecision.STAY.value, StageDecision.ADVANCE.value}:
         raise _malformed_error()
+    if output.recommendation_defaulted or payload.get("recommendation_defaulted") is True:
+        # The model sent no recommendation on a coaching reply and ``stay``
+        # was recorded. Rate of this field = rate of defaulted replies.
+        record_field("fast_chat_recommendation_defaulted", True)
     if output.needs_sources and request.source_need_check:
         # A coaching turn is never retried for course evidence: the retry
         # would rewrite it into a fail-closed course turn and discard the

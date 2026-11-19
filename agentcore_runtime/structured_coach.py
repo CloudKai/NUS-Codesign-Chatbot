@@ -1328,6 +1328,10 @@ def structured_wire_payload(output: BaseModel) -> dict[str, Any]:
     payload = output.model_dump(mode="json")
     if isinstance(output, FastChatTurnOutput):
         payload["schema_id"] = FAST_CHAT_SCHEMA_ID
+        if output.recommendation_defaulted:
+            # Observability marker only. The backend reads it for a perf
+            # field; the recommendation itself is already ``stay``.
+            payload["recommendation_defaulted"] = True
     return payload
 
 

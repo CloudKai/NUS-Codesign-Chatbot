@@ -2142,6 +2142,10 @@ def summarize_live_model(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any
         categories[category] = block
     return {
         "overall": _live_block(scored),
+        "recommendation_defaulted": {
+            "count": sum(1 for o in scored if o.get("recommendation_defaulted")),
+            "ids": [o["id"] for o in scored if o.get("recommendation_defaulted")],
+        },
         "overall_failed_in_denominator": _failed_in_denominator(outcomes),
         "failures_by_kind": _failures_by_kind(outcomes),
         "by_category": categories,
@@ -2322,6 +2326,9 @@ def _live_model_outcome(
             "honoured": bool(result.needs_sources),
             "mode": str(result.specialist),
             "out_of_scope": bool(raw.out_of_scope),
+            # True when a coaching reply carried no recommendation and the
+            # contract recorded ``stay`` (counted, not scored as a failure).
+            "recommendation_defaulted": bool(wire.get("recommendation_defaulted")),
             "stop_reason": bridge.last_stop_reason,
         },
         None,
@@ -2546,6 +2553,8 @@ def _failure_lines(summary: Mapping[str, Any]) -> list[str]:
         f"failed_as_error wrong-skip {format_rate(as_error['wrong_skip'])}, "
         f"false-retrieve {format_rate(as_error['false_retrieve'])}",
         f"failure kinds: {kind_text}",
+        "coaching replies with no recommendation, recorded as stay: "
+        f"{(summary.get('recommendation_defaulted') or {}).get('count', 0)}",
     ]
 
 

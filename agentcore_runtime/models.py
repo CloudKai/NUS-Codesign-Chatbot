@@ -14,7 +14,15 @@ import re
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 
 def _stage_assessment_as_text(value: Any) -> Any:
@@ -244,10 +252,11 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
     cutover.
 
     A rich coaching object is mapped only when ``assessment.recommendation`` is
-    exactly stay or advance. This function never invents a recommendation.
-    When ``mode`` is present, the slim schema wins and extra nested
-    ``assessment`` is ignored unless coaching is missing a top-level
-    recommendation. Conflicting stay/advance values fail closed. Review and
+    exactly stay or advance; it never invents ``advance``. A slim coaching
+    reply with no recommendation parses as ``stay`` (see
+    :class:`FastChatTurnOutput`). When ``mode`` is present, the slim schema
+    wins and extra nested ``assessment`` is ignored unless coaching is missing
+    a top-level recommendation, in which case the nested one decides. Conflicting stay/advance values fail closed. Review and
     router objects without ``mode`` fail closed.
 
     Args:
@@ -300,6 +309,14 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
                 if wire_key not in payload:
                     raise FastChatContractError("slim_invalid")
         try:
+            if (
+                mode == "coaching"
+                and has_assessment
+                and _recommendation_token(payload.get("recommendation")) is None
+            ):
+                # Keep the legacy rule: a nested assessment recommendation
+                # (or a fail-closed error) decides, not the schema default.
+                raise ValueError("top-level recommendation absent")
             return parse_fast_chat_turn_output(payload)
         except (ValidationError, TypeError, ValueError) as error:
             if mode != "coaching" or not has_assessment:
@@ -485,9 +502,11 @@ class FastChatTurnOutput(BaseModel):
     """Lightweight one-call Coaching or Q&A result. Deep Review is separate.
 
     Wire shape stays a single object named ``FastChatTurnOutput``. Coaching
-    requires ``recommendation`` stay or advance in both JSON Schema and
-    Pydantic. Q&A still allows a null or omitted recommendation. Rationale
-    remains optional.
+    requires ``recommendation`` stay or advance in the model-facing JSON Schema.
+    Pydantic accepts a coaching reply whose recommendation is absent, null or
+    blank and records ``stay`` for it (never ``advance``; see
+    ``coaching_requires_recommendation``). Q&A still allows a null or omitted
+    recommendation. Rationale remains optional.
     """
 
     model_config = ConfigDict(
@@ -541,6 +560,16 @@ class FastChatTurnOutput(BaseModel):
         ),
     )
 
+    # Set only when a coaching reply arrived without a recommendation and
+    # ``stay`` was recorded for it. Private so it never enters the tool schema
+    # the model sees; ``structured_wire_payload`` forwards it as a wire marker.
+    _recommendation_defaulted: bool = PrivateAttr(default=False)
+
+    @property
+    def recommendation_defaulted(self) -> bool:
+        """Return True when ``stay`` was recorded because the model sent none."""
+        return self._recommendation_defaulted
+
     @field_validator("mode", mode="before")
     @classmethod
     def mode_must_be_coaching_or_qa(cls, value: str) -> str:
@@ -593,7 +622,14 @@ class FastChatTurnOutput(BaseModel):
 
     @model_validator(mode="after")
     def coaching_requires_recommendation(self) -> "FastChatTurnOutput":
-        """Coaching must recommend stay or advance; Q&A must not.
+        """Coaching carries stay or advance; Q&A carries none.
+
+        A coaching reply with no recommendation (absent, null or blank) is
+        recorded as ``stay`` and flagged through ``recommendation_defaulted``.
+        The default is always the non-advancing value: it never invents
+        ``advance``, so it cannot open a pending transition that a model-sent
+        ``stay`` would not. An unrecognized token still fails in the field
+        validator.
 
         Q&A also forces ``hmw_scaffold_ready`` false so a course question
         cannot unlock Problem Identification UI guidance.
@@ -611,8 +647,10 @@ class FastChatTurnOutput(BaseModel):
                 }
             )
         if self.mode == "coaching":
-            if self.recommendation not in {"stay", "advance"}:
-                raise ValueError("coaching mode requires recommendation stay or advance")
+            if self.recommendation is None:
+                defaulted = self.model_copy(update={"recommendation": "stay"})
+                defaulted._recommendation_defaulted = True
+                return defaulted
             return self
         return self.model_copy(
             update={

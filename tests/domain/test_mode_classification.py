@@ -1721,20 +1721,26 @@ def test_qa_mode_persists_no_review_fields_or_counter(tmp_path) -> None:
     assert "recommendation" not in slim
 
 
-def test_coaching_mode_requires_stay_or_advance_on_provider() -> None:
+def test_coaching_mode_without_recommendation_is_recorded_as_stay_on_provider() -> None:
+    # Phase 4 item 1: was ``test_coaching_mode_requires_stay_or_advance_on_provider``.
+    # A missing recommendation is recorded as stay, in one invoke, never advance.
     client = FakeAgentCoreRuntime(
         payload={"mode": "coaching", "response_text": "Hello without a recommendation."}
     )
-    with pytest.raises(ProviderUnavailableError):
-        _provider(client).assess(
-            CoachRequest(
-                thread_id="thread-demo",
-                student_message="I think option B is better for my users.",
-                current_stage="problem_identification",
-                response_detail="short",
-            )
-        )
+    request = CoachRequest(
+        thread_id="thread-demo",
+        student_message="I think option B is better for my users.",
+        current_stage="problem_identification",
+        response_detail="short",
+    )
+    result = _provider(client).assess(request)
+    assert result.assessment.recommendation is StageDecision.STAY
     assert len(client.calls) == 1
+    bad = FakeAgentCoreRuntime(
+        payload={"mode": "coaching", "response_text": "Hi", "recommendation": "maybe"}
+    )
+    with pytest.raises(ProviderUnavailableError):
+        _provider(bad).assess(request)
 
 
 def test_idle_inputs_stay_unconstrained_and_skip_retrieve() -> None:

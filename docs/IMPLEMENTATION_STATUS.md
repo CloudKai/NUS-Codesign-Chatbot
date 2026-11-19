@@ -2,6 +2,32 @@
 
 ## Current status
 
+### Coaching reply with no recommendation defaults to stay (Phase 4 item 1)
+
+- **Behavior.** A coaching `FastChatTurnOutput` with no recommendation (absent,
+  null or blank) is parsed as `stay` instead of failing with "coaching mode
+  requires recommendation stay or advance". The default is never `advance`. An
+  unknown token still fails, an explicit `advance` and every Q&A reply are
+  unchanged, and the model-facing JSON Schema still requires the field.
+- **Why safe.** Every consumer reads the recommendation value only, so a defaulted
+  `stay` follows the same path as a model-sent `stay`: no pending transition is
+  created from it, `auto_advance_stages` acts only on `advance`, and stage
+  changes still need student confirmation. Tests compare the two cases end to
+  end (`tests/domain/test_fast_chat_recommendation_default.py`). One existing
+  behavior to know: in Free mode (`response_detail=long`) outside Problem
+  Identification the workflow promotes any coaching `stay` to a pending
+  `advance` proposal that the student must confirm. That applies to a
+  model-sent `stay` today and now also to the greeting replies that used to
+  fail.
+- **Observability.** Perf field `fast_chat_recommendation_defaulted` (set only
+  when defaulted); live eval row field and summary `recommendation_defaulted`.
+- **Deploy note.** The default sits in `agentcore_runtime/models.py`, which both
+  the runtime and the backend import. The failure happened inside the runtime,
+  so the fix takes effect after the runtime package is republished.
+  Rollback: revert the commit and republish.
+- **Not measured live.** No live command was run. The re-run command is in the
+  Phase 4 item 1 notes.
+
 ### Recorded retrieval outcomes (Phase 4 item 0)
 
 This entry records results that were already measured; no behavior changed and

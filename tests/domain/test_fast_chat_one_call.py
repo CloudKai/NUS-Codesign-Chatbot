@@ -200,9 +200,20 @@ def test_malformed_mode_fails_closed() -> None:
         _provider(client).assess(_request())
 
 
-def test_malformed_coaching_without_recommendation_fails_closed() -> None:
+def test_coaching_without_recommendation_is_recorded_as_stay() -> None:
+    # Phase 4 item 1: was ``..._fails_closed``. A missing recommendation on a
+    # coaching reply is recorded as stay; it never becomes advance.
     client = FakeAgentCoreRuntime(
         payload={"mode": "coaching", "response_text": "Hello"}
+    )
+    result = _provider(client).assess(_request())
+    assert result.assessment.recommendation is StageDecision.STAY
+    assert result.assessment.readiness_candidate is False
+
+
+def test_coaching_with_unknown_recommendation_token_still_fails_closed() -> None:
+    client = FakeAgentCoreRuntime(
+        payload={"mode": "coaching", "response_text": "Hello", "recommendation": "maybe"}
     )
     with pytest.raises(ProviderUnavailableError):
         _provider(client).assess(_request())
