@@ -1,0 +1,3438 @@
+{
+  "by_category": {
+    "ambiguous_generic": {
+      "calls_failed": 0,
+      "eligible_messages": 4,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 1,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_eligible": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 4,
+      "messages_sent": 4,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "course_content": {
+      "calls_failed": 0,
+      "eligible_messages": 38,
+      "extra_model_calls": 3,
+      "false_retrieve_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "false_retrieve_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "flag_rate_eligible": {
+        "denominator": 38,
+        "numerator": 3,
+        "rate": 0.0789
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 61,
+        "numerator": 23,
+        "rate": 0.377
+      },
+      "messages_scored": 61,
+      "messages_sent": 61,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 61,
+        "numerator": 38,
+        "rate": 0.623
+      },
+      "wrong_skip_with_model": {
+        "denominator": 61,
+        "numerator": 35,
+        "rate": 0.5738
+      }
+    },
+    "course_logistics": {
+      "calls_failed": 0,
+      "eligible_messages": 10,
+      "extra_model_calls": 6,
+      "false_retrieve_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "false_retrieve_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "flag_rate_eligible": {
+        "denominator": 10,
+        "numerator": 6,
+        "rate": 0.6
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 11,
+        "numerator": 7,
+        "rate": 0.6364
+      },
+      "messages_scored": 11,
+      "messages_sent": 11,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 11,
+        "numerator": 10,
+        "rate": 0.9091
+      },
+      "wrong_skip_with_model": {
+        "denominator": 11,
+        "numerator": 4,
+        "rate": 0.3636
+      }
+    },
+    "follow_up": {
+      "calls_failed": 0,
+      "eligible_messages": 10,
+      "extra_model_calls": 2,
+      "false_retrieve_gate_only": {
+        "denominator": 3,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 3,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_eligible": {
+        "denominator": 10,
+        "numerator": 2,
+        "rate": 0.2
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 12,
+        "numerator": 4,
+        "rate": 0.3333
+      },
+      "messages_scored": 12,
+      "messages_sent": 12,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 9,
+        "numerator": 7,
+        "rate": 0.7778
+      },
+      "wrong_skip_with_model": {
+        "denominator": 9,
+        "numerator": 5,
+        "rate": 0.5556
+      }
+    },
+    "greeting_thanks_chitchat": {
+      "calls_failed": 3,
+      "eligible_messages": 12,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 12,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 12,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 10,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_eligible": {
+        "denominator": 12,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 12,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 12,
+      "messages_sent": 15,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "informal_or_multilingual": {
+      "calls_failed": 0,
+      "eligible_messages": 7,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "false_retrieve_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "flag_rate_eligible": {
+        "denominator": 7,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 8,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 8,
+      "messages_sent": 8,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 8,
+        "numerator": 7,
+        "rate": 0.875
+      },
+      "wrong_skip_with_model": {
+        "denominator": 8,
+        "numerator": 7,
+        "rate": 0.875
+      }
+    },
+    "not_in_course_material": {
+      "calls_failed": 0,
+      "eligible_messages": 2,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "flag_rate_eligible": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 2,
+      "messages_sent": 2,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "out_of_scope": {
+      "calls_failed": 0,
+      "eligible_messages": 2,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_eligible": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 2,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 2,
+      "messages_sent": 2,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "procedural_ui": {
+      "calls_failed": 0,
+      "eligible_messages": 6,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 8,
+        "numerator": 2,
+        "rate": 0.25
+      },
+      "false_retrieve_with_model": {
+        "denominator": 8,
+        "numerator": 2,
+        "rate": 0.25
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 6,
+        "numerator": 1,
+        "rate": 0.1667
+      },
+      "flag_rate_eligible": {
+        "denominator": 6,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 8,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 8,
+      "messages_sent": 8,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "project_mentions_course": {
+      "calls_failed": 0,
+      "eligible_messages": 4,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "flag_rate_eligible": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 4,
+      "messages_sent": 4,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "project_reasoning": {
+      "calls_failed": 0,
+      "eligible_messages": 13,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 13,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 13,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 13,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_eligible": {
+        "denominator": 13,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 13,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 13,
+      "messages_sent": 13,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "stage_meta_guidance": {
+      "calls_failed": 0,
+      "eligible_messages": 0,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_eligible": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 4,
+      "messages_sent": 4,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "stage_navigation": {
+      "calls_failed": 0,
+      "eligible_messages": 0,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 5,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model": {
+        "denominator": 5,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 5,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_eligible": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 5,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 5,
+      "messages_sent": 5,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "wrong_skip_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      }
+    },
+    "upload_question": {
+      "calls_failed": 0,
+      "eligible_messages": 11,
+      "extra_model_calls": 0,
+      "false_retrieve_gate_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "false_retrieve_with_model": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "false_retrieve_with_model_clear_rows_only": {
+        "denominator": 0,
+        "numerator": 0,
+        "rate": null
+      },
+      "flag_rate_eligible": {
+        "denominator": 11,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "flag_rate_raw_all_rows": {
+        "denominator": 20,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "messages_scored": 20,
+      "messages_sent": 20,
+      "raw_flags_not_honoured": 0,
+      "wrong_skip_gate_only": {
+        "denominator": 20,
+        "numerator": 11,
+        "rate": 0.55
+      },
+      "wrong_skip_with_model": {
+        "denominator": 20,
+        "numerator": 11,
+        "rate": 0.55
+      }
+    }
+  },
+  "calls": {
+    "failed": 3,
+    "limit": 169,
+    "made": 169,
+    "messages_attempted": 169,
+    "messages_in_set": 295,
+    "messages_selected": 169,
+    "succeeded": 166
+  },
+  "definition": "Sends each gate message through the first Fast Chat call as production builds it (AgentCoreCoachProvider._invoke_payload: same composed runtime rules, history planner and Converse messages; the runtime system prompt from agentcore_runtime.structured_coach.specialist_system_prompt; the FastChatTurnOutput tool schema; the response checked by backend.agentcore_provider._validated_fast_chat) with the SOURCE CHECK rule on (request.source_need_check). Composition as in needs_sources_stubs: a message counts as retrieved when the gate searched a source, or when it is eligible for the second chance and the model's honoured needs_sources flag is true. The flag is honoured only on a Q&A turn. Rows whose call failed are not scored in 'overall' and 'by_category'; 'overall_failed_in_denominator' keeps them in two readings: failed_as_gate_only (a failed call raises no flag, the gate result stands) and failed_as_error (a failed retrieve row is a wrong skip, a failed skip row is a false retrieve). Eligible rows are the only rows whose flag changes a metric; the flag on other rows is reported as raw flag rate only. With FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED on, the course material titles from the manifest are added to the rule (see source_check_titles).",
+  "failures_by_kind": {
+    "by_category": {
+      "greeting_thanks_chitchat": {
+        "tool_input_invalid": 3
+      }
+    },
+    "overall": {
+      "tool_input_invalid": 3
+    }
+  },
+  "false_flags": [],
+  "first_failure": {
+    "error": "__main__.LiveStructuredOutputError",
+    "id": "gm148"
+  },
+  "flag_ignored": [],
+  "missed_flags": [
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm001"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm003"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm004"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm007"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm010"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm011"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm012"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm015"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm016"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm021"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm022"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm023"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm026"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm030"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm031"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm033"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm034"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm035"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm037"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm038"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm039"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm040"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm042"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm043"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm044"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm045"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm047"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm050"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm052"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm053"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm054"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm055"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "id": "gm056"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm058"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "id": "gm060"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "id": "gm068"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "id": "gm069"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "id": "gm071"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "borderline",
+      "id": "gm072"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "id": "gm086"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "id": "gm087"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "id": "gm088"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "clear",
+      "id": "gm089"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "clear",
+      "id": "gm090"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "id": "gm091"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "id": "gm092"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm098"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm099"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "borderline",
+      "id": "gm101"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm102"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm103"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm104"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm107"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm108"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm109"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm111"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "id": "gm114"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "id": "gm260"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "id": "gm261"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "id": "gm262"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "id": "gm267"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "id": "gm268"
+    }
+  ],
+  "mode": "live_model",
+  "model": {
+    "model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "provider": "bedrock",
+    "region": "us-west-2"
+  },
+  "overall": {
+    "eligible_messages": 119,
+    "extra_model_calls": 11,
+    "false_retrieve_gate_only": {
+      "denominator": 57,
+      "numerator": 2,
+      "rate": 0.0351
+    },
+    "false_retrieve_with_model": {
+      "denominator": 57,
+      "numerator": 2,
+      "rate": 0.0351
+    },
+    "false_retrieve_with_model_clear_rows_only": {
+      "denominator": 43,
+      "numerator": 1,
+      "rate": 0.0233
+    },
+    "flag_rate_eligible": {
+      "denominator": 119,
+      "numerator": 11,
+      "rate": 0.0924
+    },
+    "flag_rate_raw_all_rows": {
+      "denominator": 166,
+      "numerator": 34,
+      "rate": 0.2048
+    },
+    "messages_scored": 166,
+    "raw_flags_not_honoured": 0,
+    "wrong_skip_gate_only": {
+      "denominator": 109,
+      "numerator": 73,
+      "rate": 0.6697
+    },
+    "wrong_skip_with_model": {
+      "denominator": 109,
+      "numerator": 62,
+      "rate": 0.5688
+    }
+  },
+  "overall_failed_in_denominator": {
+    "calls_failed": 3,
+    "failed_as_error": {
+      "false_retrieve": {
+        "denominator": 60,
+        "numerator": 5,
+        "rate": 0.0833
+      },
+      "wrong_skip": {
+        "denominator": 109,
+        "numerator": 62,
+        "rate": 0.5688
+      }
+    },
+    "failed_as_gate_only": {
+      "false_retrieve": {
+        "denominator": 60,
+        "numerator": 2,
+        "rate": 0.0333
+      },
+      "wrong_skip": {
+        "denominator": 109,
+        "numerator": 62,
+        "rate": 0.5688
+      }
+    }
+  },
+  "rows": [
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm001",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm002",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm003",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm004",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm005",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm006",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm007",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm008",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm009",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm010",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm011",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm012",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm013",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm014",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm015",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm016",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm017",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm018",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm019",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm020",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm021",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm022",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm023",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm024",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm025",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm026",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm027",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm028",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm029",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm030",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm031",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm032",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm033",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm034",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm035",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm036",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm037",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm038",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm039",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm040",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm041",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm042",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm043",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm044",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm045",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm046",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm047",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm048",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm049",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm050",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm051",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm052",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm053",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm054",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm055",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm056",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm057",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm058",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm059",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm060",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_content",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm061",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm062",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm063",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm064",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm065",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm066",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "borderline",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm067",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm068",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm069",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm070",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm071",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "course_logistics",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm072",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm086",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm087",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm088",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm089",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm090",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm091",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm092",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "informal_or_multilingual",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm093",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm097",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm098",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm099",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm100",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm101",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm102",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm103",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm104",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm105",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "borderline",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm106",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm107",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm108",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm109",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm110",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm111",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm112",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm113",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm114",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "borderline",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm115",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "upload_question",
+      "certainty": "borderline",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm116",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm146",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "error": "__main__.LiveStructuredOutputError",
+      "expected_decision": "skip",
+      "failure_detail": {
+        "errors": [
+          {
+            "loc": [],
+            "msg": "Value error, coaching mode requires recommendation stay or advance",
+            "type": "value_error"
+          }
+        ],
+        "kind": "tool_input_invalid",
+        "stop_reason": "tool_use"
+      },
+      "gate_retrieve": false,
+      "id": "gm148",
+      "status": "failed"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "error": "__main__.LiveStructuredOutputError",
+      "expected_decision": "skip",
+      "failure_detail": {
+        "errors": [
+          {
+            "loc": [],
+            "msg": "Value error, coaching mode requires recommendation stay or advance",
+            "type": "value_error"
+          }
+        ],
+        "kind": "tool_input_invalid",
+        "stop_reason": "tool_use"
+      },
+      "gate_retrieve": false,
+      "id": "gm150",
+      "status": "failed"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm153",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm155",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm157",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm160",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm162",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "error": "__main__.LiveStructuredOutputError",
+      "expected_decision": "skip",
+      "failure_detail": {
+        "errors": [
+          {
+            "loc": [],
+            "msg": "Value error, coaching mode requires recommendation stay or advance",
+            "type": "value_error"
+          }
+        ],
+        "kind": "tool_input_invalid",
+        "stop_reason": "tool_use"
+      },
+      "gate_retrieve": false,
+      "id": "gm164",
+      "status": "failed"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm167",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm169",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm171",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm174",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm176",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm178",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "procedural_ui",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm181",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "procedural_ui",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm183",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "procedural_ui",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm185",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "procedural_ui",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm188",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "procedural_ui",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm190",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "procedural_ui",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm193",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "procedural_ui",
+      "certainty": "borderline",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": true,
+      "honoured": false,
+      "id": "gm195",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "procedural_ui",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm197",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_navigation",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm200",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_navigation",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm202",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_navigation",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm204",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_navigation",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm207",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_navigation",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm209",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_meta_guidance",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm211",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_meta_guidance",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm214",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_meta_guidance",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm216",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "stage_meta_guidance",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm218",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm221",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm223",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm225",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm228",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm230",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm232",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm235",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm237",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm240",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm242",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm244",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm247",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_reasoning",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm249",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_mentions_course",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm251",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_mentions_course",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm254",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_mentions_course",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm256",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "project_mentions_course",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm258",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm260",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm261",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm262",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm263",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "clear",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm264",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "eligible": false,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": true,
+      "honoured": true,
+      "id": "gm265",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": true,
+      "gate_retrieve": false,
+      "honoured": true,
+      "id": "gm266",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm267",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "retrieve",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm268",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm270",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm272",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "follow_up",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm274",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "ambiguous_generic",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm277",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "ambiguous_generic",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm279",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "ambiguous_generic",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm281",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "ambiguous_generic",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm284",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "out_of_scope",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm286",
+      "mode": "coaching",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "out_of_scope",
+      "certainty": "clear",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm288",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "not_in_course_material",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm291",
+      "mode": "qa",
+      "out_of_scope": true,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    },
+    {
+      "category": "not_in_course_material",
+      "certainty": "borderline",
+      "eligible": true,
+      "expected_decision": "skip",
+      "flag_raw": false,
+      "gate_retrieve": false,
+      "honoured": false,
+      "id": "gm293",
+      "mode": "qa",
+      "out_of_scope": false,
+      "status": "ok",
+      "stop_reason": "tool_use"
+    }
+  ],
+  "run": {
+    "generated_at_utc": "2026-11-19T14:44:19Z",
+    "git_dirty": false,
+    "git_sha": "61ff634863170f3d7c698e92e3d62cb7c90dbcd0"
+  },
+  "selection": {
+    "categories": [
+      "course_content",
+      "course_logistics",
+      "informal_or_multilingual",
+      "upload_question",
+      "follow_up"
+    ],
+    "compare_source_check": false,
+    "expected_decision": "retrieve",
+    "ids": null,
+    "messages_in_set": 295,
+    "rows_after_cap": 169,
+    "rows_selected": 169,
+    "skip_sample": 60
+  },
+  "source_check_titles": {
+    "block_chars": 0,
+    "count": 0,
+    "enabled": false
+  },
+  "stopped_early_on_auth_or_access_error": null,
+  "tokens": {
+    "input": 1198802,
+    "output": 52750
+  }
+}

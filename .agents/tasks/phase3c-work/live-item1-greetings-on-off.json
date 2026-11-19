@@ -1,0 +1,2139 @@
+{
+  "arms": {
+    "source_check_off": {
+      "by_category": {
+        "ambiguous_generic": {
+          "calls_failed": 0,
+          "eligible_messages": 1,
+          "extra_model_calls": 0,
+          "false_retrieve_gate_only": {
+            "denominator": 1,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "false_retrieve_with_model": {
+            "denominator": 1,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "false_retrieve_with_model_clear_rows_only": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          },
+          "flag_rate_eligible": {
+            "denominator": 1,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "flag_rate_raw_all_rows": {
+            "denominator": 1,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "messages_scored": 1,
+          "messages_sent": 1,
+          "raw_flags_not_honoured": 0,
+          "wrong_skip_gate_only": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          },
+          "wrong_skip_with_model": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          }
+        },
+        "greeting_thanks_chitchat": {
+          "calls_failed": 8,
+          "eligible_messages": 25,
+          "extra_model_calls": 0,
+          "false_retrieve_gate_only": {
+            "denominator": 25,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "false_retrieve_with_model": {
+            "denominator": 25,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "false_retrieve_with_model_clear_rows_only": {
+            "denominator": 22,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "flag_rate_eligible": {
+            "denominator": 25,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "flag_rate_raw_all_rows": {
+            "denominator": 25,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "messages_scored": 25,
+          "messages_sent": 33,
+          "raw_flags_not_honoured": 0,
+          "wrong_skip_gate_only": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          },
+          "wrong_skip_with_model": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          }
+        }
+      },
+      "failures_by_kind": {
+        "by_category": {
+          "greeting_thanks_chitchat": {
+            "tool_input_invalid": 8
+          }
+        },
+        "overall": {
+          "tool_input_invalid": 8
+        }
+      },
+      "false_flags": [],
+      "flag_ignored": [],
+      "missed_flags": [],
+      "overall": {
+        "eligible_messages": 26,
+        "extra_model_calls": 0,
+        "false_retrieve_gate_only": {
+          "denominator": 26,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "false_retrieve_with_model": {
+          "denominator": 26,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "false_retrieve_with_model_clear_rows_only": {
+          "denominator": 22,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "flag_rate_eligible": {
+          "denominator": 26,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "flag_rate_raw_all_rows": {
+          "denominator": 26,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "messages_scored": 26,
+        "raw_flags_not_honoured": 0,
+        "wrong_skip_gate_only": {
+          "denominator": 0,
+          "numerator": 0,
+          "rate": null
+        },
+        "wrong_skip_with_model": {
+          "denominator": 0,
+          "numerator": 0,
+          "rate": null
+        }
+      },
+      "overall_failed_in_denominator": {
+        "calls_failed": 8,
+        "failed_as_error": {
+          "false_retrieve": {
+            "denominator": 34,
+            "numerator": 8,
+            "rate": 0.2353
+          },
+          "wrong_skip": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          }
+        },
+        "failed_as_gate_only": {
+          "false_retrieve": {
+            "denominator": 34,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "wrong_skip": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          }
+        }
+      },
+      "rows": [
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm146",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm147",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm148",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm149",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm150",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm151",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm152",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm153",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm154",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm155",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm156",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm157",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm158",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm159",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm160",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm161",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm162",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm163",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm164",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm165",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm166",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm167",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm168",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm169",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm170",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm171",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm172",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm173",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "borderline",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm174",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "borderline",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm175",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "borderline",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm176",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm177",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm178",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "ambiguous_generic",
+          "certainty": "borderline",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm279",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        }
+      ]
+    },
+    "source_check_on": {
+      "by_category": {
+        "ambiguous_generic": {
+          "calls_failed": 0,
+          "eligible_messages": 1,
+          "extra_model_calls": 0,
+          "false_retrieve_gate_only": {
+            "denominator": 1,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "false_retrieve_with_model": {
+            "denominator": 1,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "false_retrieve_with_model_clear_rows_only": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          },
+          "flag_rate_eligible": {
+            "denominator": 1,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "flag_rate_raw_all_rows": {
+            "denominator": 1,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "messages_scored": 1,
+          "messages_sent": 1,
+          "raw_flags_not_honoured": 0,
+          "wrong_skip_gate_only": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          },
+          "wrong_skip_with_model": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          }
+        },
+        "greeting_thanks_chitchat": {
+          "calls_failed": 9,
+          "eligible_messages": 24,
+          "extra_model_calls": 0,
+          "false_retrieve_gate_only": {
+            "denominator": 24,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "false_retrieve_with_model": {
+            "denominator": 24,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "false_retrieve_with_model_clear_rows_only": {
+            "denominator": 21,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "flag_rate_eligible": {
+            "denominator": 24,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "flag_rate_raw_all_rows": {
+            "denominator": 24,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "messages_scored": 24,
+          "messages_sent": 33,
+          "raw_flags_not_honoured": 0,
+          "wrong_skip_gate_only": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          },
+          "wrong_skip_with_model": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          }
+        }
+      },
+      "failures_by_kind": {
+        "by_category": {
+          "greeting_thanks_chitchat": {
+            "tool_input_invalid": 9
+          }
+        },
+        "overall": {
+          "tool_input_invalid": 9
+        }
+      },
+      "false_flags": [],
+      "flag_ignored": [],
+      "missed_flags": [],
+      "overall": {
+        "eligible_messages": 25,
+        "extra_model_calls": 0,
+        "false_retrieve_gate_only": {
+          "denominator": 25,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "false_retrieve_with_model": {
+          "denominator": 25,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "false_retrieve_with_model_clear_rows_only": {
+          "denominator": 21,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "flag_rate_eligible": {
+          "denominator": 25,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "flag_rate_raw_all_rows": {
+          "denominator": 25,
+          "numerator": 0,
+          "rate": 0.0
+        },
+        "messages_scored": 25,
+        "raw_flags_not_honoured": 0,
+        "wrong_skip_gate_only": {
+          "denominator": 0,
+          "numerator": 0,
+          "rate": null
+        },
+        "wrong_skip_with_model": {
+          "denominator": 0,
+          "numerator": 0,
+          "rate": null
+        }
+      },
+      "overall_failed_in_denominator": {
+        "calls_failed": 9,
+        "failed_as_error": {
+          "false_retrieve": {
+            "denominator": 34,
+            "numerator": 9,
+            "rate": 0.2647
+          },
+          "wrong_skip": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          }
+        },
+        "failed_as_gate_only": {
+          "false_retrieve": {
+            "denominator": 34,
+            "numerator": 0,
+            "rate": 0.0
+          },
+          "wrong_skip": {
+            "denominator": 0,
+            "numerator": 0,
+            "rate": null
+          }
+        }
+      },
+      "rows": [
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm146",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm147",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm148",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm149",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm150",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm151",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm152",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm153",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm154",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm155",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm156",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm157",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm158",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm159",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm160",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm161",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm162",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm163",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm164",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm165",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm166",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm167",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm168",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm169",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm170",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm171",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm172",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "error": "__main__.LiveStructuredOutputError",
+          "expected_decision": "skip",
+          "failure_detail": {
+            "errors": [
+              {
+                "loc": [],
+                "msg": "Value error, coaching mode requires recommendation stay or advance",
+                "type": "value_error"
+              }
+            ],
+            "kind": "tool_input_invalid",
+            "stop_reason": "tool_use"
+          },
+          "gate_retrieve": false,
+          "id": "gm173",
+          "status": "failed"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "borderline",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm174",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "borderline",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm175",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "borderline",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm176",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm177",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "greeting_thanks_chitchat",
+          "certainty": "clear",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm178",
+          "mode": "qa",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        },
+        {
+          "category": "ambiguous_generic",
+          "certainty": "borderline",
+          "eligible": true,
+          "expected_decision": "skip",
+          "flag_raw": false,
+          "gate_retrieve": false,
+          "honoured": false,
+          "id": "gm279",
+          "mode": "coaching",
+          "out_of_scope": false,
+          "status": "ok",
+          "stop_reason": "tool_use"
+        }
+      ]
+    }
+  },
+  "calls": {
+    "calls_per_message": 2,
+    "failed": 17,
+    "limit": 68,
+    "made": 68,
+    "messages_attempted": 34,
+    "messages_in_set": 295,
+    "messages_selected": 34,
+    "succeeded": 51
+  },
+  "definition": "Sends each chosen gate message twice through the first Fast Chat call, built as in live_model: once with the SOURCE CHECK rule on (source_need_check=True, as with FAST_CHAT_NEEDS_SOURCES_ENABLED on) and once with it off (source_need_check=False, as production sends every turn with the setting off). Each arm is scored as live_model. Each message costs two model calls; --max-live-calls counts calls, so floor(limit / 2) messages are sent, evenly spaced. The run stops after the first auth or access error in either arm.",
+  "failed_both": [
+    "gm148",
+    "gm150",
+    "gm151",
+    "gm173"
+  ],
+  "failed_off_only": [
+    "gm147",
+    "gm149",
+    "gm156",
+    "gm170"
+  ],
+  "failed_on_only": [
+    "gm152",
+    "gm153",
+    "gm154",
+    "gm158",
+    "gm164"
+  ],
+  "first_failure": {
+    "arm": "source_check_off",
+    "error": "__main__.LiveStructuredOutputError",
+    "id": "gm147"
+  },
+  "mode": "live_model_compare",
+  "model": {
+    "model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "provider": "bedrock",
+    "region": "us-west-2"
+  },
+  "pairs": [
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm146",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm147",
+      "source_check_off": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm148",
+      "source_check_off": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm149",
+      "source_check_off": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm150",
+      "source_check_off": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm151",
+      "source_check_off": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm152",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm153",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm154",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm155",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm156",
+      "source_check_off": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm157",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm158",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm159",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm160",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm161",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm162",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm163",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm164",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm165",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm166",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm167",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm168",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm169",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm170",
+      "source_check_off": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm171",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm172",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm173",
+      "source_check_off": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      },
+      "source_check_on": {
+        "failure_detail": {
+          "errors": [
+            {
+              "loc": [],
+              "msg": "Value error, coaching mode requires recommendation stay or advance",
+              "type": "value_error"
+            }
+          ],
+          "kind": "tool_input_invalid",
+          "stop_reason": "tool_use"
+        },
+        "mode": null,
+        "status": "failed"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm174",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm175",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm176",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm177",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "greeting_thanks_chitchat",
+      "id": "gm178",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      }
+    },
+    {
+      "category": "ambiguous_generic",
+      "id": "gm279",
+      "source_check_off": {
+        "failure_detail": null,
+        "mode": "qa",
+        "status": "ok"
+      },
+      "source_check_on": {
+        "failure_detail": null,
+        "mode": "coaching",
+        "status": "ok"
+      }
+    }
+  ],
+  "run": {
+    "generated_at_utc": "2026-11-19T14:28:16Z",
+    "git_dirty": false,
+    "git_sha": "61ff634863170f3d7c698e92e3d62cb7c90dbcd0"
+  },
+  "selection": {
+    "categories": [
+      "greeting_thanks_chitchat"
+    ],
+    "compare_source_check": true,
+    "expected_decision": null,
+    "ids": [
+      "gm279"
+    ],
+    "messages_in_set": 295,
+    "rows_after_cap": 34,
+    "rows_selected": 34,
+    "skip_sample": 0
+  },
+  "source_check_titles": {
+    "block_chars": 0,
+    "count": 0,
+    "enabled": false
+  },
+  "stopped_early_on_auth_or_access_error": null,
+  "tokens": {
+    "input": 474584,
+    "output": 16653
+  }
+}
