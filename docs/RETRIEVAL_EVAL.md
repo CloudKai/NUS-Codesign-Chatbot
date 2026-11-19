@@ -22,8 +22,11 @@ seconds. The script blocks socket connections in offline mode.
   with one chunk per PDF page, so results carry a page number. This is a
   lexical stand-in for the Bedrock Knowledge Base. Offline numbers say
   nothing about Knowledge Base quality.
-- **Not modelled.** The second-call `needs_source_retrieval` fallback (it
-  needs a model) and image bytes.
+- **Not modelled by the gate numbers.** The second-call fallback
+  (`needs_source_retrieval` and the opt-in `needs_sources`; both need a model)
+  and image bytes. The report adds a separate block that applies three stub
+  models of `needs_sources` on top of the gate. See
+  "`needs_sources` second chance" below.
 
 ## Results history
 
@@ -31,15 +34,19 @@ The gate numbers below are for the 295 synthetic messages. Course search is the
 offline lexical stand-in, so the recall and empty-result rows describe that
 stand-in only. Re-run the script to reproduce each column.
 
-| Metric | Phase 2 baseline | After item 1 (`definitional_question` cue) |
-|---|---|---|
-| recall@4, material (94 questions) | 90/94 (95.7%) | 90/94 (95.7%) |
-| recall@4, page (94 questions) | 77/94 (81.9%) | 77/94 (81.9%) |
-| wrong-skip rate | 92/154 (59.7%) | 76/154 (49.4%) |
-| wrong-skip rate, clear rows only | 67/113 (59.3%) | 51/113 (45.1%) |
-| false-retrieve rate | 2/141 (1.4%) | 7/141 (5.0%) |
-| empty-result rate, questions track | 0/94 (0.0%) | 0/94 (0.0%) |
-| empty-result rate, gate-passed course searches | 0/40 (0.0%) | 1/63 (1.6%) |
+| Metric | Phase 2 baseline | After item 1 (`definitional_question` cue) | After item 2, gate only (flag code, no model) |
+|---|---|---|---|
+| recall@4, material (94 questions) | 90/94 (95.7%) | 90/94 (95.7%) | 90/94 (95.7%) |
+| recall@4, page (94 questions) | 77/94 (81.9%) | 77/94 (81.9%) | 77/94 (81.9%) |
+| wrong-skip rate | 92/154 (59.7%) | 76/154 (49.4%) | 76/154 (49.4%) |
+| wrong-skip rate, clear rows only | 67/113 (59.3%) | 51/113 (45.1%) | 51/113 (45.1%) |
+| false-retrieve rate | 2/141 (1.4%) | 7/141 (5.0%) | 7/141 (5.0%) |
+| empty-result rate, questions track | 0/94 (0.0%) | 0/94 (0.0%) | 0/94 (0.0%) |
+| empty-result rate, gate-passed course searches | 0/40 (0.0%) | 1/63 (1.6%) | 1/63 (1.6%) |
+
+The item 2 column is identical to item 1 by design. `needs_sources` does not
+change the first-pass gate, so the gate numbers cannot show its effect. The
+effect is a second chance after the first model call, which needs a model.
 
 Item 1 added `definitional_question` to `_COURSE_CATALOG_RETRIEVAL_CUES`. All 16
 known wrong skips of that kind now search the course catalog (for example "what
@@ -50,6 +57,44 @@ the capital of Australia" and "what does stakeholder mean". Four of the five
 are `borderline` rows. The capital question is `clear` and is also the one new
 empty result. Recall@4 does not move, because it scores
 each question sent straight to course search and never passes through the gate.
+
+## `needs_sources` second chance (stub models, offline)
+
+Item 2 adds an optional `needs_sources` field to the first Fast Chat call
+(`FAST_CHAT_NEEDS_SOURCES_ENABLED`, default off; see
+`docs/RAG_ARCHITECTURE.md`). The report's `needs_sources_stubs` block applies
+three **stand-ins for the model** on top of the unchanged gate. A message is
+**eligible** when the gate searched nothing and no override fixed its evidence
+scope (stage status, navigation, meta-guidance, private attachment). A flagged
+message is searched on the second pass (selected sources plus the course
+catalog).
+
+| Stub | Flags | Role |
+|---|---|---|
+| `oracle` | exactly the messages labelled `retrieve` | Best case: a perfect model. |
+| `mock_rule` | eligible messages phrased as a question or information request | The mock provider's deterministic rule. Crude. |
+| `flag_all` | every eligible message | Worst case: a model that over-flags. |
+
+Results on the 295 synthetic messages (189 are eligible, and all 76 current
+wrong skips are eligible):
+
+| Metric | Gate only | `oracle` | `mock_rule` | `flag_all` |
+|---|---|---|---|---|
+| wrong-skip rate | 76/154 (49.4%) | 0/154 (0.0%) | 18/154 (11.7%) | 0/154 (0.0%) |
+| false-retrieve rate | 7/141 (5.0%) | 7/141 (5.0%) | 48/141 (34.0%) | 120/141 (85.1%) |
+| empty-result rate, course searches | 1/63 (1.6%) | 2/139 (1.4%) | 7/162 (4.3%) | 18/252 (7.1%) |
+| second model calls | 0 | 76 | 99 | 189 |
+
+What this proves: every current wrong skip is reachable by the second chance,
+so the flag can in principle close the gap. The cost scales with how often the
+model flags: each flagged message adds a Retrieve and a second model call. The
+range runs from 76 calls (a perfect model) to 189 (flag everything).
+
+What it does not prove: how a real Haiku call behaves. The stubs are not
+models, the labels are synthetic and single-author, and the empty-result rate
+uses the lexical stand-in for the Knowledge Base. The real flag rate, its
+precision, the added latency and the cost need a measured run with the live
+model and an approved call limit. That run is not part of this item.
 
 ## Metric definitions
 

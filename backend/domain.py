@@ -440,6 +440,11 @@ class CoachRequest(BaseModel):
     review_id: str | None = Field(default=None, max_length=64)
     # Server-filled retrieval decision. Clients cannot make this authoritative.
     retrieval_required: bool = False
+    # Server-filled. True when the first Fast Chat call may report
+    # ``needs_sources`` because nothing was retrieved for this turn. Clients
+    # cannot make this authoritative; ``_prepare_authoritative_turn`` always
+    # overwrites it.
+    source_need_check: bool = False
     # Server-filled Q&A/coaching mode policy. Clients cannot make these
     # authoritative; ``_authoritative_request`` overwrites both from the
     # student message and selected-source metadata.
@@ -650,6 +655,9 @@ class ProviderAssessmentResult(BaseModel):
     # Transient orchestration flag from FastChatTurnOutput. Not educational
     # assessment, research coding, or a persisted student-facing field.
     needs_source_retrieval: bool = False
+    # Transient flag from FastChatTurnOutput.needs_sources. Only honoured when
+    # the request carried ``source_need_check``. Never persisted.
+    needs_sources: bool = False
 
     @model_validator(mode="after")
     def holistic_candidate_is_reflection_only(self) -> "ProviderAssessmentResult":

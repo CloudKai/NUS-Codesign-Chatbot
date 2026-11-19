@@ -190,6 +190,15 @@ The composer orders and delimits these sections:
 7. runtime rules for language, detail, grounding, citations, and structured
    assessment.
 
+When `FAST_CHAT_NEEDS_SOURCES_ENABLED=true` and the gate retrieved nothing for
+a fast-chat turn, the runtime rules also carry a SOURCE CHECK paragraph
+(`_SOURCE_NEED_INSTRUCTION` in `backend/prompts/composer.py`) for the optional
+`needs_sources` output field. The runtime copy only documents the field
+(`agentcore_runtime/prompts/fast_chat.md`, the Fast Chat contract in
+`structured_coach.py`) and defers to that paragraph, so the cacheable static
+prefix does not depend on the setting. No shared stage file changed, so
+`tests/domain/test_prompt_stage_drift.py` is unchanged.
+
 Retrieved content is explicitly untrusted evidence. It cannot override shared,
 stage, authorization, workflow, or runtime instructions. The shared prompt
 includes an internal Interpret → Assumption/V&V check → one Socratic probe →

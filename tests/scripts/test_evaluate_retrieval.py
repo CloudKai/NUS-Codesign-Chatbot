@@ -260,3 +260,48 @@ def test_call_counter_stops_at_the_limit_without_a_network() -> None:
     with pytest.raises(_EVAL.LiveCallLimitExceeded):
         counter.retrieve(query="c")
     assert fake.seen == 2 and counter.calls == 2
+
+
+# ---- needs_sources stub models (offline) ---------------------------------
+
+
+def _row(message: str, expected: str) -> dict:
+    return {
+        "id": "x",
+        "message": message,
+        "stage": "problem_identification",
+        "selected_sources": [],
+        "attachments": [],
+        "history": [],
+        "expected_decision": expected,
+        "certainty": "clear",
+        "category": "course_content",
+    }
+
+
+def test_needs_sources_stub_bounds_on_a_small_set() -> None:
+    rows = [
+        _row("what questions do we ask in the JTBD interview", "retrieve"),
+        _row("I think option B is stronger.", "skip"),
+        _row("what should I do next", "skip"),
+    ]
+    scored = [(row, _EVAL.gate_decision(row)) for row in rows]
+    assert [d.second_chance for _, d in scored] == [True, True, False]
+    stubs = _EVAL._needs_sources_stubs(scored, None)["stubs"]
+    # A perfect model rescues the wrong skip and adds no false retrieve.
+    assert stubs["oracle"]["wrong_skip_rate"]["numerator"] == 0
+    assert stubs["oracle"]["false_retrieve_rate"]["numerator"] == 0
+    # A model that flags every eligible message cannot be worse on wrong skips
+    # and adds false retrieves only for eligible skip messages.
+    assert stubs["flag_all"]["wrong_skip_rate"]["numerator"] == 0
+    assert stubs["flag_all"]["false_retrieve_rate"]["numerator"] == 1
+    assert stubs["flag_all"]["second_model_calls"] == 2
+    # The question-shaped mock rule flags only the first message.
+    assert stubs["mock_rule"]["second_model_calls"] == 1
+
+
+def test_needs_sources_stubs_do_not_change_the_first_pass_numbers() -> None:
+    rows = [_row("what questions do we ask in the JTBD interview", "retrieve")]
+    gate = _EVAL.evaluate_gate(rows, None)
+    assert gate["wrong_skip_rate"]["numerator"] == 1
+    assert gate["needs_sources_stubs"]["wrong_skips_before"] == 1

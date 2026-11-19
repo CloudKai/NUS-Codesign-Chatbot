@@ -268,6 +268,34 @@ def _wants_course_catalog_retrieval(
     return bool(set(classification.cues).intersection(_COURSE_CATALOG_RETRIEVAL_CUES))
 
 
+def _wants_source_need_check(
+    *,
+    enabled: bool,
+    searched: bool,
+    evidence_scoped: bool,
+) -> bool:
+    """Return whether the first Fast Chat call may report ``needs_sources``.
+
+    The check is a second chance for turns the regex gate did not retrieve
+    for. It is off unless the setting is on, and it never applies when this
+    turn already searched a source or when the application deliberately
+    scoped evidence away (stage status, stage navigation, meta-guidance,
+    private-attachment scope, forced or lecture-help retrieval, missing image
+    bytes).
+
+    Args:
+        enabled: ``FAST_CHAT_NEEDS_SOURCES_ENABLED``.
+        searched: True when the first pass searched at least one source.
+        evidence_scoped: True when the turn's evidence scope is fixed by a
+            gate override and a fallback retrieve must not widen it.
+
+    Returns:
+        True when the prompt should ask for ``needs_sources`` and the
+        application may honour it.
+    """
+    return bool(enabled) and not searched and not evidence_scoped
+
+
 def _quote_offsets(text: str, quote: str) -> tuple[int, int] | None:
     """Locate one exact provider quotation in persisted student-message text."""
     bounded_text = str(text or "").strip()
@@ -2500,53 +2528,90 @@ class CoachApplicationService:
     ) -> tuple[CoachRequest, CoachTurn]:
         """Retry once with application RAG when Haiku reports missing evidence.
 
+        Two first-call flags can start the retry:
+
+        * ``needs_source_retrieval`` (original): selected sources exist and
+          the gate skipped them. Retrieves from selected sources only.
+        * ``needs_sources`` (``FAST_CHAT_NEEDS_SOURCES_ENABLED``): the first
+          call said a correct answer needs course or source excerpts that the
+          regex gate did not fetch. Retrieves from selected sources and the
+          course catalog, like a first-pass catalog hit. Honoured only when
+          this request carried ``source_need_check``.
+
         The first model result is not persisted. The retry stays inside the
-        same notebook execution lease and idempotency claim. A second
-        ``needs_source_retrieval`` flag cannot trigger another retrieve.
-        Hydrated retrieval sources come from the request-scoped snapshot
-        when the first pass already retrieved. Idle first passes skip
-        hydration, so this retry hydrates selected student sources once.
+        same notebook execution lease and idempotency claim. The retry request
+        clears ``source_need_check`` and sets ``retrieval_required``, so a
+        second flag cannot trigger another retrieve. Hydrated retrieval
+        sources come from the request-scoped snapshot when the first pass
+        already retrieved. Idle first passes skip hydration, so this retry
+        hydrates selected student sources once.
         """
         record_field("rag_fallback_used", False)
         record_field("rag_fallback_model_calls", 1)
         if str(request.specialist or "").strip().lower() == "review":
             return request, turn
-        if request.retrieval_required:
-            return request, turn
         if request.retrieved_chunks:
             return request, turn
-        if not request.source_ids:
-            return request, turn
+        source_need = bool(request.source_need_check) and (
+            self._workflow.peek_needs_sources(request.thread_id)
+        )
+        if not source_need:
+            if request.retrieval_required:
+                return request, turn
+            if not request.source_ids:
+                return request, turn
         if _agentcore_turn_budget_exhausted():
             record_field("rag_fallback_skipped_budget", True)
             logger.info(
                 "rag_fallback_skipped reason=agentcore_invoke_budget_exhausted"
             )
             return request, turn
-        if not self._workflow.peek_needs_source_retrieval(request.thread_id):
+        if not source_need and not self._workflow.peek_needs_source_retrieval(
+            request.thread_id
+        ):
             return request, turn
-        snapshot = self._hydrate_retrieval_sources(snapshot)
+        snapshot = self._hydrate_retrieval_sources(
+            snapshot, include_course_catalog=source_need
+        )
         retrieval_sources = snapshot.retrieval_sources
         if not retrieval_sources:
             return request, turn
         record_field("rag_fallback_used", True)
+        record_field(
+            "rag_fallback_trigger",
+            "needs_sources" if source_need else "needs_source_retrieval",
+        )
         emit_coach_progress(PROGRESS_RETRIEVING)
-        chunks, context = self._retrieve_for_turn(
-            student_message=request.student_message,
-            current_stage=request.current_stage,
-            retrieval_sources=retrieval_sources,
-            project_context=request.student_project_context,
-            conversation_summary=request.conversation_summary,
-            recent_messages=list(request.history),
-            timing_field="rag_fallback_retrieval_ms",
-        )
-        retried = request.model_copy(
-            update={
-                "retrieved_chunks": chunks,
-                "source_context": context,
-                "retrieval_required": True,
-            }
-        )
+        try:
+            chunks, context = self._retrieve_for_turn(
+                student_message=request.student_message,
+                current_stage=request.current_stage,
+                retrieval_sources=retrieval_sources,
+                project_context=request.student_project_context,
+                conversation_summary=request.conversation_summary,
+                recent_messages=list(request.history),
+                timing_field="rag_fallback_retrieval_ms",
+            )
+        except ValueError:
+            raise
+        except Exception:
+            if not source_need:
+                raise
+            # The first answer used no course evidence, so it must not be
+            # shown as if retrieval had been unnecessary. Ask the model to
+            # state the evidence gap, as the first-pass retrieve failure does.
+            chunks, context = [], COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
+        update: dict[str, Any] = {
+            "retrieved_chunks": chunks,
+            "source_context": context,
+            "retrieval_required": True,
+            "source_need_check": False,
+        }
+        if source_need:
+            # Course-catalog turns fail closed instead of using model
+            # knowledge, the same as a first-pass catalog retrieve.
+            update["allow_model_knowledge"] = False
+        retried = request.model_copy(update=update)
         if self._generation_admission is None:
             emit_coach_progress(PROGRESS_THINKING)
         agent_started = time.perf_counter()
@@ -3072,6 +3137,21 @@ class CoachApplicationService:
         record_field("retrieved_chunk_count", len(retrieved_chunks))
         record_field("retrieved_context_chars", len(retrieval_result_context))
         record_field("rag_used", bool(retrieved_chunks))
+        source_need_check = _wants_source_need_check(
+            enabled=bool(runtime_settings.fast_chat_needs_sources_enabled),
+            searched=bool(needs_retrieval and retrieval_sources),
+            evidence_scoped=bool(
+                lecture_help
+                or force_retrieval
+                or stage_status_request
+                or progression_request
+                or workflow_no_retrieve
+                or attachment_only_question
+                or missing_image_qa
+            ),
+        )
+        if source_need_check:
+            record_field("source_need_check", True)
         response_language = " ".join(
             str(metadata.get("response_language") or "English").split()
         )[:50]
@@ -3133,6 +3213,7 @@ class CoachApplicationService:
                 # server-owned specialist is stamped after this method.
                 "specialist": None,
                 "retrieval_required": bool(needs_retrieval),
+                "source_need_check": source_need_check,
                 "expected_response_mode": (
                     "qa" if missing_image_qa else mode_policy.expected_mode
                 ),

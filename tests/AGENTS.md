@@ -93,6 +93,7 @@ modules.
 | `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |
 | `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
 | `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
+| `domain/test_needs_sources.py` | Opt-in first-call `needs_sources` flag: contract, stamp rules, flag on/off, retry with course catalog, mock-provider behaviour |
 | `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, whole-history input, stage-aware `stage_reviews`, checkpoint persistence, counter, no transcript rows, cross-stage snapshot replacement, stale-worker completion guard |
 | `domain/test_deep_review_context.py` | Deep Review `full_history` vs `checkpoint_delta` planning, exposed-only `M#` validation, readiness-evidence compact body, absolute+ratio savings gates, revision/source invalidation, synthetic token comparison |
 | `domain/test_deep_review_review_projection.py` | Review-tab merge of `stage_reviews` onto matching stages, legacy `reviewed_stage_id` fallback, HMW attribution, latest-snapshot replacement |

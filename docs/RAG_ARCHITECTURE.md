@@ -43,7 +43,8 @@ the Knowledge Base or student S3.
               AgentCore fast_chat (one FastAPI invoke; Haiku span count
               needs live traces)
                             │
-              rare: needs_source_retrieval after skip
+              rare: needs_source_retrieval after skip, or needs_sources
+              (opt-in) after a skip with nothing retrieved
                             │
                             ▼
               FastAPI retrieves once, one FastAPI Haiku retry
@@ -54,6 +55,39 @@ A rare accuracy fallback runs only when the deterministic gate skipped
 retrieval, selected sources exist, and Haiku sets
 `needs_source_retrieval=true`. FastAPI owns that retrieve. AgentCore still
 has `tools=[]` and cannot search KB, S3, or DSQL. Maximum two Haiku calls.
+
+### `needs_sources` (first-call source check, opt-in)
+
+The regex gate misses course questions that name no cue word ("what questions
+do we ask in the JTBD interview"). With `FAST_CHAT_NEEDS_SOURCES_ENABLED=true`
+(default **false**) the first Fast Chat call may also return `needs_sources`:
+
+1. `_prepare_authoritative_turn` stamps `source_need_check=true` on the request
+   when the gate searched nothing and no override fixed the evidence scope.
+   Stage status, stage navigation, meta-guidance, private-attachment scope,
+   forced retrieval, Lecture Help and missing-image turns are never stamped.
+   The stamp is server-owned; a client value is overwritten.
+2. For stamped turns the backend runtime rules (`backend/prompts/composer.py`)
+   add a SOURCE CHECK paragraph that tells the model when to set the flag and
+   to keep its first reply free of course-specific facts.
+3. The provider honours the flag only on a stamped request, so a model that
+   volunteers it (or text that induces it) cannot start a second call.
+4. When the flag is true, `_maybe_rag_fallback` retrieves from selected
+   sources **and the course catalog**, clears `source_need_check`, sets
+   `retrieval_required` and `allow_model_knowledge=false`, and runs the one
+   retry. The first result is not persisted. If that retrieve fails, the retry
+   still runs with the "retrieval unavailable" context so the reply states the
+   evidence gap.
+
+`needs_sources` and `needs_source_retrieval` coexist. They share one retry, one
+budget (two invokes per turn) and one persistence path. `needs_source_retrieval`
+keeps its narrower meaning (selected sources exist and were skipped) and its
+required place in the wire contract. `needs_sources` is a superset trigger that
+also reaches the course catalog and works when nothing is selected. A first-call
+answer is already written without evidence whenever either flag is true, so a
+retry is needed either way; the new flag adds a broader trigger and does not
+remove the second call. With the setting off the prompt, the retry rules and
+the wire behaviour are as before.
 
 ## Authority
 

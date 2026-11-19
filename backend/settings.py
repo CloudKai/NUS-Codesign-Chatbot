@@ -359,6 +359,15 @@ class Settings:
     fast_chat_retrieval_course_slots: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_COURSE_SLOTS", 2, 1, 8
     )
+    # Ask the first Fast Chat call whether the answer needs course or source
+    # excerpts that the regex gate did not retrieve (``needs_sources``). A
+    # true answer triggers the existing one-retry fallback with the course
+    # catalog included. Default OFF: the model's flag rate cannot be measured
+    # offline, a flagged turn costs a second model call, and the AgentCore
+    # runtime must be redeployed with the new field first.
+    fast_chat_needs_sources_enabled: bool = _boolean(
+        "FAST_CHAT_NEEDS_SOURCES_ENABLED", False
+    )
     fast_chat_retrieval_max_chars: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHARS", 8_000, 1_000, 24_000
     )

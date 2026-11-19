@@ -1060,6 +1060,12 @@ def _validated_fast_chat(
     ]
     if output.needs_source_retrieval:
         record_field("fast_chat_needs_source_retrieval", True)
+    # Honour needs_sources only when FastAPI asked for the check this turn, so
+    # a model that volunteers the flag (or student text that induces it)
+    # cannot start a second call on its own.
+    needs_sources = bool(output.needs_sources) and bool(request.source_need_check)
+    if needs_sources:
+        record_field("fast_chat_needs_sources", True)
     record_field("mode_returned", output.mode)
     policy = policy_from_request(request)
     enforcement = enforce_model_mode(policy.expected_mode, output.mode)
@@ -1090,6 +1096,7 @@ def _validated_fast_chat(
             deep_review_succeeded=False,
             review_trigger=None,
             needs_source_retrieval=bool(output.needs_source_retrieval),
+            needs_sources=needs_sources,
         )
     if output.recommendation not in {StageDecision.STAY.value, StageDecision.ADVANCE.value}:
         raise _malformed_error()
@@ -1113,6 +1120,7 @@ def _validated_fast_chat(
         deep_review_succeeded=False,
         review_trigger=None,
         needs_source_retrieval=bool(output.needs_source_retrieval),
+        needs_sources=needs_sources,
     )
 
 

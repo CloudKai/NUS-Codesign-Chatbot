@@ -500,6 +500,7 @@ class GateDecision:
     course: bool
     student: bool
     classifier_retrieve: bool
+    second_chance: bool = False
 
 
 def _titles_and_names(entries: Sequence[Mapping[str, Any]]) -> tuple[list[str], list[str]]:
@@ -571,6 +572,11 @@ def gate_decision(row: Mapping[str, Any]) -> GateDecision:
         course=bool(include_course),
         student=bool(student),
         classifier_retrieve=bool(policy.retrieve),
+        # Mirrors ``_wants_source_need_check``: nothing searched and no gate
+        # override fixed the evidence scope.
+        second_chance=bool(
+            not (include_course or student) and not cleared and not attachment_only
+        ),
     )
 
 
@@ -748,6 +754,80 @@ def _question_summary(outcomes: Sequence[QuestionOutcome], questions: Sequence[M
     }
 
 
+NEEDS_SOURCES_DEFINITION = (
+    "Models the second chance given by the first-call 'needs_sources' flag "
+    "(FAST_CHAT_NEEDS_SOURCES_ENABLED) with three STUBS in place of the model. "
+    "A message is eligible when the gate searched nothing and no gate override "
+    "fixed its evidence scope. 'oracle' flags exactly the messages labelled "
+    "'retrieve' (a perfect model: best case). 'mock_rule' flags eligible "
+    "messages phrased as a question or information request (the mock "
+    "provider's rule: a deterministic stand-in). 'flag_all' flags every "
+    "eligible message (a model that over-flags: worst case for false "
+    "retrieves). A flagged message is searched on the second pass (selected "
+    "sources plus the course catalog). None of this measures a real model."
+)
+
+
+def _needs_sources_stubs(
+    scored: Sequence[tuple[Mapping[str, Any], GateDecision]],
+    search: OfflineCourseSearch | None,
+) -> dict[str, Any]:
+    """Apply three stub models of ``needs_sources`` on top of the gate.
+
+    Args:
+        scored: ``(message row, first-pass gate decision)`` per message.
+        search: Offline course search, used to count empty second-pass results.
+    """
+    from backend.mock_provider import mock_flags_needs_sources
+
+    stubs = {
+        "oracle": lambda row: row["expected_decision"] == "retrieve",
+        "mock_rule": lambda row: mock_flags_needs_sources(str(row["message"])),
+        "flag_all": lambda row: True,
+    }
+    first_pass_empty = 0
+    first_pass_attempts = 0
+    for row, decision in scored:
+        if decision.course and search is not None:
+            first_pass_attempts += 1
+            if not search.search(row["message"], row["history"]):
+                first_pass_empty += 1
+    eligible = [(row, d) for row, d in scored if d.second_chance]
+    wrong_skips = [
+        row for row, d in scored if row["expected_decision"] == "retrieve" and not d.retrieve
+    ]
+    eligible_wrong_skips = sum(1 for row, d in eligible if row["expected_decision"] == "retrieve")
+    out: dict[str, Any] = {
+        "definition": NEEDS_SOURCES_DEFINITION,
+        "eligible_messages": len(eligible),
+        "wrong_skips_before": len(wrong_skips),
+        "wrong_skips_eligible_for_second_chance": eligible_wrong_skips,
+        "stubs": {},
+    }
+    for name, flags in stubs.items():
+        decisions: list[tuple[str, bool]] = []
+        attempts = first_pass_attempts
+        empty = first_pass_empty
+        second_calls = 0
+        for row, decision in scored:
+            retrieved = decision.retrieve
+            if decision.second_chance and flags(row):
+                retrieved = True
+                second_calls += 1
+                if search is not None:
+                    attempts += 1
+                    if not search.search(row["message"], row["history"]):
+                        empty += 1
+            decisions.append((row["expected_decision"], retrieved))
+        out["stubs"][name] = {
+            "wrong_skip_rate": wrong_skip_rate(decisions),
+            "false_retrieve_rate": false_retrieve_rate(decisions),
+            "empty_result_rate_course_attempts": rate_record(empty, attempts),
+            "second_model_calls": second_calls,
+        }
+    return out
+
+
 def evaluate_gate(
     messages: Sequence[Mapping[str, Any]], search: OfflineCourseSearch | None
 ) -> dict[str, Any]:
@@ -758,8 +838,10 @@ def evaluate_gate(
     by_category: dict[str, list[bool]] = defaultdict(list)
     course_attempt_counts: list[int] = []
     student_only_passes = 0
+    scored: list[tuple[Mapping[str, Any], GateDecision]] = []
     for row in messages:
         decision = gate_decision(row)
+        scored.append((row, decision))
         decisions.append((row["expected_decision"], decision.retrieve))
         classifier_decisions.append((row["expected_decision"], decision.classifier_retrieve))
         if row["certainty"] == "clear":
@@ -785,6 +867,7 @@ def evaluate_gate(
         "course_attempts": len(course_attempt_counts),
         "empty_result_rate_course_attempts": empty_result_rate(course_attempt_counts),
         "student_file_only_passes_not_searched": student_only_passes,
+        "needs_sources_stubs": _needs_sources_stubs(scored, search),
     }
 
 
@@ -955,6 +1038,22 @@ def format_report(result: Mapping[str, Any]) -> str:
     ]
     for category, record in gate["wrong_skip_by_category"].items():
         lines.append(f"  {category}: {format_rate(record)}")
+    stubs = gate.get("needs_sources_stubs")
+    if stubs:
+        lines += [
+            "",
+            "needs_sources second chance (STUB models, not a real model):",
+            f"  eligible messages: {stubs['eligible_messages']}; "
+            f"wrong skips eligible: {stubs['wrong_skips_eligible_for_second_chance']}"
+            f" of {stubs['wrong_skips_before']}",
+        ]
+        for name, record in stubs["stubs"].items():
+            lines.append(
+                f"  {name}: wrong-skip {format_rate(record['wrong_skip_rate'])}; "
+                f"false-retrieve {format_rate(record['false_retrieve_rate'])}; "
+                f"empty {format_rate(record['empty_result_rate_course_attempts'])}; "
+                f"second model calls {record['second_model_calls']}"
+            )
     return "\n".join(lines)
 
 

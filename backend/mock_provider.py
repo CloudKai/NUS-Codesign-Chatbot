@@ -51,6 +51,33 @@ _FACIONE_BEHAVIORS_BY_STAGE = {
 }
 
 
+def mock_flags_needs_sources(student_message: str) -> bool:
+    """Return the mock provider's stand-in for the model's ``needs_sources``.
+
+    This is a deterministic rule, not a judgement about course relevance: a
+    message phrased as a question or information request is reported as
+    needing sources. It exists so offline tests and the offline eval can drive
+    the real two-call fallback. It says nothing about how often a real model
+    sets the flag.
+    """
+    from .coaching.mode_policy import looks_like_information_request
+
+    return looks_like_information_request(student_message)
+
+
+def mock_needs_sources(request: CoachRequest) -> bool:
+    """Return whether the mock reports ``needs_sources`` for this request.
+
+    Only when the application asked for the check (``source_need_check``) and
+    nothing was retrieved, matching the conditions the real provider enforces.
+    """
+    return bool(
+        request.source_need_check
+        and not request.retrieved_chunks
+        and mock_flags_needs_sources(request.student_message)
+    )
+
+
 def _prior_assessed_turns(request: CoachRequest) -> int:
     """Count prior assessments eligible for the active Guide/Free profile.
 
@@ -238,6 +265,13 @@ class DeterministicCoachProvider:
         return "deterministic-v1"
 
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Return the mock turn, plus the mock ``needs_sources`` stand-in."""
+        result = self._assess_turn(request)
+        if mock_needs_sources(request):
+            return result.model_copy(update={"needs_sources": True})
+        return result
+
+    def _assess_turn(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Build a repeatable coaching turn with visible, guided progression.
 
         An explicit recommendation keeps unit tests fully controllable. In the

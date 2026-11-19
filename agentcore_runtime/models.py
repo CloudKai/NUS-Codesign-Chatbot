@@ -328,6 +328,7 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
                     "needs_source_retrieval": bool(
                         payload.get("needs_source_retrieval")
                     ),
+                    "needs_sources": payload.get("needs_sources"),
                     "out_of_scope": bool(payload.get("out_of_scope")),
                 }
             )
@@ -357,6 +358,7 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
                 "citations": citations,
                 "hmw_scaffold_ready": bool(payload.get("hmw_scaffold_ready")),
                 "needs_source_retrieval": bool(payload.get("needs_source_retrieval")),
+                "needs_sources": payload.get("needs_sources"),
                 "out_of_scope": bool(payload.get("out_of_scope")),
             }
         )
@@ -378,6 +380,7 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
             "citations": citations,
             "hmw_scaffold_ready": bool(payload.get("hmw_scaffold_ready")),
             "needs_source_retrieval": bool(payload.get("needs_source_retrieval")),
+            "needs_sources": payload.get("needs_sources"),
             "out_of_scope": bool(payload.get("out_of_scope")),
         }
     )
@@ -462,6 +465,15 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
         needs_retrieval["type"] = "boolean"
         needs_retrieval.pop("anyOf", None)
         needs_retrieval.pop("oneOf", None)
+    needs_sources = (
+        properties.get("needs_sources") if isinstance(properties, dict) else None
+    )
+    if isinstance(needs_sources, dict):
+        # Optional (not in ``required``): a Python default keeps old callers
+        # valid. Keep the model-facing type a plain boolean.
+        needs_sources["type"] = "boolean"
+        needs_sources.pop("anyOf", None)
+        needs_sources.pop("oneOf", None)
     out_of_scope = properties.get("out_of_scope") if isinstance(properties, dict) else None
     if isinstance(out_of_scope, dict):
         out_of_scope["type"] = "boolean"
@@ -511,6 +523,15 @@ class FastChatTurnOutput(BaseModel):
         ),
     )
     needs_source_retrieval: bool = False
+    needs_sources: bool = Field(
+        default=False,
+        description=(
+            "Optional. Return true only when the application's runtime rules "
+            "ask for a source check and a correct answer depends on CDE2300 "
+            "course material or the student's selected files that were not "
+            "supplied this turn. Otherwise return false."
+        ),
+    )
     out_of_scope: bool = Field(
         default=False,
         description=(
@@ -553,6 +574,17 @@ class FastChatTurnOutput(BaseModel):
         """Accept only JSON true; omit, null, and malformed values are false."""
         return value is True
 
+    @field_validator("needs_sources", mode="before")
+    @classmethod
+    def coerce_needs_sources(cls, value: Any) -> bool:
+        """Accept only JSON true; omit, null, and malformed values are false.
+
+        The field is optional on the wire so a runtime or backend deployed
+        without it keeps working. A malformed value must not trigger the
+        second model call.
+        """
+        return value is True
+
     @field_validator("out_of_scope", mode="before")
     @classmethod
     def coerce_out_of_scope(cls, value: Any) -> bool:
@@ -575,6 +607,7 @@ class FastChatTurnOutput(BaseModel):
                     "citations": [],
                     "hmw_scaffold_ready": False,
                     "needs_source_retrieval": False,
+                    "needs_sources": False,
                 }
             )
         if self.mode == "coaching":
