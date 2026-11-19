@@ -5,7 +5,7 @@ import { ThinkingPath } from './ThinkingPath';
 import { Icon } from './Icon';
 import { CoachText } from './CoachText';
 import { ReasoningPrompts } from './ReasoningPrompts';
-import { isTurn, readStream, type Citation, type Event } from './stream';
+import { citationText, isTurn, readStream, type Citation, type Event } from './stream';
 
 type Intent = 'lecture' | 'project';
 interface Attachment { id: string; title: string }
@@ -385,10 +385,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         <button key={`${citation.label}:${citation.source_id}`} onClick={event => {
           returnScroll.current = transcript.current?.scrollTop || 0; citationButton.current = event.currentTarget;
           setDownloadError(''); setEvidence({ citation, message: message.id });
-        }}>{citation.label} · {citation.title}</button>)}</div> : null}
+        }}>{citationText(citation)}</button>)}</div> : null}
     </article>)}
     {evidence ? <aside className="evidence" aria-label="Cited evidence">
-      <div className="evidence-heading"><h3 ref={evidenceHeading} tabIndex={-1}>{evidence.citation.label} · {evidence.citation.title}</h3>
+      <div className="evidence-heading"><h3 ref={evidenceHeading} tabIndex={-1}>{citationText(evidence.citation)}</h3>
         <button onClick={() => {
           setEvidence(null); citationButton.current?.focus({ preventScroll: true }); transcript.current?.scrollTo(0, returnScroll.current);
         }}>Return to answer</button></div>

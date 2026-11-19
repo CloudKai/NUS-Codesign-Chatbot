@@ -52,6 +52,9 @@ _retrieve_max_workers = 0
 _retrieve_admitted = 0
 _retrieve_occupancy_lock = threading.Lock()
 COURSE_MATERIAL_METADATA_KEY = "course_material_id"
+# Metadata attribute Bedrock Knowledge Bases add to each chunk when the
+# document was chunked (not "no chunking"). See docs/RETRIEVAL_EVAL.md.
+PAGE_NUMBER_METADATA_KEY = "x-amz-bedrock-kb-document-page-number"
 _S3_VIRTUAL_HOST = re.compile(
     r"^(?P<bucket>.+)\.s3(?:[.-](?:dualstack\.)?(?:[a-z0-9-]+))?\.amazonaws\.com$",
     re.IGNORECASE,
@@ -450,6 +453,41 @@ def _result_score(item: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _result_page(item: Mapping[str, Any]) -> int | None:
+    """Return the 1-based page of one Retrieve hit, or ``None`` when absent.
+
+    Reads the ``metadata`` attribute ``x-amz-bedrock-kb-document-page-number``.
+    The AWS reference documents ``metadata`` as a string-to-JSON-value map and
+    does not state the value type, so an int, an integral float and a digit
+    string are accepted. Booleans, fractions, zero, negatives and anything
+    else mean no page. Never raises and never guesses.
+
+    Args:
+        item: One ``retrievalResults`` element.
+
+    Returns:
+        A page number of 1 or more, or ``None``.
+    """
+    metadata = item.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    value = metadata.get(PAGE_NUMBER_METADATA_KEY)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not (cleaned.isascii() and cleaned.isdigit()):
+            return None
+        value = int(cleaned)
+    elif isinstance(value, float):
+        if not value.is_integer():
+            return None
+        value = int(value)
+    if isinstance(value, int) and value >= 1:
+        return value
+    return None
+
+
 def _course_material_ids(sources: tuple[RetrievalSource, ...]) -> list[str]:
     """Return unique selected course_material_id values for a KB metadata filter."""
     ordered: list[str] = []
@@ -510,6 +548,7 @@ class BedrockKnowledgeBaseRetriever:
         knowledge_base_type: str | None = None,
         retrieve_timeout_seconds: float | None = None,
         metadata_filter_mode: str | None = None,
+        page_citations: bool | None = None,
     ) -> None:
         """Create the adapter with an injected or lazily constructed client.
 
@@ -538,6 +577,9 @@ class BedrockKnowledgeBaseRetriever:
             metadata_filter_mode: ``required``, ``degraded_unfiltered``, or
                 ``disabled``. Default follows settings (production target
                 ``required``).
+            page_citations: Whether to copy the Knowledge Base page attribute
+                onto each chunk. Defaults to
+                ``KNOWLEDGE_BASE_PAGE_CITATIONS_ENABLED``.
         """
         self._knowledge_base_id = str(knowledge_base_id or "").strip()
         self._region = str(region or "").strip() or "us-west-2"
@@ -598,6 +640,11 @@ class BedrockKnowledgeBaseRetriever:
             if self._metadata_filter_mode not in _FILTER_MODES:
                 self._metadata_filter_mode = "required"
         self._strict_metadata_filter = self._metadata_filter_mode == "required"
+        self._page_citations = (
+            bool(getattr(settings, "knowledge_base_page_citations_enabled", True))
+            if page_citations is None
+            else bool(page_citations)
+        )
         if knowledge_base_type is None:
             self._knowledge_base_type = str(
                 getattr(settings, "normalized_knowledge_base_type", "vector")
@@ -998,6 +1045,7 @@ class BedrockKnowledgeBaseRetriever:
                     url=source.url,
                     group=source.group,
                     retrieval_origin="knowledge_base",
+                    page=_result_page(item) if self._page_citations else None,
                 )
             )
         _record_kb_perf(
@@ -1012,7 +1060,8 @@ class BedrockKnowledgeBaseRetriever:
         )
         logger.info(
             "course_retrieval_hit_count raw_hits=%s validated_count=%s "
-            "filter=%s filter_mode=%s drop_bucket=%s drop_key=%s drop_empty=%s",
+            "filter=%s filter_mode=%s drop_bucket=%s drop_key=%s drop_empty=%s "
+            "page_count=%s",
             len(raw_hits),
             len(chunks),
             int(used_filter),
@@ -1020,6 +1069,7 @@ class BedrockKnowledgeBaseRetriever:
             drop_bucket,
             drop_key,
             drop_empty,
+            sum(1 for chunk in chunks if chunk.page is not None),
         )
         if settings.co_design_rag_debug:
             titles = [str(source.title or "")[:80] for source in course_sources[:8]]

@@ -649,3 +649,83 @@ def test_live_composition_matches_the_offline_mock_rule_stub_on_the_real_gate_se
     assert overall["wrong_skip_with_model"] == offline["wrong_skip_rate"]
     assert overall["false_retrieve_with_model"] == offline["false_retrieve_rate"]
     assert overall["extra_model_calls"] == offline["second_model_calls"]
+
+
+# ---- live Knowledge Base page recall (fake client only) ---------------------
+
+_PAGE_KEY = "x-amz-bedrock-kb-document-page-number"
+
+
+def _run_live_with_fake_kb(monkeypatch, pages_by_question):
+    """Run ``run_live`` against a fake client; ``pages_by_question`` maps text to a page or None.
+
+    Each question gets one hit on its expected material. The hit carries the
+    page metadata attribute only when the mapped page is not ``None``.
+    """
+    from backend.settings import settings
+
+    materials = _EVAL.load_materials()
+    by_id = {entry["material_id"]: entry for entry in materials}
+    first, second, third = (entry["material_id"] for entry in materials[:3])
+    questions = [
+        {"id": "t1", "question": "alpha topic", "expected_material": first,
+         "expected_pages": [3], "alt_expected": []},
+        {"id": "t2", "question": "beta topic", "expected_material": second,
+         "expected_pages": [4], "alt_expected": []},
+        {"id": "t3", "question": "gamma topic", "expected_material": third,
+         "expected_pages": [5], "alt_expected": []},
+    ]
+    expected_by_text = {q["question"]: q["expected_material"] for q in questions}
+
+    class FakeKb:
+        def retrieve(self, **kwargs):
+            text = kwargs["retrievalQuery"]["text"]
+            material = expected_by_text[text]
+            hit = {
+                "content": {"text": f"excerpt for {text}"},
+                "location": {
+                    "type": "S3",
+                    "s3Location": {"uri": f"s3://bucket-test/{by_id[material]['object_key']}"},
+                },
+                "score": 0.8,
+            }
+            page = pages_by_question[text]
+            if page is not None:
+                hit["metadata"] = {_PAGE_KEY: page}
+            return {"retrievalResults": [hit]}
+
+    monkeypatch.setattr(settings, "knowledge_base_id", "kb-test")
+    monkeypatch.setattr(settings, "course_materials_bucket", "bucket-test")
+    monkeypatch.setattr(settings, "knowledge_base_page_citations_enabled", False)
+    monkeypatch.setattr(
+        _EVAL, "_build_live_client", lambda _region, limit: _EVAL.CountingClient(FakeKb(), limit)
+    )
+    result = _EVAL.run_live(materials, questions, _EVAL.load_messages(materials=materials), 3)
+    return result["retrieval"]
+
+
+def test_live_page_recall_scores_only_questions_whose_results_carry_a_page(monkeypatch) -> None:
+    # t1: right page. t2: wrong page. t3: no page metadata (left out, not a miss).
+    # The production page switch is off here; the eval must still read pages.
+    retrieval = _run_live_with_fake_kb(
+        monkeypatch, {"alpha topic": 3, "beta topic": 9, "gamma topic": None}
+    )
+    assert retrieval["recall_at_4_material"]["numerator"] == 3
+    assert retrieval["recall_at_4_page"] == {"numerator": 1, "denominator": 2, "rate": 0.5}
+    assert retrieval["page_coverage"] == {
+        "results": 3,
+        "results_with_page": 2,
+        "questions_with_page": 2,
+        "questions_evaluated": 3,
+    }
+
+
+def test_live_page_recall_stays_not_available_when_no_result_carries_a_page(monkeypatch) -> None:
+    retrieval = _run_live_with_fake_kb(
+        monkeypatch, {"alpha topic": None, "beta topic": None, "gamma topic": None}
+    )
+    assert retrieval["recall_at_4_page"]["denominator"] == 0
+    assert retrieval["recall_at_4_page"]["rate"] is None
+    assert retrieval["page_coverage"]["results_with_page"] == 0
+    assert retrieval["page_coverage"]["questions_with_page"] == 0
+    assert "n/a" in _EVAL.format_rate(retrieval["recall_at_4_page"])

@@ -354,6 +354,13 @@ class RetrievedChunk:
     url: str | None = None
     group: str | None = None
     retrieval_origin: str = "extracted_text"
+    page: int | None = None
+    """1-based source page when the adapter reports one, else ``None``.
+
+    Only the Knowledge Base adapter can set it (from the Retrieve metadata
+    attribute ``x-amz-bedrock-kb-document-page-number``). Local extracted-text
+    chunks never carry a page. Retrieval and ranking do not read this field.
+    """
 
 
 @dataclass(frozen=True)
@@ -1188,6 +1195,7 @@ def bounded_retrieval_result(
                 url=chunk.url,
                 group=chunk.group,
                 retrieval_origin=chunk.retrieval_origin,
+                page=chunk.page,
             )
         )
         if used >= max_context_chars:

@@ -1,5 +1,11 @@
 /** Shared NDJSON coach lifecycle: preview is ephemeral; only done means saved. */
-export interface Citation { source_id: string; label: string; title: string; excerpt: string }
+export interface Citation { source_id: string; label: string; title: string; excerpt: string; page?: number | null }
+
+/** Citation text: "S1 · Title", plus ", p. 4" only when the saved citation has a page. */
+export function citationText(citation: Citation): string {
+  const page = typeof citation.page === 'number' && Number.isInteger(citation.page) && citation.page >= 1 ? `, p. ${citation.page}` : '';
+  return `${citation.label} · ${citation.title}${page}`;
+}
 export interface Turn { response_text: string; assessment: { citations: Citation[]; response_mode: string } }
 export type Event =
   | { event: 'started'; thread_id: string; idempotency_key: string; stage: string }
@@ -16,7 +22,8 @@ export function isTurn(value: unknown): value is Turn {
   return typeof turn.response_text === 'string' && turn.response_text.length > 0
     && !!turn.assessment && typeof turn.assessment.response_mode === 'string'
     && Array.isArray(turn.assessment.citations) && turn.assessment.citations.every(citation =>
-      citation && ['source_id', 'label', 'title', 'excerpt'].every(key => typeof citation[key as keyof Citation] === 'string'));
+      citation && ['source_id', 'label', 'title', 'excerpt'].every(key => typeof citation[key as keyof Citation] === 'string')
+      && (citation.page === undefined || citation.page === null || (Number.isInteger(citation.page) && citation.page >= 1)));
 }
 
 /** Validate discriminated events rather than trusting a TypeScript cast of network JSON. */

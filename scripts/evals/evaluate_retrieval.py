@@ -949,6 +949,9 @@ def run_live(
         course_bucket=str(settings.course_materials_bucket or "").strip(),
         client=client,
         knowledge_base_type=str(settings.normalized_knowledge_base_type),
+        # Measure what the Knowledge Base returns, whatever the production
+        # KNOWLEDGE_BASE_PAGE_CITATIONS_ENABLED switch says.
+        page_citations=True,
     )
     sources = tuple(
         RetrievalSource(
@@ -968,6 +971,9 @@ def run_live(
     chosen = [questions[i] for i in evenly_spaced_indices(len(questions), limit)]
     outcomes: list[QuestionOutcome] = []
     failed = 0
+    results_total = 0
+    results_with_page = 0
+    questions_with_page = 0
     for q in chosen:
         narrowed = prefer_session_matching_sources(sources, q["question"])
         result = retriever.retrieve(
@@ -983,13 +989,20 @@ def run_live(
         hits = [
             RankedHit(
                 material_id=material_by_source.get(chunk.source_id, ""),
-                page=None,
+                page=chunk.page,
                 score=float(chunk.score),
                 source_index=chunk.source_index,
                 chunk_index=chunk.chunk_index,
             )
             for chunk in result.chunks
         ]
+        # A question is scored at page level only when at least one of its
+        # results carries a page. A question whose results carry none is left
+        # out of the page denominator, not counted as a miss.
+        page_aware = any(hit.page is not None for hit in hits)
+        results_total += len(hits)
+        results_with_page += sum(1 for hit in hits if hit.page is not None)
+        questions_with_page += int(page_aware)
         outcomes.append(
             score_question(
                 q["id"],
@@ -997,15 +1010,25 @@ def run_live(
                 expected_material=q["expected_material"],
                 expected_pages=q["expected_pages"],
                 alt_expected=q["alt_expected"],
+                page_aware=page_aware,
             )
         )
     summary = _question_summary(outcomes, questions)
+    summary["page_coverage"] = {
+        "results": results_total,
+        "results_with_page": results_with_page,
+        "questions_with_page": questions_with_page,
+        "questions_evaluated": len(outcomes),
+    }
     summary["failed_attempts"] = failed
     summary["live_calls_made"] = client.calls
     summary["live_call_limit"] = limit
     return {
         "mode": "live",
-        "course_search": "Bedrock Knowledge Base Retrieve (page-level scoring unavailable)",
+        "course_search": (
+            "Bedrock Knowledge Base Retrieve (page-level scoring only for "
+            "questions whose results carry a page)"
+        ),
         "definitions": DEFINITIONS,
         "retrieval": summary,
         "gate": evaluate_gate(messages, None),
@@ -1625,6 +1648,12 @@ def format_report(result: Mapping[str, Any]) -> str:
     ]
     for material, record in retrieval["recall_by_material"].items():
         lines.append(f"  {material}: {format_rate(record)}")
+    if "page_coverage" in retrieval:
+        coverage = retrieval["page_coverage"]
+        lines.append(
+            f"results with a page: {coverage['results_with_page']}/{coverage['results']}; "
+            f"questions scored at page level: {coverage['questions_with_page']}/{coverage['questions_evaluated']}"
+        )
     if "live_calls_made" in retrieval:
         lines.append(
             f"live calls made: {retrieval['live_calls_made']} of limit {retrieval['live_call_limit']}; "

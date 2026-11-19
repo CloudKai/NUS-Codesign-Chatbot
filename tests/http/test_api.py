@@ -508,6 +508,8 @@ def test_local_api_grounds_mock_reply_in_retrieved_selected_source(tmp_path):
             "label": "S1",
             "title": "Week 1 lecture",
             "excerpt": "Older pedestrians may require longer crossing intervals.",
+            # Local extracted-text sources never carry a page.
+            "page": None,
         }
     ]
     assistant = store.get_messages(thread_id)[-1]

@@ -2463,6 +2463,7 @@ class CoachApplicationService:
                     excerpt=excerpt,
                     score=chunk.score,
                     retrieval_origin=str(chunk.retrieval_origin or ""),
+                    page=chunk.page,
                 )
             )
         return retrieved_chunks, retrieval_result.context
@@ -3422,6 +3423,7 @@ class CoachApplicationService:
                     request.student_message,
                     limit=240,
                 ),
+                page=retrieved.page if retrieved is not None else None,
             )
         record_field("citation_source_resolution_count", resolved)
         return catalog

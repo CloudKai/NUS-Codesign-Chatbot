@@ -305,10 +305,26 @@ Course and student chunks share `RetrievedChunk`:
 
 - `source_id`, `label` (`[S#]`), `title`, `chunk_id`, `text`, `score`
 - `group`, `url`, `retrieval_origin` (`knowledge_base` or `extracted_text`)
+- `page` (optional, 1-based). Set only by the Knowledge Base adapter, from the
+  Retrieve `metadata` attribute `x-amz-bedrock-kb-document-page-number`.
+  Student-upload chunks never carry a page.
 
 The composer presents them as one `<retrieved_course_context>` block with
 stable `[S#]` labels for the turn. Internal ids such as `S1-C2` or `S1-KB1`
 are audit metadata, not student-facing citations.
+
+Page numbers on citations. `RetrievalChunkReference.page` and
+`CitationReference.page` carry the page through to the saved citation and the
+React UI, which shows `S1 · Title, p. 4`. The page is application-owned: it
+is not in the model-facing context block, so the model never sees or writes
+it, and the `[S#]` marker in the reply is unchanged. A citation takes the page
+of the strongest retrieved chunk of its source (the chunk whose excerpt the
+citation preview shows). When the Knowledge Base returns no page, the page is
+`None` and the UI shows `S1 · Title` as before. Setting
+`KNOWLEDGE_BASE_PAGE_CITATIONS_ENABLED` (default `true`) switches the page
+pass-through off without a code change. Retrieval, ranking and filtering do not
+read the page. Evidence for the attribute and its open points is in
+`docs/RETRIEVAL_EVAL.md`.
 
 `retrieval_refs` record what was supplied to the model. `source_refs` record
 what the model actually cited after application validation.

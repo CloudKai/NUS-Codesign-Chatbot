@@ -1756,3 +1756,138 @@ def test_configured_live_retriever_uses_managed_type(
     retriever = configured_context_retriever(client=FakeRetrieveClient(results=[]))
     assert retriever._knowledge_base is not None
     assert retriever._knowledge_base._knowledge_base_type == "managed"
+
+
+# ---- page metadata pass-through ---------------------------------------------
+
+_PAGE_KEY = "x-amz-bedrock-kb-document-page-number"
+_PAGE_URI = "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf"
+
+
+def _paged_hit(text: str, metadata: Any, *, score: float = 0.9) -> dict[str, Any]:
+    """Return one Retrieve hit with the given ``metadata`` value (any shape)."""
+    hit = _hit(_PAGE_URI, text, score=score)
+    if metadata is not _MISSING:
+        hit["metadata"] = metadata
+    return hit
+
+
+_MISSING = object()
+
+
+def _retrieve_pages(hits: list[dict[str, Any]], **kwargs: Any) -> list[int | None]:
+    """Run one fake Retrieve and return each kept chunk's page, best first."""
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=FakeRetrieveClient(results=hits),
+        max_results=8,
+        **kwargs,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture", "S1", object_key="course/lectureNotes/crossing.pdf"
+            )
+        )
+    )
+    return [chunk.page for chunk in result.chunks]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (4, 4),
+        (4.0, 4),
+        ("4", 4),
+        (" 12 ", 12),
+        (1, 1),
+        (0, None),
+        (-2, None),
+        (2.5, None),
+        ("two", None),
+        ("3a", None),
+        ("", None),
+        (True, None),
+        (None, None),
+        ([4], None),
+        ({"n": 4}, None),
+    ],
+)
+def test_page_metadata_values_are_parsed_or_dropped(value: Any, expected: int | None):
+    assert _retrieve_pages([_paged_hit("Excerpt.", {_PAGE_KEY: value})]) == [expected]
+
+
+@pytest.mark.parametrize("metadata", [_MISSING, None, "x", [], {}, {"other": 3}])
+def test_hits_without_page_metadata_carry_no_page(metadata: Any):
+    assert _retrieve_pages([_paged_hit("Excerpt.", metadata)]) == [None]
+
+
+def test_mixed_hits_keep_page_only_where_the_hit_reported_one():
+    pages = _retrieve_pages(
+        [
+            _paged_hit("Top excerpt about crossing.", {_PAGE_KEY: 7}, score=0.9),
+            _paged_hit("Second excerpt, no metadata.", _MISSING, score=0.8),
+            _paged_hit("Third excerpt about signals.", {_PAGE_KEY: "9"}, score=0.7),
+        ]
+    )
+    assert pages == [7, None, 9]
+
+
+def test_page_pass_through_leaves_context_and_ranking_unchanged():
+    texts = ["Alpha excerpt.", "Beta excerpt.", "Gamma excerpt."]
+    scores = [0.5, 0.9, 0.7]
+    with_pages = [
+        _paged_hit(text, {_PAGE_KEY: index + 1}, score=score)
+        for index, (text, score) in enumerate(zip(texts, scores))
+    ]
+    without = [
+        _paged_hit(text, _MISSING, score=score) for text, score in zip(texts, scores)
+    ]
+
+    def run(hits: list[dict[str, Any]]):
+        return BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=FakeRetrieveClient(results=hits),
+            max_results=8,
+        ).retrieve(
+            _query(
+                _course_source(
+                    "src-lecture", "S1", object_key="course/lectureNotes/crossing.pdf"
+                )
+            )
+        )
+
+    paged, plain = run(with_pages), run(without)
+    assert paged.context == plain.context
+    assert [(c.chunk_id, c.text, c.score) for c in paged.chunks] == [
+        (c.chunk_id, c.text, c.score) for c in plain.chunks
+    ]
+    assert "page" not in paged.context.lower()
+
+
+def test_page_switch_off_drops_pages_but_not_chunks(monkeypatch):
+    monkeypatch.setattr(settings, "knowledge_base_page_citations_enabled", False)
+    hits = [_paged_hit("Excerpt.", {_PAGE_KEY: 5})]
+    assert _retrieve_pages(hits) == [None]
+    # An explicit constructor argument wins over the setting (the live eval uses it).
+    assert _retrieve_pages(hits, page_citations=True) == [5]
+
+
+def test_page_survives_the_second_bounded_formatting_pass():
+    from backend.retrieval import RetrievedChunk, bounded_retrieval_result
+
+    chunk = RetrievedChunk(
+        source_id="s",
+        label="S1",
+        title="Lecture",
+        chunk_id="S1-KB1",
+        text="Excerpt text.",
+        score=0.5,
+        source_index=1,
+        chunk_index=1,
+        retrieval_origin="knowledge_base",
+        page=6,
+    )
+    result = bounded_retrieval_result([chunk], max_context_chars=2_000, max_chunks=4)
+    assert [c.page for c in result.chunks] == [6]

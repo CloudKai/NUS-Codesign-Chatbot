@@ -44,7 +44,7 @@ Retrieval results do not carry `course_material_id`. A `RetrievedChunk` from the
 | `filename` | `RetrievedChunk.title` (the source title is the file name). |
 | `source_id` | `RetrievedChunk.source_id`, which is `backend.sources.library.virtual_course_source_id(object_key)`. |
 
-`RetrievedChunk` has no page field today. The offline eval gets pages by using one chunk per PDF page, so page-level recall is available offline only. Live Knowledge Base results are scored at material level. Whether the Knowledge Base returns page metadata for these PDFs has not been checked.
+`RetrievedChunk` has an optional `page` field, filled only from the Knowledge Base `x-amz-bedrock-kb-document-page-number` metadata attribute. The offline eval gets pages by using one chunk per PDF page. A live run scores page recall for questions whose results carry a page and reports `n/a` when none do. Whether this Knowledge Base returns the attribute for these PDFs has not been checked. See `docs/RETRIEVAL_EVAL.md`, "Page numbers from the Knowledge Base".
 
 ## Coverage
 

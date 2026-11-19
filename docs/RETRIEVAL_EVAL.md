@@ -56,6 +56,10 @@ by one question (material and page) and no other number moves, including the
 gate numbers (wrong-skip and false-retrieve), which do not read the question
 set.
 
+Phase 3b item B (page numbers on citations) does not change retrieval, so
+every number in the item 0 column is unchanged by it. The offline JSON report
+has the same content as the one taken before the change.
+
 The item 2 column is identical to item 1 by design. `needs_sources` does not
 change the first-pass gate, so the gate numbers cannot show its effect. The
 effect is a second chance after the first model call, which needs a model.
@@ -127,7 +131,7 @@ it has not been run yet.
 | Metric | Numerator | Denominator |
 |---|---|---|
 | recall@4 (material) | Questions where one of the top 4 results is in the expected material or in an `alt_expected` material. | All questions evaluated. |
-| recall@4 (page) | Same, and the result page is one of the tagged pages of that material. A multi-page tag needs only one of its pages. | Questions evaluated. Reported only where results carry a page (offline). An empty result is a page miss. |
+| recall@4 (page) | Same, and the result page is one of the tagged pages of that material. A multi-page tag needs only one of its pages. | Questions evaluated. Reported only for questions whose results carry a page (offline: all; live: those with at least one paged result). An empty result is a page miss. |
 | wrong-skip rate | Messages labelled `retrieve` for which the gate searched no source. | All messages labelled `retrieve`. |
 | empty-result rate | Completed retrieval attempts that returned zero results. | Completed attempts. Failed live calls are counted separately. |
 
@@ -194,8 +198,61 @@ the normal credential chain.
   evenly spaced, deterministic subset of the question file.
 - **Reported.** Material-level recall@4 and empty-result rate on the questions
   evaluated. Failed calls (`unavailable`) are listed in `failed_attempts`.
-  Page-level recall is `n/a` because Knowledge Base results carry no page.
+  Page-level recall (`recall_at_4_page`) is filled for questions whose results
+  carry a page and is `n/a` when none do. See "Page numbers from the Knowledge
+  Base" below. The report also prints `page_coverage`: results with a page,
+  and questions scored at page level.
 - **Gate.** The gate numbers still come from the offline gate and make no call.
+
+## Page numbers from the Knowledge Base
+
+Course citations show `S1 · Title, p. 4` when the Knowledge Base reports a
+page, and `S1 · Title` when it does not. The eval convention for pages is the
+1-based PDF page index (`expected_pages`), the same number a PDF viewer shows.
+
+**Where the page comes from.** Each Retrieve result has a `metadata` map (a
+string-to-JSON-value map in the
+[KnowledgeBaseRetrievalResult reference](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_KnowledgeBaseRetrievalResult.html)).
+The adapter reads one key, `x-amz-bedrock-kb-document-page-number`
+(`backend/bedrock_retrieve.py`, `PAGE_NUMBER_METADATA_KEY` and `_result_page`).
+The `location` field carries no page: `s3Location` holds only the S3 URI
+([RetrievalResultS3Location](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_RetrievalResultS3Location.html)).
+
+| Point | Status |
+|---|---|
+| `metadata` is returned on Retrieve results, as a string-to-JSON-value map | Documented (API reference above). |
+| The attribute name `x-amz-bedrock-kb-document-page-number` exists, and a knowledge base that uses "no chunking" cannot show or filter on it | Documented, in [How content chunking works](https://docs.aws.amazon.com/bedrock/latest/userguide/kb-chunking-parsing.html). The same page says the chunker respects page boundaries for parsed content. |
+| The value type (number or string) | Not documented. The parser accepts an int, an integral float and a digit string. Anything else (zero, negative, fraction, bool, text) means no page. |
+| The number is 1-based and equals the PDF page index | **Assumed.** The docs do not say. The live eval is the check (below). If the numbers come back 0-based, set `KNOWLEDGE_BASE_PAGE_CITATIONS_ENABLED=false` rather than show a wrong page. A `0` value is dropped as no page. |
+| This project's Knowledge Base returns the attribute for its PDFs | **Unverified.** The Knowledge Base is `MANAGED` (`KNOWLEDGE_BASE_TYPE=MANAGED`). An AWS re:Post answer (community, not official documentation) says the attribute is produced by the default parser and is missing when a managed parser such as Bedrock Data Automation is used, and an older re:Post answer says KBs did not store page numbers at all. Nobody has checked this Knowledge Base. If it returns none, every citation shows no page and nothing breaks. |
+| One chunk maps to one page | Assumed from the chunking note above. A chunk that spans pages would report one number. |
+
+**Citation text format.** `S1 · Title, p. 4`. The chip under an answer and the
+evidence heading both use it (`citationText` in `frontend/src/stream.ts`). The
+`[S1]` marker inside the reply text is unchanged. The page is not placed in the
+model-facing excerpt header, so the model cannot write a page it was not given
+or break the `[S#]` parser. A citation takes the page of the strongest chunk of
+its source, which is the chunk whose excerpt the preview shows.
+
+**When no page is available.** The citation shows no page text at all (no
+"page unknown"). Saved citations from before this change have no page and
+render as before.
+
+**Switch.** `KNOWLEDGE_BASE_PAGE_CITATIONS_ENABLED` (default `true`) drops the
+page when the adapter builds each chunk. It does not change which chunks are
+returned, their order or their filtering. The live eval ignores the switch and
+always reads the page, so it can measure the Knowledge Base while production
+has pages hidden.
+
+**Live page recall.** `--live-kb` now sets `recall_at_4_page`. A question is
+scored at page level when at least one of its results carries a page. A hit
+counts when its page is one of the tagged pages of an accepted material. A
+question whose results carry no page is left out of the page denominator (it is
+not a miss), so a Knowledge Base that returns no pages still reports `n/a`.
+The report prints `page_coverage` (results with a page of all results, and
+questions scored at page level). Read page recall together with coverage. If
+recall@4 (material) is high and page recall is far lower on questions with
+good coverage, suspect an off-by-one numbering before blaming retrieval.
 
 ## Run the `needs_sources` eval against the live model (opt-in, costs money)
 

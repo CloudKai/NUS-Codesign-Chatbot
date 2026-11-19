@@ -139,6 +139,8 @@ class CitationReference(BaseModel):
     label: str
     title: str
     excerpt: str = ""
+    page: int | None = Field(default=None, ge=1)
+    """1-based page of the cited excerpt, when the Knowledge Base reported one."""
 
 
 class RetrievalChunkReference(BaseModel):
@@ -153,6 +155,7 @@ class RetrievalChunkReference(BaseModel):
     excerpt: str = Field(default="", max_length=600)
     score: float = 0.0
     retrieval_origin: str = ""
+    page: int | None = Field(default=None, ge=1)
 
 
 class FacioneDimensionScores(BaseModel):
