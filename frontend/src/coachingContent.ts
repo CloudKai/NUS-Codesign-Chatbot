@@ -17,13 +17,14 @@ const COURSE_TOOLS: Record<string, CourseTool[]> = {
     { label: 'How Might We', week: 'Week 7', text: 'How might we … (action or opportunity)\nfor … (user)\nso that … (desired outcome or benefit)\n' },
     { label: 'Functional, emotional, social jobs', week: 'Week 2', text: 'The jobs my user is hiring this product to do:\nFunctional: \nEmotional: \nSocial: \n' },
     { label: 'Interview questions', week: 'Week 2', text: 'Questions for my JTBD interview:\nWhen did you first think about buying something like this?\nTell me the story about buying this product.\nWhy did you buy this product?\nHow do you feel about your purchase now?\nHow did you share your buying story with friends and family?\n\nWhat I learned: ' },
+    { label: 'User journey map', week: 'Week 10', text: 'User journey map:\nPersona: \nScenario or Job-To-Be-Done: \nTypical journey (before, during and after the experience): \nActions: \nThinking: \nEmotion: \nOpportunities: \nAreas of responsibility: ' },
   ],
   concept_generation: [
     { label: 'Creative matrix', week: 'Week 7', text: 'Creative matrix for my How Might We… (defer judgment, aim for many ideas):\nPeople / Process / Policy: \nObjects: \nEnvironment: \nMedia: \nServices: \n' },
     { label: 'Crazy 8', week: 'Week 4', text: 'Crazy 8, eight different ideas for my How Might We…:\n1. \n2. \n3. \n4. \n5. \n6. \n7. \n8. \n' },
     { label: 'Powers of Ten', week: 'Week 8', text: 'Powers of Ten on my problem:\nZoomed in (smaller magnitude): \nZoomed out (larger magnitude): \nWhat new angle does this show? ' },
     { label: 'Combine old elements', week: 'Week 7', text: 'An idea is a new combination of old elements.\nElement A: \nElement B: \nThe relationship I see between them: ' },
-    { label: 'Metaphor or analogy', week: 'Week 8', text: 'Metaphor or analogy for my design:\nPain points: \nAttributes (converted from the pain points): \nSource domain outside my problem (nature, technology, art, social systems): \nWhat it suggests for my design: ' },
+    { label: 'Metaphor or analogy', week: 'Weeks 8–9', text: 'Metaphor or analogy for my design:\n1. Pain points: \n2. Convert the pain points to attributes: \n3. Source domain outside my design problem (nature, technology, art, social systems): \n4. Mapping relationships (how the source\'s attributes map to my design): ' },
   ],
   design_specification: [
     { label: 'Selection criteria', week: 'Week 7', text: 'My selection criteria, based on my persona, job statement and design challenge (for example big impact, best customer experience, most disruptive):\n1. \n2. \n3. \n\nThe concept that best meets them is… because… ' },
@@ -34,13 +35,12 @@ const COURSE_TOOLS: Record<string, CourseTool[]> = {
     { label: 'Riskiest assumption', week: 'Week 8', text: 'The most important assumption we need to test (the one that would make the whole solution fail if it is wrong):\n\nHow I could test it: ' },
     { label: 'Test questions', week: 'Week 9', text: 'Questions for my test:\nIs the intended solution valued by users?\nAm I focusing on the critical issues of the users?\nHow will I measure the value of the solution to the user?\n' },
     { label: 'Prototyping plan', week: 'Week 8', text: 'My prototyping plan:\n1. My design problem or challenge: \n2. My solution: \n3. My plan for user testing:\n   The most important assumption to test: \n   The prototype(s) I will build (which features?): \n   Tools and materials needed: \n' },
-    { label: 'Feedback from my test', week: 'Week 9', text: 'What I observed (listening with curiosity, not selling my idea): \nWhat it tells me about my assumptions: \nMy new point of view on my persona or job statement: ' },
+    { label: 'Feedback from my test', week: 'Week 9', text: 'What I observed (listening with curiosity, not selling my idea): \nWhat it tells me about my assumptions, solutions and concepts: \nMy new point of view on my persona or job statement: ' },
     { label: 'Who could be affected?', week: '', text: 'Someone who could be affected by my design is…\nWhat could go wrong for them, and how would I find out?' },
   ],
   reflection: [
     { label: 'What changed in my thinking?', week: '', text: 'At the start I thought…\nNow I think…\nWhat changed it was… ' },
     { label: 'Story arc', week: 'Week 10', text: 'My story arc:\nBackground: \nIntroduction: \nBuild-up and problems: \nSolution and testing: \nTake-home message: \n' },
-    { label: 'Rule of threes', week: 'Week 10', text: 'The three things I want people to remember:\n1. \n2. \n3. \n' },
     { label: 'What is still uncertain?', week: '', text: 'I am still unsure about…\nHow I could find out: ' },
   ],
 };
