@@ -141,7 +141,7 @@ def prepare_rows(messages: Sequence[Mapping[str, Any]]) -> list[PreparedRow]:
     Eligibility uses the same call as the course-intent eval scripts
     (``local_course_intent_candidate`` with the gate's intent and scope).
     """
-    from backend.coaching.execution import local_course_intent_candidate
+    from backend.coaching.evidence_scope import local_course_intent_candidate
     from backend.course_intent import is_first_student_turn
 
     prepared = []

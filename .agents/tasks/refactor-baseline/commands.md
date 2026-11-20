@@ -121,3 +121,17 @@ stub-model test:
 `stub_snapshots.before.json`, the `*.before.stdout.txt` and `*.before.stderr.txt` files,
 `exit-codes.before.tsv`, and the four helper scripts `dump_gate_decisions.py`,
 `run_offline_evals.sh`, `diff_outputs.py`, `stub_snapshots.py`.
+
+## Item 1 after-capture (evidence scope moved to `backend/coaching/evidence_scope.py`)
+
+Same dump method and command as `gate-decisions-before.json`, run from the repo root with the mock env vars:
+
+```sh
+$PY .agents/tasks/refactor-baseline/dump_gate_decisions.py .agents/tasks/refactor-baseline/gate-decisions-after.json
+diff .agents/tasks/refactor-baseline/gate-decisions-before.json .agents/tasks/refactor-baseline/gate-decisions-after.json   # empty, exit 0
+```
+
+`gate-decisions-after.json` is committed beside the before file. The offline evals were re-run with
+`sh .agents/tasks/refactor-baseline/run_offline_evals.sh .agents/tasks/refactor-evidence-scope/out after`
+and compared with `diff_outputs.py` (41 comparisons, 0 differing); the log is
+`.agents/tasks/refactor-evidence-scope/item1-offline-diff.txt`.

@@ -2,8 +2,9 @@
 
 Default mode is OFFLINE. It uses no network, no AWS, no model and no API key:
 
-* The retrieval gate is the repo's own rules-based gate, composed the same way
-  ``CoachingExecution._prepare_authoritative_turn`` composes it.
+* The retrieval gate is the repo's own rules-based gate. ``gate_decision``
+  calls ``backend.coaching.evidence_scope.decide_first_pass_scope``, the same
+  function ``CoachApplicationService._prepare_authoritative_turn`` calls.
 * Course search uses the repo's ``LocalChunkRetriever`` (lexical, BM25-style)
   over the local lecture PDFs, one chunk per PDF page. This is a stand-in for
   the Bedrock Knowledge Base. Offline numbers do not describe the Knowledge
@@ -594,91 +595,88 @@ class GateDecision:
     attachment_only: bool = False
 
 
-def _titles_and_names(entries: Sequence[Mapping[str, Any]]) -> tuple[list[str], list[str]]:
-    return (
-        [str(entry.get("title") or "") for entry in entries],
-        [str(entry.get("filename") or "") for entry in entries],
+def scope_inputs_for_row(
+    row: Mapping[str, Any], *, upload_retrieval_enabled: bool = False
+) -> Any:
+    """Build ``backend.coaching.evidence_scope.ScopeInputs`` from a dataset row.
+
+    The offline eval cannot supply four things production reads, so each is an
+    explicit input held at the value the pre-refactor gate assumed:
+
+    * image bytes: every file counts as loaded (``image_bytes_resolved=True``),
+      so missing image Q&A never fires;
+    * ``force_retrieval``: False (a Deep Review path, not a chat turn);
+    * the locked-course flag: False (a row has no course-library source);
+    * ``frozen_history``: False, and the course-intent model second chance
+      stays outside the gate (see ``evaluate_combined_gate``).
+
+    ``upload_retrieval_enabled`` stays False for the gate itself. The upload
+    policy block (``_upload_retrieval_policy``) turns it on to measure the
+    opt-in rule.
+
+    Source ids are ``eval-source-N`` then ``eval-attachment-N``, the ids
+    ``build_live_request`` stamps. ``is_image`` follows the filename extension,
+    the same guess ``_eval_upload_entries`` makes.
+    """
+    from backend.coaching.evidence_scope import ScopeInputs, ScopeSource
+
+    entries = _eval_upload_entries(row)
+    selected = list(row["selected_sources"])
+    attachments = list(row["attachments"])
+    sources = []
+    for index, (raw, entry) in enumerate(zip([*selected, *attachments], entries)):
+        is_attachment = index >= len(selected)
+        number = index - len(selected) + 1 if is_attachment else index + 1
+        sources.append(
+            ScopeSource(
+                source_id=f"eval-{'attachment' if is_attachment else 'source'}-{number}",
+                title=str(raw.get("title") or ""),
+                filename=str(raw.get("filename") or ""),
+                is_attachment=is_attachment,
+                is_course_library=False,
+                is_image=entry["kind"] == "image",
+                image_bytes_resolved=True,
+            )
+        )
+    return ScopeInputs(
+        message=str(row["message"]),
+        current_stage=str(row["stage"]),
+        sources=tuple(sources),
+        attachment_count=len(attachments),
+        interaction_intent=row.get("explicit_mode"),
+        force_retrieval=False,
+        frozen_history=False,
+        upload_retrieval_enabled=upload_retrieval_enabled,
     )
 
 
 def gate_decision(row: Mapping[str, Any]) -> GateDecision:
-    """Compose the repo's retrieval gate for one message row.
+    """Run the production first-pass scope rules for one message row.
 
-    Mirrors the first-pass mode and scope rules, including explicit interaction
-    modes when supplied. Image bytes, forced retrieval and the model-driven
-    second-chance retrieval path are outside this offline comparison.
+    A thin adapter: it builds the inputs (``scope_inputs_for_row``), calls
+    ``backend.coaching.evidence_scope.decide_first_pass_scope``, the same
+    function ``_prepare_authoritative_turn`` calls, and maps the result onto
+    ``GateDecision``. Image bytes, forced retrieval and the model-driven
+    second-chance retrieval path are held at the values ``scope_inputs_for_row``
+    documents.
 
     The effective decision is 'retrieve' only when a source is searched: the
     course catalog (``include_course_catalog``) or at least one personal file.
     """
-    from backend.coaching.execution import _wants_course_catalog_retrieval
-    from backend.coaching.mode_policy import (
-        is_current_stage_status_request,
-        is_private_attachment_question,
-        is_stage_progression_request,
-        is_terminal_completion_request,
-        resolve_mode_policy,
-        workflow_skips_retrieval,
-    )
+    from backend.coaching.evidence_scope import decide_first_pass_scope
 
-    message = str(row["message"])
-    stage = str(row["stage"])
-    selected = list(row["selected_sources"])
-    attachments = list(row["attachments"])
-    everything = selected + attachments
-    titles, filenames = _titles_and_names(everything)
-    policy = resolve_mode_policy(
-        message,
-        selected_source_titles=titles,
-        selected_source_filenames=filenames,
-        has_selected_sources=bool(everything),
-    )
-    lecture_help = row.get("explicit_mode") == "lecture_help"
-    status = not lecture_help and is_current_stage_status_request(message)
-    progression = is_stage_progression_request(message) or is_terminal_completion_request(
-        message, current_stage=stage
-    )
-    workflow_no_retrieve = workflow_skips_retrieval(message, current_stage=stage)
-    cleared = not lecture_help and (status or progression or workflow_no_retrieve)
-    mode_retrieve = (lecture_help or bool(policy.retrieve)) and not cleared
-    attachment_only = is_private_attachment_question(
-        message, attachment_count=len(attachments)
-    )
-    needs = mode_retrieve or attachment_only
-    if cleared:
-        personal: list[Mapping[str, Any]] = []
-    elif attachment_only:
-        personal = attachments
-    else:
-        personal = everything
-    include_course = (
-        needs
-        and not attachment_only
-        and not cleared
-        and (lecture_help or _wants_course_catalog_retrieval(message, mode_retrieve=mode_retrieve))
-    )
-    student = needs and bool(personal)
+    scope = decide_first_pass_scope(scope_inputs_for_row(row))
     return GateDecision(
-        retrieve=bool(include_course or student),
-        course=bool(include_course),
-        student=bool(student),
-        classifier_retrieve=bool(policy.retrieve),
-        # Mirrors ``_wants_source_need_check``: nothing searched and no gate
-        # override fixed the evidence scope.
-        second_chance=bool(
-            not (include_course or student) and not cleared and not attachment_only
-        ),
-        expected_mode=(
-            "qa"
-            if status or lecture_help
-            else "coaching"
-            if progression or workflow_no_retrieve or row.get("explicit_mode") == "project_coaching"
-            else policy.expected_mode
-        ),
-        intent=str(policy.intent or ""),
-        needs_retrieval=bool(needs or include_course),
-        scope_cleared=bool(cleared),
-        attachment_only=bool(attachment_only),
+        retrieve=bool(scope.include_course_catalog or scope.searches_personal_files),
+        course=bool(scope.include_course_catalog),
+        student=bool(scope.searches_personal_files),
+        classifier_retrieve=scope.classifier_retrieve,
+        second_chance=scope.second_chance,
+        expected_mode=scope.expected_mode,
+        intent=scope.classifier_intent,
+        needs_retrieval=scope.needs_retrieval,
+        scope_cleared=scope.scope_cleared,
+        attachment_only=scope.attachment_only,
     )
 
 
@@ -1095,9 +1093,9 @@ def _upload_retrieval_policy(
         scored: ``(message row, first-pass gate decision)`` per message.
         estimate: When False, skip the prompt-size estimate (tests).
     """
-    from backend.coaching.execution import (
-        _wants_student_upload_retrieval,
-        searchable_student_uploads,
+    from backend.coaching.evidence_scope import (
+        decide_first_pass_scope,
+        is_searchable_student_upload,
     )
 
     before: list[tuple[str, bool]] = []
@@ -1112,15 +1110,21 @@ def _upload_retrieval_policy(
     provider = _live_eval_provider() if estimate else None
     for row, decision in scored:
         uploads = (
-            [] if decision.scope_cleared else searchable_student_uploads(_eval_upload_entries(row))
+            []
+            if decision.scope_cleared
+            else [
+                entry
+                for entry in _eval_upload_entries(row)
+                if is_searchable_student_upload(
+                    is_course_library=False, is_image=entry["kind"] == "image"
+                )
+            ]
         )
-        fired = _wants_student_upload_retrieval(
-            enabled=True,
-            needs_retrieval=bool(decision.needs_retrieval),
-            has_student_upload=bool(uploads),
-            evidence_scoped=bool(decision.scope_cleared or decision.attachment_only),
-            student_message=str(row["message"]),
-        )
+        # The production rule, with the setting on: the same module call the
+        # gate makes, so the policy cannot drift from ``execution.py``.
+        fired = decide_first_pass_scope(
+            scope_inputs_for_row(row, upload_retrieval_enabled=True)
+        ).upload_policy_only
         label = row["expected_decision"]
         retrieved = bool(decision.retrieve or fired)
         before.append((label, decision.retrieve))

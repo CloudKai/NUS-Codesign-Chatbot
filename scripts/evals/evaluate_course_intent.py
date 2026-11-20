@@ -31,7 +31,7 @@ def _p95_ms(values: list[float]) -> float | None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the Phase 3c subset with local weights and write a JSON report."""
-    from backend.coaching.execution import local_course_intent_candidate
+    from backend.coaching.evidence_scope import local_course_intent_candidate
     from backend.course_intent import LayaCourseIntentClassifier
     from scripts.evals import evaluate_retrieval as retrieval
 

@@ -89,7 +89,7 @@ def select_threshold(
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Fit local synthetic data and report one untouched holdout evaluation."""
-    from backend.coaching.execution import local_course_intent_candidate
+    from backend.coaching.evidence_scope import local_course_intent_candidate
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
