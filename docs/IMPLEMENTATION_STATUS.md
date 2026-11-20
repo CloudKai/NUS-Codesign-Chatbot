@@ -2,6 +2,43 @@
 
 ## Current status
 
+### Head-to-head routing comparison: Laya vs KB-score routing (built, not run; branch `improvement/backend`)
+
+No production routing change and no setting default changed (all stay off). Nothing
+under `backend/`, `agentcore_runtime/` or `frontend/` changed. **No live command ran:**
+no Knowledge Base call, no AWS call, no Laya weights. Mock tests only. Details, exact
+commands, IAM and cost: [Head-to-head routing comparison](RETRIEVAL_EVAL.md#head-to-head-routing-comparison-built-not-run).
+
+| Step | What changed | Commits |
+|---|---|---|
+| Pre-registration | `.agents/tasks/headtohead-prereg/plan.md`: sha256 split, how T is chosen, metrics M1 to M6, pass rule, written before any per-half figure. Never edited; dated amendments only | `8c51cdd` |
+| `--live-kb-gate` | One `Retrieve` per gate message in `evaluate_retrieval.py`, cap 295, stops on the first auth error, ids and scores only | `6459ba8` |
+| `compare_routing_arms` | New command and `scripts/evals/lib/` modules; `evaluate_combined_gate.py` re-exports the moved helpers, output unchanged | `f377a1c` |
+| Laya all-rows host run | `benchmark_course_intent.py` host-note flags and per-row output | `1f6acb6` |
+| `--extra-messages` | Optional human-labelled rows, reported apart from the 295; `synthetic: true` required unless `--allow-non-synthetic` | `a1bd91e` |
+| Docs | Commands, IAM, cost, pre-registration, privacy | this commit |
+
+- **Validation evidence.** Mock tests only: the four new test files (live gate, compare,
+  host note, extra messages) plus the unchanged existing tests, and
+  `tests/scripts/test_eval_command_boundaries.py`, which picks up
+  `compare_routing_arms.py` and every new `lib` module through its directory globs and
+  passes unedited (41 tests). `ruff check` and `compileall` pass. Counts per commit are in
+  the commit messages. The full suite was not run.
+- **Compatibility and rollback.** Existing flags, help text, JSON schemas and exit codes of
+  the eval commands are unchanged (new flags only). Revert the commits above to remove the
+  work; no data or migration is involved.
+- **Unresolved.** No arm can be declared the winner until two files exist: the live
+  KB-score file (`--live-kb-gate --max-live-calls 295`, up to about $0.30 at the assumed
+  $1 per 1,000 calls) and the all-rows Laya file on a named host. Host type, vCPU, RAM and
+  arch are still `<TYPE>`, `<N>`, `<GB>`, `<arm64|x86_64>`. The AWS price per Retrieve
+  call is the user's assumption and is unconfirmed. IAM `bedrock:Retrieve` on
+  `arn:aws:bedrock:<region>:<account-id>:knowledge-base/<KB-ID>` is checked against the AWS
+  Service Authorization Reference, not tested on an account.
+- **Next exact action.** Operator runs the three commands in the RETRIEVAL_EVAL section
+  (live gate, Laya all-rows host run, `compare_routing_arms`), then the report
+  `.agents/tasks/headtohead-<date>.md` is written with measured, bound and missing
+  sections and the work stops for review.
+
 ### Refactor items 1 and 2: one owner for first-pass scope, uncoupled eval commands (branch `improvement/backend`)
 
 No behaviour change in production or in any eval number, and no live command

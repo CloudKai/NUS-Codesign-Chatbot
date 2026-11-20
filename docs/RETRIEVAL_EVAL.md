@@ -24,6 +24,7 @@ no `main` and starts no live call on import:
 | `route_scoring` | Routing splits, `observe`, `apply`, `evaluate`, `assess` (takes any `predict` callable, so no model is loaded) |
 | `passage_scoring` | Passage `candidates`, `coverage`, `run` (takes an optional encoder or judge) |
 | `prepared_rows` | `PreparedRow`, `prepare_rows` (gate once per message, Laya eligibility) |
+| `prereg`, `routing_arms`, `arm_metrics`, `arm_report`, `paired_stats`, `kb_scores`, `kb_gate`, `laya_sources`, `intervals`, `extra_messages`, `extra_arms` | Head-to-head comparison: the pre-registered split, T choice and pass rule; arm search decisions; M1 to M5; exact McNemar; KB-score file loader and live gate recorder; stored and all-rows Laya loaders; optional extra messages. See "Head-to-head routing comparison" below |
 
 Model fitting and model loading stay in the command that owns the experiment:
 `fit_laya`, `fit_setfit`, `compact_predictors` in `compare_turn_routes`;
@@ -382,6 +383,9 @@ the normal credential chain.
 - **Run block.** The JSON file carries `run` (git SHA, dirty flag, UTC
   timestamp), as in offline mode. The row filters of `--live-model` do not
   apply here and are refused.
+
+`--live-kb-gate` (one Retrieve per gate message, cap 295, for the head-to-head comparison)
+is a separate mode with its own refusals; see "Head-to-head routing comparison" below.
 
 ## Page numbers from the Knowledge Base
 
@@ -1458,6 +1462,198 @@ parts and gaps:
 
 Related open decision (not implemented): labelling answers on course Q&A turns
 where no search ran as general, not from course materials.
+
+## Head-to-head routing comparison (built, not run)
+
+Compares four ways of deciding whether a turn gets course evidence, on the same 295
+gate messages: **A** the existing gate, **B** gate plus Laya (current promotion rule,
+unchanged cutoffs), **C** Knowledge Base score routing (skip only where an existing
+skip rule fires, otherwise search, inject evidence if the top validated score is at
+least T) and **D** gate plus Laya decide whether to search, KB score decides whether
+evidence is injected. Scope decisions come from `backend/coaching/evidence_scope.py`;
+no gate rule or setting was added.
+
+**State.** The three commands below are built and covered by mock tests only. **Nothing
+live has run:** no Knowledge Base call, no AWS call, no Laya weights. The KB-score file
+(`kb-gate.json`) and the all-rows Laya file (`laya-all-rows-*.json`) do not exist, so no
+arm can be declared the winner. Without them, arms C and D are `missing`, A and B use a
+search-only bound, and no arm can reach `pass`. A run that reports a full comparison
+needs both files, produced on the host named in the report.
+
+**No production change.** Everything is under `scripts/evals/`, `tests/scripts/` and
+docs. `backend/`, `agentcore_runtime/` and `frontend/` are untouched, and every setting
+stays at its default (off). Nothing here changes routing in the app.
+
+### Pre-registration
+
+The rules were written and committed before any per-half figure was computed:
+`.agents/tasks/headtohead-prereg/plan.md` (git-ignored folder, committed with
+`git add -f`, commit `8c51cdd`; sha256
+`59fd07ffc9c64ed657de59dfecadb75c3f37ef898225dd87850044f20c4c0b9c`). **Its text is never
+edited.** A correction is appended as a dated, post-hoc amendment at the end of the file,
+and the report says so. `compare_routing_arms` records the file's sha256 and commit in its
+output, and refuses to run if the constants block in section 14 of the plan differs from
+`scripts/evals/lib/prereg.py` (a test checks the same).
+
+- **Split.** One function in `scripts/evals/lib/prereg.py`. With
+  `h = int(sha256(row_id.encode("utf-8")).hexdigest(), 16)`, a row is calibration if
+  `h % 2 == 0` and holdout otherwise. No salt, no stratification; sizes are whatever the
+  rule gives. Calibration rows are used only to choose T. Every reported metric, paired
+  test and pass decision uses holdout rows.
+- **How T is chosen** (arms C and D, `T_C` and `T_D`, by code, no override flag).
+  Candidates are the distinct top validated scores on calibration rows where the arm
+  searched the KB and got at least one validated hit, plus `+inf` (never inject KB
+  evidence). Among candidates with calibration M2 at most 10%, take the lowest
+  calibration M1. Ties: lower calibration M2, then the highest T. If none has M2 at most
+  10%, the arm has "no feasible T" and fails. T is written to the output and applied
+  unchanged to the holdout rows. A partial KB file gives `missing` and no T. Laya
+  cutoffs are read from files and never fitted: 0.8 for the multilingual checkpoint, and
+  0.8563768 (continuing) and 0.6455846 (first turn) for Laya Learn, which is secondary
+  because it was fitted on 150 rows of this set.
+- **Evidence injected.** A and B: a KB search ran, did not fail, and has at least one
+  validated hit. C and D: the same, and top validated score at least T. Any local search
+  of student uploads also counts as injected (optimistic for M1, pessimistic for M2).
+- **Metrics (holdout rows, Wilson 95%, samples under 30 marked small).** M1: `retrieve`
+  rows with no evidence injected. M2: `skip` rows with evidence injected. M3: searches
+  added per 100 turns versus A, KB and local counted separately. M4: added wait per turn
+  (Laya inference ms plus KB ms, p50 and p95; local-search time is `missing`). M5: cost
+  per 1,000 turns at $1 per 1,000 KB searches, and Laya host memory. M6 (operational risk
+  table, facts only, with file and line evidence) is written in the report, not computed
+  by the command.
+- **Paired tests.** Exact two-sided McNemar on holdout rows for A vs B, A vs C, B vs C
+  and C vs D, in three families (`retrieve` rows, `skip` rows, all-row mistakes), with
+  both discordant counts. B and D only add searches to A, so "A is never better than B"
+  on M1 is built in; the output repeats this next to the p-values.
+- **Pass rule (fixed).** An arm passes if holdout M1 is at most 15%, M2 at most 10% and
+  added p95 wait at most 1,000 ms. The states are `pass` (holds under the pessimistic
+  reading of every unknown), `fail` (breaks under the optimistic reading, or no feasible
+  T) and `cannot be determined yet` (anything with missing KB, wait or Laya data). If
+  several arms pass, the order of moving parts is A, C, B, D, and a later arm replaces the
+  champion only if its M1 is lower and the McNemar test on `retrieve` rows gives
+  `p < 0.05`. If none passes, the report says so. The rule is not relaxed afterwards.
+- **Laya coverage.** Stored decisions cover 94 of 147 eligible rows (multilingual) and 41
+  (Learn). They are reported as floor, ceiling and scored-only until an all-rows file is
+  supplied with `--laya-full`.
+
+### Exact commands (not run)
+
+Fill in the host values for the machine the final figures are for; the harness refuses
+placeholders. AWS credentials come from the normal chain.
+
+```bash
+# 1. KB scores: one Retrieve per gate message, all 295 (needs approval; costs money).
+KNOWLEDGE_BASE_ID=<kb id> KNOWLEDGE_BASE_TYPE=managed \
+KNOWLEDGE_BASE_METADATA_FILTER_MODE=required \
+COURSE_MATERIALS_BUCKET=<course bucket> AWS_REGION=<region> \
+  python scripts/evals/evaluate_retrieval.py --live-kb-gate --max-live-calls 295 \
+  --json-output .agents/tasks/headtohead-prereg/kb-gate.json
+
+# 2. Laya on all 295 rows, on the host to be reported (needs laya and the weights).
+python -m scripts.evals.benchmark_course_intent --checkpoint /path/to/laya-multilingual \
+  --passes 3 --warmup 5 \
+  --host-instance-type <TYPE> --host-vcpu <N> --host-ram-gb <GB> --host-arch <arm64|x86_64> \
+  --json-output .agents/tasks/headtohead-prereg/laya-all-rows-multilingual.json
+# Laya Learn: use  --checkpoint /path/to/vega --bundle /path/to/course-learner.zip  instead.
+
+# 3. Analysis (offline, blocks the network, writes no message text).
+python -m scripts.evals.compare_routing_arms \
+  --kb-gate .agents/tasks/headtohead-prereg/kb-gate.json \
+  --laya-full .agents/tasks/headtohead-prereg/laya-all-rows-multilingual.json \
+  --json-output .agents/tasks/headtohead-prereg/comparison.json \
+  --markdown-output .agents/tasks/headtohead-prereg/comparison.md
+# Laya Learn file: add  --laya-full-kind learn
+```
+
+Result files stay in the git-ignored `.agents/` folder; commit them only with
+`git add -f` and only if they hold no private data. Do not commit build output.
+
+**`--live-kb-gate`.** Off by default. It requires `--max-live-calls N` with N from 1 to
+295 (below 295 it sends an evenly spaced subset). It exits 2, before any client exists,
+if N is missing or out of range, if `KNOWLEDGE_BASE_ID` or `COURSE_MATERIALS_BUCKET` is
+unset, or if it is combined with `--live-kb`, `--live-model`, `--ids`, `--categories`,
+`--expected-decision`, `--skip-sample` or `--compare-source-check`. Exit codes: 0 ran, 1
+no call was answered, 2 refused, 3 stopped on the first auth or access error. Each call
+goes through `BedrockKnowledgeBaseRetriever` with the production filter on
+`course_material_id`, 12 candidates, at most 4 validated chunks, one attempt and the
+production timeouts (10 s read). The record (`mode: live_kb_gate`) has, per message id,
+the top validated score, result count, status (`ok`, `empty`, `unavailable`), failure
+category, elapsed ms, raw hit count and exception class, plus the KB settings (no KB id,
+bucket or account), git SHA, dirty flag and UTC time. It holds ids and categories only.
+
+**`compare_routing_arms`.** Flags: `--kb-gate`, `--laya-results-dir` (default
+`.agents/tasks/phase3d-work`), `--laya-full`, `--laya-full-kind {multilingual,learn}`,
+`--plan`, `--json-output`, `--markdown-output`, and the extra-message flags below. Exit
+0 means the report was written; 2 means refused (bad KB file, a Laya full-run file that
+is a stub, incomplete or has unknown ids, or a plan whose constants differ from the
+code). Every figure carries a status label: `measured`, `bound`, `missing`, or
+`synthetic_test_data` for a KB file marked `synthetic_test_fixture: true` (the report then
+opens with a "not a result" banner).
+
+**`benchmark_course_intent` host run.** The host flags, the per-row `rows` output and
+the refusal rules are described under "Laya production readiness" above. A `--stub-ms`
+file is marked `real_model: false` and `--laya-full` refuses it.
+
+### Extra messages: privacy and the `synthetic` flag
+
+The optional `--extra-messages FILE` (on `evaluate_retrieval.py --live-kb-gate` and on
+`compare_routing_arms`) is described in "Extra messages (optional, separate from the 295)"
+under "Laya production readiness" above. The points that matter for this comparison:
+
+- Extra rows are never split, never used to choose T, and never part of M1, M2, a paired
+  test or a pass rule. They are descriptive, scored under the T frozen on the 295, and
+  reported in a separate `extra_messages` section.
+- Message and history text stays in memory. It is not written to JSON, Markdown, stdout,
+  stderr or logs. Errors name a line, a field and a safe id, never a value. The text does
+  go to the Knowledge Base in the live request, as in any chat turn. Keep ids anonymous.
+- A row must carry `"synthetic": true`. A row with `false` is refused (exit 2) unless the
+  operator passes `--allow-non-synthetic`, which marks the record and the report
+  `real_messages`. A missing or non-boolean marker is always refused.
+
+### IAM for the live gate
+
+The live gate needs one action, `bedrock:Retrieve`, on the Knowledge Base resource:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "bedrock:Retrieve",
+  "Resource": "arn:aws:bedrock:<region>:<account-id>:knowledge-base/<KB-ID>"
+}
+```
+
+**Verified against AWS documentation (fetched when this section was written).** The
+[Service Authorization Reference for Amazon Bedrock](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonbedrock.html)
+lists the `Retrieve` action (access level Read, SDK client `bedrock-agent-runtime`) with the
+required resource type `knowledge-base`, whose ARN is
+`arn:${Partition}:bedrock:${Region}:${Account}:knowledge-base/${KnowledgeBaseId}`, and the
+condition key `aws:ResourceTag/${TagKey}`. The
+[Retrieve API page](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html)
+shows the call as `POST /knowledgebases/{knowledgeBaseId}/retrieve` and accepts either the
+10-character id or a `knowledge-base` ARN as the identifier. That page does not state the
+IAM policy; the policy form comes from the authorization reference. This repo's runbook
+grants the same action and resource form to the EC2 role
+(`docs/deploy/AWS_STATELESS_EC2.md`, "Bedrock Knowledge Base Retrieve"). Not tested
+against a real account. Grant it to a short-lived operator identity and remove it
+afterwards. Do not grant `bedrock:RetrieveAndGenerate`; the gate never calls it.
+
+### Cost estimate (estimate, not a measurement)
+
+- **Live gate.** At most 295 `Retrieve` calls. At the price the user supplied, $1 per
+  1,000 Retrieve calls (an assumption, not checked against an AWS price page): 295 x $1 /
+  1,000 = $0.295, so about $0.30 at most. The cap stops the run at N calls; each call is
+  made once, with no retry.
+- **What else the gate calls, from the code.** Nothing: no model call, no Converse, no
+  S3 call, no `GetKnowledgeBase`. Wall time: if every call hit the 10 s read timeout, at
+  most 295 x 10 s, about 49 minutes; the run stops sooner on the first auth error.
+- **Billed by AWS for a Retrieve, beyond the $1 assumption.** Unknown. Third-party pages
+  describe a managed Knowledge Base as billed per search with embeddings and reranking
+  included, and a vector-store Knowledge Base as billed for its embedding model and vector
+  store; I did not confirm either against an AWS pricing page, and the repo does not say
+  which applies. Check the AWS bill for the Knowledge Base type in use.
+- **Laya host run.** No AWS call (sockets are blocked and `HF_HUB_OFFLINE=1`). The cost is
+  host time on the instance the operator chooses; its price is not estimated here.
+- **Analysis command.** Offline; no cost.
+- **Not priced:** CloudWatch or CloudTrail, data transfer, and the host's own cost.
 
 ## AgentCore vs direct Bedrock Converse benchmark (Phase 4 item 5, built, not run)
 
