@@ -2,55 +2,74 @@
 import type { ChatSummary, Project, Stage } from './api';
 
 export interface Starter { label: string; text: string }
+/** A template from the CDE2300 lecture notes. `week` names the lecture file it comes from. */
+export interface CourseTool extends Starter { week: string }
 
-/** Stage ids match backend THINKING_STAGES. Unknown ids use the generic starters. */
-const STAGE_STARTERS: Record<string, Starter[]> = {
+/**
+ * Templates taken from the CDE2300 lecture notes (lecture_notes/lectureNotes) and the app's own How Might We
+ * formula (agentcore_runtime/prompts/stages). Wording follows the slides. Stage ids match backend THINKING_STAGES.
+ * The first three tools of a stage appear as chips above the composer; all of them are listed in Review.
+ */
+const COURSE_TOOLS: Record<string, CourseTool[]> = {
   problem_identification: [
-    { label: 'Empathy map', text: 'Empathy map for (who is affected):\nSays: \nThinks: \nDoes: \nFeels: \n\nWhat stands out to me: ' },
-    { label: 'Sharpen my problem', text: 'My problem statement right now is…\nHelp me make it clearer and more specific.' },
-    { label: 'Why does it matter?', text: 'This problem matters because…\nWhat evidence would show that it really is a problem worth solving?' },
+    { label: 'Job statement', week: 'Week 2', text: 'My job statement:\nWHEN I … (what is the context?)\nBUT … (what is the barrier getting in the way today?)\nHELP ME … (what is the user trying to do?)\nSO I … (what is the outcome of achieving it?)\n' },
+    { label: 'Persona', week: 'Week 4', text: 'My persona:\nEmpathic title: \nQuote: \nBasic demographics: \nGoals & frustrations: \nHabits/preferences: \n' },
+    { label: 'How Might We', week: 'Week 7', text: 'How might we … (action or opportunity)\nfor … (user)\nso that … (desired outcome or benefit)\n' },
+    { label: 'Functional, emotional, social jobs', week: 'Week 2', text: 'The jobs my user is hiring this product to do:\nFunctional: \nEmotional: \nSocial: \n' },
+    { label: 'Interview questions', week: 'Week 2', text: 'Questions for my JTBD interview:\nWhen did you first think about buying something like this?\nTell me the story about buying this product.\nWhy did you buy this product?\nHow do you feel about your purchase now?\nHow did you share your buying story with friends and family?\n\nWhat I learned: ' },
   ],
   concept_generation: [
-    { label: 'Give me three alternatives', text: 'My current idea is…\nGive me three genuinely different alternatives to consider.' },
-    { label: 'Compare my ideas', text: 'Comparing my ideas:\nIdea A: \nIdea B: \nWhat matters most (for example safety, cost, ease of use): \n\nI think the better fit is… because…' },
-    { label: 'Pick a direction', text: 'The concept I am leaning towards is…\nHelp me test whether it is the right one to develop.' },
+    { label: 'Creative matrix', week: 'Week 7', text: 'Creative matrix for my How Might We… (defer judgment, aim for many ideas):\nPeople / Process / Policy: \nObjects: \nEnvironment: \nMedia: \nServices: \n' },
+    { label: 'Crazy 8', week: 'Week 4', text: 'Crazy 8, eight different ideas for my How Might We…:\n1. \n2. \n3. \n4. \n5. \n6. \n7. \n8. \n' },
+    { label: 'Powers of Ten', week: 'Week 8', text: 'Powers of Ten on my problem:\nZoomed in (smaller magnitude): \nZoomed out (larger magnitude): \nWhat new angle does this show? ' },
+    { label: 'Combine old elements', week: 'Week 7', text: 'An idea is a new combination of old elements.\nElement A: \nElement B: \nThe relationship I see between them: ' },
+    { label: 'Metaphor or analogy', week: 'Week 8', text: 'Metaphor or analogy for my design:\nPain points: \nAttributes (converted from the pain points): \nSource domain outside my problem (nature, technology, art, social systems): \nWhat it suggests for my design: ' },
   ],
   design_specification: [
-    { label: 'List requirements', text: 'My design must…\nHelp me check whether these requirements are complete and testable.' },
-    { label: 'Name the constraints', text: 'The constraints I know about are…\nWhat constraints might I be missing?' },
-    { label: 'How will I judge success?', text: 'I will know my design works if…\nHelp me turn this into measurable criteria.' },
+    { label: 'Selection criteria', week: 'Week 7', text: 'My selection criteria, based on my persona, job statement and design challenge (for example big impact, best customer experience, most disruptive):\n1. \n2. \n3. \n\nThe concept that best meets them is… because… ' },
+    { label: 'Prioritisation matrix', week: 'Week 7', text: 'Prioritisation matrix (importance to the customer experience vs difficulty):\nHigh importance, low difficulty: \nHigh importance, high difficulty: \nLow importance, low difficulty: \nLow importance, high difficulty: \n' },
+    { label: 'Goals, values, features', week: 'Week 4', text: 'User goal (why?): \nProduct value (what?): \nProduct feature (how?): \n' },
   ],
   deep_analysis: [
-    { label: 'Challenge my assumption', text: 'One assumption in my design is…\nWhat evidence would challenge it?' },
-    { label: 'Weigh the trade-offs', text: 'The main trade-off in my design is…\nHelp me weigh the options and what I would give up.' },
-    { label: 'Ethical implications', text: 'Someone who could be affected by my design is…\nWhat ethical risks should I consider?' },
+    { label: 'Riskiest assumption', week: 'Week 8', text: 'The most important assumption we need to test (the one that would make the whole solution fail if it is wrong):\n\nHow I could test it: ' },
+    { label: 'Test questions', week: 'Week 9', text: 'Questions for my test:\nIs the intended solution valued by users?\nAm I focusing on the critical issues of the users?\nHow will I measure the value of the solution to the user?\n' },
+    { label: 'Prototyping plan', week: 'Week 8', text: 'My prototyping plan:\n1. My design problem or challenge: \n2. My solution: \n3. My plan for user testing:\n   The most important assumption to test: \n   The prototype(s) I will build (which features?): \n   Tools and materials needed: \n' },
+    { label: 'Feedback from my test', week: 'Week 9', text: 'What I observed (listening with curiosity, not selling my idea): \nWhat it tells me about my assumptions: \nMy new point of view on my persona or job statement: ' },
+    { label: 'Who could be affected?', week: '', text: 'Someone who could be affected by my design is…\nWhat could go wrong for them, and how would I find out?' },
   ],
   reflection: [
-    { label: 'What changed in my thinking?', text: 'At the start I thought…\nNow I think…\nHelp me explain what changed and why.' },
-    { label: 'What is still uncertain?', text: 'I am still unsure about…\nHelp me decide how to deal with this uncertainty.' },
-    { label: 'Plan next steps', text: 'If I continued this project, I would next…\nHelp me prioritise.' },
+    { label: 'What changed in my thinking?', week: '', text: 'At the start I thought…\nNow I think…\nWhat changed it was… ' },
+    { label: 'Story arc', week: 'Week 10', text: 'My story arc:\nBackground: \nIntroduction: \nBuild-up and problems: \nSolution and testing: \nTake-home message: \n' },
+    { label: 'Rule of threes', week: 'Week 10', text: 'The three things I want people to remember:\n1. \n2. \n3. \n' },
+    { label: 'What is still uncertain?', week: '', text: 'I am still unsure about…\nHow I could find out: ' },
   ],
 };
-const GENERIC_STARTERS: Starter[] = [
-  { label: 'Share my idea', text: 'My idea so far is…\nHelp me develop it.' },
-  { label: 'Test an assumption', text: 'One assumption I am making is…\nWhat evidence would challenge it?' },
-  { label: 'What next?', text: 'I am not sure what to do next on my project.\nWhat should I think about?' },
+const GENERIC_TOOLS: CourseTool[] = [
+  { label: 'Share my idea', week: '', text: 'My idea so far is…\nWhat I am not sure about: ' },
+  { label: 'Test an assumption', week: '', text: 'One assumption I am making is…\nWhat evidence would challenge it? ' },
+  { label: 'What next?', week: '', text: 'I am not sure what to do next on my project.\nWhat should I think about? ' },
 ];
+
+/** Every template for a stage, for the Review stage list. */
+export function courseTools(stageId: string): CourseTool[] {
+  return COURSE_TOOLS[stageId] ?? GENERIC_TOOLS;
+}
+
+/** Up to three starters for a stage: the lecture tools most used at that point. */
+export function starterChips(stageId: string): Starter[] {
+  return courseTools(stageId).slice(0, 3);
+}
 
 /** Progressive hints: a nudge first, then a more specific one. Neither asks for the answer. */
 export function hintScaffold(level: number, stage: string) {
   return level <= 0
-    ? `I'm stuck on ${stage}.\n\nPlease give me a small hint, such as a question or a nudge. Don't give me the answer. `
+    ? `I'm stuck on ${stage}.\n\nPlease give me a small hint, such as a question or a nudge. If a tool from our lectures could help, name it. Don't give me the answer. `
     : `Your last hint helped a little, but I'm still stuck on ${stage}.\n\nPlease give me a more specific hint. Don't write the answer for me. `;
 }
 
 /** One optional line after a stage move, to build the habit of noticing how thinking changed. */
 export const reflectionScaffold = (stage: string) => `Looking back on ${stage}, what changed in my thinking: `;
 
-/** Up to three starters for a stage. */
-export function starterChips(stageId: string): Starter[] {
-  return STAGE_STARTERS[stageId] ?? GENERIC_STARTERS;
-}
 
 interface SkillContent { explanation: string; practice: string }
 /** Keyed by lowercase Facione dimension label from the API (FACIONE_DIMENSIONS). */

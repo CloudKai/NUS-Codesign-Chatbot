@@ -149,10 +149,16 @@ stage markers express actual ordered stages, never invented scores or rewards.
 - **Recovery:** preserve actionable errors, pending-write checks, disabled states
   and unsaved streaming labels even when simplifying ordinary status copy.
 
-- **Hints, tools and reflection:** the starter row above the composer leads with a
-  **Need a hint?** chip that inserts a request for a small nudge, then **Stronger hint**
-  after one use (resets when the stage changes). Stage chips can carry fill-in tools such
-  as the Problem identification empathy map and the Concept generation comparison.
+- **Course tools:** stage chips above the composer and the "Tools from the course" list in
+  each opened Review stage insert fill-in templates taken from the CDE2300 lecture notes:
+  job statement (WHEN I, BUT, HELP ME, SO I), persona, How Might We, creative matrix with
+  POEMS, Crazy 8, Powers of Ten, selection criteria, prioritisation matrix, goals, values and
+  features, prototyping plan, test questions and the story arc. Each shows the lecture week.
+  Do not add frameworks that are not in the notes. The Week 3 empathy map is left out until
+  its slides are in `lecture_notes/`.
+- **Hints and reflection:** the **Hint** button beside Send asks for a small nudge and
+  points to a lecture tool if one fits, then **Stronger hint** after one use (resets when
+  the stage changes).
   After a confirmed stage move, the milestone banner offers an optional **Add a
   reflection**. Everything inserts editable text and never sends. The row shows two chips
   plus the hint chip, scrolls sideways on phones, and hides while a check-in or milestone

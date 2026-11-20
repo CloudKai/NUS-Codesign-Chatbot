@@ -4,7 +4,7 @@ import type { Project, ReviewFeedback, Stage } from './api';
 import { CoachText } from './CoachText';
 import { Icon } from './Icon';
 import { downloadProject } from './projectExport';
-import { buildScaffold, improveScaffold, practiceScaffold, skillExplanation, skillLevel, skillSummary, skillTip } from './coachingContent';
+import { buildScaffold, improveScaffold, practiceScaffold, courseTools, skillExplanation, skillLevel, skillSummary, skillTip } from './coachingContent';
 
 const reviewTabs = ['Summary', 'Progression'] as const;
 
@@ -167,7 +167,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
                 <Icon name={expanded ? 'chevronDown' : 'chevronRight'}/>
               </button>
               <section hidden={!expanded} id={`stage-work-${stage.id}`} className="stage-work" aria-label={`${stage.label} saved work`}>
-                {expanded ? <StageDetail stage={stage} isCurrent={isCurrent} disabled={disabled}
+                {expanded ? <StageDetail stage={stage} isCurrent={isCurrent} disabled={disabled} onUseTool={text => insertScaffold(text, 'project')}
                   onSelect={() => void decide('select-stage', { stage_id: stage.id })}/> : null}
               </section>
             </li>;
@@ -181,7 +181,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
 const WORK_PREVIEW = 1;
 
 /** Compact stage detail: next action, coach summary, and a short preview of the student's own work. */
-function StageDetail({ stage, isCurrent, disabled, onSelect }: { stage: Stage; isCurrent: boolean; disabled: boolean; onSelect: () => void }) {
+function StageDetail({ stage, isCurrent, disabled, onSelect, onUseTool }: { stage: Stage; isCurrent: boolean; disabled: boolean; onSelect: () => void; onUseTool: (text: string) => void }) {
   const [allWork, setAllWork] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const newestFirst = [...stage.student_work].reverse();
@@ -207,6 +207,12 @@ function StageDetail({ stage, isCurrent, disabled, onSelect }: { stage: Stage; i
       {extra > 0 ? <button className="card-link" aria-expanded={allWork} onClick={() => setAllWork(open => !open)}>
         {allWork ? 'Show less' : `Show all ${stage.student_work.length}`}</button> : null}
     </div>
+    {isCurrent || stage.selectable ? <div className="stage-block">
+      <h4>Tools from the course</h4>
+      <ul className="tool-list">{courseTools(stage.id).map(tool => <li key={tool.label}>
+        <button className="tool-chip" disabled={disabled} onClick={() => onUseTool(tool.text)}>
+          {tool.label}{tool.week ? <small>{tool.week}</small> : null}</button></li>)}</ul>
+    </div> : null}
   </div>;
 }
 
