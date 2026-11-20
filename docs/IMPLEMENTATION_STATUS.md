@@ -2,6 +2,22 @@
 
 ## Current status
 
+### Refactor item 1: first-pass evidence scope has one owner (branch `improvement/backend`)
+
+No behaviour change and no live command. `backend/coaching/evidence_scope.py`
+now owns the first-pass scope and mode precedence (Lecture Help, Thinking Path
+commands, attachment-only questions, missing image Q&A, `force_retrieval`,
+course catalog, Laya eligibility, upload retrieval policy).
+`_prepare_authoritative_turn` and the offline gate eval's `gate_decision` both
+call it; the duplicated precedence code is gone from both. Evidence: the per
+message decisions for all 295 gate messages and 12 follow-up cases are
+identical to `.agents/tasks/refactor-baseline/gate-decisions-before.json`
+(empty diff against `gate-decisions-after.json`), and wrong-skip 76/154,
+false-retrieve 7/141 and recall@4 91/94 are unchanged. Report:
+`.agents/tasks/refactor-evidence-scope-2026-11-20.md` (git-ignored, committed
+with `git add -f`). Next: item 2, uncoupling the eval commands, after review.
+See [RAG_ARCHITECTURE](RAG_ARCHITECTURE.md) (First-pass evidence scope).
+
 ### Phase 4 status (items 0 to 5 complete; branch `improvement/backend`)
 
 No live command (AWS, Bedrock, AgentCore, Knowledge Base, OpenAI or any paid call)
@@ -46,8 +62,9 @@ entries for items 0 to 5 follow; the full report is
   licences, storage, memory, timeout, startup failure versus fallback);
   (5) whether to pursue AgentCore streaming (a runtime contract change). Entry point
   for the next phase: Phase 5, to be defined from those answers; the first code
-  entry point is `backend/coaching/execution.py` (retrieval gate, around line 3190)
-  if the labelling decision is approved.
+  entry point is `backend/coaching/evidence_scope.py` (first-pass scope rules; called from
+  `_prepare_authoritative_turn` in `backend/coaching/execution.py`) if the labelling
+  decision is approved.
 
 ### AgentCore vs direct Converse benchmark harness (Phase 4 item 5, built, not run)
 

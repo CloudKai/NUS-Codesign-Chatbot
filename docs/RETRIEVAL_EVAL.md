@@ -27,10 +27,14 @@ report is unchanged. To compare two files, drop `run` first:
 python -c "import json,sys;a,b=(json.load(open(p)) for p in sys.argv[1:]);[d.pop('run',None) for d in (a,b)];print(a==b)" before.json after.json
 ```
 
-- **Gate.** The script composes the repo's own rules-based retrieval gate
-  (`resolve_mode_policy`, the attachment, stage-status, navigation and
-  meta-guidance overrides, and `_wants_course_catalog_retrieval`) the way
-  `backend/coaching/execution.py` does. See `gate_decision` in the script.
+- **Gate.** `gate_decision` in the script is a thin adapter. It builds
+  `ScopeInputs` from the dataset row (`scope_inputs_for_row`) and calls
+  `backend.coaching.evidence_scope.decide_first_pass_scope`, the function
+  `backend/coaching/execution.py` calls for a live turn, so the gate cannot
+  drift from production. What a row cannot supply stays an explicit input at
+  the value the gate always assumed: image bytes loaded, `force_retrieval`
+  false, no locked course rows, no frozen Deep Review history. See
+  `docs/RAG_ARCHITECTURE.md` (First-pass evidence scope) for the precedence.
 - **Course search.** `LocalChunkRetriever` runs over the local lecture PDFs
   with one chunk per PDF page, so results carry a page number. This is a
   lexical stand-in for the Bedrock Knowledge Base. Offline numbers say
@@ -81,7 +85,7 @@ The item 2 column is identical to item 1 by design. `needs_sources` does not
 change the first-pass gate, so the gate numbers cannot show its effect. The
 effect is a second chance after the first model call, which needs a model.
 
-Item 1 added `definitional_question` to `_COURSE_CATALOG_RETRIEVAL_CUES`. All 16
+Item 1 added `definitional_question` to `_COURSE_CATALOG_RETRIEVAL_CUES` (now in `backend/coaching/evidence_scope.py`). All 16
 known wrong skips of that kind now search the course catalog (for example "what
 is a creative matrix"). The cost is 5 new false retrieves, all impersonal
 "what is / explain / what does X mean" messages that are not course questions:
@@ -152,8 +156,9 @@ chit-chat. The excerpt ranking is local (no Bedrock or Knowledge Base call);
 loading the uploads can add one S3 GET per selected upload on a chunk-cache
 miss, or every such turn on the extracted-text fallback. This block does not
 measure those reads. The report's `gate.upload_retrieval_policy` block applies the
-production rule (`_wants_student_upload_retrieval`, imported, not copied) to
-every gate row. The row's selected and attached files are projected into
+production rule (`wants_student_upload_retrieval` in
+`backend/coaching/evidence_scope.py`, reached through
+`decide_first_pass_scope` with the setting on, not copied) to every gate row. The row's selected and attached files are projected into
 source dicts, with the image check taken from the filename extension (rows
 hold only a title and a filename). The main gate numbers and
 `needs_sources_stubs` stay computed with the policy off.

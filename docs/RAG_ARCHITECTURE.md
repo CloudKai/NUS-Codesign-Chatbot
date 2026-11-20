@@ -56,6 +56,66 @@ retrieval, selected sources exist, and Haiku sets
 `needs_source_retrieval=true`. FastAPI owns that retrieve. AgentCore still
 has `tools=[]` and cannot search KB, S3, or DSQL. Maximum two Haiku calls.
 
+### First-pass evidence scope (one owner)
+
+`backend/coaching/evidence_scope.py` owns the first-pass decision of which
+evidence a turn may use (course catalog, the student's own files, both or
+neither), the expected response mode and the cues that fired.
+`decide_first_pass_scope(ScopeInputs) -> ScopeDecision` is a pure function over
+plain values. It imports no `boto3`, provider, settings or store module
+(`tests/domain/test_evidence_scope.py` walks its imports). Two callers use it:
+`_prepare_authoritative_turn` in `backend/coaching/execution.py` and
+`gate_decision` in `scripts/evals/evaluate_retrieval.py`, so the offline gate
+numbers run the production rules and not a copy.
+
+Precedence, in the order the rules run:
+
+1. `resolve_mode_policy` on the message, titles and filenames.
+2. Lecture Help (`interaction_intent == "lecture_help"`) sets
+   `high_confidence_source`, `qa`, retrieve, and masks every navigation
+   override below. Project Coaching sets the mode to `coaching`.
+3. Current-stage status clears the evidence scope and sets `qa`, no retrieve.
+4. Stage progression, terminal completion or workflow meta-guidance (the
+   latter only when it is not a status request) clears the scope and sets
+   `coaching`, no retrieve.
+5. A private-attachment question narrows the scope to the attachments. It runs
+   after a clear too, so it still forces retrieval while the kept scope is
+   empty.
+6. Missing image Q&A: every selected source is an image, none loaded, and the
+   message is an information request. It forces retrieval, stamps `qa` and
+   fails closed.
+7. `force_retrieval` with any originally selected source forces retrieval,
+   even after a clear.
+8. Course catalog: retrieval is needed and the turn is not attachment-only,
+   status, progression or workflow guidance, and it is Lecture Help or a
+   course-catalog cue fired.
+9. Local course-intent promotion (Laya), only for an eligible ambiguous turn.
+10. Upload retrieval policy (below).
+
+What stays in `execution.py` because it reads state the pure function cannot
+see: authorization, image-byte loading (`image_inputs_for_sources`, passed in
+as `image_bytes_resolved`), `is_locked_course_source` (passed in as
+`is_course_library`), the Laya model call, its cutoffs and course titles, the
+`FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED` read (taken after the model call, as
+before), the snapshot replacements, hydration and its failure handling, the
+`needs_sources` check that depends on hydrated `retrieval_sources`, and every
+`record_field` write. `execution.py` calls the module once. When the module
+reports `course_intent_eligible` and its own classifier scores at or above the
+cutoff, it calls the module again with `course_intent_promoted=True`, so the
+promotion lands before the upload rule exactly as before. The module returns
+cues; `execution.py` records `current_stage_status_request`,
+`stage_progression_request` or `workflow_skips_retrieval`, and
+`attachment_retrieval_scoped` before the model call, then
+`local_course_intent_retrieval` and `upload_retrieval_policy` after it, then
+`retrieval_gate_ms`, `retrieval_required` and `mode_policy_intent`. The first
+four names are not in the perf allow-list, so the accumulator drops them with a
+`turn_perf_rejected_field` warning; the calls and their order are unchanged.
+
+The offline eval cannot supply four inputs and holds them at the values the
+old gate assumed: image bytes loaded, `force_retrieval` false, no locked
+course-library rows, and no frozen Deep Review history. The model-driven
+second chance stays outside the gate.
+
 ### `needs_sources` (first-call source check, opt-in)
 
 The regex gate misses course questions that name no cue word ("what questions
@@ -159,7 +219,7 @@ retriever never ranks the display placeholder
 
 The course catalog joins a turn only when the gate classifies the message as a
 retrieve and the classifier reports a cue in `_COURSE_CATALOG_RETRIEVAL_CUES`
-(`backend/coaching/execution.py`). The cues are `conservative_course_question`,
+(`backend/coaching/evidence_scope.py`). The cues are `conservative_course_question`,
 `week_or_session`, `course_grounding`, `according_to_source`,
 `what_source_says`, `based_on_source`, `material_noun`, `compare_to_source` and
 `definitional_question`. The last one covers impersonal concept questions such
@@ -329,14 +389,15 @@ on every such turn when the source falls back to extracted text (no
 `extracted_text_sha256`, or a missing or invalid artifact; that read is not
 cached). The latency and cost of those reads are not measured.
 `_prepare_authoritative_turn` applies
-`_wants_student_upload_retrieval` (`backend/coaching/execution.py`) after the
-course-catalog step. It fires only when all of these hold:
+`wants_student_upload_retrieval` (`backend/coaching/evidence_scope.py`, inside
+`decide_first_pass_scope`) after the course-catalog step. It fires only when
+all of these hold:
 
 - the setting is on and the gate decided no retrieval;
 - at least one selected or attached source left after scoping is the
-  student's own and not an image (`searchable_student_uploads`: course
-  library rows and image sources are dropped; images reach the model as image
-  input);
+  student's own and not an image (`is_searchable_student_upload`, applied by
+  `searchable_student_uploads` in `execution.py`: course library rows and
+  image sources are dropped; images reach the model as image input);
 - no gate override fixed the evidence scope. Navigation reuses the existing
   overrides: current-stage status, stage progression or terminal completion,
   and `workflow_skips_retrieval` (meta-guidance). These turns already clear

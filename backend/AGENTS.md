@@ -61,6 +61,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `source_library.py` / `sources/` | Compatibility import plus ingestion, course sync, bounded context, and image/storage projection |
 | `retrieval.py` | Provider-neutral retrieval port, local chunk retriever, and composite KB/local splitter |
 | `retrieval_gate.py` | Deterministic, non-LLM gate for whether a normal chat turn retrieves |
+| `coaching/evidence_scope.py` | Single owner of the first-pass evidence scope: `decide_first_pass_scope` takes plain inputs (message, sources with flags, attachment count, interaction intent, `force_retrieval`, upload setting) and returns course-catalog yes/no, personal files yes/no, expected mode and the cues that fired. Pure: no `boto3`, provider, settings or store import (an `ast` test enforces it). `coaching/execution.py` and the offline gate eval (`scripts/evals/evaluate_retrieval.py::gate_decision`) both call it. State reads, the Laya model call, snapshot changes and `record_field` telemetry stay in `execution.py`. |
 | `turn_perf.py` | Privacy-safe per-request latency/context instrumentation (`coach_turn_perf` JSON plus `TIMING` seconds lines) |
 | `file_processing.py` | Upload storage, text extraction, safe paths |
 | `settings.py` | Environment-driven configuration (`Settings`) |
@@ -137,6 +138,15 @@ CRUD in API mode or `WorkspaceService` in process. Panels must not call
 resolution injected from `create_app`; moving a route must not weaken
 `Depends(current_owner)` or alter its OpenAPI contract. Professor Research
 routes stay in the same composition root.
+
+**Change first-pass retrieval scope or mode precedence**
+
+Edit `coaching/evidence_scope.py` only. Do not re-derive scope in
+`coaching/execution.py` or in `scripts/evals/evaluate_retrieval.py`. Extend the
+conflict matrix in `tests/domain/test_evidence_scope.py`, keep
+`tests/domain/test_evidence_scope_turn.py` and
+`tests/scripts/test_gate_scope_equivalence.py` passing, and re-run the offline
+gate eval to see any number move.
 
 **Change stage behavior or coaching output**
 
