@@ -549,10 +549,10 @@ html[data-reduce-motion] .typing-dots i { opacity: .7; }
 .skill-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 14px; }
 .skill-value { color: var(--secondary); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .skill-level { margin-inline-end: 4px; color: var(--accent); font-weight: 600; }
-.skill-pips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; }
-.skill-pips span { height: 6px; border-radius: 6px; background: var(--line); }
+.skill-pips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; margin-top: 5px; }
+.skill-pips span { height: 4px; border-radius: 4px; background: var(--line); }
 .skill-pips span[data-on] { background: var(--accent); }
-.skill-note { margin: 6px 0 0; color: var(--secondary); font-size: 13px; line-height: 1.4; }
+.skill-note { margin: 5px 0 0; color: var(--secondary); font-size: 13px; line-height: 1.4; }
 .skill-row[data-unassessed] strong, .skill-row[data-unassessed] .skill-note { color: var(--secondary); }
 .skill-glossary li { display: grid; gap: 1px; padding: 6px 0; font-size: 14px; }
 .skill-glossary span { color: var(--secondary); font-size: 13px; }

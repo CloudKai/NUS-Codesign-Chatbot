@@ -3,7 +3,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import type { Project, ReviewFeedback, Stage } from './api';
 import { CoachText } from './CoachText';
 import { Icon } from './Icon';
-import { buildScaffold, improveScaffold, practiceScaffold, skillExplanation, skillLevel, skillSummary } from './coachingContent';
+import { buildScaffold, improveScaffold, practiceScaffold, skillExplanation, skillLevel, skillSummary, skillTip } from './coachingContent';
 
 const reviewTabs = ['Summary', 'Progression'] as const;
 
@@ -76,7 +76,7 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
         action="Work on this" onAct={item => insertScaffold(improveScaffold(item), 'project')}/>
       <section className="review-section" aria-labelledby="review-facione">
         <h3 id="review-facione">How your idea scores</h3>
-        <p className="supporting">These scores are feedback on your critical thinking. They are not a grade.</p>
+        <p className="supporting">These scores are feedback on your critical thinking. They are not a grade.{skills ? ' The tips below are a general guide for each score, not a review of your work.' : ''}</p>
         {skills ? <div className="skill-highlights">
           {skills.strongest !== skills.grow ? <div className="skill-tile strong">
             <span className="skill-tile-label">Strongest</span>
@@ -98,7 +98,8 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
                 : <span className="skill-value"><span className="skill-level">{skillLevel(item.score)}</span> {item.score}/4</span>}
             </div>
             <div className="skill-pips" aria-hidden="true">{[1, 2, 3, 4].map(step => <span key={step} data-on={(item.score ?? 0) >= step || undefined}/>)}</div>
-            {skillExplanation(item.dimension) ? <p className="skill-note">{skillExplanation(item.dimension)}</p> : null}
+            {item.score !== null ? <p className="skill-note" title={skillExplanation(item.dimension) || undefined}>{skillTip(item.dimension, item.score)}</p>
+              : skillExplanation(item.dimension) ? <p className="skill-note">{skillExplanation(item.dimension)}</p> : null}
           </li>)}
         </ul> : <details className="review-disclosure">
           <summary>The six skills</summary>

@@ -76,6 +76,58 @@ export function skillExplanation(dimension: string): string {
   return SKILLS[dimension.trim().toLowerCase()]?.explanation ?? '';
 }
 
+/** General guide per skill and score (index 0 = score 1). It describes the level, not the student's work. */
+const SKILL_TIPS: Record<string, [string, string, string, string]> = {
+  analysis: [
+    'Your idea is described as a whole. Try splitting it into its main parts.',
+    'Some parts are named, but how they connect is unclear. Say how each part affects the others.',
+    'You break the idea into clear parts. Next, show which part matters most and why.',
+    'You map parts and their links well. Keep checking for parts you may have missed.',
+  ],
+  interpretation: [
+    'Information is taken at face value. Ask what a finding or comment really tells you.',
+    'You notice information, but its meaning is vague. Say what it means for your users.',
+    'You explain what information means. Next, try another reading of the same evidence.',
+    'You read evidence accurately and in context. Keep comparing different readings.',
+  ],
+  inference: [
+    'Conclusions come without reasons. Add a “because…” to each one.',
+    'Some conclusions go further than your evidence. Say what each one rests on.',
+    'Your conclusions follow from the evidence. Next, ask what could make them wrong.',
+    'You draw well-supported conclusions and weigh alternatives. Keep it up.',
+  ],
+  evaluation: [
+    'Ideas and sources are accepted as given. Ask how reliable each one is.',
+    'You judge some claims, but without clear criteria. Say what makes evidence strong or weak.',
+    'You judge evidence with reasonable criteria. Next, apply them to your own idea too.',
+    'You weigh strengths and weaknesses, including your own. Keep using the same standard.',
+  ],
+  explanation: [
+    'Decisions are stated without reasons. Walk through why you made them.',
+    'Reasons are given but hard to follow. Put them in order, step by step.',
+    'Your reasoning is clear. Next, explain why you ruled out the alternatives.',
+    'Others can follow and trust your reasoning. Keep it clear as the project grows.',
+  ],
+  'self-regulation': [
+    'There is little checking of your own work. Pause and ask what you might have missed.',
+    'You notice some gaps but have not acted yet. Pick one thing to revise.',
+    'You check your work and make fixes. Next, ask which assumptions you have not tested.',
+    'You question and improve your own thinking. Keep noting what you changed and why.',
+  ],
+};
+const GENERIC_TIPS = [
+  'Early days for this skill. Pick one small step to practise.',
+  'Some of this skill is showing. Add more detail to your reasons.',
+  'This skill is working well. Next, push it a little further.',
+  'This is a strength. Keep using it.',
+];
+
+/** One-sentence guide for what a 1–4 score looks like and how to move up. */
+export function skillTip(dimension: string, score: number): string {
+  const level = Math.min(Math.max(Math.round(score), 1), 4) - 1;
+  return (SKILL_TIPS[dimension.trim().toLowerCase()] ?? GENERIC_TIPS)[level];
+}
+
 /** Plain word for a 1–4 score so the number reads as feedback, not a grade. */
 export function skillLevel(score: number): string {
   return ['Just starting', 'Developing', 'Solid', 'Strong'][Math.min(Math.max(Math.round(score), 1), 4) - 1];
