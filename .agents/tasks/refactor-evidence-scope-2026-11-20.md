@@ -1,6 +1,6 @@
-# Refactor report (draft): one owner for first-pass evidence scope
+# Refactor report: one owner for first-pass evidence scope, uncoupled eval commands
 
-Status: item 1 implemented and verified (section "Item 1 result" at the end); the sections above are the pre-change draft and stay as written. Item 2 has not started.
+Status: items 1 and 2 are implemented, verified offline and pushed to `origin/improvement/backend`. The sections "Decision points before the refactor" and "Item 1 result" were written during item 1 and are kept as written; "Item 2 result" and "Overall verification" below complete the report. The line "HEAD `9d43fe6` at the time of writing" in the first bullet describes the draft, not the final head.
 
 - Branch `improvement/backend`, HEAD `9d43fe6` at the time of writing, working tree clean.
 - Date in the file name is 2026-11-20. The sandbox clock (`date +%F`) also reads 2026-11-20, so no override was needed.
@@ -166,3 +166,152 @@ New finding on telemetry: `current_stage_status_request`, `stage_progression_req
 - One transient failure of `tests/domain/test_deep_review_execution.py::test_deep_review_started_in_cg_ignores_later_stage_advance` in one combined domain and scripts run on `26e6fed`. It passed alone four times, in five further domain runs, and in the full suite. It uses a background Deep Review worker. I did not find a link to this change, and I did not run it on the old commit to confirm it is flaky there.
 - The setting is read twice per turn now (see state read 4).
 - The ten-step precedence now sits in one 230-line function. The matrix and turn tests are the guard; a later rule change must update both.
+
+## Item 2 result: eval commands no longer import each other
+
+No live command and no AWS, Bedrock, AgentCore, Knowledge Base or OpenAI call was run. No existing test was edited. No CLI flag, output JSON schema or exit code changed.
+
+### Commits (author and committer `CloudKai <kaiming_01@live.com>`)
+
+| SHA | Message |
+|---|---|
+| `21ebbf3` | refactor: move shared retrieval-eval helpers into `scripts/evals/lib` |
+| `e320db1` | refactor: add Laya state, route scoring, passage scoring and prepared-row lib modules |
+| `6d743de` | refactor: `compare_turn_routes` uses lib |
+| `e731689` | refactor: `evaluate_passage_support` uses lib |
+| `0ce765c` | refactor: `evaluate_laya_turn_decisions` uses lib |
+| `b0290b0` | refactor: `evaluate_course_intent` and its learn variant use lib |
+| `43fd29a` | refactor: `evaluate_combined_gate` and `benchmark_course_intent` use lib |
+| `a210b65` | refactor: `benchmark_agentcore_vs_converse` uses lib |
+| `ae09e37` | fix: keep the `evaluate_combined_gate` docstring unchanged (my first wording change altered its `--help` text and the JSON `definition` field; the next re-run found it and the diff then came back empty) |
+| `4fe3063` | test: eval commands may not import each other; restore sockets after each script test |
+| `8d6bc1b` | docs: describe `scripts/evals/lib` and the no-command-imports rule |
+| `4a55e3c` | docs: record item 2 offline re-run outputs (`after/`) |
+
+### Structure
+
+`scripts/evals/lib/` has 11 modules (about 1,800 lines, mostly code that used to live in the commands): `paths`, `fixtures`, `metrics`, `output`, `offline`, `gate`, `live`, `turn_state`, `route_scoring`, `passage_scoring`, `prepared_rows`. `docs/RETRIEVAL_EVAL.md` ("Command layout") lists what each one owns. Model fitting and loading stay with the experiment: `fit_laya`, `fit_setfit`, `compact_predictors` in `compare_turn_routes`; `benchmark_pages`, the encoder and judge in `evaluate_passage_support`; the Learner fits in `evaluate_laya_turn_decisions` and `evaluate_course_intent_learn`. Each command re-exports the names it used to define.
+
+| File | Lines before (`4fb7c92`) | Lines now |
+|---|---|---|
+| `evaluate_retrieval.py` | 3079 | 2098 |
+| `compare_turn_routes.py` | 497 | 243 |
+| `evaluate_passage_support.py` | 204 | 110 |
+| `evaluate_laya_turn_decisions.py` | 164 | 74 |
+| `evaluate_course_intent_learn.py` | 216 | 224 |
+| `evaluate_combined_gate.py` | 824 | 784 |
+| `benchmark_agentcore_vs_converse.py` | 864 | 887 |
+
+`evaluate_course_intent_learn` and `benchmark_agentcore_vs_converse` grew slightly because they now carry explicit import and re-export lines.
+
+### Things that were not obvious
+
+- **New fixture `tests/scripts/conftest.py`.** Two existing tests patch `evaluate_retrieval._block_network` before running another command's `main`. The commands now call the `lib` function, so that patch no longer reaches them, and the blocked sockets leaked into 5 later tests. The autouse fixture restores the socket functions. The two tests themselves are unchanged, but their patch is now inert.
+- **`bench.retrieval` alias.** `benchmark_agentcore_vs_converse` keeps a `retrieval` attribute, now the `lib.live` module, because its test patches `bench.retrieval._git_run_metadata`. `lib.live` re-exports `_git_run_metadata`.
+- **Patch-point wrapper.** `evaluate_retrieval` keeps a two-line `_write_json_output` wrapper so tests that patch its own `_git_run_metadata` still reach the `run` block.
+- **Dropped names.** The unused `re` import in `evaluate_retrieval` and a few module aliases (`base`, `retrieval`) in other commands are gone.
+- **Direct script execution.** The five commands that ran as `python scripts/evals/<name>.py` before still do. The other four fail with `ModuleNotFoundError` as before, because they never inserted the repo root into `sys.path`. `python -m scripts.evals.<name>` works for all. I did not change that.
+- **New boundary test.** `tests/scripts/test_eval_command_boundaries.py` walks the imports with `ast` and fails if one command imports another, if `lib` imports a command or defines `main`, or if `lib` loads a model package. It also builds the routing report from a stub predictor, which shows report building needs no fitted model.
+
+## Overall verification (at `4a55e3c`, re-checked at `3839b82` for docs)
+
+### Decisions JSON
+
+```
+$ diff .agents/tasks/refactor-baseline/gate-decisions-before.json .agents/tasks/refactor-baseline/gate-decisions-after.json
+(no output, exit 0)
+$ cmp .agents/tasks/refactor-baseline/gate-decisions-before.json .agents/tasks/refactor-baseline/after/gate-decisions-after.json
+(no output, exit 0)
+```
+
+All three files are 165,736 bytes with sha256 `7fa20f73ff9d9691a2f397f14bd582dec028dc879e3d597fd8b54d0006c9d9ff`. The file in `after/` is the item 2 re-run. I re-ran these checks in this step.
+
+### Every eval output, `refactor-baseline/` against `refactor-baseline/after/`
+
+`after/diff-outputs.after.txt` (made by `diff_outputs.py`): **41 comparisons, 0 differing**. The log has 41 `same` lines (40 output files plus the exit-code table) and then the total line. The comparison masks only `run.git_sha`, `run.git_dirty`, `run.generated_at_utc` and, for the two files that record timings, the timing and memory floats.
+
+| Output | Command | Result |
+|---|---|---|
+| `evaluate_retrieval.json`, `.stdout.txt`, `.stderr.txt` | `evaluate_retrieval` (offline) | same. Raw `diff` of the sorted JSON shows only `run.generated_at_utc` and `run.git_sha` (4 lines) |
+| `evaluate_combined_gate.json`, `.stdout.txt`, `.stderr.txt` | `evaluate_combined_gate` (stored `phase3d-work` results) | same. Raw diff: the same two `run` fields |
+| `benchmark_course_intent_stub.json`, `.stderr.txt` | `benchmark_course_intent --stub-ms 5` | same after masking timing and memory floats (they vary run to run, also between two baseline captures) |
+| `measure_stream_first_text.json`, `.stderr.txt` | `measure_stream_first_text --runs 3` | same after masking timing floats, `git_sha` and `utc` |
+| `stub_snapshots.json` | report building of `compare_turn_routes`, `evaluate_passage_support`, `evaluate_laya_turn_decisions`, `evaluate_course_intent_learn` with a stub model | **identical, no masking** (raw diff 0 lines) |
+| `benchmark_agentcore_vs_converse_dry_run`, `fast_chat_quality_matrix_dry_run`, `evaluate_fast_chat_regression_dry_run` | dry runs | same stdout and stderr |
+| `benchmark_agentcore_vs_converse_refusal`, `evaluate_retrieval_live_kb_refusal` | refusal before any client is built | same stdout and stderr |
+| `help_*` (nine commands) | `--help` | same stdout and stderr, so every flag and its help text is unchanged |
+
+The `after/` capture ran at `ae09e37`. The commits after it (`4fe3063`, `8d6bc1b`) add a test, a fixture and docs only. Item 1 gave the same result against the baseline (41 comparisons, 0 differing, log `.agents/tasks/refactor-evidence-scope/item1-offline-diff.txt`).
+
+### Exit codes (`exit-codes.before.tsv` against `after/exit-codes.after.tsv`)
+
+`diff` of the two files is empty. All 19 entries are the same: 0 for 17 of them (the seven offline runs, the nine `--help` runs, `stub_snapshots`) and **2** for `benchmark_agentcore_vs_converse_refusal` and `evaluate_retrieval_live_kb_refusal`.
+
+### Eval numbers (unchanged to the digit, items 1 and 2)
+
+wrong-skip 76/154 (49.4%); clear rows 51/113 (45.1%); classifier only 85/154 (55.2%); false-retrieve 7/141 (5.0%); recall@4 material 91/94 (96.8%), page 78/94 (83.0%); follow-up cases 8/9 and 0/3.
+
+### Commands that cannot run offline here
+
+`laya`, `vegaml` and `setfit` are not installed and the sandbox has no checkpoint. Nothing live was attempted. The stand-ins are the ones recorded in `refactor-baseline/commands.md`.
+
+| Command | Why it cannot run | Stand-in |
+|---|---|---|
+| `compare_turn_routes` | needs `laya` and `setfit` to fit | `tests/scripts/test_compare_turn_routes.py` (7) and `stub_snapshots` (`inputs`, `training`, `evaluate`) |
+| `evaluate_passage_support` | needs an encoder and a judge model | `test_fact_union_requires_every_fact` and the `run()` snapshots (lexical only, stub judge, reversed orders) |
+| `evaluate_laya_turn_decisions` | needs `laya` | snapshots of `route_state`, `evidence_state`, `read_training`, `decide`, `scope_name`. It has no test of its own |
+| `evaluate_course_intent_learn` | needs `laya` | `tests/scripts/test_evaluate_course_intent_learn.py` (4) and snapshots of the split, `select_threshold`, `evaluate_routes` |
+| `evaluate_course_intent` | needs `laya` and a checkpoint | `--help` comparison only. Nothing covers its `main` beyond `_p95_ms`, so **its `main` was not run before or after** |
+| `benchmark_course_intent --checkpoint` | needs a checkpoint | the `--stub-ms` run and `test_benchmark_course_intent.py` (10) |
+| `evaluate_combined_gate --checkpoint` | needs a checkpoint | the default run on stored results and `test_evaluate_combined_gate.py` (21) |
+| `--live-kb`, `--live-model`, `--live-benchmark` modes | paid or live; prohibited | the two refusal exit codes and the stub-client tests in `test_evaluate_retrieval.py` (103) and `test_benchmark_agentcore_vs_converse.py` (41) |
+| `evaluate_live_coach` | live only; its `--dry-run` also needs an AgentCore harness ARN that is not set | none. It imports no other eval module, so the refactor does not touch it |
+
+### Ruff and test counts
+
+Mock env (`MOCK_OPENAI=true MODEL_PROVIDER=mock OPENAI_API_KEY= USE_LOCAL_API=false AUTO_ADVANCE_STAGES=false APP_ENV=development`), `-p no:cacheprovider`, venv `nus-codesign-py312`.
+
+| Point | `ruff check .` | Passed | Failed (known) | Skipped |
+|---|---|---|---|---|
+| Baseline `4fb7c92` (step 0, same tree as `9d43fe6` for code) | pass | 2753 | 2 | 1 |
+| After item 1 (`c56233f`) | pass | 2876 | 2 | 1 |
+| After item 2 (`4a55e3c`, earlier run) | pass | 2905 | 2 | 1 |
+| Final check at `4a55e3c` code (docs commit `3839b82` changes no code), run 2 | pass | **2905** | **2** | **1** |
+
+- **Known failures (2, all runs):** `tests/http/test_notebook_reader.py::test_pilot_serves_only_built_public_assets` and `::test_default_workspace_and_streamlit_gate`. Both get a 404 because there is no `frontend/dist`.
+- **Skipped (1):** `tests/domain/test_strands_first_cycle_middleware.py`, `strands` is not installed.
+- **Added tests, +152:** item 1: 79 (`test_evidence_scope.py`), 38 (`test_evidence_scope_turn.py`), 6 (`test_gate_scope_equivalence.py`); item 2: 29 in `tests/scripts` (258 existing and 287 total there).
+- **Unstable test, not a regression I can attribute.** In this step's first completed full run a third test failed: `tests/domain/test_mode_classification.py::test_reflection_completion_request_skips_retrieval_and_completes_in_place` (`assert 2 == 1` on `len(client.calls)`). The second call in the log is the background stage-checkpoint review (`review_trigger=stage_checkpoint`), which the test does not wait for. It passed 8 of 8 times alone and in the second full run (2905 passed). It also failed once in one earlier item 2 full run and once in a different test in item 1 (`test_deep_review_started_in_cg_ignores_later_stage_advance`). Neither test file was edited, and none of this touches eval code. I did **not** run them on `4fb7c92`, so I cannot show they are flaky there. My reading: both depend on a background worker and race the assertion. Treat that as a hypothesis until someone runs them on `4fb7c92` under load.
+
+## Commit SHAs
+
+| Group | SHAs |
+|---|---|
+| Baseline (step 0) | `9d43fe6` (starting head `4fb7c92`) |
+| Item 1 | `3e18abe`, `6c91e5c`, `26e6fed`, `dda9e34`, `94e8eed`, `c56233f` (pushed earlier, head `c56233f`) |
+| Item 2 | `21ebbf3`, `e320db1`, `6d743de`, `e731689`, `0ce765c`, `b0290b0`, `43fd29a`, `a210b65`, `ae09e37`, `4fe3063`, `8d6bc1b`, `4a55e3c` |
+| Docs (this step) | `3839b82` (`IMPLEMENTATION_STATUS.md`, `RAG_ARCHITECTURE.md`, `RETRIEVAL_EVAL.md`, `backend/AGENTS.md`) |
+| This report | the commit after `3839b82` (`git log -1 -- .agents/tasks/refactor-evidence-scope-2026-11-20.md`); a commit cannot name its own SHA |
+
+Docs edited in item 2 (`8d6bc1b`): `docs/RETRIEVAL_EVAL.md`, `scripts/AGENTS.md`, `tests/AGENTS.md`. In this step I only corrected three leftover references to `scripts/evals/evaluate_retrieval.py` as the home of `gate_decision` (it now lives in `scripts/evals/lib/gate.py`) in `docs/RAG_ARCHITECTURE.md`, `docs/RETRIEVAL_EVAL.md` and `backend/AGENTS.md`, and rewrote the status entry. The date 2026-11-20 matches the sandbox clock (`date -u` read Fri Nov 20 2026), so no override was used.
+
+## Risks
+
+- The unstable background-worker tests above.
+- The four telemetry names that are dropped with `turn_perf_rejected_field` (item 1 finding). The calls and warnings are kept as before.
+- `fast_chat_upload_retrieval_enabled` is read twice per turn; it differs from the old behaviour only if the value changes during the Laya model call.
+- The ten-step precedence sits in one 230-line function. A later rule change must update `test_evidence_scope.py`, `test_evidence_scope_turn.py` and the equivalence test.
+- The tests' old `_block_network` patch is inert and the new `conftest.py` fixture does that job. A test author who copies the old patch will think it works.
+- The `evaluate_course_intent` `main` has no test and was not run.
+
+## Not done, and why
+
+- **Stale docstring:** the module docstring of `backend/coaching/evidence_scope.py` (line 18) still names `scripts/evals/evaluate_retrieval.py` as the eval caller. It is now `scripts/evals/lib/gate.py`. This step was docs and report only, so I left the code untouched.
+- **Residual duplicates (from item 1):** `build_live_request` derives `source_ids` from `GateDecision` flags; the Laya eval scripts keep their own `evidence_scoped` and `searched` approximations (equal to the module on all 295 rows, test-checked); `UPLOAD_POLICY_DEFINITION` still names `_wants_student_upload_retrieval` because editing it changes the output JSON.
+- **Direct-execution fix** for the four commands that cannot run as `python scripts/evals/<name>.py`: not changed, as it is a behaviour change.
+- **Candidate 3, Laya or SetFit changes, new gate rules, live runs, settings defaults:** not started, as instructed.
+- **Stop-and-report points:** none. No existing test was edited and no part needed a behaviour change. There was no review file, so there are no open review findings.
+
+## Next exact step
+
+Review this report and the pushed head. Then decide: (1) whether to run `test_deep_review_started_in_cg_ignores_later_stage_advance` and `test_reflection_completion_request_skips_retrieval_and_completes_in_place` 20 times each on `4fb7c92` and on this head (mock env, no live command) to settle whether they are pre-existing races; (2) whether to add the four dropped names to `SAFE_PERF_FIELDS`; (3) whether to fix the one-line docstring in `backend/coaching/evidence_scope.py`.
