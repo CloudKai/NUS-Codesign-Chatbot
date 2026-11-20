@@ -1125,6 +1125,49 @@ stand-in sleeps 5 ms, so the latency says nothing about Laya): 147 eligible rows
 threads the stand-in's single slot gave 146 of 147 calls no score, the same pattern
 Phase 3d recorded for real Laya (93/94).
 
+### Extra messages (optional, separate from the 295)
+
+`--extra-messages FILE` lets an operator check anonymised, human-labelled messages next
+to the synthetic set. The file is JSONL (one object per line, UTF-8, at most 295 rows).
+Required fields: `id` (a short token such as `ex001`, not `gm###`), `message`, `label`
+(`retrieve` or `skip`) and `synthetic` (a JSON boolean). Optional fields:
+`history_summary` (becomes one earlier user turn), `selected_source` and `attachment`
+(booleans; each adds one source with no title or filename), `stage` (default
+`problem_identification`) and `category` (a gate category, default `uncategorised`).
+
+- **Default refuses real messages.** A row whose `synthetic` is not `true` is refused
+  (exit 2) by both commands. `--allow-non-synthetic` accepts `synthetic: false`; the
+  record and the report are then marked `real_messages`. A missing or non-boolean
+  marker is refused with or without the flag.
+- **Live gate.** `evaluate_retrieval.py --live-kb-gate --max-live-calls N --extra-messages FILE`
+  sends only the extra rows (the 295 are a separate run), under the same cap of 1 to 295.
+  The record has `mode: live_kb_gate_extra`, `set: extra_messages` and the same row
+  fields as the gate record. Both new flags are refused (exit 2, before any client)
+  without `--live-kb-gate`.
+- **Comparison.** `compare_routing_arms --extra-messages FILE [--extra-kb-gate KB.json]
+  [--allow-non-synthetic]` adds an `extra_messages` JSON key and a Markdown section.
+  Extra rows are never split, never used to choose T, never in M1, M2, a paired test or a
+  pass rule. Arms A and C are reported per row (id, category, label, search flags,
+  evidence), using the T_C frozen on the 295. Arms B and D are `missing` (no Laya
+  decisions exist for extra rows). Without `--extra-kb-gate` the evidence columns are
+  `missing`. Without `--extra-messages`, output is unchanged.
+- **Privacy.** Message and history text is read into memory only. It is not written to
+  JSON, Markdown, stdout, stderr or logs; outputs hold ids, categories, labels, scores,
+  counts and timings. Validation errors name a line number, a field and the id (when it
+  is a safe token), never a value. The text of the live gate request goes to the
+  Knowledge Base, as for any chat turn. Ids are the operator's responsibility: keep them
+  anonymous.
+
+```bash
+# not run here
+KNOWLEDGE_BASE_ID=<kb id> COURSE_MATERIALS_BUCKET=<bucket> AWS_REGION=<region> \
+  python scripts/evals/evaluate_retrieval.py --live-kb-gate --max-live-calls <N> \
+  --extra-messages extra.jsonl --json-output .agents/tasks/headtohead-prereg/kb-gate-extra.json
+python -m scripts.evals.compare_routing_arms --kb-gate .agents/tasks/headtohead-prereg/kb-gate.json \
+  --extra-messages extra.jsonl --extra-kb-gate .agents/tasks/headtohead-prereg/kb-gate-extra.json \
+  --json-output .agents/tasks/headtohead-prereg/comparison.json
+```
+
 ### Laya results
 
 All Laya figures come from the Phase 3d result files in

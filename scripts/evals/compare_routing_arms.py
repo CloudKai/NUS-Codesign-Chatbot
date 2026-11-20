@@ -32,8 +32,15 @@ if str(_PROJECT_ROOT) not in sys.path:
 from scripts.evals.lib import prereg  # noqa: E402
 from scripts.evals.lib.arm_metrics import compare  # noqa: E402
 from scripts.evals.lib.arm_report import format_report  # noqa: E402
+from scripts.evals.lib.extra_arms import extra_section, format_extra_section  # noqa: E402
+from scripts.evals.lib.extra_messages import (  # noqa: E402
+    ALLOW_FLAG,
+    ExtraMessages,
+    ExtraMessagesError,
+    load_extra_messages,
+)
 from scripts.evals.lib.fixtures import load_materials, load_messages, load_questions  # noqa: E402
-from scripts.evals.lib.kb_scores import KbFileError, KbScores, load_kb_scores  # noqa: E402
+from scripts.evals.lib.kb_scores import EXTRA_MODE, KbFileError, KbScores, load_kb_scores  # noqa: E402
 from scripts.evals.lib.laya_sources import (  # noqa: E402
     LayaFileError,
     LayaSource,
@@ -67,6 +74,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--laya-full", type=Path, default=None, help="all-rows Laya run file (benchmark_course_intent with host notes)")
     parser.add_argument("--laya-full-kind", choices=FULL_KINDS, default="multilingual", help="which cutoffs --laya-full uses: multilingual 0.8, or Learn per-turn")
     parser.add_argument("--plan", type=Path, default=prereg.PLAN_PATH, help="the pre-registration file; its sha256 and commit go into the output")
+    parser.add_argument("--extra-messages", type=Path, default=None, help="JSONL of anonymised, human-labelled messages; reported in a separate section, never in M1, M2, the split or T")
+    parser.add_argument("--extra-kb-gate", type=Path, default=None, help="JSON from evaluate_retrieval --live-kb-gate --extra-messages (needs --extra-messages); without it the extra rows' evidence is missing")
+    parser.add_argument(ALLOW_FLAG, action="store_true", help="accept extra rows marked synthetic: false (real messages); the default refuses them")
     parser.add_argument("--json-output", type=Path, default=None)
     parser.add_argument("--markdown-output", type=Path, default=None)
     return parser
@@ -109,6 +119,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Write the comparison JSON and a short Markdown report. Exit 0 or 2 (refused)."""
     args = build_parser().parse_args(argv)
     block_network()
+    if args.extra_messages is None and (args.extra_kb_gate is not None or args.allow_non_synthetic):
+        return _refuse(f"--extra-kb-gate and {ALLOW_FLAG} need --extra-messages")
+    extras: ExtraMessages | None = None
+    extra_kb: KbScores | None = None
+    if args.extra_messages is not None:
+        try:
+            extras = load_extra_messages(args.extra_messages, allow_non_synthetic=args.allow_non_synthetic)
+            if args.extra_kb_gate is not None:
+                extra_kb = load_kb_scores(args.extra_kb_gate, set(extras.ids), mode=EXTRA_MODE)
+        except (ExtraMessagesError, KbFileError) as error:
+            return _refuse(f"extra messages: {error}")
     try:
         plan = prereg.plan_record(args.plan)
     except (OSError, ValueError) as error:
@@ -146,6 +167,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         **result,
     }
     report = format_report(result)
+    if extras is not None:
+        result["extra_messages"] = extra_section(
+            extras, extra_kb, result["calibration"],
+            main_kb_synthetic=bool(result["kb_file"].get("synthetic_test_fixture")),
+        )
+        report += format_extra_section(result["extra_messages"])
     if args.json_output is not None:
         write_json_output(args.json_output, result)
     if args.markdown_output is not None:

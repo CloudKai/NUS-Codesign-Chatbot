@@ -134,6 +134,11 @@ from scripts.evals.lib.live import (  # noqa: E402
     _refuse_unknown as _refuse_unknown,
     select_live_rows,
 )
+from scripts.evals.lib.extra_messages import (  # noqa: E402
+    ALLOW_FLAG as _ALLOW_NON_SYNTHETIC_FLAG,
+    ExtraMessagesError,
+    load_extra_messages,
+)
 from scripts.evals.lib.kb_gate import (  # noqa: E402
     build_retriever as _build_gate_retriever,
     course_sources as _gate_course_sources,
@@ -144,6 +149,7 @@ from scripts.evals.lib.kb_gate import (  # noqa: E402
     RecordingRetrieveClient,
     run_gate_calls,
 )
+from scripts.evals.lib.kb_scores import EXTRA_MODE as EXTRA_KB_MODE  # noqa: E402
 from scripts.evals.lib.output import (  # noqa: E402
     _git_run_metadata,
     write_json_output as _write_output,
@@ -2023,6 +2029,23 @@ def build_parser() -> argparse.ArgumentParser:
         f"{LIVE_KB_GATE_CAP}); stops after the first auth or access error. "
         "Cannot be combined with --live-kb, --live-model or the row filters.",
     )
+    parser.add_argument(
+        "--extra-messages",
+        type=Path,
+        default=None,
+        help="Only with --live-kb-gate. JSONL file of anonymised, human-labelled messages "
+        "(id, message, label, synthetic; optional history_summary, selected_source, "
+        "attachment, stage, category). Sends only these rows (not the 295) and writes a "
+        "separate live_kb_gate_extra record of ids, scores and counts, never message text. "
+        "Rows whose synthetic marker is not true are refused unless "
+        f"{_ALLOW_NON_SYNTHETIC_FLAG} is given.",
+    )
+    parser.add_argument(
+        _ALLOW_NON_SYNTHETIC_FLAG,
+        action="store_true",
+        help="Only with --extra-messages. Accept rows marked synthetic: false (real "
+        "messages). The default refuses them. The record is then marked real_messages.",
+    )
     return parser
 
 
@@ -2167,12 +2190,23 @@ def _main_live_kb_gate(args: argparse.Namespace) -> int:
         if conflicts:
             raise LiveRunRefused(f"--live-kb-gate cannot be combined with {', '.join(conflicts)}")
         limit = check_live_gate_request(args.max_live_calls, os.environ)
-    except LiveRunRefused as exc:
+        extras = (
+            load_extra_messages(
+                args.extra_messages, allow_non_synthetic=args.allow_non_synthetic
+            )
+            if args.extra_messages is not None
+            else None
+        )
+    except (LiveRunRefused, ExtraMessagesError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
     materials = load_materials(args.materials)
     questions = load_questions(args.questions, materials)
-    messages = load_messages(args.messages, materials, [q["id"] for q in questions])
+    messages = (
+        list(extras.rows)
+        if extras is not None
+        else load_messages(args.messages, materials, [q["id"] for q in questions])
+    )
     kb_settings = _gate_kb_settings_record()
     counting = _build_live_gate_client(
         _gate_kb_region(), limit, float(kb_settings["timeout_seconds"])
@@ -2186,15 +2220,17 @@ def _main_live_kb_gate(args: argparse.Namespace) -> int:
         limit=limit,
     )
     result = {
-        "mode": "live_kb_gate",
+        "mode": "live_kb_gate" if extras is None else EXTRA_KB_MODE,
         "definition": LIVE_KB_GATE_DEFINITION,
-        "set": args.messages.name,
+        "set": args.messages.name if extras is None else "extra_messages",
         "messages_in_set": len(messages),
         "live_calls_made": client.calls,
         "live_call_limit": limit,
         "kb_settings": kb_settings,
         **outcome,
     }
+    if extras is not None:
+        result["extra_messages"] = extras.describe()
     print(format_live_kb_gate_report(result))
     if args.json_output:
         _write_json_output(args.json_output, result)
@@ -2212,6 +2248,15 @@ def _main_live_kb_gate(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if not args.live_kb_gate and (args.extra_messages is not None or args.allow_non_synthetic):
+        print(
+            "refused: --extra-messages and --allow-non-synthetic only work with --live-kb-gate",
+            file=sys.stderr,
+        )
+        return 2
+    if args.allow_non_synthetic and args.extra_messages is None:
+        print("refused: --allow-non-synthetic needs --extra-messages", file=sys.stderr)
+        return 2
     if args.live_kb_gate:
         return _main_live_kb_gate(args)
     if args.live_model:

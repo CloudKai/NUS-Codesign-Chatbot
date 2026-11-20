@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 STATUSES = frozenset({"ok", "empty", "unavailable"})
+GATE_MODE = "live_kb_gate"
+EXTRA_MODE = "live_kb_gate_extra"
 
 
 class KbFileError(ValueError):
@@ -96,8 +98,11 @@ def _row(raw: Any) -> KbRow:
     )
 
 
-def load_kb_scores(path: Path, expected_ids: Collection[str]) -> KbScores:
+def load_kb_scores(path: Path, expected_ids: Collection[str], *, mode: str = GATE_MODE) -> KbScores:
     """Read and validate a KB-score file against the gate ids.
+
+    ``mode`` is ``live_kb_gate`` for the 295 gate messages and ``live_kb_gate_extra``
+    for a file made with ``--extra-messages``; a file of the other kind is refused.
 
     Raises ``KbFileError`` for an unreadable file, a wrong ``mode``, a malformed or
     repeated row, or an id outside ``expected_ids``. A file that covers only some
@@ -108,8 +113,8 @@ def load_kb_scores(path: Path, expected_ids: Collection[str]) -> KbScores:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise KbFileError(f"{path}: cannot read as JSON ({type(error).__name__})") from None
-    if not isinstance(data, dict) or data.get("mode") != "live_kb_gate":
-        raise KbFileError(f"{path}: not a live_kb_gate file (mode must be 'live_kb_gate')")
+    if not isinstance(data, dict) or data.get("mode") != mode:
+        raise KbFileError(f"{path}: not a {mode} file (mode must be '{mode}')")
     raw_rows = data.get("rows")
     if not isinstance(raw_rows, list):
         raise KbFileError(f"{path}: 'rows' must be a list")
@@ -121,7 +126,8 @@ def load_kb_scores(path: Path, expected_ids: Collection[str]) -> KbScores:
         rows[row.id] = row
     unknown = sorted(set(rows) - set(expected_ids))
     if unknown:
-        raise KbFileError(f"{path}: ids not in the gate set: {', '.join(unknown[:5])}")
+        where = "gate set" if mode == GATE_MODE else "extra-messages file"
+        raise KbFileError(f"{path}: ids not in the {where}: {', '.join(unknown[:5])}")
     summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
     run = data.get("run") if isinstance(data.get("run"), dict) else {}
     settings = data.get("kb_settings") if isinstance(data.get("kb_settings"), dict) else {}
