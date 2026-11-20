@@ -31,12 +31,10 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import math
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from statistics import NormalDist
 from typing import Any, Callable, Mapping, Sequence
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -49,7 +47,6 @@ from scripts.evals.lib.fixtures import (  # noqa: E402
     load_messages,
     load_questions,
 )
-from scripts.evals.lib.metrics import rate_record  # noqa: E402
 from scripts.evals.lib.offline import block_network  # noqa: E402
 from scripts.evals.lib.output import write_json_output  # noqa: E402
 from scripts.evals.lib.paths import MATERIALS_PATH, MESSAGES_PATH, QUESTIONS_PATH  # noqa: E402
@@ -59,17 +56,32 @@ from scripts.evals.lib.paths import MATERIALS_PATH, MESSAGES_PATH, QUESTIONS_PAT
 from scripts.evals.lib.prepared_rows import PreparedRow as PreparedRow  # noqa: E402
 from scripts.evals.lib.prepared_rows import prepare_rows as prepare_rows  # noqa: E402
 
+# Moved to scripts/evals/lib so compare_routing_arms shares the interval maths and the
+# stored Laya loaders without importing this command; re-exported for existing callers.
+from scripts.evals.lib.intervals import SMALL_N as SMALL_N  # noqa: E402
+from scripts.evals.lib.intervals import VERY_SMALL_N as VERY_SMALL_N  # noqa: E402
+from scripts.evals.lib.intervals import Z_95 as Z_95  # noqa: E402
+from scripts.evals.lib.intervals import format_ci as format_ci  # noqa: E402
+from scripts.evals.lib.intervals import rate_ci as rate_ci  # noqa: E402
+from scripts.evals.lib.intervals import sample_mark as sample_mark  # noqa: E402
+from scripts.evals.lib.intervals import wilson_interval as wilson_interval  # noqa: E402
+from scripts.evals.lib.laya_sources import MODES as MODES  # noqa: E402
+from scripts.evals.lib.laya_sources import RERUN_ORIGIN as RERUN_ORIGIN  # noqa: E402
+from scripts.evals.lib.laya_sources import STORED_ORIGIN as STORED_ORIGIN  # noqa: E402
+from scripts.evals.lib.laya_sources import LayaSource as LayaSource  # noqa: E402
+from scripts.evals.lib.laya_sources import (  # noqa: E402
+    _stored_consistency as _stored_consistency,
+)
+from scripts.evals.lib.laya_sources import (  # noqa: E402
+    load_stored_learn as load_stored_learn,
+)
+from scripts.evals.lib.laya_sources import (  # noqa: E402
+    load_stored_multilingual as load_stored_multilingual,
+)
+from scripts.evals.lib.laya_sources import promotion  # noqa: E402
+
 PHASE3D_DIR = _PROJECT_ROOT / ".agents" / "tasks" / "phase3d-work"
-Z_95 = NormalDist().inv_cdf(0.975)
-SMALL_N = 30
-VERY_SMALL_N = 10
 STUB_NAMES = ("oracle", "mock_rule", "flag_all")
-# How eligible rows with no stored Laya decision are treated.
-MODES = {
-    "floor": "unscored eligible rows are not promoted (the least Laya can do)",
-    "ceiling": "unscored eligible rows are all promoted (the most Laya can do)",
-    "scored_only": "unscored eligible rows are left out; every kept row has an exact decision",
-}
 BOUND_NOTE = (
     "Arm (c) wording is a STUB MODEL BOUND, not a measurement: oracle flags exactly the "
     "rows labelled retrieve, mock_rule is the repo's keyword rule, flag_all flags every "
@@ -83,74 +95,7 @@ CUTOFF_NOTE = (
 )
 
 
-# --------------------------------------------------------------------------- maths
-
-
-def wilson_interval(successes: int, total: int, z: float = Z_95) -> tuple[float, float] | None:
-    """Wilson score interval for a proportion, or ``None`` when ``total`` is 0."""
-    if total <= 0:
-        return None
-    if not 0 <= successes <= total:
-        raise ValueError("successes must be between 0 and total")
-    p = successes / total
-    denominator = 1 + z * z / total
-    centre = (p + z * z / (2 * total)) / denominator
-    half = z * math.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / denominator
-    return max(0.0, centre - half), min(1.0, centre + half)
-
-
-def sample_mark(total: int) -> str:
-    """``VS`` under 10 rows, ``S`` under 30 rows, else empty."""
-    if total < VERY_SMALL_N:
-        return "VS"
-    if total < SMALL_N:
-        return "S"
-    return ""
-
-
-def rate_ci(successes: int, total: int) -> dict[str, Any]:
-    """A rate record with a Wilson 95% interval and a small-sample mark."""
-    base = rate_record(successes, total)
-    interval = wilson_interval(successes, total)
-    return {
-        **base,
-        "wilson_low": None if interval is None else round(interval[0], 4),
-        "wilson_high": None if interval is None else round(interval[1], 4),
-        "small_sample": sample_mark(total),
-    }
-
-
-def format_ci(record: Mapping[str, Any]) -> str:
-    """Render ``n/d = p% [lo, hi] mark`` or ``n/a (0/0)``."""
-    if record["rate"] is None:
-        return f"n/a ({record['numerator']}/{record['denominator']})"
-    text = (
-        f"{record['numerator']}/{record['denominator']} = {record['rate'] * 100:.1f}% "
-        f"[{record['wilson_low'] * 100:.1f}, {record['wilson_high'] * 100:.1f}]"
-    )
-    return f"{text} {record['small_sample']}".rstrip()
-
-
 # ------------------------------------------------------------------- Laya sources
-
-
-@dataclass(frozen=True)
-class LayaSource:
-    """Per-row Laya promotion decisions and where they came from."""
-
-    name: str
-    origin: str
-    description: str
-    cutoffs: Mapping[str, Any]
-    # id -> promoted. Holds every row the source has a decision for.
-    decisions: Mapping[str, bool]
-    file: str | None = None
-    file_summary: Mapping[str, Any] | None = None
-    consistency: Mapping[str, Any] = field(default_factory=dict)
-
-
-STORED_ORIGIN = "from stored results, not re-run"
-RERUN_ORIGIN = "re-run in this process"
 
 
 def probe_laya_runtime(checkpoint: Path | None) -> dict[str, Any]:
@@ -173,87 +118,6 @@ def probe_laya_runtime(checkpoint: Path | None) -> dict[str, Any]:
         "can_rerun": bool(laya and weights),
         "reason_if_not": "; ".join(reasons),
     }
-
-
-def _stored_consistency(
-    prepared: Mapping[str, PreparedRow], rows: Sequence[Mapping[str, Any]], eligible_key: str
-) -> dict[str, Any]:
-    """Compare stored rows with the gate and eligibility computed at this commit."""
-    missing = [str(r["id"]) for r in rows if str(r["id"]) not in prepared]
-    known = [r for r in rows if str(r["id"]) in prepared]
-    gate = [
-        str(r["id"]) for r in known if prepared[str(r["id"])].gate_retrieve != r["baseline_retrieve"]
-    ]
-    eligibility = [
-        str(r["id"]) for r in known if prepared[str(r["id"])].eligible != bool(r[eligible_key])
-    ]
-    return {
-        "stored_rows": len(rows),
-        "ids_not_in_gate_set": missing,
-        "gate_mismatch_ids": gate,
-        "eligibility_mismatch_ids": eligibility,
-        "consistent": not (missing or gate or eligibility),
-    }
-
-
-def load_stored_multilingual(
-    path: Path, name: str, prepared: Mapping[str, PreparedRow]
-) -> LayaSource:
-    """Read a phase3d per-row run (``rows`` with ``promoted``) at its stored cutoff."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    rows = data["rows"]
-    return LayaSource(
-        name=name,
-        origin=STORED_ORIGIN,
-        description=f"Laya checkpoint {Path(str(data['checkpoint'])).parts[-3].split('--')[-1]}, "
-        f"serial, stored cutoff {data['threshold']}",
-        cutoffs={"threshold": data["threshold"]},
-        decisions={str(r["id"]): bool(r["promoted"]) for r in rows},
-        file=str(path),
-        file_summary={
-            "wrong_skip": data["with_laya"]["wrong_skip"],
-            "false_retrieve": data["with_laya"]["false_retrieve"],
-        },
-        # A stored row was eligible when the classifier ran (or was busy) on it.
-        consistency=_stored_consistency(
-            prepared,
-            [{**r, "eligible": r["classifier_ms"] is not None} for r in rows],
-            "eligible",
-        ),
-    )
-
-
-def load_stored_learn(path: Path, name: str, prepared: Mapping[str, PreparedRow]) -> LayaSource:
-    """Read the Laya Learn holdout rows and apply the stored per-turn cutoffs.
-
-    Only ``holdout_rows`` are used. The cutoffs were selected on the calibration
-    rows, and the training rows were fitted on, so neither is a fair test.
-    """
-    data = json.loads(path.read_text(encoding="utf-8"))
-    cutoffs = data["thresholds_from_calibration"]
-    continuing, first = cutoffs["learn"], cutoffs.get("learn_first_turn")
-    decisions: dict[str, bool] = {}
-    for row in data["holdout_rows"]:
-        cutoff = first if first is not None and row["first_turn"] else continuing
-        score = row["learn"]
-        decisions[str(row["id"])] = bool(
-            row["eligible"] and score is not None and cutoff is not None and score >= cutoff
-        )
-    return LayaSource(
-        name=name,
-        origin=STORED_ORIGIN,
-        description="Laya Learn, per-turn cutoffs, 84 holdout rows",
-        cutoffs={"learn": continuing, "learn_first_turn": first},
-        decisions=decisions,
-        file=str(path),
-        file_summary={
-            "wrong_skip": data["holdout"]["learn_by_turn"]["wrong_skip"],
-            "false_retrieve": data["holdout"]["learn_by_turn"]["false_retrieve"],
-        },
-        consistency=_stored_consistency(
-            prepared, data["holdout_rows"], "eligible"
-        ),
-    )
 
 
 def rerun_source(
@@ -358,14 +222,7 @@ def compose(
         raise ValueError(f"mode must be one of {', '.join(MODES)}")
     outcomes = []
     for row in prepared:
-        unscored = False
-        promoted = False
-        if source is not None and row.eligible:
-            if row.id in source.decisions:
-                promoted = source.decisions[row.id]
-            else:
-                unscored = True
-                promoted = mode == "ceiling"
+        promoted, unscored = promotion(row, source, mode)
         if unscored and mode == "scored_only":
             continue
         stamped = row.second_chance and not promoted and not row.gate_retrieve
