@@ -138,8 +138,8 @@ export function practiceScaffold(dimension: string): string {
     ?? `I want to practise ${dimension}.\nHere is an example from my project…`;
 }
 
-export const improveScaffold = (item: string) => `I want to work on this feedback: "${item}"\nHere is how I will address it…`;
-export const buildScaffold = (item: string) => `A strength I want to build on: "${item}"\nHere is how I can take it further…`;
+export const improveScaffold = (item: string) => `Working on this feedback: “${item}”\n\nHere is how I will address it: `;
+export const buildScaffold = (item: string) => `Building on this strength: “${item}”\n\nHere is how I can take it further: `;
 export const pickUpScaffold = (stage: string, nextAction: string) =>
   `Picking up where I left off on ${stage}.\nNext step: ${nextAction}\nMy update is…`;
 export const stageScaffold = (stage: string) => `For ${stage}, here is what I have so far…`;

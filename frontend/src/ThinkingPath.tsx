@@ -172,13 +172,14 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
   </section>;
 }
 
-const WORK_PREVIEW = 2;
+const WORK_PREVIEW = 1;
 
 /** Compact stage detail: next action, coach summary, and a short preview of the student's own work. */
 function StageDetail({ stage, isCurrent, disabled, onSelect }: { stage: Stage; isCurrent: boolean; disabled: boolean; onSelect: () => void }) {
   const [allWork, setAllWork] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
-  const work = allWork ? stage.student_work : stage.student_work.slice(0, WORK_PREVIEW);
+  const newestFirst = [...stage.student_work].reverse();
+  const work = allWork ? newestFirst : newestFirst.slice(0, WORK_PREVIEW);
   const extra = stage.student_work.length - WORK_PREVIEW;
   const longSummary = stage.coach_summary.length > 220;
   const actionLabel = stage.completed ? 'Revisit' : 'Continue';
@@ -195,10 +196,10 @@ function StageDetail({ stage, isCurrent, disabled, onSelect }: { stage: Stage; i
     </div> : null}
     <div className="stage-block">
       <h4>Your work</h4>
-      {work.length ? <ul className="work-list">{work.map(item => <li key={item.message_id} className="work-quote" data-open={allWork || undefined}>{item.text}</li>)}</ul>
+      {work.length ? <ul className="work-list" data-scroll={allWork || undefined} tabIndex={allWork ? 0 : undefined} aria-label={allWork ? 'All your work in this stage' : undefined}>{work.map(item => <li key={item.message_id} className="work-quote" data-open={allWork || undefined}>{item.text}</li>)}</ul>
         : <p className="supporting">Work you share in Design coaching will appear here.</p>}
       {extra > 0 ? <button className="card-link" aria-expanded={allWork} onClick={() => setAllWork(open => !open)}>
-        {allWork ? 'Show less' : `Show ${extra} more`}</button> : null}
+        {allWork ? 'Show less' : `Show all ${stage.student_work.length}`}</button> : null}
     </div>
   </div>;
 }
@@ -242,7 +243,7 @@ function FeedbackCard({ tone, title, icon, groups, stages, currentStage, action,
       <h3 id={`${listId}-title`}>{title}</h3>
       {entries.length ? <span className="card-count" aria-label={`${entries.length} ${entries.length === 1 ? 'item' : 'items'}`}>{entries.length}</span> : null}
     </header>
-    {entries.length ? <ul id={listId} className="fb-list">
+    {entries.length ? <ul id={listId} className="fb-list" data-expanded={expanded || undefined} tabIndex={expanded ? 0 : undefined}>
       {visible.map(entry => <li key={entry.text} className="fb-item">
         <p className="fb-text">{entry.text}</p>
         <div className="fb-meta">

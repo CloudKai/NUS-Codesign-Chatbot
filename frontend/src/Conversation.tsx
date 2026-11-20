@@ -132,11 +132,19 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const lock = useRef(false);
   const controller = useRef(new AbortController());
   const composer = useRef<HTMLTextAreaElement>(null);
+  const lastScaffold = useRef('');
   const evidenceHeading = useRef<HTMLHeadingElement>(null);
   const citationButton = useRef<HTMLButtonElement | null>(null);
   const returnScroll = useRef(0);
   const path = `/api/v1/reader/threads/${encodeURIComponent(page.notebook.id)}`;
   textRef.current = text;
+  useLayoutEffect(() => {
+    const field = composer.current;
+    if (!field) return;
+    field.style.height = 'auto';
+    field.style.height = `${Math.min(Math.max(field.scrollHeight, 60), 200)}px`;
+    if (stickToLatest.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
+  }, [text]);
   pendingRef.current = pending;
 
   function remember(nextText: string, nextPending: Receipt | null, nextAttachments = attachments) {
@@ -382,9 +390,19 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   /** Single path for every scaffold button: keep the draft, optionally switch mode, focus the composer. No send. */
   function insertScaffold(prompt: string, switchTo?: Intent) {
     if (switchTo && !(watching || checking || moving || pendingRef.current)) { intentRef.current = switchTo; setIntent(switchTo); }
-    remember(textRef.current.trim() ? `${textRef.current}\n\n${prompt}` : prompt, pendingRef.current);
+    // Replace an empty draft or an untouched earlier scaffold. Never delete words the student typed: add below them.
+    const current = textRef.current;
+    const next = !current.trim() || current === lastScaffold.current ? prompt : `${current}\n\n${prompt}`;
+    lastScaffold.current = next;
+    remember(next, pendingRef.current);
     if (pathOpen && window.innerWidth < 1024) setPathOpen(false);
-    window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => {
+      const field = composer.current;
+      if (!field) return;
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(next.length, next.length);
+      field.scrollTop = field.scrollHeight;
+    });
   }
   const choosePrompt = (prompt: string) => insertScaffold(prompt);
   const stageLabel = project.stages.find(stage => stage.id === project.current_stage)?.label ?? '';
