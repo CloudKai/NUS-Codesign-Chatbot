@@ -48,7 +48,7 @@ const COURSE_TOOLS: Record<string, CourseTool[]> = {
 const GENERIC_TOOLS: CourseTool[] = [
   { label: 'Share my idea', week: '', text: 'My idea so far is…\nWhat I am not sure about: ' },
   { label: 'Test an assumption', week: '', text: 'One assumption I am making is…\nWhat evidence would challenge it? ' },
-  { label: 'What next?', week: '', text: 'I am not sure what to do next on my project.\nWhat should I think about? ' },
+  { label: 'What next?', week: '', text: 'I am not sure what to do next on my project.\nAsk me a question that helps me decide. ' },
 ];
 
 /** Every template for a stage, for the Review stage list. */
@@ -61,11 +61,9 @@ export function starterChips(stageId: string): Starter[] {
   return courseTools(stageId).slice(0, 3);
 }
 
-/** Progressive hints: a nudge first, then a more specific one. Neither asks for the answer. */
-export function hintScaffold(level: number, stage: string) {
-  return level <= 0
-    ? `I'm stuck on ${stage}.\n\nPlease give me a small hint, such as a question or a nudge. If a tool from our lectures could help, name it. Don't give me the answer. `
-    : `Your last hint helped a little, but I'm still stuck on ${stage}.\n\nPlease give me a more specific hint. Don't write the answer for me. `;
+/** One hint request. The student says what they tried, and asks for a question back, never the answer. */
+export function hintScaffold(stage: string) {
+  return `I'm stuck on ${stage}. Ask me one question that helps me think it through. If a tool from our lectures fits, name it. Please don't give me the answer.\n\nWhat I've tried so far: `;
 }
 
 /** One optional line after a stage move, to build the habit of noticing how thinking changed. */

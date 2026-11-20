@@ -156,9 +156,9 @@ stage markers express actual ordered stages, never invented scores or rewards.
   features, prototyping plan, test questions and the story arc. Each shows the lecture week.
   Do not add frameworks that are not in the notes. The Week 3 empathy map is left out until
   its slides are in `lecture_notes/`.
-- **Hints and reflection:** the **Hint** button beside Send asks for a small nudge and
-  points to a lecture tool if one fits, then **Stronger hint** after one use (resets when
-  the stage changes).
+- **Hints and reflection:** the **Hint** button beside Send inserts one request: the student
+  notes what they tried, and asks for one question back and a lecture tool if one fits,
+  never the answer. Templates and hints never ask the coach to do the student's thinking.
   After a confirmed stage move, the milestone banner offers an optional **Add a
   reflection**. Everything inserts editable text and never sends. The row shows two chips
   plus the hint chip, scrolls sideways on phones, and hides while a check-in or milestone

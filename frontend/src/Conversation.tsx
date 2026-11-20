@@ -62,8 +62,6 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const [pathOpen, setPathOpen] = useState(false);
   const [pathTab, setPathTab] = useState<{ tab?: 'Summary' | 'Progression'; n: number }>({ n: 0 });
   const [milestone, setMilestone] = useState<Milestone | null>(null);
-  const [hintLevel, setHintLevel] = useState(0);
-  useEffect(() => { setHintLevel(0); }, [project.current_stage]);
   const [transition, setTransition] = useState<{ from: string; to: string } | null>(null);
   const allDone = useRef(project.stages.every(stage => stage.completed));
   const checkInKey = `codesign-checkin:${owner}:${page.notebook.id}`;
@@ -556,9 +554,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         intentRef.current = next; setIntent(next); remember(textRef.current, pendingRef.current);
       }}/>
         <span className="composer-hint" id="composer-hint">↵ send · ⇧ ↵ new line</span>
-        {intent === 'project' ? <button className="hint-button" type="button" title="Ask for a small nudge, not the answer" disabled={externalBlocked || watching || checking || moving || !!pending}
-          onClick={() => { insertScaffold(hintScaffold(hintLevel, stageLabel), 'project'); setHintLevel(level => Math.min(level + 1, 2)); }}>
-          <Icon name="spark"/><span>{hintLevel > 0 ? 'Stronger hint' : 'Hint'}</span></button> : null}
+        {intent === 'project' ? <button className="hint-button" type="button" title="Ask the coach for a question that helps you think, not the answer" disabled={externalBlocked || watching || checking || moving || !!pending}
+          onClick={() => insertScaffold(hintScaffold(stageLabel), 'project')}>
+          <Icon name="spark"/><span>Hint</span></button> : null}
         <button className="primary send-button" aria-label="Send message" title="Send message" type="submit" disabled={watching || checking || busy || moving || projectUncertain || externalBlocked || uploading || feedbackBusy || !!pending || !text.trim()}><Icon name="arrow"/></button></div>
     </form>
     {storageError ? <p role="alert">Tab storage is unavailable. Keep a copy of your draft before reloading.</p> : null}
