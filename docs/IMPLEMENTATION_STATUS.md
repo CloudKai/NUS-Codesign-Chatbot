@@ -2,21 +2,58 @@
 
 ## Current status
 
-### Refactor item 1: first-pass evidence scope has one owner (branch `improvement/backend`)
+### Refactor items 1 and 2: one owner for first-pass scope, uncoupled eval commands (branch `improvement/backend`)
 
-No behaviour change and no live command. `backend/coaching/evidence_scope.py`
-now owns the first-pass scope and mode precedence (Lecture Help, Thinking Path
-commands, attachment-only questions, missing image Q&A, `force_retrieval`,
-course catalog, Laya eligibility, upload retrieval policy).
-`_prepare_authoritative_turn` and the offline gate eval's `gate_decision` both
-call it; the duplicated precedence code is gone from both. Evidence: the per
-message decisions for all 295 gate messages and 12 follow-up cases are
-identical to `.agents/tasks/refactor-baseline/gate-decisions-before.json`
-(empty diff against `gate-decisions-after.json`), and wrong-skip 76/154,
-false-retrieve 7/141 and recall@4 91/94 are unchanged. Report:
+No behaviour change in production or in any eval number, and no live command
+(AWS, Bedrock, AgentCore, Knowledge Base, OpenAI or any paid call). Mock tests
+only. No settings default changed. Report:
 `.agents/tasks/refactor-evidence-scope-2026-11-20.md` (git-ignored, committed
-with `git add -f`). Next: item 2, uncoupling the eval commands, after review.
-See [RAG_ARCHITECTURE](RAG_ARCHITECTURE.md) (First-pass evidence scope).
+with `git add -f`).
+
+| Step | What changed | Commits |
+|---|---|---|
+| Step 0 baseline | Per-message gate decisions and every offline eval output recorded under `.agents/tasks/refactor-baseline/` | `9d43fe6` |
+| Item 1 | `backend/coaching/evidence_scope.py` owns the first-pass scope and mode rules; `execution.py` and the eval `gate_decision` both call it | `3e18abe`, `6c91e5c`, `26e6fed`, `dda9e34`, `94e8eed`, `c56233f` (pushed) |
+| Item 2 | Shared eval code moved to `scripts/evals/lib/`; no eval command imports another; boundary test added | `21ebbf3` to `4a55e3c` (12 commits) |
+
+- **Item 1 evidence.** Per-message decisions for all 295 gate messages and the 12
+  follow-up cases: `gate-decisions-after.json` is byte-identical to
+  `gate-decisions-before.json` (empty `diff`, same sha256 `7fa20f73...d9ff`). A
+  5,652-row cross product of the old and new `gate_decision` is identical.
+  Wrong-skip 76/154, false-retrieve 7/141 and recall@4 91/94 are unchanged to the
+  digit. No existing test or setting default was edited.
+- **Item 2 evidence.** `run_offline_evals.sh` re-run into
+  `.agents/tasks/refactor-baseline/after/`: 41 comparisons, 0 differing after
+  masking the recorded SHA, dirty flag, timestamps and (for the stub benchmark
+  and `measure_stream_first_text`) timing floats. All 19 exit codes are the same
+  (0, and 2 for the two refusal paths). `--help` output of nine commands is
+  unchanged. Commands that need `laya`, `vegaml`, `setfit` or a checkpoint cannot
+  run in the sandbox; their report-building code is compared through
+  `stub_snapshots` (no difference) and the `tests/scripts` tests.
+- **Validation (script run, mock env).** `ruff check .` passes before and after.
+  Full suite: baseline `4fb7c92` 2753 passed, 2 failed, 1 skipped; after item 1
+  2876 passed, 2 failed, 1 skipped; at `4a55e3c` (before the docs commit) 2905
+  passed, 2 failed, 1 skipped. The +152 are new tests (item 1: 79 + 38 + 6;
+  item 2: 29). The 2 failures are the known `tests/http/test_notebook_reader.py`
+  pair (no `frontend/dist`); the skip is the missing `strands` package.
+- **Risks.** `tests/domain/test_mode_classification.py::test_reflection_completion_request_skips_retrieval_and_completes_in_place`
+  failed in one of two completed full runs at `4a55e3c` (and once in item 2). It asserts
+  `len(client.calls) == 1` right after `submit`, and the second call it saw was the
+  background stage-checkpoint review. It passes alone (8 of 8) and in the other
+  runs; it was not run on `4fb7c92`, so it is not shown to be pre-existing.
+  `current_stage_status_request`, `stage_progression_request`,
+  `workflow_skips_retrieval` and `attachment_retrieval_scoped` are not in the
+  perf allow-list and log `turn_perf_rejected_field` (unchanged; a separate
+  decision). The setting `fast_chat_upload_retrieval_enabled` is now read twice
+  per turn. A stale docstring in `backend/coaching/evidence_scope.py` still names
+  `evaluate_retrieval.py` as the eval caller (code not touched in the docs step).
+- **Compatibility and rollback.** No schema or stored-data change. Each commit is
+  a separate revert unit; item 2 can be reverted without item 1.
+- **Next exact action.** Review the report, then decide: (a) whether to add the
+  four dropped telemetry names to the perf allow-list, (b) whether to fix the
+  racy `len(client.calls) == 1` assertion, (c) candidate 3 (evidence acquisition),
+  which was not started. See [RAG_ARCHITECTURE](RAG_ARCHITECTURE.md) (First-pass
+  evidence scope) and [RETRIEVAL_EVAL](RETRIEVAL_EVAL.md) (Command layout).
 
 ### Phase 4 status (items 0 to 5 complete; branch `improvement/backend`)
 

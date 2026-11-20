@@ -56,7 +56,8 @@ report is unchanged. To compare two files, drop `run` first:
 python -c "import json,sys;a,b=(json.load(open(p)) for p in sys.argv[1:]);[d.pop('run',None) for d in (a,b)];print(a==b)" before.json after.json
 ```
 
-- **Gate.** `gate_decision` in the script is a thin adapter. It builds
+- **Gate.** `gate_decision` (in `scripts/evals/lib/gate.py`, re-exported by the
+  script) is a thin adapter. It builds
   `ScopeInputs` from the dataset row (`scope_inputs_for_row`) and calls
   `backend.coaching.evidence_scope.decide_first_pass_scope`, the function
   `backend/coaching/execution.py` calls for a live turn, so the gate cannot

@@ -142,7 +142,7 @@ routes stay in the same composition root.
 **Change first-pass retrieval scope or mode precedence**
 
 Edit `coaching/evidence_scope.py` only. Do not re-derive scope in
-`coaching/execution.py` or in `scripts/evals/evaluate_retrieval.py`. Extend the
+`coaching/execution.py` or in `scripts/evals/lib/gate.py`. Extend the
 conflict matrix in `tests/domain/test_evidence_scope.py`, keep
 `tests/domain/test_evidence_scope_turn.py` and
 `tests/scripts/test_gate_scope_equivalence.py` passing, and re-run the offline

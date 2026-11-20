@@ -65,7 +65,8 @@ neither), the expected response mode and the cues that fired.
 plain values. It imports no `boto3`, provider, settings or store module
 (`tests/domain/test_evidence_scope.py` walks its imports). Two callers use it:
 `_prepare_authoritative_turn` in `backend/coaching/execution.py` and
-`gate_decision` in `scripts/evals/evaluate_retrieval.py`, so the offline gate
+`gate_decision` in `scripts/evals/lib/gate.py` (re-exported by
+`scripts/evals/evaluate_retrieval.py`), so the offline gate
 numbers run the production rules and not a copy.
 
 Precedence, in the order the rules run:
