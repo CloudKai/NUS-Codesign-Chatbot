@@ -3,7 +3,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import type { Project, ReviewFeedback, Stage } from './api';
 import { CoachText } from './CoachText';
 import { Icon } from './Icon';
-import { buildScaffold, improveScaffold, practiceScaffold, skillExplanation, skillSummary } from './coachingContent';
+import { buildScaffold, improveScaffold, practiceScaffold, skillExplanation, skillLevel, skillSummary } from './coachingContent';
 
 const reviewTabs = ['Summary', 'Progression'] as const;
 
@@ -77,19 +77,35 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
       <section className="review-section" aria-labelledby="review-facione">
         <h3 id="review-facione">How your idea scores</h3>
         <p className="supporting">These scores are feedback on your critical thinking. They are not a grade.</p>
-        {scores.length ? <ul className="facione-list">
-          {scores.map(item => <li key={item.dimension}>
-            <div className="facione-head"><strong>{item.dimension}</strong>
-              <span className="facione-value">{item.score === null ? 'Not yet assessed' : `${item.score}/4`}</span></div>
-            {skillExplanation(item.dimension) ? <p className="supporting">{skillExplanation(item.dimension)}</p> : null}
-            <div className="facione-bar" aria-hidden="true"><span style={{ width: `${((item.score ?? 0) / 4) * 100}%` }}/></div>
+        {skills ? <div className="skill-highlights">
+          {skills.strongest !== skills.grow ? <div className="skill-tile strong">
+            <span className="skill-tile-label">Strongest</span>
+            <strong>{skills.strongest}</strong>
+            <span className="skill-tile-score">{skillLevel(skills.strongestScore)} · {skills.strongestScore}/4</span>
+          </div> : null}
+          <div className="skill-tile grow">
+            <span className="skill-tile-label">{skills.strongest !== skills.grow ? 'Grow next' : 'Keep building'}</span>
+            <strong>{skills.grow}</strong>
+            <span className="skill-tile-score">{skillLevel(skills.growScore)} · {skills.growScore}/4</span>
+            <button disabled={disabled} onClick={() => insertScaffold(practiceScaffold(skills.grow), 'project')}>Practice this</button>
+          </div>
+        </div> : <p className="skill-empty">Your skill scores will appear here as you share your thinking with the coach.</p>}
+        {scores.length ? skills ? <ul className="skill-list">
+          {scores.map(item => <li key={item.dimension} className="skill-row" data-unassessed={item.score === null || undefined}>
+            <div className="skill-head">
+              <strong>{item.dimension}</strong>
+              {item.score === null ? <span className="skill-value"><span aria-hidden="true">–</span><span className="sr-only">Not yet assessed</span></span>
+                : <span className="skill-value"><span className="skill-level">{skillLevel(item.score)}</span> {item.score}/4</span>}
+            </div>
+            <div className="skill-pips" aria-hidden="true">{[1, 2, 3, 4].map(step => <span key={step} data-on={(item.score ?? 0) >= step || undefined}/>)}</div>
+            {skillExplanation(item.dimension) ? <p className="skill-note">{skillExplanation(item.dimension)}</p> : null}
           </li>)}
-        </ul> : <p className="supporting">No Facione assessments yet.</p>}
-        {skills ? <div className="facione-summary">
-          <p><strong>Strongest skill:</strong> {skills.strongest}</p>
-          <p><strong>Skill to grow next:</strong> {skills.grow}</p>
-          <button disabled={disabled} onClick={() => insertScaffold(practiceScaffold(skills.grow), 'project')}>Practice {skills.grow}</button>
-        </div> : null}
+        </ul> : <details className="review-disclosure">
+          <summary>The six skills</summary>
+          <ul className="skill-glossary">
+            {scores.map(item => <li key={item.dimension}><strong>{item.dimension}</strong>{skillExplanation(item.dimension) ? <span>{skillExplanation(item.dimension)}</span> : null}</li>)}
+          </ul>
+        </details> : null}
       </section>
     </section>
     <section id="review-panel-progression" role="tabpanel" aria-labelledby="review-tab-progression"

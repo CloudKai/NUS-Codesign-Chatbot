@@ -76,6 +76,11 @@ export function skillExplanation(dimension: string): string {
   return SKILLS[dimension.trim().toLowerCase()]?.explanation ?? '';
 }
 
+/** Plain word for a 1–4 score so the number reads as feedback, not a grade. */
+export function skillLevel(score: number): string {
+  return ['Just starting', 'Developing', 'Solid', 'Strong'][Math.min(Math.max(Math.round(score), 1), 4) - 1];
+}
+
 export function practiceScaffold(dimension: string): string {
   return SKILLS[dimension.trim().toLowerCase()]?.practice
     ?? `I want to practise ${dimension}.\nHere is an example from my project…`;

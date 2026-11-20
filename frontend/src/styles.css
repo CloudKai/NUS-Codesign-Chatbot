@@ -534,14 +534,28 @@ html[data-reduce-motion] .typing-dots i { opacity: .7; }
 .feedback-item > :first-child { flex: 1; min-width: 0; }
 .scaffold-action { flex: none; min-height: 32px; padding: 3px 10px; font-size: 13px; background: transparent; color: var(--accent); }
 .review-feedback .feedback-item + .feedback-item { margin-top: 6px; }
-.facione-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
-.facione-head { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
-.facione-value { color: var(--secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.facione-list .supporting { margin-top: 1px; }
-.facione-bar { height: 6px; margin-top: 5px; border-radius: 6px; background: var(--line); overflow: hidden; }
-.facione-bar span { display: block; height: 100%; border-radius: 6px; background: var(--accent); }
-.facione-summary { margin-top: 14px; padding: 12px; border-radius: 12px; background: var(--rail); font-size: 14px; }
-.facione-summary button { margin-top: 8px; }
+.skill-empty { margin: 10px 0 8px; padding: 12px 14px; border-radius: 12px; background: var(--rail); color: var(--secondary); font-size: 14px; }
+.skill-highlights { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 12px 0 6px; }
+.skill-tile { display: grid; gap: 2px; align-content: start; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--rail); font-size: 14px; }
+.skill-tile strong { font-size: 16px; }
+.skill-tile-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--secondary); }
+.skill-tile-score { color: var(--secondary); font-size: 13px; }
+.skill-tile.strong { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.skill-tile.grow { background: var(--soft); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.skill-tile button { margin-top: 8px; justify-self: start; }
+.skill-list, .skill-glossary { list-style: none; margin: 8px 0 0; padding: 0; }
+.skill-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.skill-row:first-child { border-top: 0; }
+.skill-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 14px; }
+.skill-value { color: var(--secondary); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.skill-level { margin-inline-end: 4px; color: var(--accent); font-weight: 600; }
+.skill-pips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; }
+.skill-pips span { height: 6px; border-radius: 6px; background: var(--line); }
+.skill-pips span[data-on] { background: var(--accent); }
+.skill-note { margin: 6px 0 0; color: var(--secondary); font-size: 13px; line-height: 1.4; }
+.skill-row[data-unassessed] strong, .skill-row[data-unassessed] .skill-note { color: var(--secondary); }
+.skill-glossary li { display: grid; gap: 1px; padding: 6px 0; font-size: 14px; }
+.skill-glossary span { color: var(--secondary); font-size: 13px; }
 .stage-count { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
 .stage-work .artifact-work { margin-top: 4px; }
 
@@ -578,7 +592,7 @@ html[data-reduce-motion] .typing-dots i { opacity: .7; }
   .stepper { min-width: 44px; }
   .check-in { flex-wrap: wrap; }
   .check-in-actions { width: 100%; justify-content: space-between; }
-  .check-in-actions .primary, .stage-card .stage-actions button, .milestone button, .scaffold-action, .facione-summary button, .chips-hide, .starter-toggle-visible, .stage-chips button, .chips-more, .message-actions .use-in-project { min-height: 44px; }
+  .check-in-actions .primary, .stage-card .stage-actions button, .milestone button, .scaffold-action, .skill-tile button, .chips-hide, .starter-toggle-visible, .stage-chips button, .chips-more, .message-actions .use-in-project { min-height: 44px; }
   .scaffold-action { min-width: 44px; }
   .stage-starters:not(.more) .extra-chip { display: none; }
   .chips-more { display: inline-flex; min-height: 44px; }
