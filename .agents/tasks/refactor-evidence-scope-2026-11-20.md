@@ -1,6 +1,6 @@
 # Refactor report (draft): one owner for first-pass evidence scope
 
-Status: draft, written before any code change. Item 1 and item 2 results are appended below as they finish.
+Status: item 1 implemented and verified (section "Item 1 result" at the end); the sections above are the pre-change draft and stay as written. Item 2 has not started.
 
 - Branch `improvement/backend`, HEAD `9d43fe6` at the time of writing, working tree clean.
 - Date in the file name is 2026-11-20. The sandbox clock (`date +%F`) also reads 2026-11-20, so no override was needed.
@@ -85,3 +85,84 @@ All three use `evidence_scoped = scope_cleared or attachments or selected_source
 ### 5. What the refactor must not move
 
 Authorization (2927-3000), image byte loading (3032-3041), the Laya model call and cutoffs (3246-3262), the upload setting read (3267), hydration and storage failure handling (3283-3352), and every reader listed in section 2 step 5 stay in `execution.py`. The new module takes plain inputs only.
+
+## Item 1 result: first-pass evidence scope has one owner
+
+No live command, no AWS, Bedrock, AgentCore, Knowledge Base or OpenAI call was run. No existing test was edited. No setting default changed. Nothing was pushed in this step.
+
+### Commits (author and committer `CloudKai <kaiming_01@live.com>`, all local)
+
+| SHA | Message |
+|---|---|
+| `754116a` | docs: draft evidence-scope report with verified decision points before refactor (before this step) |
+| `3e18abe` | test: record first-pass evidence scope decisions before moving them (characterisation on the unchanged code) |
+| `6c91e5c` | refactor: add evidence_scope, one pure owner for first-pass evidence scope |
+| `26e6fed` | refactor: execution.py takes first-pass scope from evidence_scope |
+| `dda9e34` | refactor: gate_decision is a thin adapter over evidence_scope (includes `gate-decisions-after.json`) |
+| `94e8eed` | docs: describe the evidence_scope owner and the eval adapter |
+
+### Decision points moved (line numbers)
+
+Before = `backend/coaching/execution.py` at `9d43fe6`. After = `backend/coaching/evidence_scope.py` (new, 614 lines) at `94e8eed`. `execution.py` went from 3055-3280 for the whole gate to 2928-3052 (125 lines, mostly snapshot replacement and telemetry).
+
+| # | Decision | Before (`execution.py`) | After (`evidence_scope.py`, `decide_first_pass_scope` starts 348) |
+|---|---|---|---|
+| 1 | `resolve_mode_policy` over titles and filenames | 3055-3066 | 382-390 |
+| 2 | Lecture Help, Project Coaching | 3067-3076 | 391-407 |
+| 3 | Current-stage status | 3077-3095 | 410-424 |
+| 4 | Thinking Path progression, terminal completion, workflow guidance | 3096-3128 | 425-451 |
+| 5 | Attachment-only question and narrowing | 3129-3173 | 453-465 |
+| 6 | Effective source ids, unresolved image ids | 3174-3190 | 463-466 |
+| 7 | Missing image Q&A | 3191-3195 | 467-473 |
+| 8 | `needs_retrieval`, attachment, missing image, `force_retrieval` | 3196-3210 | 475-483 |
+| 9 | Course catalog retrieval | 3211-3227 | 485-501 |
+| 10 | `evidence_scoped` | 3228-3236 | 502-510 |
+| 11 | Laya eligibility and promotion (the model call stays) | 3237-3264 | 511-528 (eligibility, promotion); model call at `execution.py` 3012-3032 |
+| 12 | Upload retrieval policy | 3265-3277 | 529-546 |
+| 13 | Final values, telemetry | 3278-3280 | `execution.py` 3050-3052; `ScopeDecision` built at 547-575 |
+
+Helpers moved with their bodies unchanged (before in `execution.py`, after in `evidence_scope.py`): `_COURSE_CATALOG_RETRIEVAL_CUES` 172 to line 41; `_wants_course_catalog_retrieval` 242 to `wants_course_catalog_retrieval` 230 (now built on the new `course_catalog_cues` 210); `_wants_source_need_check` 275 to 253; `is_chit_chat` 327 to 281; `local_course_intent_candidate` 342 to 296; `_wants_student_upload_retrieval` 354 to 308. `searchable_student_uploads` stays in `execution.py` (it needs `is_locked_course_source`) and calls the module's `is_searchable_student_upload` (201). The old names stay importable from `execution.py` as aliases, so the existing tests import them unchanged.
+
+Eval side (`scripts/evals/evaluate_retrieval.py`): `gate_decision` 604-682 (80 lines of precedence code) is now `scope_inputs_for_row` 598 and a 20-line `gate_decision` 653 that maps the module result to the unchanged `GateDecision`. `_upload_retrieval_policy` (now 1085) asks the module with the setting on instead of rebuilding `evidence_scoped`. The three Laya eval scripts import `local_course_intent_candidate` from `evidence_scope`.
+
+### State reads and telemetry cases
+
+Kept in `execution.py` and passed in or applied after the module call:
+
+1. Image bytes (`image_inputs_for_sources`, storage I/O) become `ScopeSource.image_bytes_resolved`.
+2. `is_locked_course_source` becomes `ScopeSource.is_course_library`. It is now evaluated for every selected source at the start of the gate. It is a pure dict read.
+3. The Laya model call, course titles, cutoffs, `is_first_student_turn`. The module returns `course_intent_eligible`; the caller scores; a second call with `course_intent_promoted=True` applies the promotion before the upload rule, as before.
+4. `runtime_settings.fast_chat_upload_retrieval_enabled`. It was read after the model call. It is now read when building the inputs and read again after the model call; the scope is decided a second time only if the promotion fired or the value changed. It differs from the old behaviour only if something changes the setting during the model call.
+5. Snapshot replacement (clear, attachment narrowing, unresolved-row drop), hydration, the failure flips that set `retrieval_required` back to False, `source_need_check` after hydration, `allow_model_knowledge`, request stamps, and the retrieval failure path (`mode_policy.expected_mode`, `image_inputs`) stay as they were.
+
+Telemetry: the module returns data only. `execution.py` records `current_stage_status_request`, `stage_progression_request` or `workflow_skips_retrieval`, and `attachment_retrieval_scoped` before the model call, then `local_course_intent_retrieval` and `upload_retrieval_policy` after it, then `retrieval_gate_ms`, `retrieval_required`, `mode_policy_intent`. Order and values are unchanged; `tests/domain/test_evidence_scope_turn.py` pins the call order for 38 scenarios (recorded on the old code in `3e18abe`). No case was found where the order could not be kept.
+
+New finding on telemetry: `current_stage_status_request`, `stage_progression_request`, `workflow_skips_retrieval` and `attachment_retrieval_scoped` are not in `SAFE_PERF_FIELDS` (`backend/turn_perf.py`). `CoachTurnPerf.set` drops them and logs `turn_perf_rejected_field` at WARNING. The calls were kept so the warnings stay. Whether those four names should be allow-listed is a separate decision, not made here.
+
+### Differences between the old eval mirror and the module (none changes a number)
+
+1. Status and progression together: old eval mode `qa`, module (as production) `coaching`. No natural message triggers both predicates, so no row of the 5652-row cross product moved. The matrix test covers it with patched predicates.
+2. `second_chance` is now `wants_source_need_check(enabled=True, searched, evidence_scoped)`. It equals the old expression on every row.
+3. `UPLOAD_POLICY_DEFINITION` (a string written to the JSON) still names `_wants_student_upload_retrieval`. I did not edit it because that would change the output JSON; the alias still exists in `execution.py`.
+4. Not changed, left as a residual duplicate: `build_live_request` derives `source_ids` from `scope_cleared` and `attachment_only` of a `GateDecision`. `evaluate_laya_turn_decisions.scope_name` and the dump script keep their own scope-label helper (`scope_label` now exists in the module). The three Laya eval scripts keep their `evidence_scoped` and `searched` approximations; test T6 shows they equal the module on all 295 rows (147 eligible).
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `diff gate-decisions-before.json gate-decisions-after.json` (same `dump_gate_decisions.py` command, recorded in `commands.md`) | empty, exit 0, also `cmp` identical |
+| Legacy `gate_decision` cross product, 5652 rows (every gate and follow-up message, plus 7 compound ones, times 3 explicit modes, 2 attachment states, 3 source states) | identical to the capture made on the old code |
+| `run_offline_evals.sh` after-capture vs baseline (`diff_outputs.py`) | 41 comparisons, 0 differing, exit 0; log `.agents/tasks/refactor-evidence-scope/item1-offline-diff.txt` |
+| `evaluate_retrieval` JSON and stdout vs baseline | equal apart from `run.git_sha`, `git_dirty`, `generated_at_utc` |
+| Numbers | wrong-skip 76/154 (49.4%), clear rows 51/113, classifier only 85/154, false-retrieve 7/141 (5.0%), recall@4 material 91/94, page 78/94, follow-ups 8/9 and 0/3: all unchanged |
+| `ruff check .` | pass |
+| Full mock suite | 2876 passed, 2 failed, 1 skipped (baseline 2753 passed, 2 failed, 1 skipped). The 123 extra passes are the new tests: 79 (`test_evidence_scope.py`), 38 (`test_evidence_scope_turn.py`), 6 (`test_gate_scope_equivalence.py`). The 2 failures are the known `tests/http/test_notebook_reader.py` ones (no `frontend/dist`). |
+| Production-path tests (`test_needs_sources`, `test_rag_fallback`, `test_upload_retrieval_policy`, `test_course_library_chat_context`, `test_mode_classification`, `test_progression_effect`, `test_retrieval_gate`, `test_coach_turn_perf`) | pass, none edited |
+| Mutation check | flipping the workflow-not-status mask in the module failed the matrix and four turn scenarios |
+
+### Risks
+
+- The turn scenarios in `3e18abe` pin behaviour for `force_retrieval` and missing image Q&A, which had no direct test. Deep Review frozen-history turns (`frozen_history`) are covered in the matrix only, not at turn level.
+- One transient failure of `tests/domain/test_deep_review_execution.py::test_deep_review_started_in_cg_ignores_later_stage_advance` in one combined domain and scripts run on `26e6fed`. It passed alone four times, in five further domain runs, and in the full suite. It uses a background Deep Review worker. I did not find a link to this change, and I did not run it on the old commit to confirm it is flaky there.
+- The setting is read twice per turn now (see state read 4).
+- The ten-step precedence now sits in one 230-line function. The matrix and turn tests are the guard; a later rule change must update both.
