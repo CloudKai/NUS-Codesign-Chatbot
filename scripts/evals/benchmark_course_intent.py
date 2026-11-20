@@ -261,17 +261,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("passes and concurrency must be positive and warmup not negative")
 
     os.environ["HF_HUB_OFFLINE"] = "1"
-    from scripts.evals import evaluate_combined_gate as combined
-    from scripts.evals import evaluate_retrieval as retrieval
-
-    retrieval._block_network()
-    materials = retrieval.load_materials(retrieval.MATERIALS_PATH)
-    questions = retrieval.load_questions(retrieval.QUESTIONS_PATH, materials)
-    messages = retrieval.load_messages(
-        retrieval.MESSAGES_PATH, materials, [row["id"] for row in questions]
+    from scripts.evals.lib.fixtures import (
+        eval_course_titles,
+        load_materials,
+        load_messages,
+        load_questions,
     )
-    rows = [row for row in combined.prepare_rows(messages) if row.eligible]
-    titles = retrieval.eval_course_titles(materials)
+    from scripts.evals.lib.offline import block_network
+    from scripts.evals.lib.output import write_json_output
+    from scripts.evals.lib.paths import MATERIALS_PATH, MESSAGES_PATH, QUESTIONS_PATH
+    from scripts.evals.lib.prepared_rows import prepare_rows
+
+    block_network()
+    materials = load_materials(MATERIALS_PATH)
+    questions = load_questions(QUESTIONS_PATH, materials)
+    messages = load_messages(MESSAGES_PATH, materials, [row["id"] for row in questions])
+    rows = [row for row in prepare_rows(messages) if row.eligible]
+    titles = eval_course_titles(materials)
     result = {
         "gate_messages": len(messages),
         "eligible_rows": len(rows),
@@ -280,7 +286,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         **run_benchmark(args, rows, titles),
     }
     if args.json_output is not None:
-        retrieval._write_json_output(args.json_output, result)
+        write_json_output(args.json_output, result)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

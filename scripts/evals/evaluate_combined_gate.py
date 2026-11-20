@@ -6,7 +6,7 @@ counts per category, each rate with a Wilson 95% interval.
 
 Arms:
 
-* (a) the existing rules-based gate (``evaluate_retrieval.gate_decision``).
+* (a) the existing rules-based gate (``scripts.evals.lib.gate.gate_decision``).
 * (b) gate + Laya: an ambiguous turn the gate skipped is promoted to course
   retrieval when the local course-intent classifier scores at or above its
   cutoff (``backend.coaching.execution`` rule). The cutoffs are the existing
@@ -43,7 +43,21 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from scripts.evals import evaluate_retrieval as retrieval  # noqa: E402
+from scripts.evals.lib.fixtures import (  # noqa: E402
+    eval_course_titles,
+    load_materials,
+    load_messages,
+    load_questions,
+)
+from scripts.evals.lib.metrics import rate_record  # noqa: E402
+from scripts.evals.lib.offline import block_network  # noqa: E402
+from scripts.evals.lib.output import write_json_output  # noqa: E402
+from scripts.evals.lib.paths import MATERIALS_PATH, MESSAGES_PATH, QUESTIONS_PATH  # noqa: E402
+
+# Moved to scripts/evals/lib/prepared_rows.py so benchmark_course_intent can use them
+# without importing this command; re-exported for existing callers.
+from scripts.evals.lib.prepared_rows import PreparedRow as PreparedRow  # noqa: E402
+from scripts.evals.lib.prepared_rows import prepare_rows as prepare_rows  # noqa: E402
 
 PHASE3D_DIR = _PROJECT_ROOT / ".agents" / "tasks" / "phase3d-work"
 Z_95 = NormalDist().inv_cdf(0.975)
@@ -96,7 +110,7 @@ def sample_mark(total: int) -> str:
 
 def rate_ci(successes: int, total: int) -> dict[str, Any]:
     """A rate record with a Wilson 95% interval and a small-sample mark."""
-    base = retrieval.rate_record(successes, total)
+    base = rate_record(successes, total)
     interval = wilson_interval(successes, total)
     return {
         **base,
@@ -115,60 +129,6 @@ def format_ci(record: Mapping[str, Any]) -> str:
         f"[{record['wilson_low'] * 100:.1f}, {record['wilson_high'] * 100:.1f}]"
     )
     return f"{text} {record['small_sample']}".rstrip()
-
-
-# ------------------------------------------------------------------- row preparation
-
-
-@dataclass(frozen=True)
-class PreparedRow:
-    """One gate message with the gate's decision and Laya eligibility."""
-
-    id: str
-    category: str
-    expected: str
-    message: str
-    history: tuple[Mapping[str, Any], ...]
-    gate_retrieve: bool
-    second_chance: bool
-    eligible: bool
-    first_turn: bool
-
-
-def prepare_rows(messages: Sequence[Mapping[str, Any]]) -> list[PreparedRow]:
-    """Run the gate once per message and record Laya eligibility.
-
-    Eligibility uses the same call as the course-intent eval scripts
-    (``local_course_intent_candidate`` with the gate's intent and scope).
-    """
-    from backend.coaching.evidence_scope import local_course_intent_candidate
-    from backend.course_intent import is_first_student_turn
-
-    prepared = []
-    for row in messages:
-        decision = retrieval.gate_decision(row)
-        eligible = local_course_intent_candidate(
-            row["message"],
-            intent=decision.intent,
-            evidence_scoped=bool(
-                decision.scope_cleared or row["attachments"] or row["selected_sources"]
-            ),
-            searched=decision.retrieve,
-        )
-        prepared.append(
-            PreparedRow(
-                id=str(row["id"]),
-                category=str(row["category"]),
-                expected=str(row["expected_decision"]),
-                message=str(row["message"]),
-                history=tuple(row["history"]),
-                gate_retrieve=bool(decision.retrieve),
-                second_chance=bool(decision.second_chance),
-                eligible=bool(eligible),
-                first_turn=bool(is_first_student_turn(row["history"])),
-            )
-        )
-    return prepared
 
 
 # ------------------------------------------------------------------- Laya sources
@@ -441,7 +401,7 @@ def default_cost_model(materials: Sequence[Mapping[str, Any]]) -> CostModel:
     from backend.prompts.composer import _SOURCE_NEED_INSTRUCTION, source_check_titles_block
     from backend.settings import settings
 
-    titles = retrieval.eval_course_titles(materials)
+    titles = eval_course_titles(materials)
     return CostModel(
         rule_chars=len(_SOURCE_NEED_INSTRUCTION) + 1,
         titles_chars=len(source_check_titles_block(titles)) + 1,
@@ -784,7 +744,7 @@ def _load_sources(
             rerun_source(
                 classifier,
                 prepared,
-                retrieval.eval_course_titles(materials),
+                eval_course_titles(materials),
                 name="laya_rerun",
                 threshold=threshold,
                 first_turn_threshold=args.first_turn_threshold,
@@ -799,11 +759,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     modes = [m for m in args.per_category_modes.split(",") if m]
     if any(m not in MODES for m in modes):
         build_parser().error(f"--per-category-modes must be from: {', '.join(MODES)}")
-    retrieval._block_network()
-    materials = retrieval.load_materials(retrieval.MATERIALS_PATH)
-    questions = retrieval.load_questions(retrieval.QUESTIONS_PATH, materials)
-    messages = retrieval.load_messages(
-        retrieval.MESSAGES_PATH, materials, [row["id"] for row in questions]
+    block_network()
+    materials = load_materials(MATERIALS_PATH)
+    questions = load_questions(QUESTIONS_PATH, materials)
+    messages = load_messages(
+        MESSAGES_PATH, materials, [row["id"] for row in questions]
     )
     prepared = prepare_rows(messages)
     sources, unavailable = _load_sources(args, prepared, materials)
@@ -815,7 +775,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         unavailable=unavailable,
     )
     if args.json_output is not None:
-        retrieval._write_json_output(args.json_output, result)
+        write_json_output(args.json_output, result)
     print(format_report(result, modes))
     return 0
 
