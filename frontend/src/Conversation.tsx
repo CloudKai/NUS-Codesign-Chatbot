@@ -530,8 +530,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     </div></div>
     <div className="composer-dock"><div className="chat-column">
     {checkIn ? <CoachCheckIn checkIn={checkIn} onAct={item => insertScaffold(item.scaffold, 'project')} onDismiss={dismissCheckIn}/> : null}
-    {showChips ? <StageStarters stageId={project.current_stage} disabled={externalBlocked} collapsed={startersCollapsed} setCollapsed={setStartersCollapsed} onChoose={choosePrompt}
-      hintLevel={hintLevel} onHint={() => { insertScaffold(hintScaffold(hintLevel, stageLabel), 'project'); setHintLevel(level => Math.min(level + 1, 2)); }}/> : null}
+    {showChips ? <StageStarters stageId={project.current_stage} disabled={externalBlocked} collapsed={startersCollapsed} setCollapsed={setStartersCollapsed} onChoose={choosePrompt}/> : null}
     <form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
       <input ref={attachmentInput} hidden type="file" multiple aria-label="Attach files to your message" onChange={event => {
         const files = Array.from(event.target.files ?? []);
@@ -557,6 +556,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         intentRef.current = next; setIntent(next); remember(textRef.current, pendingRef.current);
       }}/>
         <span className="composer-hint" id="composer-hint">↵ send · ⇧ ↵ new line</span>
+        {intent === 'project' ? <button className="hint-button" type="button" title="Ask for a small nudge, not the answer" disabled={externalBlocked || watching || checking || moving || !!pending}
+          onClick={() => { insertScaffold(hintScaffold(hintLevel, stageLabel), 'project'); setHintLevel(level => Math.min(level + 1, 2)); }}>
+          <Icon name="spark"/><span>{hintLevel > 0 ? 'Stronger hint' : 'Hint'}</span></button> : null}
         <button className="primary send-button" aria-label="Send message" title="Send message" type="submit" disabled={watching || checking || busy || moving || projectUncertain || externalBlocked || uploading || feedbackBusy || !!pending || !text.trim()}><Icon name="arrow"/></button></div>
     </form>
     {storageError ? <p role="alert">Tab storage is unavailable. Keep a copy of your draft before reloading.</p> : null}
