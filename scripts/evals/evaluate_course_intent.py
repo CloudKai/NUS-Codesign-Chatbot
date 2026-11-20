@@ -16,6 +16,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from scripts.evals.lib.metrics import p95_ms as _p95_ms  # noqa: E402
+
 _COMPARE_CATEGORIES = (
     "course_content",
     "course_logistics",
@@ -25,15 +27,21 @@ _COMPARE_CATEGORIES = (
 )
 
 
-def _p95_ms(values: list[float]) -> float | None:
-    return round(sorted(values)[(95 * len(values) - 1) // 100], 2) if values else None
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the Phase 3c subset with local weights and write a JSON report."""
     from backend.coaching.evidence_scope import local_course_intent_candidate
     from backend.course_intent import LayaCourseIntentClassifier
-    from scripts.evals import evaluate_retrieval as retrieval
+    from scripts.evals.lib.fixtures import (
+        eval_course_titles,
+        load_materials,
+        load_messages,
+        load_questions,
+    )
+    from scripts.evals.lib.gate import gate_decision
+    from scripts.evals.lib.live import select_live_rows
+    from scripts.evals.lib.metrics import false_retrieve_rate, wrong_skip_rate
+    from scripts.evals.lib.offline import block_network
+    from scripts.evals.lib.paths import MATERIALS_PATH, MESSAGES_PATH, QUESTIONS_PATH
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=Path, required=True)
@@ -45,22 +53,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("threshold must be in [0, 1] and concurrency must be positive")
 
     os.environ["HF_HUB_OFFLINE"] = "1"
-    retrieval._block_network()
-    materials = retrieval.load_materials(retrieval.MATERIALS_PATH)
-    questions = retrieval.load_questions(retrieval.QUESTIONS_PATH, materials)
-    messages = retrieval.load_messages(
-        retrieval.MESSAGES_PATH, materials, [row["id"] for row in questions]
+    block_network()
+    materials = load_materials(MATERIALS_PATH)
+    questions = load_questions(QUESTIONS_PATH, materials)
+    messages = load_messages(
+        MESSAGES_PATH, materials, [row["id"] for row in questions]
     )
-    selected = retrieval.select_live_rows(
+    selected = select_live_rows(
         messages, categories=_COMPARE_CATEGORIES, expected_decision="retrieve", skip_sample=60
     )
-    titles = retrieval.eval_course_titles(materials)
+    titles = eval_course_titles(materials)
     started = perf_counter()
     classifier = LayaCourseIntentClassifier(args.checkpoint)
     load_ms = (perf_counter() - started) * 1000
 
     def evaluate(row: Mapping[str, Any]) -> dict[str, Any]:
-        decision = retrieval.gate_decision(row)
+        decision = gate_decision(row)
         eligible = local_course_intent_candidate(
             row["message"],
             intent=decision.intent,
@@ -111,12 +119,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             [row["classifier_ms"] for row in rows if row["course_score"] is not None]
         ),
         "baseline": {
-            "wrong_skip": retrieval.wrong_skip_rate(baseline),
-            "false_retrieve": retrieval.false_retrieve_rate(baseline),
+            "wrong_skip": wrong_skip_rate(baseline),
+            "false_retrieve": false_retrieve_rate(baseline),
         },
         "with_laya": {
-            "wrong_skip": retrieval.wrong_skip_rate(candidate),
-            "false_retrieve": retrieval.false_retrieve_rate(candidate),
+            "wrong_skip": wrong_skip_rate(candidate),
+            "false_retrieve": false_retrieve_rate(candidate),
             "promoted_outside_course_scope": sum(
                 row["promoted"] and row["expected_scope"] not in {"course", "both"}
                 for row in rows

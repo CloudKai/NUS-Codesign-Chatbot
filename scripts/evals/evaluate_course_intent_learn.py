@@ -18,8 +18,16 @@ from backend.course_intent import (
     learner_course_score,
     load_vega_reader,
 )
-from scripts.evals import evaluate_retrieval as retrieval
-from scripts.evals.evaluate_course_intent import _p95_ms
+from scripts.evals.lib.fixtures import (
+    eval_course_titles,
+    load_materials,
+    load_messages,
+    load_questions,
+)
+from scripts.evals.lib.gate import GateDecision, gate_decision
+from scripts.evals.lib.metrics import false_retrieve_rate, p95_ms as _p95_ms, wrong_skip_rate
+from scripts.evals.lib.offline import block_network
+from scripts.evals.lib.paths import MATERIALS_PATH, MESSAGES_PATH, QUESTIONS_PATH
 
 
 def split_messages(
@@ -58,8 +66,8 @@ def evaluate_routes(
         for row in rows
     ]
     return {
-        "wrong_skip": retrieval.wrong_skip_rate(decisions),
-        "false_retrieve": retrieval.false_retrieve_rate(decisions),
+        "wrong_skip": wrong_skip_rate(decisions),
+        "false_retrieve": false_retrieve_rate(decisions),
         "promoted_outside_course_scope": sum(
             promoted(row) and row["expected_scope"] not in {"course", "both"}
             for row in rows
@@ -101,21 +109,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.bundle_output.exists() or args.json_output.exists():
         parser.error("use fresh output paths")
     os.environ["HF_HUB_OFFLINE"] = "1"
-    retrieval._block_network()
+    block_network()
     from laya import Learner
 
-    materials = retrieval.load_materials(retrieval.MATERIALS_PATH)
-    questions = retrieval.load_questions(retrieval.QUESTIONS_PATH, materials)
-    messages = retrieval.load_messages(
-        retrieval.MESSAGES_PATH, materials, [row["id"] for row in questions]
+    materials = load_materials(MATERIALS_PATH)
+    questions = load_questions(QUESTIONS_PATH, materials)
+    messages = load_messages(
+        MESSAGES_PATH, materials, [row["id"] for row in questions]
     )
     if not all(row.get("synthetic") is True for row in messages):
         parser.error("use synthetic labels only")
     splits = split_messages(messages)
-    titles = retrieval.eval_course_titles(materials)
+    titles = eval_course_titles(materials)
     decision_question = course_intent_questions()
 
-    def candidate(row: Mapping[str, Any], decision: retrieval.GateDecision) -> bool:
+    def candidate(row: Mapping[str, Any], decision: GateDecision) -> bool:
         return local_course_intent_candidate(
             row["message"],
             intent=decision.intent,
@@ -135,7 +143,7 @@ def main(argv: Sequence[str] | None = None) -> int:
              else "no_course_evidence"},
         )
         for row in splits["train"]
-        if candidate(row, retrieval.gate_decision(row))
+        if candidate(row, gate_decision(row))
     ]
     print(f"Fitting Vega on {len(training)} eligible synthetic turns.", flush=True)
     started = perf_counter()
@@ -151,7 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Scoring {len(splits[name])} {name} turns.", flush=True)
         results = []
         for row in splits[name]:
-            decision = retrieval.gate_decision(row)
+            decision = gate_decision(row)
             result = {
                 "id": row["id"],
                 "expected": row["expected_decision"],
