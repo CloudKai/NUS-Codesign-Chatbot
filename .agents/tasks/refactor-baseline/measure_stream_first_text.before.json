@@ -1,0 +1,66 @@
+{
+  "git_sha": "4fb7c92",
+  "label": "baseline",
+  "modes": [
+    {
+      "done_ms": {
+        "max": 518.5,
+        "median": 16.5,
+        "min": 14.9
+      },
+      "first_reply_delta_ms": {
+        "max": 516.8,
+        "median": 14.9,
+        "min": 13.6
+      },
+      "first_visible_event": "reply_delta",
+      "first_visible_text_ms": {
+        "max": 516.8,
+        "median": 14.9,
+        "min": 13.6
+      },
+      "mode": "plain_mock",
+      "reply_delta_events_per_run": 6,
+      "reply_ready_ms": {
+        "max": 516.8,
+        "median": 14.9,
+        "min": 13.6
+      },
+      "runs": 3
+    },
+    {
+      "done_ms": {
+        "max": 289.5,
+        "median": 286.8,
+        "min": 286.6
+      },
+      "first_reply_delta_ms": {
+        "max": 184.5,
+        "median": 182.9,
+        "min": 182.6
+      },
+      "first_visible_event": "reply_delta",
+      "first_visible_text_ms": {
+        "max": 184.5,
+        "median": 182.9,
+        "min": 182.6
+      },
+      "mode": "simulated_latency_mock",
+      "reply_delta_events_per_run": 6,
+      "reply_ready_ms": {
+        "max": 287.4,
+        "median": 285.4,
+        "min": 285.1
+      },
+      "runs": 3
+    }
+  ],
+  "provider": "mock",
+  "real_model": false,
+  "simulated": {
+    "chunk_ms": 20.0,
+    "ttft_ms": 150.0,
+    "words_per_chunk": 4
+  },
+  "utc": "2026-11-20T06:46:39+00:00"
+}
