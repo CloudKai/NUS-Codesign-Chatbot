@@ -92,14 +92,14 @@ from scripts.evals.lib.metrics import (  # noqa: E402
     wrong_skip_rate,
 )
 from scripts.evals.lib.gate import (  # noqa: E402
-    _eval_upload_entries,
+    eval_upload_entries as _eval_upload_entries,
     gate_decision,
     GateDecision,
     scope_inputs_for_row,
 )
 from scripts.evals.lib.offline import (  # noqa: E402
     accepted_targets,
-    _block_network,
+    block_network as _block_network,
     extract_pdf_pages as extract_pdf_pages,
     OfflineCourseSearch,
     rank_hits,
@@ -114,7 +114,7 @@ from scripts.evals.lib.live import (  # noqa: E402
     exception_label,
     _inline_schema_refs as _inline_schema_refs,
     is_auth_or_access_error,
-    _live_eval_provider,
+    live_eval_provider as _live_eval_provider,
     live_failure_detail,
     LIVE_MODEL_HARD_CALL_CAP,
     LIVE_MODEL_MAX_OUTPUT_TOKENS as LIVE_MODEL_MAX_OUTPUT_TOKENS,
@@ -129,7 +129,7 @@ from scripts.evals.lib.live import (  # noqa: E402
 )
 from scripts.evals.lib.output import (  # noqa: E402
     _git_run_metadata,
-    _write_json_output as _write_output,
+    write_json_output as _write_output,
 )
 
 

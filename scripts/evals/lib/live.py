@@ -2,7 +2,7 @@
 
 Importing this module starts no call. ``check_live_model_request`` and
 ``select_live_rows`` only validate; ``LiveFastChatBridge``, ``build_live_request``
-and ``_live_eval_provider`` build payloads and import the backend lazily. The
+and ``live_eval_provider`` build payloads and import the backend lazily. The
 commands that actually send requests (``evaluate_retrieval --live-model`` and
 ``benchmark_agentcore_vs_converse``) stay the only owners of the clients.
 """
@@ -15,6 +15,9 @@ from typing import Any
 from scripts.evals.lib.fixtures import DECISIONS, MESSAGE_CATEGORIES
 from scripts.evals.lib.gate import GateDecision
 from scripts.evals.lib.metrics import evenly_spaced_indices
+
+# Result files of the live-run commands carry the run block; they look it up here.
+from scripts.evals.lib.output import _git_run_metadata as _git_run_metadata
 
 
 def _refuse_unknown(flag: str, unknown: Sequence[str]) -> None:
@@ -448,7 +451,7 @@ def is_auth_or_access_error(error: BaseException) -> bool:
     return type(error).__name__ in AUTH_ACCESS_ERROR_CLASSES
 
 
-def _live_eval_provider() -> Any:
+def live_eval_provider() -> Any:
     """Build the provider only to reuse its payload builder (never invoked)."""
     from backend.agentcore_provider import AgentCoreCoachProvider
 

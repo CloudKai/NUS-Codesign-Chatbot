@@ -5,6 +5,7 @@ No backend imports, no I/O.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -74,3 +75,22 @@ def evenly_spaced_indices(total: int, limit: int) -> list[int]:
     if limit >= total:
         return list(range(total))
     return [index * total // limit for index in range(limit)]
+
+
+def interval(n: int, total: int) -> dict[str, Any]:
+    """Compute counts and descriptive Wilson 95% intervals for turn-level rates."""
+    result = rate_record(n, total)
+    if total:
+        p, z = n / total, 1.96
+        center = p + z * z / (2 * total)
+        delta = z * math.sqrt((p * (1 - p) + z * z / (4 * total)) / total)
+        result["wilson95"] = [
+            max(0, (center - delta) / (1 + z * z / total)),
+            min(1, (center + delta) / (1 + z * z / total)),
+        ]
+    return result
+
+
+def p95_ms(values: list[float]) -> float | None:
+    """Nearest-rank 95th percentile in ms, rounded to two places, or ``None`` when empty."""
+    return round(sorted(values)[(95 * len(values) - 1) // 100], 2) if values else None

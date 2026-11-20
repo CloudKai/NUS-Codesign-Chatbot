@@ -50,11 +50,11 @@ def scope_inputs_for_row(
 
     Source ids are ``eval-source-N`` then ``eval-attachment-N``, the ids
     ``build_live_request`` stamps. ``is_image`` follows the filename extension,
-    the same guess ``_eval_upload_entries`` makes.
+    the same guess ``eval_upload_entries`` makes.
     """
     from backend.coaching.evidence_scope import ScopeInputs, ScopeSource
 
-    entries = _eval_upload_entries(row)
+    entries = eval_upload_entries(row)
     selected = list(row["selected_sources"])
     attachments = list(row["attachments"])
     sources = []
@@ -114,7 +114,7 @@ def gate_decision(row: Mapping[str, Any]) -> GateDecision:
     )
 
 
-def _eval_upload_entries(row: Mapping[str, Any]) -> list[dict[str, Any]]:
+def eval_upload_entries(row: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Project the row's selected and attached files into source dicts.
 
     Rows hold only a title and a filename, so ``mime`` is guessed from the

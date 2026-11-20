@@ -131,7 +131,7 @@ class OfflineCourseSearch:
         ]
 
 
-def _block_network() -> None:
+def block_network() -> None:
     """Make any socket connection fail, so offline mode cannot reach a network."""
     import socket
 

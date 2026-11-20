@@ -6,12 +6,14 @@ which imports one production helper lazily. No network, no model.
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from scripts.evals.lib.paths import (
+    DATASET_DIR,
     FOLLOWUPS_PATH,
     MATERIALS_PATH,
     MESSAGES_PATH,
@@ -305,3 +307,11 @@ def eval_course_titles(materials: Sequence[Mapping[str, Any]]) -> list[str]:
         ]
     )
 
+
+def read_training(name: str, width: int) -> list[list[str]]:
+    """Read source-controlled, synthetic Sol examples and validate field counts."""
+    with (DATASET_DIR / name).open(encoding="utf-8", newline="") as file:
+        rows = list(csv.reader(file, delimiter="\t"))
+    if not rows or any(len(row) != width or not all(row) for row in rows):
+        raise ValueError(f"Invalid synthetic training rows in {name}")
+    return rows

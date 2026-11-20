@@ -43,7 +43,7 @@ def _git_run_metadata() -> dict[str, Any]:
     }
 
 
-def _write_json_output(
+def write_json_output(
     path: Path, result: Mapping[str, Any], run: Mapping[str, Any] | None = None
 ) -> None:
     """Write ``result`` as JSON with a ``run`` block (git SHA, UTC timestamp).
@@ -55,3 +55,8 @@ def _write_json_output(
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {**result, "run": _git_run_metadata() if run is None else run}
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def save(path: Path, data: Any) -> None:
+    """Write JSON report data with a trailing newline."""
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
