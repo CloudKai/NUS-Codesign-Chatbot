@@ -1,0 +1,1241 @@
+{
+  "course_search": "LocalChunkRetriever over local lecture PDFs, one chunk per page (not the Knowledge Base)",
+  "definitions": {
+    "empty_result_rate": "Numerator: completed retrieval attempts that returned zero results. Denominator: completed attempts (failed live calls are counted separately). Offline, a chunk with no lexical match (score 0) is not a result.",
+    "recall_at_4": "Numerator: questions with at least one of the top 4 ranked results in the expected material or in an alt_expected material. Denominator: questions evaluated. The page-level variant also requires the result page to be one of the tagged pages for that material (any one page of a multi-page tag counts) and uses only questions whose results carry a page. Ranking: score descending, ties by material order in the manifest then page number.",
+    "wrong_skip_rate": "Numerator: messages labelled 'retrieve' for which the gate searched no source (effective decision 'skip'). Denominator: all messages labelled 'retrieve'. The effective decision is 'retrieve' if and only if at least one source (course catalog or student file) is searched."
+  },
+  "followups": {
+    "attributable_failures_if_second_chance_recovers_gate": 2,
+    "cases": 12,
+    "definition": "Follow-up cases are reported apart from the gate messages. gate_ok: the gate searched the course (retrieve cases) or searched nothing (skip cases). query_ok: one of the top 4 offline results for the query the Knowledge Base adapter builds from the message and history is in the expected material (the search gets no history, like the Knowledge Base). end_to_end_pass: gate_ok and query_ok. standalone_ok: the linked standalone question passes the gate and its top 4 hold the expected material. Rewriting is justified only when at least 5 retrieve cases fail end to end and at least 5 of those failures have standalone_ok.",
+    "end_to_end_pass": {
+      "denominator": 9,
+      "numerator": 1,
+      "rate": 0.1111
+    },
+    "end_to_end_pass_if_second_chance_recovers_gate": {
+      "denominator": 9,
+      "numerator": 6,
+      "rate": 0.6667
+    },
+    "gate_false_retrieve": {
+      "denominator": 3,
+      "numerator": 0,
+      "rate": 0.0
+    },
+    "gate_wrong_skip": {
+      "denominator": 9,
+      "numerator": 8,
+      "rate": 0.8889
+    },
+    "gate_wrong_skip_recoverable_by_second_chance": 8,
+    "history_weighted_search_ok_contrast": {
+      "denominator": 9,
+      "numerator": 8,
+      "rate": 0.8889
+    },
+    "per_case": [
+      {
+        "bare_message_top4": [
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_2_engaging_personas"
+        ],
+        "built_query": "what is it good for?",
+        "built_query_top4": [
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_2_engaging_personas"
+        ],
+        "end_to_end_pass": false,
+        "expected_decision": "retrieve",
+        "expected_material": "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+        "gate_course": false,
+        "gate_ok": false,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "history_weighted_search_ok_contrast": true,
+        "history_weighted_search_top4_contrast": [
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "reading_reading_2_engaging_personas"
+        ],
+        "id": "gm296",
+        "message": "what is it good for?",
+        "query_ok": false,
+        "query_uses_history": false,
+        "standalone_gate_course": true,
+        "standalone_ok": true,
+        "standalone_question": "What is a creative matrix and what is it good for?",
+        "standalone_question_id": "rq029",
+        "standalone_top4": [
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026"
+        ]
+      },
+      {
+        "bare_message_top4": [],
+        "built_query": "what are the axes?",
+        "built_query_top4": [],
+        "end_to_end_pass": false,
+        "expected_decision": "retrieve",
+        "expected_material": "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+        "gate_course": false,
+        "gate_ok": false,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "history_weighted_search_ok_contrast": true,
+        "history_weighted_search_top4_contrast": [
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026"
+        ],
+        "id": "gm297",
+        "message": "what are the axes?",
+        "query_ok": false,
+        "query_uses_history": false,
+        "standalone_gate_course": true,
+        "standalone_ok": true,
+        "standalone_question": "What are the two axes of the prioritisation matrix?",
+        "standalone_question_id": "rq035",
+        "standalone_top4": [
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026"
+        ]
+      },
+      {
+        "bare_message_top4": [
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_2_engaging_personas"
+        ],
+        "built_query": "what goes in each part?",
+        "built_query_top4": [
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_2_engaging_personas"
+        ],
+        "end_to_end_pass": false,
+        "expected_decision": "retrieve",
+        "expected_material": "lecture_week_2_jtbd_framework_term_1_2026",
+        "gate_course": false,
+        "gate_ok": false,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "history_weighted_search_ok_contrast": false,
+        "history_weighted_search_top4_contrast": [
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_2_engaging_personas"
+        ],
+        "id": "gm298",
+        "message": "what goes in each part?",
+        "query_ok": false,
+        "query_uses_history": false,
+        "standalone_gate_course": false,
+        "standalone_ok": false,
+        "standalone_question": "How do I write a job statement? What goes in WHEN I, BUT, HELP ME and SO I?",
+        "standalone_question_id": "rq011",
+        "standalone_top4": [
+          "lecture_week_4_affinity_clusters_product_values_and_features_oxymoron",
+          "lecture_week_2_jtbd_framework_term_1_2026",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young"
+        ]
+      },
+      {
+        "bare_message_top4": [
+          "lecture_week_2_jtbd_framework_term_1_2026",
+          "reading_reading_2_engaging_personas",
+          "lecture_week_2_jtbd_framework_term_1_2026",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "built_query": "how many should I focus on?",
+        "built_query_top4": [
+          "lecture_week_2_jtbd_framework_term_1_2026",
+          "reading_reading_2_engaging_personas",
+          "lecture_week_2_jtbd_framework_term_1_2026",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "end_to_end_pass": false,
+        "expected_decision": "retrieve",
+        "expected_material": "reading_reading_2_engaging_personas",
+        "gate_course": false,
+        "gate_ok": false,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "history_weighted_search_ok_contrast": true,
+        "history_weighted_search_top4_contrast": [
+          "reading_reading_2_engaging_personas",
+          "lecture_week_2_jtbd_framework_term_1_2026",
+          "lecture_week_2_jtbd_framework_term_1_2026",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "id": "gm299",
+        "message": "how many should I focus on?",
+        "query_ok": true,
+        "query_uses_history": false,
+        "standalone_gate_course": false,
+        "standalone_ok": false,
+        "standalone_question": "How many personas should I focus on?",
+        "standalone_question_id": "rq085",
+        "standalone_top4": [
+          "reading_reading_2_engaging_personas",
+          "reading_reading_2_engaging_personas",
+          "reading_reading_2_engaging_personas",
+          "lecture_week_2_jtbd_framework_term_1_2026"
+        ]
+      },
+      {
+        "bare_message_top4": [
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_2_jtbd_framework_term_1_2026",
+          "lecture_week_2_jtbd_framework_term_1_2026"
+        ],
+        "built_query": "Current source question: which lecture is that from? Prior student reasoning: what is the rule of threes?",
+        "built_query_top4": [
+          "lecture_week_10_storytelling",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_2_engaging_personas",
+          "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026"
+        ],
+        "end_to_end_pass": true,
+        "expected_decision": "retrieve",
+        "expected_material": "lecture_week_10_storytelling",
+        "gate_course": true,
+        "gate_ok": true,
+        "gate_retrieve": true,
+        "gate_second_chance": false,
+        "history_weighted_search_ok_contrast": true,
+        "history_weighted_search_top4_contrast": [
+          "lecture_week_10_storytelling",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_2_engaging_personas",
+          "reading_reading_1_how_pixar_fosters_collective_creativity"
+        ],
+        "id": "gm300",
+        "message": "which lecture is that from?",
+        "query_ok": true,
+        "query_uses_history": true,
+        "standalone_gate_course": true,
+        "standalone_ok": true,
+        "standalone_question": "What is the rule of threes?",
+        "standalone_question_id": "rq069",
+        "standalone_top4": [
+          "lecture_week_10_storytelling",
+          "reading_reading_1_how_pixar_fosters_collective_creativity"
+        ]
+      },
+      {
+        "bare_message_top4": [
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "built_query": "how would that change the HMW about transport at NUS?",
+        "built_query_top4": [
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "end_to_end_pass": false,
+        "expected_decision": "retrieve",
+        "expected_material": "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+        "gate_course": false,
+        "gate_ok": false,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "history_weighted_search_ok_contrast": true,
+        "history_weighted_search_top4_contrast": [
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "id": "gm301",
+        "message": "how would that change the HMW about transport at NUS?",
+        "query_ok": true,
+        "query_uses_history": false,
+        "standalone_gate_course": false,
+        "standalone_ok": false,
+        "standalone_question": "How does Powers of Ten change the HMW about on-demand transportation at NUS?",
+        "standalone_question_id": "rq052",
+        "standalone_top4": [
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ]
+      },
+      {
+        "bare_message_top4": [
+          "lecture_week_10_storytelling",
+          "lecture_week_10_storytelling",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "built_query": "what should I write for emotion?",
+        "built_query_top4": [
+          "lecture_week_10_storytelling",
+          "lecture_week_10_storytelling",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "end_to_end_pass": false,
+        "expected_decision": "retrieve",
+        "expected_material": "lecture_week_10_storytelling",
+        "gate_course": false,
+        "gate_ok": false,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "history_weighted_search_ok_contrast": true,
+        "history_weighted_search_top4_contrast": [
+          "lecture_week_10_storytelling",
+          "lecture_week_10_storytelling",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "id": "gm302",
+        "message": "what should I write for emotion?",
+        "query_ok": true,
+        "query_uses_history": false,
+        "standalone_gate_course": false,
+        "standalone_ok": false,
+        "standalone_question": "What should I write for emotion in the user journey map?",
+        "standalone_question_id": "rq071",
+        "standalone_top4": [
+          "lecture_week_10_storytelling",
+          "lecture_week_10_storytelling",
+          "lecture_week_10_storytelling",
+          "lecture_week_10_storytelling"
+        ]
+      },
+      {
+        "bare_message_top4": [
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "built_query": "and the F-pattern?",
+        "built_query_top4": [
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "end_to_end_pass": false,
+        "expected_decision": "retrieve",
+        "expected_material": "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+        "gate_course": false,
+        "gate_ok": false,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "history_weighted_search_ok_contrast": true,
+        "history_weighted_search_top4_contrast": [
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "id": "gm303",
+        "message": "and the F-pattern?",
+        "query_ok": true,
+        "query_uses_history": false,
+        "standalone_gate_course": true,
+        "standalone_ok": true,
+        "standalone_question": "What is the Z-pattern and the F-pattern for poster layouts?",
+        "standalone_question_id": "rq056",
+        "standalone_top4": [
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ]
+      },
+      {
+        "bare_message_top4": [
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "built_query": "does it have any authority?",
+        "built_query_top4": [
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "end_to_end_pass": false,
+        "expected_decision": "retrieve",
+        "expected_material": "reading_reading_1_how_pixar_fosters_collective_creativity",
+        "gate_course": false,
+        "gate_ok": false,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "history_weighted_search_ok_contrast": true,
+        "history_weighted_search_top4_contrast": [
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ],
+        "id": "gm304",
+        "message": "does it have any authority?",
+        "query_ok": true,
+        "query_uses_history": false,
+        "standalone_gate_course": false,
+        "standalone_ok": false,
+        "standalone_question": "What is Pixar's brain trust and does it have any authority?",
+        "standalone_question_id": "rq075",
+        "standalone_top4": [
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ]
+      },
+      {
+        "built_query": "ok so i will fill one in for our bike lock idea",
+        "end_to_end_pass": true,
+        "expected_decision": "skip",
+        "gate_course": false,
+        "gate_ok": true,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "id": "gm305",
+        "message": "ok so i will fill one in for our bike lock idea",
+        "query_uses_history": false,
+        "standalone_ok": null
+      },
+      {
+        "built_query": "and also the staff at the counter",
+        "end_to_end_pass": true,
+        "expected_decision": "skip",
+        "gate_course": false,
+        "gate_ok": true,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "id": "gm306",
+        "message": "and also the staff at the counter",
+        "query_uses_history": false,
+        "standalone_ok": null
+      },
+      {
+        "built_query": "thanks, got it",
+        "end_to_end_pass": true,
+        "expected_decision": "skip",
+        "gate_course": false,
+        "gate_ok": true,
+        "gate_retrieve": false,
+        "gate_second_chance": true,
+        "id": "gm307",
+        "message": "thanks, got it",
+        "query_uses_history": false,
+        "standalone_ok": null
+      }
+    ],
+    "query_ok": {
+      "denominator": 9,
+      "numerator": 6,
+      "rate": 0.6667
+    },
+    "query_ok_among_gate_passed": {
+      "denominator": 1,
+      "numerator": 1,
+      "rate": 1.0
+    },
+    "query_uses_history": {
+      "denominator": 9,
+      "numerator": 1,
+      "rate": 0.1111
+    },
+    "retrieve_cases": 9,
+    "skip_cases": 3,
+    "standalone_control_ok": {
+      "denominator": 9,
+      "numerator": 4,
+      "rate": 0.4444
+    },
+    "verdict": {
+      "attributable_failures": 3,
+      "clearly_fail": false,
+      "end_to_end_failures": 8,
+      "min_attributable": 5,
+      "min_failures": 5,
+      "retrieve_cases": 9
+    }
+  },
+  "gate": {
+    "course_attempts": 63,
+    "empty_result_rate_course_attempts": {
+      "denominator": 63,
+      "numerator": 1,
+      "rate": 0.0159
+    },
+    "expected_retrieve": 154,
+    "expected_skip": 141,
+    "false_retrieve_rate": {
+      "denominator": 141,
+      "numerator": 7,
+      "rate": 0.0496
+    },
+    "messages": 295,
+    "needs_sources_stubs": {
+      "definition": "Models the second chance given by the first-call 'needs_sources' flag (FAST_CHAT_NEEDS_SOURCES_ENABLED) with three STUBS in place of the model. A message is eligible when the gate searched nothing and no gate override fixed its evidence scope. 'oracle' flags exactly the messages labelled 'retrieve' (a perfect model: best case). 'mock_rule' flags eligible messages phrased as a question or information request (the mock provider's rule: a deterministic stand-in). 'flag_all' flags every eligible message (a model that over-flags: worst case for false retrieves). A flagged message is searched on the second pass (selected sources plus the course catalog). None of this measures a real model.",
+      "eligible_messages": 189,
+      "stubs": {
+        "flag_all": {
+          "empty_result_rate_course_attempts": {
+            "denominator": 252,
+            "numerator": 18,
+            "rate": 0.0714
+          },
+          "false_retrieve_rate": {
+            "denominator": 141,
+            "numerator": 120,
+            "rate": 0.8511
+          },
+          "second_model_calls": 189,
+          "wrong_skip_rate": {
+            "denominator": 154,
+            "numerator": 0,
+            "rate": 0.0
+          }
+        },
+        "mock_rule": {
+          "empty_result_rate_course_attempts": {
+            "denominator": 152,
+            "numerator": 7,
+            "rate": 0.0461
+          },
+          "false_retrieve_rate": {
+            "denominator": 141,
+            "numerator": 39,
+            "rate": 0.2766
+          },
+          "second_model_calls": 89,
+          "wrong_skip_rate": {
+            "denominator": 154,
+            "numerator": 19,
+            "rate": 0.1234
+          }
+        },
+        "oracle": {
+          "empty_result_rate_course_attempts": {
+            "denominator": 139,
+            "numerator": 2,
+            "rate": 0.0144
+          },
+          "false_retrieve_rate": {
+            "denominator": 141,
+            "numerator": 7,
+            "rate": 0.0496
+          },
+          "second_model_calls": 76,
+          "wrong_skip_rate": {
+            "denominator": 154,
+            "numerator": 0,
+            "rate": 0.0
+          }
+        }
+      },
+      "wrong_skips_before": 76,
+      "wrong_skips_eligible_for_second_chance": 76
+    },
+    "student_file_only_passes_not_searched": 22,
+    "upload_retrieval_policy": {
+      "by_category": {
+        "ambiguous_generic": {
+          "extra_prompt_chars_estimate": 11778,
+          "false_retrieves_after": 4,
+          "false_retrieves_before": 1,
+          "policy_fired": 3,
+          "retrieve_rows": 0,
+          "skip_rows": 9,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "attachment_question": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 13,
+          "skip_rows": 0,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "course_content": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 61,
+          "skip_rows": 0,
+          "wrong_skips_after": 38,
+          "wrong_skips_before": 38
+        },
+        "course_logistics": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 11,
+          "skip_rows": 0,
+          "wrong_skips_after": 10,
+          "wrong_skips_before": 10
+        },
+        "course_with_unrelated_upload": {
+          "extra_prompt_chars_estimate": 3928,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 1,
+          "retrieve_rows": 4,
+          "skip_rows": 0,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 1
+        },
+        "follow_up": {
+          "extra_prompt_chars_estimate": 7856,
+          "false_retrieves_after": 1,
+          "false_retrieves_before": 1,
+          "policy_fired": 2,
+          "retrieve_rows": 9,
+          "skip_rows": 7,
+          "wrong_skips_after": 5,
+          "wrong_skips_before": 7
+        },
+        "greeting_thanks_chitchat": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 0,
+          "skip_rows": 33,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "informal_or_multilingual": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 8,
+          "skip_rows": 0,
+          "wrong_skips_after": 7,
+          "wrong_skips_before": 7
+        },
+        "mixed_project_and_course": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 3,
+          "skip_rows": 0,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "named_material": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 13,
+          "skip_rows": 0,
+          "wrong_skips_after": 1,
+          "wrong_skips_before": 1
+        },
+        "not_in_course_material": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 1,
+          "false_retrieves_before": 1,
+          "policy_fired": 0,
+          "retrieve_rows": 0,
+          "skip_rows": 4,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "out_of_scope": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 1,
+          "false_retrieves_before": 1,
+          "policy_fired": 0,
+          "retrieve_rows": 0,
+          "skip_rows": 7,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "procedural_ui": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 2,
+          "false_retrieves_before": 2,
+          "policy_fired": 0,
+          "retrieve_rows": 0,
+          "skip_rows": 20,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "project_mentions_course": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 1,
+          "false_retrieves_before": 1,
+          "policy_fired": 0,
+          "retrieve_rows": 0,
+          "skip_rows": 9,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "project_reasoning": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 0,
+          "skip_rows": 31,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "stage_meta_guidance": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 0,
+          "skip_rows": 10,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "stage_navigation": {
+          "extra_prompt_chars_estimate": 0,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 0,
+          "retrieve_rows": 0,
+          "skip_rows": 11,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 0
+        },
+        "upload_and_course": {
+          "extra_prompt_chars_estimate": 3928,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 1,
+          "retrieve_rows": 12,
+          "skip_rows": 0,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 1
+        },
+        "upload_question": {
+          "extra_prompt_chars_estimate": 43184,
+          "false_retrieves_after": 0,
+          "false_retrieves_before": 0,
+          "policy_fired": 11,
+          "retrieve_rows": 20,
+          "skip_rows": 0,
+          "wrong_skips_after": 0,
+          "wrong_skips_before": 11
+        }
+      },
+      "definition": "Models FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED (default off) on top of the gate, with the production rule _wants_student_upload_retrieval: a row the gate searched nothing for is searched locally when it still has a non-image student upload in scope, no gate override fixed its evidence scope, and it is not chit-chat. The course catalog is never added. A row 'retrieves' when a source is searched (the gate's definition), so a course-scope row that only searches an unrelated upload counts as retrieved; 'fixed_wrong_skips_course_scope_only' lists those. Student file text is not in the gate set, so no search runs: extra prompt characters are an ESTIMATE (upper bound), the payload growth when min(FAST_CHAT_RETRIEVAL_MAX_CHUNKS, 2 x non-image uploads) full-size local chunks with the row's real titles are attached, measured on the provider payload builder. Tokens use 4 and 3 characters per token.",
+      "extra_prompt_estimate": {
+        "per_fired_row_chars_max": 3928,
+        "per_fired_row_chars_mean": 3926.3,
+        "total_chars": 70674,
+        "total_tokens_3cpt": 23558,
+        "total_tokens_4cpt": 17668
+      },
+      "false_retrieve_rate_after": {
+        "denominator": 141,
+        "numerator": 10,
+        "rate": 0.0709
+      },
+      "false_retrieve_rate_before": {
+        "denominator": 141,
+        "numerator": 7,
+        "rate": 0.0496
+      },
+      "fired_rows": [
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm098",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm099",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm101",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm102",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm103",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm104",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3716,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3926,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm107",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3716,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3926,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm108",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3716,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3926,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm109",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3712,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3922,
+          "extra_tokens_3cpt": 1307,
+          "extra_tokens_4cpt": 980,
+          "id": "gm111",
+          "uploads": 1
+        },
+        {
+          "category": "upload_question",
+          "chunks": 2,
+          "context_chars": 3706,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3916,
+          "extra_tokens_3cpt": 1305,
+          "extra_tokens_4cpt": 979,
+          "id": "gm114",
+          "uploads": 1
+        },
+        {
+          "category": "upload_and_course",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "both",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm137",
+          "uploads": 1
+        },
+        {
+          "category": "course_with_unrelated_upload",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "course",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm142",
+          "uploads": 1
+        },
+        {
+          "category": "follow_up",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm267",
+          "uploads": 1
+        },
+        {
+          "category": "follow_up",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "retrieve",
+          "expected_scope": "student_upload",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm268",
+          "uploads": 1
+        },
+        {
+          "category": "ambiguous_generic",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "skip",
+          "expected_scope": "none",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm276",
+          "uploads": 1
+        },
+        {
+          "category": "ambiguous_generic",
+          "chunks": 2,
+          "context_chars": 3718,
+          "expected_decision": "skip",
+          "expected_scope": "none",
+          "extra_prompt_chars": 3928,
+          "extra_tokens_3cpt": 1309,
+          "extra_tokens_4cpt": 982,
+          "id": "gm277",
+          "uploads": 1
+        },
+        {
+          "category": "ambiguous_generic",
+          "chunks": 2,
+          "context_chars": 3712,
+          "expected_decision": "skip",
+          "expected_scope": "none",
+          "extra_prompt_chars": 3922,
+          "extra_tokens_3cpt": 1307,
+          "extra_tokens_4cpt": 980,
+          "id": "gm282",
+          "uploads": 1
+        }
+      ],
+      "fixed_wrong_skips": [
+        "gm098",
+        "gm099",
+        "gm101",
+        "gm102",
+        "gm103",
+        "gm104",
+        "gm107",
+        "gm108",
+        "gm109",
+        "gm111",
+        "gm114",
+        "gm137",
+        "gm142",
+        "gm267",
+        "gm268"
+      ],
+      "fixed_wrong_skips_course_scope_only": [
+        "gm142"
+      ],
+      "new_false_retrieves": [
+        "gm276",
+        "gm277",
+        "gm282"
+      ],
+      "rows_fired": 18,
+      "second_chance_eligible_lost": {
+        "expected_scope_course_or_both": 2,
+        "expected_scope_course_or_both_ids": [
+          "gm137",
+          "gm142"
+        ],
+        "ids": [
+          "gm098",
+          "gm099",
+          "gm101",
+          "gm102",
+          "gm103",
+          "gm104",
+          "gm107",
+          "gm108",
+          "gm109",
+          "gm111",
+          "gm114",
+          "gm137",
+          "gm142",
+          "gm267",
+          "gm268",
+          "gm276",
+          "gm277",
+          "gm282"
+        ],
+        "rows": 18
+      },
+      "upload_question_misses_fixed": {
+        "fixed": 11,
+        "misses_before": 11
+      },
+      "wrong_skip_rate_after": {
+        "denominator": 154,
+        "numerator": 61,
+        "rate": 0.3961
+      },
+      "wrong_skip_rate_before": {
+        "denominator": 154,
+        "numerator": 76,
+        "rate": 0.4935
+      }
+    },
+    "wrong_skip_by_category": {
+      "attachment_question": {
+        "denominator": 13,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "course_content": {
+        "denominator": 61,
+        "numerator": 38,
+        "rate": 0.623
+      },
+      "course_logistics": {
+        "denominator": 11,
+        "numerator": 10,
+        "rate": 0.9091
+      },
+      "course_with_unrelated_upload": {
+        "denominator": 4,
+        "numerator": 1,
+        "rate": 0.25
+      },
+      "follow_up": {
+        "denominator": 9,
+        "numerator": 7,
+        "rate": 0.7778
+      },
+      "informal_or_multilingual": {
+        "denominator": 8,
+        "numerator": 7,
+        "rate": 0.875
+      },
+      "mixed_project_and_course": {
+        "denominator": 3,
+        "numerator": 0,
+        "rate": 0.0
+      },
+      "named_material": {
+        "denominator": 13,
+        "numerator": 1,
+        "rate": 0.0769
+      },
+      "upload_and_course": {
+        "denominator": 12,
+        "numerator": 1,
+        "rate": 0.0833
+      },
+      "upload_question": {
+        "denominator": 20,
+        "numerator": 11,
+        "rate": 0.55
+      }
+    },
+    "wrong_skip_rate": {
+      "denominator": 154,
+      "numerator": 76,
+      "rate": 0.4935
+    },
+    "wrong_skip_rate_classifier_only": {
+      "denominator": 154,
+      "numerator": 85,
+      "rate": 0.5519
+    },
+    "wrong_skip_rate_clear_rows_only": {
+      "denominator": 113,
+      "numerator": 51,
+      "rate": 0.4513
+    }
+  },
+  "mode": "offline",
+  "network_calls": 0,
+  "retrieval": {
+    "empty_result_rate": {
+      "denominator": 94,
+      "numerator": 0,
+      "rate": 0.0
+    },
+    "misses": [
+      {
+        "expected_material": "lecture_week_1_introduction_to_innovation_v3",
+        "id": "rq003",
+        "question": "How many people should be in a team?",
+        "result_count": 64,
+        "top_materials": [
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "reading_reading_1_how_pixar_fosters_collective_creativity"
+        ]
+      },
+      {
+        "expected_material": "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+        "id": "rq031",
+        "question": "What are the rules for running a good brainstorming session?",
+        "result_count": 34,
+        "top_materials": [
+          "lecture_week_10_storytelling",
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+        ]
+      },
+      {
+        "expected_material": "lecture_week_10_storytelling",
+        "id": "rq073",
+        "question": "Are there examples of storyboards with frames?",
+        "result_count": 32,
+        "top_materials": [
+          "reading_reading_1_how_pixar_fosters_collective_creativity",
+          "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+          "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+          "lecture_week_2_jtbd_framework_term_1_2026"
+        ]
+      }
+    ],
+    "questions_evaluated": 94,
+    "recall_at_4_material": {
+      "denominator": 94,
+      "numerator": 91,
+      "rate": 0.9681
+    },
+    "recall_at_4_page": {
+      "denominator": 94,
+      "numerator": 78,
+      "rate": 0.8298
+    },
+    "recall_by_material": {
+      "lecture_week_10_storytelling": {
+        "denominator": 6,
+        "numerator": 5,
+        "rate": 0.8333
+      },
+      "lecture_week_1_introduction_to_innovation_v3": {
+        "denominator": 3,
+        "numerator": 2,
+        "rate": 0.6667
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026": {
+        "denominator": 14,
+        "numerator": 14,
+        "rate": 1.0
+      },
+      "lecture_week_4_affinity_clusters_product_values_and_features_oxymoron": {
+        "denominator": 8,
+        "numerator": 8,
+        "rate": 1.0
+      },
+      "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026": {
+        "denominator": 16,
+        "numerator": 15,
+        "rate": 0.9375
+      },
+      "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0": {
+        "denominator": 11,
+        "numerator": 11,
+        "rate": 1.0
+      },
+      "lecture_week_9_testing_feedback_poster_design_affordance_genai": {
+        "denominator": 15,
+        "numerator": 15,
+        "rate": 1.0
+      },
+      "reading_reading_1_how_pixar_fosters_collective_creativity": {
+        "denominator": 8,
+        "numerator": 8,
+        "rate": 1.0
+      },
+      "reading_reading_2_engaging_personas": {
+        "denominator": 5,
+        "numerator": 5,
+        "rate": 1.0
+      },
+      "reading_reading_3_a_technique_for_getting_ideas_james_webb_young": {
+        "denominator": 8,
+        "numerator": 8,
+        "rate": 1.0
+      }
+    },
+    "tie_at_cutoff_questions": 19
+  },
+  "run": {
+    "generated_at_utc": "2026-11-20T07:46:17Z",
+    "git_dirty": false,
+    "git_sha": "ae09e3779c8b5f1d69826e11416649f596124c33"
+  }
+}

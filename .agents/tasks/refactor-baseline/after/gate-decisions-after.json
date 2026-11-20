@@ -1,0 +1,5995 @@
+{
+  "description": "Per-message output of scripts.evals.evaluate_retrieval.gate_decision, sorted by id. effective_scope: course|student_upload|both|none; mode: GateDecision.expected_mode; retrieve: course or student searched.",
+  "followup_cases": {
+    "gm296": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": true,
+          "course": true,
+          "expected_mode": "qa",
+          "intent": "high_confidence_source",
+          "needs_retrieval": true,
+          "retrieve": true,
+          "scope_cleared": false,
+          "second_chance": false,
+          "student": false
+        },
+        "effective_scope": "course",
+        "mode": "qa",
+        "retrieve": true
+      }
+    },
+    "gm297": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": true,
+          "course": true,
+          "expected_mode": "qa",
+          "intent": "high_confidence_source",
+          "needs_retrieval": true,
+          "retrieve": true,
+          "scope_cleared": false,
+          "second_chance": false,
+          "student": false
+        },
+        "effective_scope": "course",
+        "mode": "qa",
+        "retrieve": true
+      }
+    },
+    "gm298": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": false,
+          "course": false,
+          "expected_mode": "coaching",
+          "intent": "ambiguous",
+          "needs_retrieval": false,
+          "retrieve": false,
+          "scope_cleared": false,
+          "second_chance": true,
+          "student": false
+        },
+        "effective_scope": "none",
+        "mode": "coaching",
+        "retrieve": false
+      }
+    },
+    "gm299": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": false,
+          "course": false,
+          "expected_mode": "coaching",
+          "intent": "ambiguous",
+          "needs_retrieval": false,
+          "retrieve": false,
+          "scope_cleared": false,
+          "second_chance": true,
+          "student": false
+        },
+        "effective_scope": "none",
+        "mode": "coaching",
+        "retrieve": false
+      }
+    },
+    "gm300": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": true,
+          "course": true,
+          "expected_mode": "qa",
+          "intent": "high_confidence_source",
+          "needs_retrieval": true,
+          "retrieve": true,
+          "scope_cleared": false,
+          "second_chance": false,
+          "student": false
+        },
+        "effective_scope": "course",
+        "mode": "qa",
+        "retrieve": true
+      }
+    },
+    "gm301": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": false,
+          "course": false,
+          "expected_mode": "coaching",
+          "intent": "ambiguous",
+          "needs_retrieval": false,
+          "retrieve": false,
+          "scope_cleared": false,
+          "second_chance": true,
+          "student": false
+        },
+        "effective_scope": "none",
+        "mode": "coaching",
+        "retrieve": false
+      }
+    },
+    "gm302": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": false,
+          "course": false,
+          "expected_mode": "coaching",
+          "intent": "ambiguous",
+          "needs_retrieval": false,
+          "retrieve": false,
+          "scope_cleared": false,
+          "second_chance": true,
+          "student": false
+        },
+        "effective_scope": "none",
+        "mode": "coaching",
+        "retrieve": false
+      }
+    },
+    "gm303": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": true,
+          "course": true,
+          "expected_mode": "qa",
+          "intent": "high_confidence_source",
+          "needs_retrieval": true,
+          "retrieve": true,
+          "scope_cleared": false,
+          "second_chance": false,
+          "student": false
+        },
+        "effective_scope": "course",
+        "mode": "qa",
+        "retrieve": true
+      }
+    },
+    "gm304": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false,
+      "standalone": {
+        "decision": {
+          "attachment_only": false,
+          "classifier_retrieve": false,
+          "course": false,
+          "expected_mode": "coaching",
+          "intent": "ambiguous",
+          "needs_retrieval": false,
+          "retrieve": false,
+          "scope_cleared": false,
+          "second_chance": true,
+          "student": false
+        },
+        "effective_scope": "none",
+        "mode": "coaching",
+        "retrieve": false
+      }
+    },
+    "gm305": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm306": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm307": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    }
+  },
+  "followup_cases_sha256": "c27eb35ab9438af1a855c7d2c18d15455037c5863100a12ca420acf98cad8081",
+  "gate_messages": {
+    "gm001": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm002": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm003": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm004": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm005": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm006": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm007": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm008": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm009": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm010": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm011": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm012": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm013": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm014": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm015": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm016": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm017": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm018": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm019": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm020": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm021": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm022": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm023": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm024": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm025": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm026": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm027": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm028": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm029": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm030": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm031": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm032": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm033": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm034": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm035": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm036": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm037": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm038": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm039": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm040": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm041": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm042": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm043": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm044": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm045": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm046": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm047": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm048": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm049": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm050": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm051": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm052": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm053": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm054": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm055": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm056": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm057": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm058": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm059": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm060": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm061": {
+      "category": "course_content",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm062": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm063": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm064": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm065": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm066": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm067": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm068": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm069": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm070": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm071": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm072": {
+      "category": "course_logistics",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm073": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm074": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm075": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm076": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm077": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm078": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm079": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm080": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm081": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm082": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm083": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm084": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm085": {
+      "category": "named_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm086": {
+      "category": "informal_or_multilingual",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm087": {
+      "category": "informal_or_multilingual",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm088": {
+      "category": "informal_or_multilingual",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm089": {
+      "category": "informal_or_multilingual",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm090": {
+      "category": "informal_or_multilingual",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm091": {
+      "category": "informal_or_multilingual",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm092": {
+      "category": "informal_or_multilingual",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm093": {
+      "category": "informal_or_multilingual",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm094": {
+      "category": "mixed_project_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm095": {
+      "category": "mixed_project_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm096": {
+      "category": "mixed_project_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm097": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm098": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm099": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm100": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm101": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm102": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm103": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm104": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm105": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm106": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm107": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm108": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm109": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm110": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm111": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm112": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm113": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm114": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm115": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm116": {
+      "category": "upload_question",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm117": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm118": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm119": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm120": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm121": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm122": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm123": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm124": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm125": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm126": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm127": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm128": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm129": {
+      "category": "attachment_question",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm130": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm131": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm132": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm133": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm134": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm135": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm136": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm137": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm138": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": true,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "student_upload",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": true
+    },
+    "gm139": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm140": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm141": {
+      "category": "upload_and_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm142": {
+      "category": "course_with_unrelated_upload",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm143": {
+      "category": "course_with_unrelated_upload",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm144": {
+      "category": "course_with_unrelated_upload",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm145": {
+      "category": "course_with_unrelated_upload",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": true
+      },
+      "effective_scope": "both",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm146": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm147": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm148": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm149": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm150": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm151": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm152": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm153": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm154": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm155": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm156": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm157": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm158": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm159": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm160": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm161": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm162": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm163": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm164": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm165": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm166": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm167": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm168": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm169": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm170": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm171": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm172": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm173": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm174": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm175": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm176": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm177": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm178": {
+      "category": "greeting_thanks_chitchat",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm179": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm180": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm181": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm182": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm183": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm184": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm185": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm186": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm187": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm188": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm189": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm190": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm191": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm192": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm193": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm194": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm195": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm196": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm197": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm198": {
+      "category": "procedural_ui",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm199": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm200": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm201": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm202": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": false
+    },
+    "gm203": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": false
+    },
+    "gm204": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm205": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm206": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm207": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm208": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm209": {
+      "category": "stage_navigation",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm210": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm211": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm212": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm213": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm214": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm215": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm216": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm217": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm218": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm219": {
+      "category": "stage_meta_guidance",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": true,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm220": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm221": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm222": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm223": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm224": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm225": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm226": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm227": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm228": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm229": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm230": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm231": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm232": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm233": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm234": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm235": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm236": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm237": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm238": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm239": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm240": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm241": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm242": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm243": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm244": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm245": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm246": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm247": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm248": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm249": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "high_confidence_personal",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm250": {
+      "category": "project_reasoning",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm251": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm252": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm253": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm254": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm255": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm256": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm257": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm258": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm259": {
+      "category": "project_mentions_course",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm260": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm261": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm262": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm263": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm264": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm265": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm266": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": false,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "qa",
+      "retrieve": false
+    },
+    "gm267": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm268": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "retrieve",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm269": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm270": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm271": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm272": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm273": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm274": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm275": {
+      "category": "follow_up",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm276": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm277": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm278": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm279": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm280": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm281": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm282": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm283": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm284": {
+      "category": "ambiguous_generic",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm285": {
+      "category": "out_of_scope",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm286": {
+      "category": "out_of_scope",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm287": {
+      "category": "out_of_scope",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm288": {
+      "category": "out_of_scope",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm289": {
+      "category": "out_of_scope",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm290": {
+      "category": "out_of_scope",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm291": {
+      "category": "not_in_course_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm292": {
+      "category": "not_in_course_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm293": {
+      "category": "not_in_course_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    },
+    "gm294": {
+      "category": "not_in_course_material",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": true,
+        "course": true,
+        "expected_mode": "qa",
+        "intent": "high_confidence_source",
+        "needs_retrieval": true,
+        "retrieve": true,
+        "scope_cleared": false,
+        "second_chance": false,
+        "student": false
+      },
+      "effective_scope": "course",
+      "expected_decision": "skip",
+      "mode": "qa",
+      "retrieve": true
+    },
+    "gm295": {
+      "category": "out_of_scope",
+      "decision": {
+        "attachment_only": false,
+        "classifier_retrieve": false,
+        "course": false,
+        "expected_mode": "coaching",
+        "intent": "ambiguous",
+        "needs_retrieval": false,
+        "retrieve": false,
+        "scope_cleared": false,
+        "second_chance": true,
+        "student": false
+      },
+      "effective_scope": "none",
+      "expected_decision": "skip",
+      "mode": "coaching",
+      "retrieve": false
+    }
+  },
+  "gate_messages_sha256": "e4e031bb83f822c67179832c4874553bed92303a2edaa36631ae52f1a2b9a5a6"
+}

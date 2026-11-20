@@ -1,0 +1,112 @@
+{
+  "classifier_kind": "stub",
+  "course_titles": 10,
+  "eligible_rows": 147,
+  "environment": {
+    "cpu_count": 8,
+    "machine": "x86_64",
+    "measured_on": "this machine only; not production hardware unless run there",
+    "packages": {
+      "laya": null,
+      "numpy": "2.5.5",
+      "safetensors": null,
+      "torch": null,
+      "transformers": null,
+      "vegaml": null
+    },
+    "platform": "Linux-6.1.189-236.400.amzn2023.x86_64-x86_64-with-glibc2.34",
+    "python": "3.12.13",
+    "torch_threads": null
+  },
+  "first_call_ms": 5.11,
+  "gate_messages": 295,
+  "load_ms": 0.01,
+  "memory": {
+    "after_load": {
+      "peak_rss_mib": 64.2,
+      "rss_mib": 64.2,
+      "source": "/proc/self/status"
+    },
+    "after_passes": {
+      "peak_rss_mib": 64.5,
+      "rss_mib": 64.5,
+      "source": "/proc/self/status"
+    },
+    "after_warmup": {
+      "peak_rss_mib": 64.2,
+      "rss_mib": 64.2,
+      "source": "/proc/self/status"
+    },
+    "before_load": {
+      "peak_rss_mib": 64.2,
+      "rss_mib": 64.2,
+      "source": "/proc/self/status"
+    },
+    "load_delta_rss_mib": 0.0,
+    "peak_rss_mib": 64.5
+  },
+  "passes": [
+    {
+      "abstained_or_busy": 0,
+      "calls": 147,
+      "concurrency": 1,
+      "errors": 0,
+      "latency_of_scored_calls": {
+        "calls": 147,
+        "max_ms": 5.51,
+        "mean_ms": 5.11,
+        "p50_ms": 5.1,
+        "p95_ms": 5.18,
+        "p99_ms": 5.28
+      },
+      "scored": 147,
+      "wall_seconds": 0.752
+    },
+    {
+      "abstained_or_busy": 0,
+      "calls": 147,
+      "concurrency": 1,
+      "errors": 0,
+      "latency_of_scored_calls": {
+        "calls": 147,
+        "max_ms": 5.52,
+        "mean_ms": 5.12,
+        "p50_ms": 5.1,
+        "p95_ms": 5.24,
+        "p99_ms": 5.28
+      },
+      "scored": 147,
+      "wall_seconds": 0.753
+    },
+    {
+      "abstained_or_busy": 0,
+      "calls": 147,
+      "concurrency": 1,
+      "errors": 0,
+      "latency_of_scored_calls": {
+        "calls": 147,
+        "max_ms": 5.41,
+        "mean_ms": 5.13,
+        "p50_ms": 5.11,
+        "p95_ms": 5.32,
+        "p99_ms": 5.38
+      },
+      "scored": 147,
+      "wall_seconds": 0.755
+    }
+  ],
+  "real_model": false,
+  "run": {
+    "generated_at_utc": "2026-11-20T07:46:21Z",
+    "git_dirty": false,
+    "git_sha": "ae09e3779c8b5f1d69826e11416649f596124c33"
+  },
+  "warmup_call_ms": [
+    5.11,
+    5.1,
+    5.11,
+    5.1,
+    5.1
+  ],
+  "warmup_calls": 5
+}

@@ -1,0 +1,49 @@
+{
+  "event": "fast_chat_regression_dry_run",
+  "case_count": 50,
+  "stages": [
+    "concept_generation",
+    "deep_analysis",
+    "design_specification",
+    "problem_identification",
+    "reflection"
+  ],
+  "dimensions": [
+    "socratic_guidance",
+    "student_agency",
+    "stage_alignment",
+    "reasoning_gap_identification",
+    "assumption_challenge",
+    "vv_quality",
+    "question_focus",
+    "does_not_complete_assignment",
+    "non_grading",
+    "conversation_continuity",
+    "stay_advance_consistency",
+    "source_grounding",
+    "citation_validity",
+    "hallucination_avoidance",
+    "response_relevance",
+    "correctness",
+    "faithfulness",
+    "citation_precision",
+    "citation_coverage"
+  ],
+  "critical_regressions": [
+    "begins directly completing assignments",
+    "stops asking Socratic questions",
+    "repeatedly asks already-answered questions",
+    "ignores current stage",
+    "makes decisions for the student",
+    "invents citations",
+    "introduces unsupported course claims",
+    "starts grading",
+    "lets CLEAR/research coding control Coaching",
+    "materially worsens STAY/ADVANCE judgement"
+  ],
+  "baseline_artifact": null,
+  "live_claude": false,
+  "judge_model": false,
+  "agentcore_publish": false,
+  "note": "Mock tests do not prove live model quality. Baseline ratings must be an explicit artifact; this dry run does not invent them."
+}

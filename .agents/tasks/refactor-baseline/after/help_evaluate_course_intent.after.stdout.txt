@@ -1,0 +1,13 @@
+usage: evaluate_course_intent.py [-h] --checkpoint CHECKPOINT
+                                 [--threshold THRESHOLD]
+                                 [--concurrency CONCURRENCY] --json-output
+                                 JSON_OUTPUT
+
+Benchmark the optional Laya course classifier on synthetic messages.
+
+options:
+  -h, --help            show this help message and exit
+  --checkpoint CHECKPOINT
+  --threshold THRESHOLD
+  --concurrency CONCURRENCY
+  --json-output JSON_OUTPUT
