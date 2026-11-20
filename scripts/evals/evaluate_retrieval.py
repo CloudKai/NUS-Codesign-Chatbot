@@ -43,7 +43,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
@@ -54,79 +53,91 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-DATASET_DIR = _PROJECT_ROOT / "scripts" / "evals" / "datasets"
-QUESTIONS_PATH = DATASET_DIR / "retrieval_questions.jsonl"
-MESSAGES_PATH = DATASET_DIR / "retrieval_gate_messages.synthetic.jsonl"
-FOLLOWUPS_PATH = DATASET_DIR / "retrieval_gate_followups.synthetic.jsonl"
-MATERIALS_PATH = DATASET_DIR / "course_materials.json"
+# Shared offline helpers live in scripts/evals/lib. The names below are re-exported here so
+# tests and callers that import them from this module keep working.
+from scripts.evals.lib.paths import (  # noqa: E402
+    DATASET_DIR as DATASET_DIR,
+    FOLLOWUPS_PATH,
+    MATERIALS_PATH,
+    MESSAGES_PATH,
+    QUESTIONS_PATH,
+)
+from scripts.evals.lib.fixtures import (  # noqa: E402
+    CERTAINTIES as CERTAINTIES,
+    DatasetError as DatasetError,
+    DECISIONS,
+    eval_course_titles,
+    load_followups,
+    load_materials,
+    load_messages,
+    load_questions,
+    MESSAGE_CATEGORIES as MESSAGE_CATEGORIES,
+    MESSAGE_KEYS as MESSAGE_KEYS,
+    MIN_MESSAGE_COUNT as MIN_MESSAGE_COUNT,
+    QUESTION_COUNT_RANGE as QUESTION_COUNT_RANGE,
+    QUESTION_KEYS as QUESTION_KEYS,
+    QUESTION_KINDS as QUESTION_KINDS,
+    _read_jsonl as _read_jsonl,
+    SCOPES as SCOPES,
+    validate_messages as validate_messages,
+    validate_questions as validate_questions,
+)
+from scripts.evals.lib.metrics import (  # noqa: E402
+    empty_result_rate,
+    evenly_spaced_indices,
+    false_retrieve_rate,
+    format_rate,
+    rate as rate,
+    rate_record,
+    wrong_skip_rate,
+)
+from scripts.evals.lib.gate import (  # noqa: E402
+    _eval_upload_entries,
+    gate_decision,
+    GateDecision,
+    scope_inputs_for_row,
+)
+from scripts.evals.lib.offline import (  # noqa: E402
+    accepted_targets,
+    _block_network,
+    extract_pdf_pages as extract_pdf_pages,
+    OfflineCourseSearch,
+    rank_hits,
+    RankedHit,
+)
+from scripts.evals.lib.live import (  # noqa: E402
+    AUTH_ACCESS_ERROR_CLASSES as AUTH_ACCESS_ERROR_CLASSES,
+    AUTH_ACCESS_ERROR_CODES as AUTH_ACCESS_ERROR_CODES,
+    build_live_request,
+    check_live_model_request,
+    _EVAL_RUNTIME_ARN as _EVAL_RUNTIME_ARN,
+    exception_label,
+    _inline_schema_refs as _inline_schema_refs,
+    is_auth_or_access_error,
+    _live_eval_provider,
+    live_failure_detail,
+    LIVE_MODEL_HARD_CALL_CAP,
+    LIVE_MODEL_MAX_OUTPUT_TOKENS as LIVE_MODEL_MAX_OUTPUT_TOKENS,
+    live_model_settings,
+    LIVE_MODEL_TIMEOUT_SECONDS,
+    LiveCallLimitExceeded,
+    LiveFastChatBridge,
+    LiveRunRefused,
+    LiveStructuredOutputError as LiveStructuredOutputError,
+    _refuse_unknown as _refuse_unknown,
+    select_live_rows,
+)
+from scripts.evals.lib.output import (  # noqa: E402
+    _git_run_metadata,
+    _write_json_output as _write_output,
+)
+
 
 TOP_K = 4
 # One Retrieve call per question and the set has fewer than 100 questions, so
 # a higher limit could never be used.
 HARD_LIVE_CALL_CAP = 100
-QUESTION_COUNT_RANGE = (60, 100)
-MIN_MESSAGE_COUNT = 200
 
-QUESTION_KEYS = frozenset(
-    {
-        "id",
-        "question",
-        "expected_material",
-        "expected_pages",
-        "alt_expected",
-        "evidence",
-        "kind",
-        "note",
-    }
-)
-QUESTION_KINDS = frozenset(
-    {"definition", "list", "procedure", "example", "detail", "logistics"}
-)
-MESSAGE_KEYS = frozenset(
-    {
-        "id",
-        "message",
-        "stage",
-        "selected_sources",
-        "attachments",
-        "history",
-        "expected_decision",
-        "expected_scope",
-        "category",
-        "certainty",
-        "follow_up",
-        "question_id",
-        "expected_material",
-        "rationale",
-        "synthetic",
-    }
-)
-DECISIONS = frozenset({"retrieve", "skip"})
-SCOPES = frozenset({"course", "student_upload", "both", "none"})
-CERTAINTIES = frozenset({"clear", "borderline"})
-MESSAGE_CATEGORIES = frozenset(
-    {
-        "course_content",
-        "course_logistics",
-        "named_material",
-        "informal_or_multilingual",
-        "mixed_project_and_course",
-        "upload_question",
-        "attachment_question",
-        "upload_and_course",
-        "course_with_unrelated_upload",
-        "follow_up",
-        "greeting_thanks_chitchat",
-        "procedural_ui",
-        "stage_navigation",
-        "stage_meta_guidance",
-        "project_reasoning",
-        "project_mentions_course",
-        "ambiguous_generic",
-        "out_of_scope",
-        "not_in_course_material",
-    }
-)
 
 FOLLOWUP_DEFINITION = (
     "Follow-up cases are reported apart from the gate messages. gate_ok: the "
@@ -165,36 +176,9 @@ DEFINITIONS = {
 }
 
 
-class DatasetError(ValueError):
-    """Raised when a data file does not match its documented format."""
-
-
-class LiveRunRefused(RuntimeError):
-    """Raised when the live Knowledge Base path is requested without approval."""
-
-
-class LiveCallLimitExceeded(RuntimeError):
-    """Raised by the call counter when the approved call limit is reached."""
-
-
 # ---------------------------------------------------------------------------
 # Pure metric functions (no backend imports, no I/O)
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class RankedHit:
-    """One retrieved result reduced to what scoring needs.
-
-    ``page`` is ``None`` when the retriever does not report a page.
-    """
-
-    material_id: str
-    page: int | None
-    score: float
-    source_index: int = 0
-    chunk_index: int = 0
-    text: str = ""
 
 
 @dataclass(frozen=True)
@@ -209,53 +193,6 @@ class QuestionOutcome:
     first_material_rank: int | None
     tie_at_cutoff: bool
     top_materials: tuple[str, ...]
-
-
-def rate(numerator: int, denominator: int) -> float | None:
-    """Return numerator/denominator, or ``None`` when the denominator is 0."""
-    if denominator <= 0:
-        return None
-    return numerator / denominator
-
-
-def rate_record(numerator: int, denominator: int) -> dict[str, Any]:
-    """Return a JSON-ready ``{numerator, denominator, rate}`` record."""
-    value = rate(numerator, denominator)
-    return {
-        "numerator": numerator,
-        "denominator": denominator,
-        "rate": None if value is None else round(value, 4),
-    }
-
-
-def format_rate(record: Mapping[str, Any]) -> str:
-    """Render a rate record as ``n/d (p%)`` or ``n/a``."""
-    value = record.get("rate")
-    if value is None:
-        return f"n/a ({record['numerator']}/{record['denominator']})"
-    return f"{record['numerator']}/{record['denominator']} ({value * 100:.1f}%)"
-
-
-def rank_hits(hits: Iterable[RankedHit]) -> list[RankedHit]:
-    """Sort hits by score descending; ties by source order, then chunk order."""
-    return sorted(
-        hits,
-        key=lambda hit: (-hit.score, hit.source_index, hit.chunk_index, hit.material_id),
-    )
-
-
-def accepted_targets(
-    expected_material: str,
-    expected_pages: Sequence[int],
-    alt_expected: Sequence[Mapping[str, Any]] = (),
-) -> dict[str, frozenset[int]]:
-    """Map each acceptable material to the set of acceptable pages."""
-    targets: dict[str, set[int]] = {expected_material: set(expected_pages)}
-    for alt in alt_expected:
-        targets.setdefault(str(alt["material"]), set()).update(
-            int(page) for page in alt["pages"]
-        )
-    return {material: frozenset(pages) for material, pages in targets.items()}
 
 
 def score_question(
@@ -317,48 +254,6 @@ def page_recall_at_k(outcomes: Sequence[QuestionOutcome]) -> dict[str, Any]:
     return rate_record(hits, len(scored))
 
 
-def wrong_skip_rate(decisions: Iterable[tuple[str, bool]]) -> dict[str, Any]:
-    """Share of 'should retrieve' messages the gate skipped.
-
-    Args:
-        decisions: ``(expected_decision, gate_retrieved)`` per message.
-    """
-    expected_retrieve = [
-        retrieved for expected, retrieved in decisions if expected == "retrieve"
-    ]
-    skipped = sum(1 for retrieved in expected_retrieve if not retrieved)
-    return rate_record(skipped, len(expected_retrieve))
-
-
-def false_retrieve_rate(decisions: Iterable[tuple[str, bool]]) -> dict[str, Any]:
-    """Share of 'should skip' messages the gate searched for (reported extra)."""
-    expected_skip = [
-        retrieved for expected, retrieved in decisions if expected == "skip"
-    ]
-    searched = sum(1 for retrieved in expected_skip if retrieved)
-    return rate_record(searched, len(expected_skip))
-
-
-def empty_result_rate(result_counts: Iterable[int]) -> dict[str, Any]:
-    """Share of completed attempts that returned zero results.
-
-    Args:
-        result_counts: Number of results per completed attempt.
-    """
-    counts = list(result_counts)
-    empty = sum(1 for count in counts if count == 0)
-    return rate_record(empty, len(counts))
-
-
-def evenly_spaced_indices(total: int, limit: int) -> list[int]:
-    """Pick ``min(limit, total)`` deterministic, evenly spread indices."""
-    if total <= 0 or limit <= 0:
-        return []
-    if limit >= total:
-        return list(range(total))
-    return [index * total // limit for index in range(limit)]
-
-
 # ---------------------------------------------------------------------------
 # Data files
 # ---------------------------------------------------------------------------
@@ -393,370 +288,9 @@ def followup_verdict(cases: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open(encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                raise DatasetError(f"{path.name}:{line_number}: blank line")
-            try:
-                value = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise DatasetError(f"{path.name}:{line_number}: {exc}") from exc
-            if not isinstance(value, dict):
-                raise DatasetError(f"{path.name}:{line_number}: not an object")
-            rows.append(value)
-    return rows
-
-
-def load_materials(path: Path = MATERIALS_PATH) -> list[dict[str, Any]]:
-    """Load the course-material manifest."""
-    manifest = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(manifest, list) or not manifest:
-        raise DatasetError("course_materials.json must be a non-empty list")
-    required = {"material_id", "object_key", "local_path", "filename", "group", "source_id", "pdf_pages"}
-    ids: set[str] = set()
-    for entry in manifest:
-        missing = required - set(entry)
-        if missing:
-            raise DatasetError(f"manifest entry missing {sorted(missing)}")
-        if entry["material_id"] in ids:
-            raise DatasetError(f"duplicate material_id {entry['material_id']}")
-        ids.add(entry["material_id"])
-    return manifest
-
-
-def validate_questions(
-    rows: Sequence[Mapping[str, Any]],
-    materials: Sequence[Mapping[str, Any]],
-    *,
-    count_range: tuple[int, int] = QUESTION_COUNT_RANGE,
-) -> None:
-    """Raise :class:`DatasetError` if the question rows break the format."""
-    low, high = count_range
-    if not low <= len(rows) <= high:
-        raise DatasetError(f"question count {len(rows)} outside {low}..{high}")
-    pages_by_material = {m["material_id"]: int(m["pdf_pages"]) for m in materials}
-    seen: set[str] = set()
-    for row in rows:
-        row_id = str(row.get("id"))
-        if set(row) != QUESTION_KEYS:
-            raise DatasetError(f"{row_id}: keys {sorted(set(row) ^ QUESTION_KEYS)} differ")
-        if not re.fullmatch(r"rq\d{3}", row_id) or row_id in seen:
-            raise DatasetError(f"{row_id}: bad or duplicate id")
-        seen.add(row_id)
-        if not str(row["question"]).strip() or not str(row["evidence"]).strip():
-            raise DatasetError(f"{row_id}: empty question or evidence")
-        if row["kind"] not in QUESTION_KINDS:
-            raise DatasetError(f"{row_id}: unknown kind {row['kind']!r}")
-        targets = [(row["expected_material"], row["expected_pages"])]
-        if not isinstance(row["alt_expected"], list):
-            raise DatasetError(f"{row_id}: alt_expected must be a list")
-        for alt in row["alt_expected"]:
-            if set(alt) != {"material", "pages", "evidence"}:
-                raise DatasetError(f"{row_id}: bad alt_expected entry")
-            targets.append((alt["material"], alt["pages"]))
-        for material, pages in targets:
-            if material not in pages_by_material:
-                raise DatasetError(f"{row_id}: unknown material {material}")
-            ok = (
-                isinstance(pages, list)
-                and pages
-                and pages == sorted(set(pages))
-                and all(isinstance(p, int) and 1 <= p <= pages_by_material[material] for p in pages)
-            )
-            if not ok:
-                raise DatasetError(f"{row_id}: bad pages {pages} for {material}")
-
-
-def validate_messages(
-    rows: Sequence[Mapping[str, Any]],
-    materials: Sequence[Mapping[str, Any]],
-    question_ids: Iterable[str],
-    *,
-    min_count: int = MIN_MESSAGE_COUNT,
-    require_synthetic: bool = True,
-) -> None:
-    """Raise :class:`DatasetError` if the message rows break the format."""
-    from backend.domain import VALID_STAGE_IDS
-
-    if len(rows) < min_count:
-        raise DatasetError(f"message count {len(rows)} below {min_count}")
-    material_ids = {m["material_id"] for m in materials}
-    known_questions = set(question_ids)
-    seen: set[str] = set()
-    for row in rows:
-        row_id = str(row.get("id"))
-        if set(row) != MESSAGE_KEYS:
-            raise DatasetError(f"{row_id}: keys {sorted(set(row) ^ MESSAGE_KEYS)} differ")
-        if not re.fullmatch(r"gm\d{3}", row_id) or row_id in seen:
-            raise DatasetError(f"{row_id}: bad or duplicate id")
-        seen.add(row_id)
-        if row["synthetic"] is not True and require_synthetic:
-            raise DatasetError(f"{row_id}: synthetic marker is not true")
-        if not str(row["message"]).strip():
-            raise DatasetError(f"{row_id}: empty message")
-        if row["stage"] not in VALID_STAGE_IDS:
-            raise DatasetError(f"{row_id}: unknown stage {row['stage']!r}")
-        if row["expected_decision"] not in DECISIONS:
-            raise DatasetError(f"{row_id}: bad expected_decision")
-        if row["expected_scope"] not in SCOPES:
-            raise DatasetError(f"{row_id}: bad expected_scope")
-        if (row["expected_scope"] == "none") != (row["expected_decision"] == "skip"):
-            raise DatasetError(f"{row_id}: scope 'none' must match decision 'skip'")
-        if row["category"] not in MESSAGE_CATEGORIES:
-            raise DatasetError(f"{row_id}: unknown category {row['category']!r}")
-        if row["certainty"] not in CERTAINTIES:
-            raise DatasetError(f"{row_id}: bad certainty")
-        for field in ("selected_sources", "attachments"):
-            for entry in row[field]:
-                if set(entry) != {"title", "filename"}:
-                    raise DatasetError(f"{row_id}: bad {field} entry")
-        for turn in row["history"]:
-            if set(turn) != {"role", "text"} or turn["role"] not in {"user", "assistant"}:
-                raise DatasetError(f"{row_id}: bad history entry")
-        if row["question_id"] is not None and row["question_id"] not in known_questions:
-            raise DatasetError(f"{row_id}: unknown question_id {row['question_id']}")
-        if row["expected_material"] is not None and row["expected_material"] not in material_ids:
-            raise DatasetError(f"{row_id}: unknown expected_material")
-
-
-def load_questions(
-    path: Path = QUESTIONS_PATH, materials: Sequence[Mapping[str, Any]] | None = None
-) -> list[dict[str, Any]]:
-    """Load and validate the retrieval questions."""
-    manifest = list(materials) if materials is not None else load_materials()
-    rows = _read_jsonl(path)
-    validate_questions(rows, manifest)
-    return rows
-
-
-def load_messages(
-    path: Path = MESSAGES_PATH,
-    materials: Sequence[Mapping[str, Any]] | None = None,
-    question_ids: Iterable[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Load and validate the gate messages."""
-    manifest = list(materials) if materials is not None else load_materials()
-    ids = question_ids if question_ids is not None else [q["id"] for q in load_questions(materials=manifest)]
-    rows = _read_jsonl(path)
-    validate_messages(rows, manifest, ids)
-    return rows
-
-
-def load_followups(
-    path: Path = FOLLOWUPS_PATH,
-    materials: Sequence[Mapping[str, Any]] | None = None,
-    question_ids: Iterable[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Load the synthetic follow-up cases (same row format as the gate messages).
-
-    The file is kept apart from the 295 gate messages so their numbers stay
-    comparable. Every row must be a follow-up with prior history, and ids must
-    not collide with the gate messages.
-    """
-    manifest = list(materials) if materials is not None else load_materials()
-    ids = list(question_ids) if question_ids is not None else [q["id"] for q in load_questions(materials=manifest)]
-    rows = _read_jsonl(path)
-    validate_messages(rows, manifest, ids, min_count=1)
-    gate_ids = {row["id"] for row in _read_jsonl(MESSAGES_PATH)}
-    for row in rows:
-        if row["id"] in gate_ids:
-            raise DatasetError(f"{row['id']}: id also used in the gate messages")
-        if row["category"] != "follow_up" or row["follow_up"] is not True or not row["history"]:
-            raise DatasetError(f"{row['id']}: not a follow-up with history")
-        if row["expected_decision"] == "retrieve" and (
-            row["question_id"] is None or row["expected_material"] is None
-        ):
-            raise DatasetError(f"{row['id']}: retrieve follow-up needs question_id and expected_material")
-    return rows
-
-
 # ---------------------------------------------------------------------------
 # Offline gate and course search (imports the backend lazily)
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class GateDecision:
-    """What the gate would do for one message."""
-
-    retrieve: bool
-    course: bool
-    student: bool
-    classifier_retrieve: bool
-    second_chance: bool = False
-    # Fields the live model mode copies onto the request it builds. They
-    # mirror what ``_prepare_authoritative_turn`` stamps for the same turn.
-    expected_mode: str | None = None
-    intent: str = ""
-    needs_retrieval: bool = False
-    scope_cleared: bool = False
-    attachment_only: bool = False
-
-
-def scope_inputs_for_row(
-    row: Mapping[str, Any], *, upload_retrieval_enabled: bool = False
-) -> Any:
-    """Build ``backend.coaching.evidence_scope.ScopeInputs`` from a dataset row.
-
-    The offline eval cannot supply four things production reads, so each is an
-    explicit input held at the value the pre-refactor gate assumed:
-
-    * image bytes: every file counts as loaded (``image_bytes_resolved=True``),
-      so missing image Q&A never fires;
-    * ``force_retrieval``: False (a Deep Review path, not a chat turn);
-    * the locked-course flag: False (a row has no course-library source);
-    * ``frozen_history``: False, and the course-intent model second chance
-      stays outside the gate (see ``evaluate_combined_gate``).
-
-    ``upload_retrieval_enabled`` stays False for the gate itself. The upload
-    policy block (``_upload_retrieval_policy``) turns it on to measure the
-    opt-in rule.
-
-    Source ids are ``eval-source-N`` then ``eval-attachment-N``, the ids
-    ``build_live_request`` stamps. ``is_image`` follows the filename extension,
-    the same guess ``_eval_upload_entries`` makes.
-    """
-    from backend.coaching.evidence_scope import ScopeInputs, ScopeSource
-
-    entries = _eval_upload_entries(row)
-    selected = list(row["selected_sources"])
-    attachments = list(row["attachments"])
-    sources = []
-    for index, (raw, entry) in enumerate(zip([*selected, *attachments], entries)):
-        is_attachment = index >= len(selected)
-        number = index - len(selected) + 1 if is_attachment else index + 1
-        sources.append(
-            ScopeSource(
-                source_id=f"eval-{'attachment' if is_attachment else 'source'}-{number}",
-                title=str(raw.get("title") or ""),
-                filename=str(raw.get("filename") or ""),
-                is_attachment=is_attachment,
-                is_course_library=False,
-                is_image=entry["kind"] == "image",
-                image_bytes_resolved=True,
-            )
-        )
-    return ScopeInputs(
-        message=str(row["message"]),
-        current_stage=str(row["stage"]),
-        sources=tuple(sources),
-        attachment_count=len(attachments),
-        interaction_intent=row.get("explicit_mode"),
-        force_retrieval=False,
-        frozen_history=False,
-        upload_retrieval_enabled=upload_retrieval_enabled,
-    )
-
-
-def gate_decision(row: Mapping[str, Any]) -> GateDecision:
-    """Run the production first-pass scope rules for one message row.
-
-    A thin adapter: it builds the inputs (``scope_inputs_for_row``), calls
-    ``backend.coaching.evidence_scope.decide_first_pass_scope``, the same
-    function ``_prepare_authoritative_turn`` calls, and maps the result onto
-    ``GateDecision``. Image bytes, forced retrieval and the model-driven
-    second-chance retrieval path are held at the values ``scope_inputs_for_row``
-    documents.
-
-    The effective decision is 'retrieve' only when a source is searched: the
-    course catalog (``include_course_catalog``) or at least one personal file.
-    """
-    from backend.coaching.evidence_scope import decide_first_pass_scope
-
-    scope = decide_first_pass_scope(scope_inputs_for_row(row))
-    return GateDecision(
-        retrieve=bool(scope.include_course_catalog or scope.searches_personal_files),
-        course=bool(scope.include_course_catalog),
-        student=bool(scope.searches_personal_files),
-        classifier_retrieve=scope.classifier_retrieve,
-        second_chance=scope.second_chance,
-        expected_mode=scope.expected_mode,
-        intent=scope.classifier_intent,
-        needs_retrieval=scope.needs_retrieval,
-        scope_cleared=scope.scope_cleared,
-        attachment_only=scope.attachment_only,
-    )
-
-
-def extract_pdf_pages(path: Path) -> list[str]:
-    """Return whitespace-normalised text for each PDF page (1 page = 1 chunk)."""
-    import fitz  # PyMuPDF, pinned in requirements.txt
-
-    fitz.TOOLS.mupdf_display_errors(False)
-    with fitz.open(path) as document:
-        return [" ".join(page.get_text().split()) for page in document]
-
-
-class OfflineCourseSearch:
-    """Lexical stand-in for the Knowledge Base over the local lecture PDFs."""
-
-    def __init__(self, materials: Sequence[Mapping[str, Any]], root: Path = _PROJECT_ROOT):
-        from backend.retrieval import LocalChunkRetriever, RetrievalSource
-
-        self._sources = []
-        self._material_by_source: dict[str, str] = {}
-        for index, entry in enumerate(materials, start=1):
-            pdf_path = root / entry["local_path"]
-            if not pdf_path.is_file():
-                raise FileNotFoundError(f"course PDF not found: {pdf_path}")
-            pages = extract_pdf_pages(pdf_path)
-            if len(pages) != int(entry["pdf_pages"]):
-                raise DatasetError(
-                    f"{entry['filename']}: manifest says {entry['pdf_pages']} pages, "
-                    f"PDF has {len(pages)}"
-                )
-            self._sources.append(
-                RetrievalSource(
-                    source_id=entry["source_id"],
-                    label=f"S{index}",
-                    title=entry["filename"],
-                    text="",
-                    mime="application/pdf",
-                    group=entry["group"],
-                    object_key=entry["object_key"],
-                    course_material_id=entry["material_id"],
-                    virtual_course_source=True,
-                    chunks=tuple(pages),
-                )
-            )
-            self._material_by_source[entry["source_id"]] = entry["material_id"]
-        # Large limits: every lexical match is returned and ranked here by
-        # score, like the Knowledge Base adapter, instead of by the local
-        # retriever's per-source diversity order.
-        self._retriever = LocalChunkRetriever(
-            max_chunks=100_000,
-            max_chunks_per_source=100_000,
-            max_context_chars=10**9,
-        )
-
-    def search(self, message: str, history: Sequence[Mapping[str, Any]] = ()) -> list[RankedHit]:
-        """Return ranked results with score above zero."""
-        from backend.retrieval import RetrievalQuery, prefer_session_matching_sources
-
-        sources = prefer_session_matching_sources(tuple(self._sources), message)
-        query = RetrievalQuery(
-            current_message=message,
-            current_stage="problem_identification",
-            sources=sources,
-            recent_messages=tuple(
-                {"role": turn["role"], "content": turn["text"]} for turn in history
-            ),
-        )
-        result = self._retriever.retrieve(query)
-        return [
-            RankedHit(
-                material_id=self._material_by_source[chunk.source_id],
-                page=chunk.chunk_index,
-                score=float(chunk.score),
-                source_index=chunk.source_index,
-                chunk_index=chunk.chunk_index,
-                text=chunk.text,
-            )
-            for chunk in result.chunks
-            if chunk.score > 0.0
-        ]
 
 
 # ---------------------------------------------------------------------------
@@ -946,29 +480,6 @@ UPLOAD_POLICY_DEFINITION = (
     "local chunks with the row's real titles are attached, measured on the "
     "provider payload builder. Tokens use 4 and 3 characters per token."
 )
-
-
-def _eval_upload_entries(row: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Project the row's selected and attached files into source dicts.
-
-    Rows hold only a title and a filename, so ``mime`` is guessed from the
-    filename extension (``.png`` is an image).
-    """
-    import mimetypes
-
-    entries: list[dict[str, Any]] = []
-    for entry in [*row["selected_sources"], *row["attachments"]]:
-        filename = str(entry.get("filename") or "")
-        mime = mimetypes.guess_type(filename)[0] or ""
-        entries.append(
-            {
-                "title": str(entry.get("title") or filename),
-                "filename": filename,
-                "kind": "image" if mime.startswith("image/") else "file",
-                "mime": mime,
-            }
-        )
-    return entries
 
 
 def _payload_text_chars(payload: Mapping[str, Any]) -> int:
@@ -1577,43 +1088,6 @@ def run_live(
 # Live model path: the first Fast Chat call with needs_sources (opt-in)
 # ---------------------------------------------------------------------------
 
-# One model call per message, sequential, no retries. The gate set has fewer
-# than 500 messages, so a higher limit could never be used.
-LIVE_MODEL_HARD_CALL_CAP = 500
-# Same read timeout as ``AgentCoreCoachProvider`` (``timeout_seconds=110``).
-LIVE_MODEL_TIMEOUT_SECONDS = 110.0
-# Same output reserve as the fast-chat context planner
-# (``_fast_chat_planner_from_settings``: ``output_reserve_tokens=4_000``).
-LIVE_MODEL_MAX_OUTPUT_TOKENS = 4_000
-# Never invoked: the provider is built only to reuse its payload builder.
-_EVAL_RUNTIME_ARN = "eval:runtime-never-invoked"
-
-# Codes and exception classes that mean "credentials or permission": the run
-# stops after the first one, because every later call would fail the same way.
-AUTH_ACCESS_ERROR_CODES = frozenset(
-    {
-        "AccessDeniedException",
-        "AccessDenied",
-        "UnrecognizedClientException",
-        "InvalidClientTokenId",
-        "ExpiredTokenException",
-        "ExpiredToken",
-        "AuthFailure",
-        "InvalidSignatureException",
-        "SignatureDoesNotMatch",
-        "UnauthorizedOperation",
-        "UnauthorizedException",
-    }
-)
-AUTH_ACCESS_ERROR_CLASSES = frozenset(
-    {
-        "NoCredentialsError",
-        "PartialCredentialsError",
-        "TokenRetrievalError",
-        "CredentialRetrievalError",
-        "NoAuthTokenError",
-    }
-)
 
 LIVE_MODEL_DEFINITION = (
     "Sends each gate message through the first Fast Chat call as production "
@@ -1647,93 +1121,6 @@ LIVE_MODEL_COMPARE_DEFINITION = (
     "floor(limit / 2) messages are sent, evenly spaced. The run stops after "
     "the first auth or access error in either arm."
 )
-
-
-class LiveStructuredOutputError(RuntimeError):
-    """The model returned no usable ``FastChatTurnOutput`` tool call.
-
-    ``detail`` holds only safe, structural facts (failure kind, stop reason,
-    pydantic error locations and types); never message, reply or tool input
-    values.
-    """
-
-    def __init__(self, message: str, detail: Mapping[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.detail: dict[str, Any] = dict(detail or {})
-
-
-def check_live_model_request(
-    live_model: bool,
-    live_kb: bool,
-    max_live_calls: int | None,
-    *,
-    provider: str,
-    model_id: str,
-    region: str,
-) -> int:
-    """Validate the live model opt-in and return the approved call limit.
-
-    Makes no network call and imports no AWS library.
-
-    Args:
-        live_model: ``--live-model``.
-        live_kb: ``--live-kb`` (cannot be combined with the model mode).
-        max_live_calls: ``--max-live-calls``.
-        provider: Fast-chat provider from settings (``COACHING_MODEL_PROVIDER``).
-        model_id: Fast-chat model id from settings (``COACHING_MODEL_ID``).
-        region: Model region from settings.
-
-    Raises:
-        LiveRunRefused: When the limit is missing or out of range, the mode is
-            combined with ``--live-kb``, or the model settings are not a Haiku
-            model on the ``bedrock`` provider.
-    """
-    if live_kb:
-        raise LiveRunRefused("--live-model cannot be combined with --live-kb")
-    if not live_model:
-        raise LiveRunRefused("live model mode was not requested")
-    if max_live_calls is None:
-        raise LiveRunRefused(
-            "--live-model requires --max-live-calls N (1 to "
-            f"{LIVE_MODEL_HARD_CALL_CAP}); no call limit was given"
-        )
-    if not 1 <= max_live_calls <= LIVE_MODEL_HARD_CALL_CAP:
-        raise LiveRunRefused(
-            f"--max-live-calls must be between 1 and {LIVE_MODEL_HARD_CALL_CAP}"
-        )
-    if str(provider or "").strip().lower() != "bedrock":
-        raise LiveRunRefused(
-            "COACHING_MODEL_PROVIDER must be 'bedrock' for the fast-chat model "
-            f"(got {provider or 'empty'!r})"
-        )
-    if "haiku" not in str(model_id or "").lower():
-        raise LiveRunRefused(
-            "COACHING_MODEL_ID is not set to a Haiku model "
-            f"(got {model_id or 'empty'!r}); the fast-chat role is Haiku"
-        )
-    if not str(region or "").strip():
-        raise LiveRunRefused("AGENTCORE_MODEL_REGION (or AWS_REGION) is not set")
-    return max_live_calls
-
-
-def live_model_settings() -> tuple[str, str, str]:
-    """Return ``(provider, model_id, region)`` the fast-chat role uses.
-
-    Mirrors ``AgentCoreCoachProvider._role_provider_model("fast_chat")`` and
-    the runtime region rule (``AGENTCORE_MODEL_REGION``, then ``AWS_REGION``).
-    """
-    from backend.settings import settings
-
-    provider = str(settings.coaching_model_provider or "").strip().lower()
-    model_id = str(settings.coaching_model_id or "").strip()
-    if not (provider and model_id):
-        provider = str(settings.agentcore_model_provider or "").strip().lower()
-        model_id = str(settings.agentcore_model_id or "").strip()
-    region = (
-        str(settings.agentcore_model_region or "").strip()
-        or str(settings.aws_region or "").strip()
-    )
-    return provider, model_id, region
 
 
 class CountingConverseClient:
@@ -1775,163 +1162,6 @@ def _build_bedrock_runtime_client(region: str, limit: int) -> CountingConverseCl
     return CountingConverseClient(client, limit)
 
 
-def _inline_schema_refs(schema: Mapping[str, Any]) -> dict[str, Any]:
-    """Inline ``$ref`` targets and drop ``$defs`` (a tool schema must be flat)."""
-    defs = dict(schema.get("$defs") or {})
-
-    def walk(node: Any) -> Any:
-        if isinstance(node, Mapping):
-            ref = node.get("$ref")
-            if isinstance(ref, str) and ref.startswith("#/$defs/"):
-                return walk(defs[ref.rsplit("/", 1)[-1]])
-            return {key: walk(value) for key, value in node.items() if key != "$defs"}
-        if isinstance(node, list):
-            return [walk(item) for item in node]
-        return node
-
-    return walk(dict(schema))
-
-
-class LiveFastChatBridge:
-    """Run the AgentCore runtime's fast-chat model call straight on Bedrock.
-
-    The runtime (``agentcore_runtime/main.py::fast_chat_invoke``) builds a
-    Strands ``Agent`` with ``tools=[]`` and ``structured_output_model=
-    FastChatTurnOutput``; Strands forwards that model to Bedrock Converse as
-    one forced tool. This class sends the same system prompt, messages and
-    tool through ``bedrock-runtime`` ``converse`` without Strands or an
-    AgentCore hop. Differences from production, all recorded in the docs: no
-    Bedrock guardrail, no prompt-cache point, no structured-output recovery
-    turn (a reply without the tool call is a failure), no SDK retries.
-    """
-
-    def __init__(self, client: Any, model_id: str) -> None:
-        from agentcore_runtime.models import FastChatTurnOutput
-
-        self._client = client
-        self._model_id = model_id
-        # Bedrock ``stopReason`` of the last call (an enum value, not text).
-        self.last_stop_reason: str | None = None
-        self._schema = _inline_schema_refs(FastChatTurnOutput.model_json_schema())
-        self._description = " ".join(
-            (FastChatTurnOutput.__doc__ or "").split("\n\n")[0].split()
-        )
-
-    def request_kwargs(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        """Build the Converse arguments for one runtime payload."""
-        from agentcore_runtime.structured_coach import (
-            conversation_for_invoke,
-            specialist_system_prompt,
-        )
-
-        prior, prompt = conversation_for_invoke(payload)
-        current = [{"text": prompt}] if isinstance(prompt, str) else list(prompt)
-        return {
-            "modelId": self._model_id,
-            "system": [{"text": specialist_system_prompt(payload)}],
-            "messages": [*prior, {"role": "user", "content": current}],
-            "toolConfig": {
-                "tools": [
-                    {
-                        "toolSpec": {
-                            "name": "FastChatTurnOutput",
-                            "description": self._description,
-                            "inputSchema": {"json": self._schema},
-                        }
-                    }
-                ],
-                # First-cycle forced tool use, as the runtime middleware sets.
-                "toolChoice": {"any": {}},
-            },
-            "inferenceConfig": {"maxTokens": LIVE_MODEL_MAX_OUTPUT_TOKENS},
-        }
-
-    def invoke(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        """Return the runtime wire payload for one fast-chat turn.
-
-        Raises:
-            LiveStructuredOutputError: When the reply has no valid tool call.
-        """
-        from pydantic import ValidationError
-
-        from agentcore_runtime.models import parse_fast_chat_turn_output
-        from agentcore_runtime.structured_coach import structured_wire_payload
-
-        self.last_stop_reason = None
-        response = self._client.converse(**self.request_kwargs(payload))
-        stop_reason = response.get("stopReason")
-        self.last_stop_reason = None if stop_reason is None else str(stop_reason)[:40]
-        message = ((response.get("output") or {}).get("message")) or {}
-        content = message.get("content") or []
-        tool_input = None
-        for block in content:
-            tool_use = block.get("toolUse") if isinstance(block, Mapping) else None
-            if isinstance(tool_use, Mapping) and isinstance(tool_use.get("input"), Mapping):
-                tool_input = tool_use["input"]
-                break
-        if tool_input is None:
-            raise LiveStructuredOutputError(
-                f"no tool call in reply (stopReason={response.get('stopReason')!r})",
-                {
-                    "kind": "no_tool_call",
-                    "stop_reason": self.last_stop_reason,
-                    "text_blocks": sum(
-                        1 for block in content if isinstance(block, Mapping) and "text" in block
-                    ),
-                },
-            )
-        try:
-            output = parse_fast_chat_turn_output(dict(tool_input))
-        except ValueError as error:
-            errors: list[dict[str, Any]] = []
-            if isinstance(error, ValidationError):
-                # Locations, types and pydantic's static messages only: no input values.
-                errors = [
-                    {
-                        "loc": [str(part) for part in item.get("loc", ())],
-                        "type": str(item.get("type") or ""),
-                        "msg": str(item.get("msg") or ""),
-                    }
-                    for item in error.errors(
-                        include_url=False, include_context=False, include_input=False
-                    )
-                ]
-            raise LiveStructuredOutputError(
-                f"tool input failed validation ({type(error).__name__})",
-                {
-                    "kind": "tool_input_invalid",
-                    "stop_reason": self.last_stop_reason,
-                    "errors": errors,
-                },
-            ) from error
-        return structured_wire_payload(output)
-
-
-def eval_course_titles(materials: Sequence[Mapping[str, Any]]) -> list[str]:
-    """Course titles for the SOURCE CHECK rule, built from the eval manifest.
-
-    Each manifest entry is projected into the locked course source shape
-    production lists for a notebook, then passed to the production helper
-    ``source_check_course_titles``, so the eval and production share the
-    title rules (order, clipping, de-duplication).
-    """
-    from backend.coaching.execution import source_check_course_titles
-
-    return source_check_course_titles(
-        [
-            {
-                "title": str(entry["filename"]),
-                "metadata": {
-                    "origin": "lecture_notes_folder",
-                    "locked_source": True,
-                    "course_material_group": str(entry.get("group") or ""),
-                },
-            }
-            for entry in materials
-        ]
-    )
-
-
 def live_source_check_titles(
     materials: Sequence[Mapping[str, Any]] | None,
 ) -> tuple[list[str], dict[str, Any]]:
@@ -1953,96 +1183,6 @@ def live_source_check_titles(
         "count": len(titles),
         "block_chars": len(source_check_titles_block(titles)),
     }
-
-
-def build_live_request(
-    row: Mapping[str, Any],
-    decision: GateDecision,
-    *,
-    source_check: bool = True,
-    course_titles: Sequence[str] = (),
-) -> Any:
-    """Build the ``CoachRequest`` production would hand the provider.
-
-    Mirrors the fields ``_prepare_authoritative_turn`` stamps that change the
-    first call's prompt. Retrieved excerpts are never attached: a row the gate
-    searched for is sent without them (see ``LIVE_MODEL_DEFINITION``).
-    ``source_need_check`` is on by default so every row measures the flag;
-    ``source_check=False`` sends the turn as production does with
-    ``FAST_CHAT_NEEDS_SOURCES_ENABLED`` off (the compare mode's off arm).
-    ``course_titles`` are attached only when ``source_check`` is on, as
-    production stamps them only on turns with ``source_need_check``.
-    """
-    from backend.domain import CoachRequest
-
-    selected = list(row["selected_sources"])
-    attachments = list(row["attachments"])
-    attachment_ids = [f"eval-attachment-{i}" for i, _ in enumerate(attachments, 1)]
-    selected_ids = [f"eval-source-{i}" for i, _ in enumerate(selected, 1)]
-    if decision.scope_cleared:
-        source_ids: list[str] = []
-    elif decision.attachment_only:
-        source_ids = list(attachment_ids)
-    else:
-        source_ids = selected_ids + attachment_ids
-    return CoachRequest(
-        thread_id=f"eval-{row['id']}",
-        student_message=str(row["message"]),
-        current_stage=str(row["stage"]),
-        response_detail="short",
-        source_ids=source_ids,
-        attachment_source_ids=attachment_ids,
-        attachment_titles=[str(item.get("title") or "") for item in attachments],
-        allow_model_knowledge=not source_ids and not decision.course,
-        history=[
-            {"role": turn["role"], "content": turn["text"]} for turn in row["history"]
-        ],
-        retrieval_required=bool(decision.needs_retrieval),
-        source_need_check=bool(source_check),
-        course_material_titles=list(course_titles) if source_check else [],
-        expected_response_mode=decision.expected_mode,
-        mode_policy_intent=decision.intent,
-    )
-
-
-def live_failure_detail(error: BaseException) -> dict[str, Any]:
-    """Return safe, structural facts about one failed live call.
-
-    Kinds: ``no_tool_call`` and ``tool_input_invalid`` (from the bridge),
-    ``fast_chat_contract`` (the wire adapter's fixed reason token),
-    ``contract_rejected`` (``_validated_fast_chat`` category), ``other``
-    (for example an AWS error; ``error`` on the row names its class).
-    Never message, reply or tool input text.
-    """
-    from agentcore_runtime.models import FastChatContractError
-    from backend.providers import ProviderUnavailableError
-
-    if isinstance(error, LiveStructuredOutputError) and error.detail:
-        return dict(error.detail)
-    if isinstance(error, FastChatContractError):
-        return {"kind": "fast_chat_contract", "reason": str(error.reason)}
-    if isinstance(error, ProviderUnavailableError):
-        return {"kind": "contract_rejected", "category": str(error.category or "")}
-    return {"kind": "other"}
-
-
-def exception_label(error: BaseException) -> str:
-    """Return ``module.Class`` plus the AWS error code when there is one."""
-    name = f"{type(error).__module__}.{type(error).__qualname__}"
-    code = ""
-    response = getattr(error, "response", None)
-    if isinstance(response, Mapping) and isinstance(response.get("Error"), Mapping):
-        code = str(response["Error"].get("Code") or "")
-    return f"{name} (code {code})" if code else name
-
-
-def is_auth_or_access_error(error: BaseException) -> bool:
-    """Return whether *error* is a credential or permission failure."""
-    response = getattr(error, "response", None)
-    if isinstance(response, Mapping) and isinstance(response.get("Error"), Mapping):
-        if str(response["Error"].get("Code") or "") in AUTH_ACCESS_ERROR_CODES:
-            return True
-    return type(error).__name__ in AUTH_ACCESS_ERROR_CLASSES
 
 
 def _live_block(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -2179,72 +1319,6 @@ def summarize_live_model(outcomes: Sequence[Mapping[str, Any]]) -> dict[str, Any
     }
 
 
-def _refuse_unknown(flag: str, unknown: Sequence[str]) -> None:
-    if unknown:
-        more = f" and {len(unknown) - 5} more" if len(unknown) > 5 else ""
-        raise LiveRunRefused(f"unknown value(s) in {flag}: {', '.join(unknown[:5])}{more}")
-
-
-def select_live_rows(
-    messages: Sequence[Mapping[str, Any]],
-    *,
-    ids: Sequence[str] | None = None,
-    categories: Sequence[str] | None = None,
-    expected_decision: str | None = None,
-    skip_sample: int = 0,
-) -> list[Mapping[str, Any]]:
-    """Select the gate rows a live-model run sends, in file order.
-
-    Order: (a) with neither ``ids`` nor ``categories`` start from all rows,
-    else keep rows whose id **or** category is listed (union); (b)
-    ``expected_decision`` keeps only rows with that label; (c) ``skip_sample``
-    adds that many ``skip`` rows not already selected, chosen with
-    ``evenly_spaced_indices`` over that pool in file order. ``None`` for a
-    filter means "not given"; ``--max-live-calls`` applies later.
-
-    Raises:
-        LiveRunRefused: On an unknown id or category, an empty ``ids`` or
-            ``categories`` list, a bad ``expected_decision``, a negative
-            ``skip_sample``, or an empty selection.
-    """
-    if ids is not None and not ids:
-        raise LiveRunRefused("--ids was given but names no id")
-    if categories is not None and not categories:
-        raise LiveRunRefused("--categories was given but names no category")
-    if expected_decision is not None and expected_decision not in DECISIONS:
-        raise LiveRunRefused(f"--expected-decision must be one of {', '.join(sorted(DECISIONS))}")
-    if skip_sample < 0:
-        raise LiveRunRefused("--skip-sample must be 0 or more")
-    wanted_ids = set(ids or ())
-    wanted_categories = set(categories or ())
-    known_ids = {str(row["id"]) for row in messages}
-    _refuse_unknown("--ids", [item for item in dict.fromkeys(ids or ()) if item not in known_ids])
-    _refuse_unknown(
-        "--categories",
-        [item for item in dict.fromkeys(categories or ()) if item not in MESSAGE_CATEGORIES],
-    )
-    if ids is None and categories is None:
-        selected = list(messages)
-    else:
-        selected = [
-            row
-            for row in messages
-            if str(row["id"]) in wanted_ids or str(row["category"]) in wanted_categories
-        ]
-    if expected_decision is not None:
-        selected = [row for row in selected if row["expected_decision"] == expected_decision]
-    if skip_sample:
-        taken = {str(row["id"]) for row in selected}
-        pool = [
-            row for row in messages if row["expected_decision"] == "skip" and str(row["id"]) not in taken
-        ]
-        taken |= {str(pool[i]["id"]) for i in evenly_spaced_indices(len(pool), skip_sample)}
-        selected = [row for row in messages if str(row["id"]) in taken]
-    if not selected:
-        raise LiveRunRefused("the row filters selected no rows")
-    return selected
-
-
 def check_compare_limit(limit: int) -> int:
     """Return the message count a compare run sends: ``limit // 2``.
 
@@ -2256,17 +1330,6 @@ def check_compare_limit(limit: int) -> int:
             "--compare-source-check sends each message twice; --max-live-calls must be at least 2"
         )
     return limit // 2
-
-
-def _live_eval_provider() -> Any:
-    """Build the provider only to reuse its payload builder (never invoked)."""
-    from backend.agentcore_provider import AgentCoreCoachProvider
-
-    class _NoRuntime:
-        def invoke_agent_runtime(self, **_kwargs: Any) -> Any:
-            raise AssertionError("AgentCore Runtime must not be invoked by the eval")
-
-    return AgentCoreCoachProvider(_EVAL_RUNTIME_ARN, client=_NoRuntime())
 
 
 def _live_model_outcome(
@@ -2683,61 +1746,13 @@ def format_live_model_report(result: Mapping[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _block_network() -> None:
-    """Make any socket connection fail, so offline mode cannot reach a network."""
-    import socket
-
-    def _refuse(*_args: Any, **_kwargs: Any) -> Any:
-        raise RuntimeError("network access is disabled in offline mode")
-
-    socket.socket.connect = _refuse  # type: ignore[method-assign]
-    socket.socket.connect_ex = _refuse  # type: ignore[method-assign]
-    socket.create_connection = _refuse  # type: ignore[assignment]
-    socket.getaddrinfo = _refuse  # type: ignore[assignment]
-
-
-def _git_run_metadata() -> dict[str, Any]:
-    """Return the checkout's commit and a UTC timestamp for a JSON output file.
-
-    ``git_dirty`` is true when tracked files have uncommitted changes
-    (untracked files are ignored). Both git fields are ``None`` when git is
-    unavailable. Local subprocess only; never raises.
-    """
-    import subprocess
-    from datetime import datetime, timezone
-
-    def _git(*command: str) -> str | None:
-        try:
-            done = subprocess.run(
-                ["git", *command],
-                cwd=_PROJECT_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-        return done.stdout if done.returncode == 0 else None
-
-    sha = _git("rev-parse", "HEAD")
-    status = _git("status", "--porcelain", "--untracked-files=no")
-    return {
-        "git_sha": (sha.strip() or None) if sha is not None else None,
-        "git_dirty": bool(status.strip()) if status is not None else None,
-        "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-
-
 def _write_json_output(path: Path, result: Mapping[str, Any]) -> None:
     """Write ``result`` as JSON with a ``run`` block (git SHA, UTC timestamp).
 
-    Shared by the offline, ``--live-kb`` and ``--live-model`` modes. ``run`` is
-    added only to the file, so the printed report is unchanged.
+    The run block comes from this module's ``_git_run_metadata`` so a test can
+    patch it here. The writer itself is ``scripts.evals.lib.output``.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = {**result, "run": _git_run_metadata()}
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_output(path, result, run=_git_run_metadata())
 
 
 def format_report(result: Mapping[str, Any]) -> str:
