@@ -61,6 +61,9 @@ def scopes(messages, prepared):
     return build_row_scopes(messages, prepared)
 
 
+PLAN_KB_SETTINGS = {"candidates": 12, "max_results": 4, "filter_mode": "required"}
+
+
 def synthetic_kb(
     scopes_: list[Any],
     *,
@@ -96,6 +99,7 @@ def synthetic_kb(
         "mode": "live_kb_gate",
         "synthetic_test_fixture": True,
         "rows": rows,
+        "kb_settings": dict(PLAN_KB_SETTINGS),
         "summary": {"stopped_on_auth_error": False},
         "run": {"git_sha": "0" * 40, "git_dirty": False, "generated_at_utc": "2000-01-01T00:00:00Z"},
     }
@@ -709,6 +713,34 @@ def test_command_with_a_full_laya_run_adds_a_source(tmp_path: Path, capsys, prep
     assert learn_code == 0
     learn = json.loads((tmp_path / "l.json").read_text(encoding="utf-8"))["sources"]["laya_full_learn"]
     assert learn["cutoffs"] == {"threshold": 0.8563768, "first_turn_threshold": 0.6455846}
+
+
+@pytest.mark.parametrize(
+    ("change", "named"),
+    [
+        ({"candidates": 5}, "candidates"),
+        ({"max_results": 8}, "max_results"),
+        ({"filter_mode": "off"}, "filter_mode"),
+        ({"candidates": None}, "candidates"),
+        ({"candidates": True}, "candidates"),
+    ],
+)
+def test_kb_file_settings_must_match_the_plan(tmp_path: Path, capsys, scopes, change, named) -> None:
+    data = synthetic_kb(scopes)
+    assert load_kb_scores(write_kb(tmp_path / "ok.json", data), {r.id for r in scopes}).settings_mismatch() is None
+    for key, value in change.items():
+        if value is None:
+            del data["kb_settings"][key]
+        else:
+            data["kb_settings"][key] = value
+    path = write_kb(tmp_path / "bad.json", data)
+    assert f"kb_settings.{named}" in load_kb_scores(path, {r.id for r in scopes}).settings_mismatch()
+    code, out, err = _run(["--kb-gate", str(path)], capsys)
+    assert code == 2 and "refused" in err and f"kb_settings.{named}" in err and out == ""
+    no_block = synthetic_kb(scopes)
+    del no_block["kb_settings"]
+    code, _, err = _run(["--kb-gate", str(write_kb(tmp_path / "none.json", no_block))], capsys)
+    assert code == 2 and "kb_settings.candidates is missing" in err
 
 
 def test_command_refuses_bad_inputs_with_exit_2(tmp_path: Path, capsys, scopes, prepared) -> None:

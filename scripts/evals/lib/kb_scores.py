@@ -16,9 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from scripts.evals.lib import prereg
+
 STATUSES = frozenset({"ok", "empty", "unavailable"})
 GATE_MODE = "live_kb_gate"
 EXTRA_MODE = "live_kb_gate_extra"
+# The plan (section 5) names production values: 12 candidates, 4 results, filter mode "required".
+EXPECTED_FILTER_MODE = "required"
 
 
 class KbFileError(ValueError):
@@ -52,6 +56,24 @@ class KbScores:
     synthetic_test_fixture: bool
     git_sha: str | None
     kb_settings: Mapping[str, Any]
+
+    def settings_mismatch(self) -> str | None:
+        """Name the first recorded KB setting that differs from the plan, or None.
+
+        A file without a ``kb_settings`` block cannot be checked and counts as a mismatch.
+        """
+        expected = {
+            "candidates": prereg.KB_CANDIDATES,
+            "max_results": prereg.KB_MAX_RESULTS,
+            "filter_mode": EXPECTED_FILTER_MODE,
+        }
+        for name, want in expected.items():
+            got = self.kb_settings.get(name)
+            if got is None:
+                return f"kb_settings.{name} is missing (the plan needs {want!r})"
+            if got != want or isinstance(got, bool):
+                return f"kb_settings.{name} is {got!r} (the plan needs {want!r})"
+        return None
 
     def describe(self, expected_ids: Collection[str]) -> dict[str, Any]:
         """JSON-ready coverage and counts (no scores, no text)."""

@@ -23,9 +23,17 @@ commands, IAM and cost: [Head-to-head routing comparison](RETRIEVAL_EVAL.md#head
   `tests/scripts/test_eval_command_boundaries.py`, which picks up
   `compare_routing_arms.py` and every new `lib` module through its directory globs and
   passes unedited (41 tests). `ruff check` and `compileall` pass. Counts per commit are in
-  the commit messages. The full suite was not run.
-- **Compatibility and rollback.** Existing flags, help text, JSON schemas and exit codes of
-  the eval commands are unchanged (new flags only). Revert the commits above to remove the
+  the commit messages. The full mock suite ran in the report commit `8736bf9`: 3041 passed,
+  2 failed (the baseline's two `frontend/dist` failures, `assert 404 == 200` on `GET /`),
+  1 skipped, against 2905 passed, 2 failed, 1 skipped at `e9bebcb`.
+- **Compatibility and rollback.** `evaluate_retrieval.py` and `compare_routing_arms.py`
+  only gain flags, and the existing flags, help text, JSON schemas and exit codes are
+  unchanged. **One existing command changes behaviour:** `benchmark_course_intent.py
+  --checkpoint` now exits 2 unless `--host-instance-type`, `--host-vcpu`, `--host-ram-gb`
+  and `--host-arch` are given (placeholders such as `<TYPE>` and non-positive numbers are
+  also refused). Every earlier real-model invocation needs those four flags; `--stub-ms`
+  runs are unaffected. The three `--checkpoint` examples in `RETRIEVAL_EVAL.md` carry them.
+  The output also gains `host_note` and `rows`. Revert the commits above to remove the
   work; no data or migration is involved.
 - **Unresolved.** No arm can be declared the winner until two files exist: the live
   KB-score file (`--live-kb-gate --max-live-calls 295`, up to about $0.30 at the assumed
@@ -34,10 +42,12 @@ commands, IAM and cost: [Head-to-head routing comparison](RETRIEVAL_EVAL.md#head
   call is the user's assumption and is unconfirmed. IAM `bedrock:Retrieve` on
   `arn:aws:bedrock:<region>:<account-id>:knowledge-base/<KB-ID>` is checked against the AWS
   Service Authorization Reference, not tested on an account.
-- **Next exact action.** Operator runs the three commands in the RETRIEVAL_EVAL section
-  (live gate, Laya all-rows host run, `compare_routing_arms`), then the report
-  `.agents/tasks/headtohead-<date>.md` is written with measured, bound and missing
-  sections and the work stops for review.
+- **Next exact action.** The report `.agents/tasks/headtohead-2026-11-20.md` is written
+  (`8736bf9`) and the work is stopped for review. After approval, the operator runs the
+  three commands in the RETRIEVAL_EVAL section (live gate, Laya all-rows host run,
+  `compare_routing_arms`) and the comparison is re-reported. `compare_routing_arms` refuses
+  a KB-score file whose recorded `kb_settings` differ from the plan (12 candidates, 4
+  results, filter mode `required`).
 
 ### Refactor items 1 and 2: one owner for first-pass scope, uncoupled eval commands (branch `improvement/backend`)
 

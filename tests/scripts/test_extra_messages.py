@@ -84,6 +84,7 @@ def extra_kb(rows: list[dict[str, Any]] | None = None, *, scores: dict[str, floa
     return {
         "mode": "live_kb_gate_extra",
         "synthetic_test_fixture": True,
+        "kb_settings": {"candidates": 12, "max_results": 4, "filter_mode": "required"},
         "rows": [
             {
                 "id": row["id"],
@@ -445,6 +446,10 @@ def test_comparison_refusals_report_ids_and_flags_not_text(tmp_path: Path, capsy
     bad["rows"][0]["id"] = "zz999"
     code, _, err = _compare(["--extra-messages", path, "--extra-kb-gate", str(write_kb(tmp_path / "b.json", bad))], capsys)
     assert code == 2 and "extra-messages file" in err
+    other = extra_kb()
+    other["kb_settings"]["filter_mode"] = "off"
+    code, _, err = _compare(["--extra-messages", path, "--extra-kb-gate", str(write_kb(tmp_path / "o.json", other))], capsys)
+    assert code == 2 and "kb_settings.filter_mode" in err
 
 
 def test_no_extra_message_text_reaches_the_json_markdown_or_stdout(tmp_path: Path, capsys, gate_scopes, caplog) -> None:

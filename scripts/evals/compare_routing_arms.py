@@ -128,6 +128,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             extras = load_extra_messages(args.extra_messages, allow_non_synthetic=args.allow_non_synthetic)
             if args.extra_kb_gate is not None:
                 extra_kb = load_kb_scores(args.extra_kb_gate, set(extras.ids), mode=EXTRA_MODE)
+                mismatch = extra_kb.settings_mismatch()
+                if mismatch is not None:
+                    return _refuse(f"extra KB file: {mismatch}")
         except (ExtraMessagesError, KbFileError) as error:
             return _refuse(f"extra messages: {error}")
     try:
@@ -147,6 +150,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.kb_gate is not None:
             kb = load_kb_scores(args.kb_gate, set(prepared))
+            mismatch = kb.settings_mismatch()
+            if mismatch is not None:
+                return _refuse(f"KB file: {mismatch}")
         sources, unavailable, roles = load_sources(args, prepared)
     except (KbFileError, LayaFileError) as error:
         return _refuse(str(error))

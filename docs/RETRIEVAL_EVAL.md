@@ -1086,7 +1086,8 @@ the machine. The harness records them as given in a `host_note` block next to wh
 process observed (`platform.machine()`, `os.cpu_count()`). A mismatch is recorded, never
 fixed, and nothing is filled in from the machine. A real-model run refuses without all
 four, and a value that is still a `<...>` placeholder is refused. With `--stub-ms` they
-are optional.
+are optional. **This changes an existing command:** a `--checkpoint` run without the four
+flags used to start and now exits 2, so older invocations need the flags added.
 
 **All-rows run for the head-to-head comparison.** The stored Laya decisions cover only
 94, 94 and 41 of the 147 eligible rows, so the comparison reports a floor, a ceiling and
@@ -1114,8 +1115,10 @@ python -m scripts.evals.compare_routing_arms --kb-gate .agents/tasks/headtohead-
 # Laya Learn file: add  --laya-full-kind learn
 ```
 
-`compare_routing_arms` applies the unchanged cutoffs (0.8, or the Learn per-turn
-cutoffs) and refuses a stub file, an unknown id, or a file missing any eligible row.
+`compare_routing_arms` also refuses a `--kb-gate` file (and an `--extra-kb-gate` file)
+whose recorded `kb_settings` do not match the plan: `candidates` 12, `max_results` 4 and
+`filter_mode` `required`, or a file with no `kb_settings` block. It applies the unchanged
+cutoffs (0.8, or the Learn per-turn cutoffs) and refuses a stub file, an unknown id, or a file missing any eligible row.
 Until such a file exists, no all-rows Laya comparison has been made.
 
 Run it on the intended production host (the output records platform, CPU count,
