@@ -3,16 +3,17 @@ import { useRef, useState, type ReactNode } from 'react';
 import type { Project, ReviewFeedback, Stage } from './api';
 import { CoachText } from './CoachText';
 import { Icon } from './Icon';
+import { buildScaffold, improveScaffold, practiceScaffold, skillExplanation, skillSummary } from './coachingContent';
 
 const reviewTabs = ['Summary', 'Progression'] as const;
 
 /** Show saved feedback and the explicit Thinking Path actions for this chat. */
-export function ThinkingPath({ project, disabled, act, startInChat, onClose, status, children }: {
-  project: Project; disabled: boolean; act: (route: string, body: object) => Promise<void>;
+export function ThinkingPath({ project, disabled, act, startInChat, onClose, status, children, insertScaffold, initialTab }: {
+  project: Project; disabled: boolean; insertScaffold: (text: string, switchTo?: 'project') => void; initialTab?: (typeof reviewTabs)[number]; act: (route: string, body: object) => Promise<void>;
   startInChat: () => void; onClose: () => void; status: string; children: ReactNode;
 }) {
   const [activeTab, setActiveTab] = useState<(typeof reviewTabs)[number]>(
-    project.pending ? 'Progression' : 'Summary',
+    initialTab ?? (project.pending ? 'Progression' : 'Summary'),
   );
   const tabButtons = useRef<Array<HTMLButtonElement | null>>([]);
   const [opened, setOpened] = useState('');
@@ -21,6 +22,7 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
   const pending = project.pending;
   const review = project.review;
   const scores = review?.facione_scores ?? [];
+  const skills = skillSummary(scores);
   async function decide(route: string, body: object) {
     await act(route, body);
     document.getElementById('review-heading')?.focus({ preventScroll: true });
@@ -68,13 +70,26 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
         <h3 id="review-summary">Discussion summary</h3>
         <CoachText text={review?.summary || current.coach_summary || 'A summary will appear after the coach has reviewed your design reasoning.'}/>
       </section>
-      <ReviewFeedbackSection title="Strengths" groups={review?.strengths ?? []} stages={project.stages} currentStage={current.id}/>
-      <ReviewFeedbackSection title="Areas to improve" groups={review?.improvements ?? []} stages={project.stages} currentStage={current.id}/>
-      <section className="review-section">
-        <h3>Facione critical-thinking skills</h3>
-        {scores.some(item => item.score !== null) ? <dl className="facione-scores">
-          {scores.map(item => <div key={item.dimension}><dt>{item.dimension}</dt><dd>{item.score === null ? 'Not yet assessed' : `${item.score}/4`}</dd></div>)}
-        </dl> : <p className="supporting">No Facione assessments yet.</p>}
+      <ReviewFeedbackSection title="Strengths" groups={review?.strengths ?? []} stages={project.stages} currentStage={current.id}
+        action="Build on this" onAct={item => insertScaffold(buildScaffold(item), 'project')}/>
+      <ReviewFeedbackSection title="Areas to improve" groups={review?.improvements ?? []} stages={project.stages} currentStage={current.id}
+        action="Work on this" onAct={item => insertScaffold(improveScaffold(item), 'project')}/>
+      <section className="review-section" aria-labelledby="review-facione">
+        <h3 id="review-facione">How your idea scores</h3>
+        <p className="supporting">These scores are feedback on your critical thinking. They are not a grade.</p>
+        {scores.length ? <ul className="facione-list">
+          {scores.map(item => <li key={item.dimension}>
+            <div className="facione-head"><strong>{item.dimension}</strong>
+              <span className="facione-value">{item.score === null ? 'Not yet assessed' : `${item.score}/4`}</span></div>
+            {skillExplanation(item.dimension) ? <p className="supporting">{skillExplanation(item.dimension)}</p> : null}
+            <div className="facione-bar" aria-hidden="true"><span style={{ width: `${((item.score ?? 0) / 4) * 100}%` }}/></div>
+          </li>)}
+        </ul> : <p className="supporting">No Facione assessments yet.</p>}
+        {skills ? <div className="facione-summary">
+          <p><strong>Strongest skill:</strong> {skills.strongest}</p>
+          <p><strong>Skill to grow next:</strong> {skills.grow}</p>
+          <button disabled={disabled} onClick={() => insertScaffold(practiceScaffold(skills.grow), 'project')}>Practice {skills.grow}</button>
+        </div> : null}
       </section>
     </section>
     <section id="review-panel-progression" role="tabpanel" aria-labelledby="review-tab-progression"
@@ -105,7 +120,8 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
           return <li key={stage.id} className={isCurrent ? 'current-stage' : ''}>
             <button className="stage-row" aria-current={isCurrent ? 'step' : undefined} aria-expanded={expanded} aria-controls={`stage-work-${stage.id}`} onClick={() => setOpened(expanded ? '' : stage.id)}>
               <span className={`stage-number ${stage.completed ? 'completed' : ''}`} aria-hidden="true">{stage.completed ? <Icon name="check"/> : index + 1}</span>
-              <span className="stage-label">{stage.label}{stage.completed ? <span className="sr-only"> (completed)</span> : null}</span>
+              <span className="stage-label">{stage.label}{stage.completed ? <span className="sr-only"> (completed)</span> : null}
+                <small className="stage-count">{stage.student_work.length} {stage.student_work.length === 1 ? 'contribution' : 'contributions'}</small></span>
               <Icon name={expanded ? 'chevronDown' : 'chevronRight'}/>
             </button>
             <section hidden={!expanded} id={`stage-work-${stage.id}`} className="stage-work" aria-label={`${stage.label} saved work`}>
@@ -113,10 +129,7 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
               {!isCurrent && !stage.selectable ? <p className="supporting">Stage unavailable</p> : null}
               {!isCurrent && stage.selectable ? <button className="stage-continue" aria-label={`${continueLabel} ${stage.label}`} disabled={disabled}
                 onClick={() => void decide('select-stage', { stage_id: stage.id })}>{continueLabel} <Icon name="chevronRight"/></button> : null}
-              {expanded ? <details className="review-disclosure">
-                <summary>Saved work</summary>
-                <StageWork stage={stage}/>
-              </details> : null}
+              {expanded ? <StageWork stage={stage}/> : null}
             </section>
           </li>;
         })}
@@ -138,15 +151,16 @@ function StageWork({ stage }: { stage: Stage }) {
 }
 
 /** Give each feedback group a short preview and keep further items available. */
-function ReviewFeedbackSection({ title, groups, stages, currentStage }: {
-  title: string; groups: ReviewFeedback[]; stages: Stage[]; currentStage: string;
+function ReviewFeedbackSection({ title, groups, stages, currentStage, action, onAct }: {
+  title: string; groups: ReviewFeedback[]; stages: Stage[]; currentStage: string; action: string; onAct: (item: string) => void;
 }) {
+  const act = (item: string) => <button className="scaffold-action" aria-label={`${action}: ${item}`} onClick={() => onAct(item)}>{action}</button>;
   const populated = groups.filter(group => group.items.length);
   const featured = populated.find(group => group.stage_id === currentStage) ?? populated[populated.length - 1];
   const hasMore = populated.length > 1 || (featured?.items.length ?? 0) > 1;
   return <section className="review-section">
     <h3>{title}</h3>
-    {featured ? <p className="review-feedback-preview">{featured.items[0]}</p> : <p className="supporting">No feedback yet.</p>}
+    {featured ? <div className="feedback-item"><p className="review-feedback-preview">{featured.items[0]}</p>{act(featured.items[0])}</div> : <p className="supporting">No feedback yet.</p>}
     {hasMore ? <details className="review-disclosure">
       <summary>{title === 'Strengths' ? 'More strengths' : 'More areas to improve'}</summary>
       <ul className="review-feedback">
@@ -154,7 +168,7 @@ function ReviewFeedbackSection({ title, groups, stages, currentStage }: {
           const items = group === featured ? group.items.slice(1) : group.items;
           return items.length ? <li key={group.stage_id}>
             <h4>{stages.find(stage => stage.id === group.stage_id)?.label}</h4>
-            <ul>{items.map(item => <li key={item}>{item}</li>)}</ul>
+            <ul>{items.map(item => <li key={item} className="feedback-item"><span>{item}</span>{act(item)}</li>)}</ul>
           </li> : null;
         })}
       </ul>

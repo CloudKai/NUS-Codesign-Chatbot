@@ -2,7 +2,7 @@
 version: 1
 slug: "frontend-src-app-tsx"
 primary_target: "frontend/src/App.tsx"
-related_targets: ["frontend/src/styles.css","frontend/src/Conversation.tsx","frontend/src/ThinkingPath.tsx"]
+related_targets: ["frontend/src/HomeView.tsx","frontend/src/StageStepper.tsx","frontend/src/CoachCheckIn.tsx","frontend/src/StageRecommendation.tsx","frontend/src/ModeSwitch.tsx","frontend/src/coachingContent.ts","frontend/src/styles.css","frontend/src/Conversation.tsx","frontend/src/ThinkingPath.tsx"]
 ---
 
 # React student workspace
@@ -33,9 +33,15 @@ seed:ff7fd354936e258b.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
 ## User refinement
-Use icon controls where familiar, remove Streamlit links and saved-message counts,
-replace prominent intent tabs with a compact composer selector, and expose a
-persistent day/night toggle. No extra informational copy in the chat.
+Use icon controls where familiar, remove Streamlit links, replace prominent intent tabs
+with a compact segmented mode switch, and expose a persistent day/night toggle.
+
+Engagement update: a Home view (continue card), header stage stepper, inline stage
+recommendation with milestone banner, deterministic coach check-ins, stage starter chips
+and actionable feedback (Work on this, Build on this, Practice, Use in my project) are
+allowed. Counts, check-ins and milestone copy must come from saved API data. Never
+fabricate achievements, streaks or scores. Keep it calm: one check-in and one milestone
+at a time, no modals, scaffolds only insert editable text.
 
 Keep chat as the default. Review brings together saved summary, feedback,
 Facione and stage work. A notebook's Sources tab manages shared materials.

@@ -1,6 +1,9 @@
 /** Small consistent outline icons; surrounding controls supply accessible names. */
-export function Icon({ name }: { name: 'attach' | 'document' | 'image' | 'download' | 'help' | 'grid' | 'close' | 'panel' | 'plus' | 'chat' | 'spark' | 'arrow' | 'path' | 'check' | 'book' | 'sun' | 'moon' | 'copy' | 'edit' | 'up' | 'down' | 'search' | 'folder' | 'grip' | 'more' | 'pin' | 'share' | 'trash' | 'chevronDown' | 'chevronRight' | 'settings' | 'refresh' | 'user' }) {
+export function Icon({ name }: { name: 'attach' | 'document' | 'image' | 'download' | 'help' | 'grid' | 'close' | 'panel' | 'plus' | 'chat' | 'spark' | 'arrow' | 'path' | 'check' | 'book' | 'sun' | 'moon' | 'copy' | 'edit' | 'up' | 'down' | 'search' | 'folder' | 'grip' | 'more' | 'pin' | 'share' | 'trash' | 'chevronDown' | 'chevronRight' | 'settings' | 'refresh' | 'user' | 'home' | 'flag' | 'coach' }) {
   const paths = {
+    home: 'M3 11 12 3l9 8 M5 10v11h5v-6h4v6h5V10',
+    flag: 'M5 21V4 M5 4h13l-2 4 2 4H5',
+    coach: 'M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2z M12 7.5c0 2.5-1.5 3.5-3.5 3.5 2 0 3.5 1 3.5 3.5 0-2.5 1.5-3.5 3.5-3.5-2 0-3.5-1-3.5-3.5z',
     user: 'M16 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2',
     attach: 'm9 12 6-6a3 3 0 0 1 4 4l-8 8a5 5 0 0 1-7-7l9-9 M8 14a1.5 1.5 0 0 0 2 2l7-7',
     image: 'M3 4h18v16H3z M8 9h.01 M3 16l5-5 4 4 3-3 6 6',

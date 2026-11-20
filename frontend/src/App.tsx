@@ -9,6 +9,7 @@ import { WorkspaceSearch } from './WorkspaceSearch';
 import type { Preferences } from './api';
 import { WorkspaceTools, type WorkspaceActions } from './WorkspaceTools';
 import { Icon } from './Icon';
+import { HomeView } from './HomeView';
 
 /** Render authentication, notebook navigation, and saved transcript reading states. */
 export default function App() {
@@ -18,7 +19,7 @@ export default function App() {
     if (reader.phase !== 'signed-out' && !(reader.phase === 'error' && reader.error === 'This account cannot access the student workspace.')) return;
     try {
       for (const key of Object.keys(sessionStorage)) {
-        if (key.startsWith('codesign-lecture:') || key.startsWith('codesign-selected:')) sessionStorage.removeItem(key);
+        if (key.startsWith('codesign-lecture:') || key.startsWith('codesign-selected:') || key.startsWith('codesign-checkin:') || key.startsWith('codesign-starters:')) sessionStorage.removeItem(key);
       }
     } catch { /* No persistent draft exists when tab storage is blocked. */ }
   }, [reader.phase, reader.error]);
@@ -48,8 +49,8 @@ function Brand() {
 function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const [themeHost, setThemeHost] = useState<HTMLDivElement | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [view, setView] = useState<'chat' | 'notebook' | 'library' | 'search' | 'settings'>('chat');
-  const [settingsReturn, setSettingsReturn] = useState<'chat' | 'notebook' | 'library' | 'search'>('chat');
+  const [view, setView] = useState<'chat' | 'home' | 'notebook' | 'library' | 'search' | 'settings'>('chat');
+  const [settingsReturn, setSettingsReturn] = useState<'chat' | 'home' | 'notebook' | 'library' | 'search'>('chat');
   const [folderId, setFolderId] = useState<string>();
   const [settingsHost, setSettingsHost] = useState<HTMLDivElement | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -59,6 +60,8 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const [workspaceBlocked, setWorkspaceBlocked] = useState(false);
   const [listOpen, setListOpen] = useState(() => window.innerWidth >= 1024);
   const workspaceActions = useRef<WorkspaceActions>(null);
+  const pendingIntent = useRef<'project' | 'lecture'>(undefined);
+  const startIntents = useRef<Record<string, 'project' | 'lecture'>>({});
   const [sections, setSections] = useState({ notebooks: true, chats: true });
   const setSection = (section: keyof typeof sections, open: boolean) => setSections(value => ({ ...value, [section]: open }));
   const promptNotebook = () => workspaceActions.current?.promptNotebook();
@@ -109,7 +112,9 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
     try {
       // Drafts belong to one verified owner in this tab. Replies are never stored.
       for (const key of Object.keys(sessionStorage)) {
-        if (key.startsWith('codesign-lecture:') && !key.startsWith(`codesign-lecture:${session.owner_id}:`)) sessionStorage.removeItem(key);
+        for (const prefix of ['codesign-lecture:', 'codesign-checkin:', 'codesign-starters:']) {
+          if (key.startsWith(prefix) && !key.startsWith(`${prefix}${session.owner_id}:`)) sessionStorage.removeItem(key);
+        }
       }
       const selected = sessionStorage.getItem(`codesign-selected:${session.owner_id}`);
       if (selected?.startsWith('folder:')) {
@@ -121,15 +126,23 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
       }
     } catch { /* Reading still works when browser tab storage is unavailable. */ }
   }, []);
-  function startChat() {
+  function startChat(intent?: 'project' | 'lecture') {
     if (workspaceLocked) return;
+    pendingIntent.current = intent;
     if (reader.page?.notebook.kind === 'chat' && !reader.page.notebook.parent_notebook_id && reader.page.total_count === 0) {
+      pendingIntent.current = undefined;
       setView('chat');
       closeMobileList();
       window.requestAnimationFrame(() => document.getElementById('lecture-question')?.focus({ preventScroll: true }));
     } else {
       workspaceActions.current?.createChat();
     }
+  }
+  function openHome() {
+    setView('home');
+    setSearch('');
+    closeMobileList();
+    window.requestAnimationFrame(() => document.getElementById('main')?.focus({ preventScroll: true }));
   }
   function openChat(id: string) {
     setView('chat');
@@ -155,6 +168,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const selectedChat = reader.page?.notebook;
   const parentId = selectedChat?.kind === 'notebook' ? selectedChat.id : selectedChat?.parent_notebook_id;
   const parentFolder = reader.notebooks.find(item => item.id === parentId && item.kind === 'notebook');
+  const showHome = view === 'home' || (view === 'chat' && !reader.page && !reader.busy);
   const folderSettings = view === 'notebook' || (view === 'settings' && settingsReturn === 'notebook');
 
   return <>
@@ -176,7 +190,8 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
       {listOpen ? <button className="drawer-backdrop" aria-label="Close navigation" onClick={closeNavigation}/> : null}
       {!listOpen ? <nav className="navigation-rail" aria-label="Workspace shortcuts">
         <button ref={railToggle} className="icon-button" aria-label="Expand navigation" title="Expand navigation" onClick={openNavigation}><Icon name="panel"/></button>
-        <button className="icon-button" aria-label="New Chat" title="New Chat" disabled={workspaceLocked} onClick={startChat}><Icon name="edit"/></button>
+        <button className="icon-button" aria-label="Home" title="Home" aria-current={showHome ? 'page' : undefined} onClick={openHome}><Icon name="home"/></button>
+        <button className="icon-button" aria-label="New Chat" title="New Chat" disabled={workspaceLocked} onClick={() => startChat()}><Icon name="edit"/></button>
         <button className="icon-button" aria-label="Search" aria-current={view === 'search' ? 'page' : undefined} aria-keyshortcuts="Meta+K Control+K" title="Search notebooks and chats" onClick={openSearch}><Icon name="search"/></button>
         <button className="icon-button" aria-label="Library" title="Library" onClick={openLibrary}><Icon name="book"/></button>
         <button className="icon-button rail-account" aria-label="Account" title="Account" aria-controls="notebook-list" onClick={() => {
@@ -187,7 +202,8 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
       <aside onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented && event.currentTarget.contains(event.target as Node)) closeNavigation(); }} id="notebook-list" className={`notebooks ${listOpen ? 'list-open' : ''}`} aria-label="Your notebooks">
         <div className="notebook-heading"><span>Co-design</span>
           <button id="collapse-navigation" className="icon-button" aria-label="Collapse navigation" title="Collapse navigation" onClick={closeNavigation}><Icon name="panel"/></button></div>
-        <button className="nav-new" disabled={workspaceLocked} onClick={startChat}><Icon name="edit"/> New Chat</button>
+        <button className="nav-home" aria-current={showHome ? 'page' : undefined} onClick={openHome}><Icon name="home"/> Home</button>
+        <button className="nav-new" disabled={workspaceLocked} onClick={() => startChat()}><Icon name="edit"/> New Chat</button>
         <button className="nav-search-link" aria-current={view === 'search' ? 'page' : undefined} aria-keyshortcuts="Meta+K Control+K" onClick={openSearch}><Icon name="search"/> Search<kbd aria-hidden="true">{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></button>
         <button className="nav-library" aria-current={view === 'library' ? 'page' : undefined} onClick={openLibrary}><Icon name="book"/> Library</button>
         <ChatNavigation entries={reader.notebooks} currentId={view === 'chat' ? reader.page?.notebook.id : undefined}
@@ -210,6 +226,8 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
                 openFolder(created);
                 return;
               }
+              if (pendingIntent.current) startIntents.current[created] = pendingIntent.current;
+              pendingIntent.current = undefined;
               if (!await reader.open(created)) throw new Error('Created workspace could not open');
               setView('chat'); setSearch(''); closeMobileList();
               setSection(entry.parent_notebook_id ? 'notebooks' : 'chats', true);
@@ -242,8 +260,10 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
         {view === 'notebook' && folder ? <NotebookPage key={folder.id} notebook={folder} entries={reader.notebooks} summaries={reader.chatSummaries}
           owner={session.owner_id} locked={workspaceLocked} expired={() => void reader.reload()}
           createChat={() => workspaceActions.current?.createChat(folder.id)} openChat={openChat}/> : null}
+        {showHome ? <HomeView owner={session.owner_id} name={preferences?.display_name || (session.kind === 'guest' ? '' : session.display_name)}
+          entries={reader.notebooks} summaries={reader.chatSummaries} locked={workspaceLocked} openChat={openChat} startChat={startChat}/> : null}
         {view === 'settings' ? <div className="settings-host" ref={setSettingsHost}/> : null}
-        <div className="reading-content" hidden={view !== 'chat'}>
+        <div className="reading-content" hidden={view !== 'chat' || showHome}>
         {parentFolder ? <div className="chat-folder-bar"><button className="chat-folder-back" disabled={workspaceLocked} onClick={() => openFolder(parentFolder.id)}>
           <Icon name="folder"/><span>{parentFolder.name}</span>
         </button></div> : null}
@@ -251,10 +271,9 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           displayTitle={reader.page.notebook.kind === 'notebook' ? 'Original chat' : undefined}
           onHelp={() => setHelpOpen(true)} preferredIntent={preferences?.default_mode ?? 'lecture'}
           showStarters={preferences?.starter_prompts ?? true} reduceMotion={preferences?.reduce_motion ?? false}
+          summary={reader.chatSummaries[reader.page.notebook.id]} startIntent={startIntents.current[reader.page.notebook.id]}
           onboardingRequest={onboardingRequest} busy={reader.busy} externalBlocked={workspaceBlocked} activity={setActivity} refresh={async () => { if (!await reader.open(reader.page!.notebook.id, false, true)) throw new Error('Refresh failed'); }} expired={() => void reader.reload()}
-          loadEarlier={() => reader.open(reader.page!.notebook.id, true).then(() => {})}/> : !reader.busy ? <div className="choose-notebook"><span className="welcome-mark"><Icon name="spark"/></span><h2>Make room for a better question.</h2><p>Bring a half-formed thought. We’ll work through it together.</p>
-          <div className="empty-workspace-actions"><button className="primary" onClick={startChat} disabled={workspaceLocked}>New Chat</button><button onClick={promptNotebook} aria-haspopup="dialog" disabled={workspaceLocked}><Icon name="plus"/> Create a notebook</button></div>
-          <p className="supporting privacy-note">Your work here is not graded.</p></div> : null}
+          loadEarlier={() => reader.open(reader.page!.notebook.id, true).then(() => {})}/> : null}
         </div>
       </main>
     </div>

@@ -1,10 +1,16 @@
 /** Lecture composer, exact-request reconciliation and saved citation inspection. */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ApiError, currentSession, get, type Page, type Project } from './api';
+import { ApiError, currentSession, get, type ChatSummary, type Page, type Project } from './api';
 import { ThinkingPath } from './ThinkingPath';
 import { Icon } from './Icon';
 import { CoachText } from './CoachText';
 import { ReasoningPrompts } from './ReasoningPrompts';
+import { StageStepper } from './StageStepper';
+import { ModeSwitch } from './ModeSwitch';
+import { StageRecommendation, MilestoneBanner, type Milestone } from './StageRecommendation';
+import { StageStarters } from './StageStarters';
+import { CoachCheckIn } from './CoachCheckIn';
+import { chooseCheckIn, lectureToProjectScaffold, type CheckIn } from './coachingContent';
 import { isTurn, readStream, type Citation, type Event } from './stream';
 
 type Intent = 'lecture' | 'project';
@@ -26,18 +32,44 @@ function restore(key: string): Draft {
 }
 
 /** Keep draft, focus and loaded transcript stable during progress and evidence inspection. */
-export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, externalBlocked, activity, onHelp, preferredIntent, showStarters, reduceMotion, onboardingRequest, displayTitle = page.notebook.name }: {
+export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, externalBlocked, activity, onHelp, preferredIntent, showStarters, reduceMotion, onboardingRequest, summary, startIntent, displayTitle = page.notebook.name }: {
   page: Page; project: Project; owner: string; refresh: () => Promise<void>; expired: () => void;
   onHelp: () => void; preferredIntent: Intent; showStarters: boolean; reduceMotion: boolean; onboardingRequest: number;
   externalBlocked: boolean; activity: (value: boolean) => void;
   busy: boolean; loadEarlier: () => Promise<void>;
+  summary?: ChatSummary; startIntent?: Intent;
   displayTitle?: string;
 }) {
   const storageKey = `codesign-lecture:${owner}:${page.notebook.id}`;
   const initial = useRef(restore(storageKey));
-  const [mode, setIntent] = useState<Intent | undefined>(initial.current.intent ?? (page.total_count ? 'lecture' : undefined));
+  const [mode, setIntent] = useState<Intent | undefined>(initial.current.intent ?? (page.total_count ? 'lecture' : startIntent));
   const intent = mode ?? preferredIntent;
   const [pathOpen, setPathOpen] = useState(false);
+  const [pathTab, setPathTab] = useState<{ tab?: 'Summary' | 'Progression'; n: number }>({ n: 0 });
+  const [milestone, setMilestone] = useState<Milestone | null>(null);
+  const [transition, setTransition] = useState<{ from: string; to: string } | null>(null);
+  const allDone = useRef(project.stages.every(stage => stage.completed));
+  const checkInKey = `codesign-checkin:${owner}:${page.notebook.id}`;
+  const startersKey = `codesign-starters:${owner}:${page.notebook.id}`;
+  const [dismissedRules, setDismissedRules] = useState<string[]>(() => {
+    try { const value = JSON.parse(sessionStorage.getItem(checkInKey) || '[]'); return Array.isArray(value) ? value.filter(item => typeof item === 'string') : []; }
+    catch { return []; }
+  });
+  const [checkInHidden, setCheckInHidden] = useState(false);
+  const [startersCollapsed, setStartersCollapsedState] = useState(() => {
+    try { return sessionStorage.getItem(startersKey) === 'collapsed'; } catch { return false; }
+  });
+  const [compactScreen, setCompactScreen] = useState(() => window.matchMedia('(max-width: 1023px)').matches);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 1023px)');
+    const update = () => setCompactScreen(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  function setStartersCollapsed(value: boolean) {
+    setStartersCollapsedState(value);
+    try { if (value) sessionStorage.setItem(startersKey, 'collapsed'); else sessionStorage.removeItem(startersKey); } catch { /* Optional tab preference. */ }
+  }
   const [dismissedRequest, setDismissedRequest] = useState<number | null>(null);
   const transcript = useRef<HTMLDivElement>(null);
   const stickToLatest = useRef(true);
@@ -153,17 +185,17 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       if (saved !== null && !isTurn(saved)) throw new Error('Malformed saved reply');
       if (saved) {
         remember(!receipt.message && textRef.current === receipt.text ? '' : textRef.current, null, receipt.message ? attachments : []);
-        setStatus('Answer saved.');
+        setStatus('Your answer is ready.');
         await refresh();
         if (receipt.message) composer.current?.focus({ preventScroll: true });
       } else {
         setCheckedKey(receipt.key);
-        setStatus('No saved answer found yet. It may still be running. Check again, or retry this same question with its original request identity.');
+        setStatus('We couldn’t confirm the reply was saved. Your question is safe. Check again before retrying.');
       }
     } catch (error) {
       if (!active.current) return;
       if (error instanceof ApiError && [401, 403].includes(error.status)) expired();
-      else setStatus('Could not check the saved answer. Keep this question and check again when connected.');
+      else setStatus('We couldn’t check for your reply. Your question is kept. Check again when you’re connected.');
     } finally { if (active.current) setChecking(false); }
   }
 
@@ -177,7 +209,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     remember(textRef.current, receipt);
     setWatching(true);
     setPreview('');
-    setStatus('Connecting…');
+    setStatus('Reading your message…');
     controller.current.abort();
     controller.current = new AbortController();
     let terminalError: Event & { event: 'error' } | null = null;
@@ -194,9 +226,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         if (!isTurn(await response.json())) throw new Error('Malformed saved edit');
       } else await readStream(response, page.notebook.id, receipt.key, event => {
         if (!active.current) return;
-        if (event.event === 'started') setStatus('Question accepted.');
-        if (event.event === 'status') setStatus(({ queued: 'Waiting for capacity…', retrieving: 'Finding evidence…', thinking: 'Preparing an answer…', saving: 'Saving answer…' })[event.phase]);
-        if (event.event === 'reply_ready') { setPreview(event.text); setStatus('Preview — waiting for saved completion.'); }
+        if (event.event === 'started') setStatus('Reading your message…');
+        if (event.event === 'status') setStatus(({ queued: 'Thinking…', retrieving: 'Looking through your sources…', thinking: 'Thinking…', saving: 'Saving…' })[event.phase]);
+        if (event.event === 'reply_ready') { setPreview(event.text); setStatus('Saving…'); }
         if (event.event === 'error') { terminalError = event; setPreview(''); }
       });
     } catch (error) {
@@ -212,9 +244,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           const failure = terminalError as Event & { event: 'error' };
           setStatus(failure.status === 429
             ? failure.category === 'generation_budget'
-              ? 'The monthly generation allowance is used up. Reading and evidence remain available; the allowance resets next UTC month.'
-              : `Generation is busy or limited. Wait${failure.retry_after ? ` at least ${failure.retry_after} seconds` : ''}, then check before retrying.`
-            : 'The answer was not confirmed saved. Your question is kept. Check saved answer before retrying.');
+              ? 'This month’s coach allowance is used up. You can still read your work and sources. It resets next month.'
+              : `The coach is busy right now. Wait${failure.retry_after ? ` at least ${failure.retry_after} seconds` : ''}, then check before retrying.`
+            : 'We couldn’t confirm the reply was saved. Your question is safe. Check again before retrying.');
         }
       }
       lock.current = false;
@@ -223,6 +255,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
 
   async function stageAction(route: string, body: object) {
     if (lock.current || pendingRef.current || busy || moving || externalBlocked || feedbackBusy) return;
+    // Only a confirmed move can become a milestone, and only if the refreshed project really changed stage.
+    const resolving = project.pending && route.startsWith('resolve/') && (body as { accepted?: boolean }).accepted === true
+      ? { from: project.current_stage, to: project.pending.to_stage } : null;
     lock.current = true;
     setMoving(true);
     setProjectUncertain(true);
@@ -239,6 +274,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       await refresh();
       if (active.current) {
         setProjectUncertain(false);
+        if (resolving && response.ok) setTransition(resolving);
         setReviewStatus(response.ok ? 'Saved project updated.' : 'That action is no longer available. Saved project refreshed.');
       }
     } catch { if (active.current) setReviewStatus('Could not verify the project action. Refresh saved project before continuing.'); }
@@ -303,7 +339,21 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
 
   useEffect(() => {
     if (stickToLatest.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
-  }, [page.messages, preview, watching]);
+  }, [page.messages, preview, watching, project.pending?.id, milestone]);
+  useEffect(() => {
+    const complete = project.stages.every(stage => stage.completed);
+    if (complete && !allDone.current) setMilestone({ kind: 'finished' });
+    allDone.current = complete;
+  }, [project]);
+  useEffect(() => {
+    if (!transition) return;
+    setTransition(null);
+    if (transition.from === transition.to || project.current_stage !== transition.to) return;
+    if (project.stages.every(stage => stage.completed)) { setMilestone({ kind: 'finished' }); return; }
+    const completed = project.stages.findIndex(stage => stage.id === transition.from) + 1;
+    const next = project.stages.find(stage => stage.id === transition.to)?.label;
+    if (completed > 0 && next) setMilestone({ kind: 'stage', completed, total: project.stages.length, next });
+  }, [transition, project]);
 
   function closePath() {
     setPathOpen(false);
@@ -312,10 +362,31 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
 
   const done = project.stages.filter(stage => stage.completed).length;
   const isEmpty = page.messages.length === 0 && !watching && !pending;
-  const choosePrompt = (prompt: string) => {
+  const reviewDisabled = watching || checking || busy || moving || uploading || !!pending || projectUncertain || externalBlocked || feedbackBusy;
+  /** Single path for every scaffold button: keep the draft, optionally switch mode, focus the composer. No send. */
+  function insertScaffold(prompt: string, switchTo?: Intent) {
+    if (switchTo && !(watching || checking || moving || pendingRef.current)) { intentRef.current = switchTo; setIntent(switchTo); }
     remember(textRef.current.trim() ? `${textRef.current}\n\n${prompt}` : prompt, pendingRef.current);
-    composer.current?.focus({ preventScroll: true });
-  };
+    if (pathOpen && window.innerWidth < 1024) setPathOpen(false);
+    window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
+  }
+  const choosePrompt = (prompt: string) => insertScaffold(prompt);
+  const stageLabel = project.stages.find(stage => stage.id === project.current_stage)?.label ?? '';
+  const turnBusy = watching || checking || moving || uploading || !!pending;
+  const checkIn = !checkInHidden && !isEmpty && !turnBusy && !text.trim() && !projectUncertain && !(pathOpen && compactScreen)
+    ? chooseCheckIn(project, summary, intent, dismissedRules) : null;
+  function dismissCheckIn(item: CheckIn) {
+    const next = [...dismissedRules, item.rule];
+    setCheckInHidden(true);
+    setDismissedRules(next);
+    try { sessionStorage.setItem(checkInKey, JSON.stringify(next)); } catch { /* Optional tab preference. */ }
+  }
+  const showChips = intent === 'project' && showStarters && !text.trim() && !turnBusy;
+  const openReview = (tab?: 'Summary' | 'Progression') => { setPathTab(value => ({ tab, n: value.n + 1 })); setPathOpen(true); };
+  async function decideInline(route: string, body: object) {
+    await stageAction(route, body);
+    window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
+  }
 
   function startDesignChat() {
     setPathOpen(false);
@@ -330,9 +401,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   return <section aria-label="Saved conversation" className={`conversation ${pathOpen ? 'review-open' : ''}`}>
     <header className="chat-heading">
       <h2 title={displayTitle}>{displayTitle}</h2>
+      <StageStepper stages={project.stages} currentStage={project.current_stage} pending={!!project.pending} onOpen={() => openReview('Progression')}/>
       <button ref={pathToggle} className="path-toggle" aria-haspopup="dialog" aria-expanded={pathOpen}
         aria-description={project.pending ? 'Stage decision pending' : undefined}
-        aria-controls={pathOpen ? 'project-review' : undefined} onClick={() => pathOpen ? closePath() : setPathOpen(true)}>
+        aria-controls={pathOpen ? 'project-review' : undefined} onClick={() => pathOpen ? closePath() : openReview()}>
         <Icon name="path"/> Review{project.pending ? <span className="decision-dot" aria-hidden="true"/> : null}
       </button>
     </header>
@@ -368,6 +440,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       <div className="message-actions">
         <button aria-label={message.role === 'user' ? 'Copy your message' : 'Copy answer'} title="Copy" onClick={() => { void navigator.clipboard.writeText(message.content).then(() => setStatus('Message copied.')).catch(() => setStatus('Could not copy. Select the message text to copy it.')); }}><Icon name="copy"/></button>
         {message.role === 'user' ? <button aria-label="Edit message" title="Edit message" disabled={watching || checking || moving || !!pending || externalBlocked || projectUncertain} id={`edit-trigger-${message.id}`} onClick={() => setEdit({ id: message.id, text: message.content })}><Icon name="edit"/></button> : null}
+        {message.role !== 'user' ? <button className="use-in-project" disabled={watching || checking || moving || !!pending || externalBlocked}
+          onClick={() => insertScaffold(lectureToProjectScaffold(message.content), 'project')}><Icon name="path"/> Use in my project</button> : null}
         {message.feedback_available ? <div role="group" aria-label="Was this answer useful?">
           {(['useful', 'not_useful'] as const).map(kind => <button key={kind} aria-label={kind === 'useful' ? 'Useful' : 'Not useful'} title={kind === 'useful' ? 'Useful' : 'Not useful'} aria-pressed={message.rating === kind} disabled={feedbackBusy || watching || checking || !!pending || externalBlocked} onClick={() => void rate(message.id, kind)}><Icon name={kind === 'useful' ? 'up' : 'down'}/></button>)}
         </div> : null}
@@ -387,6 +461,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           setDownloadError(''); setEvidence({ citation, message: message.id });
         }}>{citation.label} · {citation.title}</button>)}</div> : null}
     </article>)}
+    {milestone ? <MilestoneBanner milestone={milestone} onDismiss={() => setMilestone(null)} onReview={() => { setMilestone(null); openReview('Summary'); }}/> : null}
+    <StageRecommendation project={project} disabled={reviewDisabled} act={decideInline}/>
+    {watching ? <div className="typing" aria-hidden="true"><span className="typing-dots"><i/><i/><i/></span><span>{status}</span></div> : null}
     {evidence ? <aside className="evidence" aria-label="Cited evidence">
       <div className="evidence-heading"><h3 ref={evidenceHeading} tabIndex={-1}>{evidence.citation.label} · {evidence.citation.title}</h3>
         <button onClick={() => {
@@ -406,6 +483,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     </div> : null}
     </div></div>
     <div className="composer-dock"><div className="chat-column">
+    {checkIn ? <CoachCheckIn checkIn={checkIn} onAct={item => insertScaffold(item.scaffold, 'project')} onDismiss={dismissCheckIn}/> : null}
+    {showChips ? <StageStarters stageId={project.current_stage} disabled={externalBlocked} collapsed={startersCollapsed} setCollapsed={setStartersCollapsed} onChoose={choosePrompt}/> : null}
     <form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
       <input ref={attachmentInput} hidden type="file" multiple aria-label="Attach files to your message" onChange={event => {
         const files = Array.from(event.target.files ?? []);
@@ -427,9 +506,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         placeholder={intent === 'lecture' ? "Ask about a lecture, reading, or course concept…" : "Share an idea or ask a question…"} onChange={event => remember(event.target.value, pendingRef.current)}/>
       <div className="composer-actions">
         <button className="icon-button attach-button" type="button" aria-label="Attach files" title="Attach files" disabled={externalBlocked || uploading || watching || !!pending} onClick={() => attachmentInput.current?.click()}><Icon name="attach"/></button>
-        <div className="composer-mode"><label className="sr-only" htmlFor="conversation-mode">Conversation mode</label><select id="conversation-mode" value={intent} disabled={watching || checking || moving || !!pending} title="Lecture help keeps your project stage unchanged. Project coaching develops your saved project." onChange={event => {
-        const next = event.target.value as Intent; intentRef.current = next; setIntent(next); remember(textRef.current, pendingRef.current);
-      }}><option value="lecture">Lecture help</option><option value="project">Design coaching</option></select></div>
+        <ModeSwitch value={intent} stageLabel={stageLabel} disabled={watching || checking || moving || !!pending} onChange={next => {
+        intentRef.current = next; setIntent(next); remember(textRef.current, pendingRef.current);
+      }}/>
         <span className="composer-hint" id="composer-hint">↵ send · ⇧ ↵ new line</span>
         <button className="primary send-button" aria-label="Send message" title="Send message" type="submit" disabled={watching || checking || busy || moving || projectUncertain || externalBlocked || uploading || feedbackBusy || !!pending || !text.trim()}><Icon name="arrow"/></button></div>
     </form>
@@ -446,8 +525,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           closePath();
         }
       }}>
-      <ThinkingPath project={project}
-        disabled={watching || checking || busy || moving || uploading || !!pending || projectUncertain || externalBlocked || feedbackBusy}
+      <ThinkingPath key={pathTab.n} project={project} initialTab={pathTab.tab} insertScaffold={insertScaffold}
+        disabled={reviewDisabled}
         act={stageAction} startInChat={startDesignChat} onClose={closePath} status={reviewStatus}>
         {projectUncertain && !moving ? <p className="review-recovery" role="alert">Check saved project before another action. <button disabled={busy} onClick={() => void refreshProject()}>Refresh saved project</button></p> : null}
       </ThinkingPath>
