@@ -25,6 +25,15 @@ no model key and saves local work under `data/` by default. Use `Ctrl+C` to
 stop the stack. Run the last command again to restart and rebuild React after
 frontend edits.
 
+If port 8080 is occupied, build React once and use the alternate local launcher:
+
+```sh
+npm run build --prefix frontend
+sh scripts/start_local_8081.sh
+```
+
+Open `http://127.0.0.1:8081/` and press `Ctrl+C` to stop the app.
+
 | Local service | Address |
 | --- | --- |
 | Student workspace | [127.0.0.1:8080](http://127.0.0.1:8080/) |
