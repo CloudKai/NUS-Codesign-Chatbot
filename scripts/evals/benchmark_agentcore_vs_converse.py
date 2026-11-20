@@ -58,7 +58,30 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from scripts.evals import evaluate_retrieval as retrieval  # noqa: E402
+from scripts.evals.lib import live as retrieval  # noqa: E402
+from scripts.evals.lib.output import write_json_output  # noqa: E402
+from scripts.evals.lib.fixtures import load_materials, load_messages, load_questions  # noqa: E402
+from scripts.evals.lib.gate import gate_decision  # noqa: E402
+from scripts.evals.lib.live import (  # noqa: E402
+    LIVE_MODEL_TIMEOUT_SECONDS,
+    LiveCallLimitExceeded,
+    LiveFastChatBridge,
+    LiveRunRefused,
+    LiveStructuredOutputError,
+    build_live_request,
+    check_live_model_request,
+    exception_label,
+    is_auth_or_access_error,
+    live_eval_provider,
+    live_failure_detail,
+    live_model_settings,
+)
+from scripts.evals.lib.metrics import evenly_spaced_indices  # noqa: E402
+from scripts.evals.lib.paths import MESSAGES_PATH, QUESTIONS_PATH  # noqa: E402
+
+# ``retrieval`` is kept as a module attribute for tests that patch
+# ``bench.retrieval._git_run_metadata`` (the run block of the JSON file) and read
+# ``bench.retrieval.LiveCallLimitExceeded``. It is the lib live-run module, not a command.
 
 TURN_COUNT = 50
 # SHA-256 of the 50 selected ids joined by newlines, in file order.
@@ -90,7 +113,7 @@ RUN_DEFINITION = (
 )
 
 
-class BenchmarkRefused(retrieval.LiveRunRefused):
+class BenchmarkRefused(LiveRunRefused):
     """Raised when the benchmark is asked to run without approval or safe input."""
 
 
@@ -105,7 +128,7 @@ def select_benchmark_turns(messages: Sequence[Mapping[str, Any]]) -> list[Mappin
     Raises:
         BenchmarkRefused: When the dataset no longer yields the pinned id list.
     """
-    indices = retrieval.evenly_spaced_indices(len(messages), TURN_COUNT)
+    indices = evenly_spaced_indices(len(messages), TURN_COUNT)
     turns = [messages[i] for i in indices]
     digest = hashlib.sha256("\n".join(str(t["id"]) for t in turns).encode("utf-8")).hexdigest()
     if len(turns) != TURN_COUNT or digest != TURN_IDS_SHA256:
@@ -119,7 +142,7 @@ def select_benchmark_turns(messages: Sequence[Mapping[str, Any]]) -> list[Mappin
 
 def turns_for_limit(turns: Sequence[Mapping[str, Any]], limit: int) -> list[Mapping[str, Any]]:
     """Return the turns a cap of ``limit`` calls pays for: ``limit // 2``, evenly spaced."""
-    return [turns[i] for i in retrieval.evenly_spaced_indices(len(turns), limit // CALLS_PER_TURN)]
+    return [turns[i] for i in evenly_spaced_indices(len(turns), limit // CALLS_PER_TURN)]
 
 
 def check_benchmark_request(
@@ -145,10 +168,10 @@ def check_benchmark_request(
         raise BenchmarkRefused("live benchmark mode was not requested (--live-benchmark)")
     limit = check_call_limit(max_live_calls)
     try:
-        retrieval.check_live_model_request(
+        check_live_model_request(
             True, False, limit, provider=provider, model_id=model_id, region=region
         )
-    except retrieval.LiveRunRefused as error:
+    except LiveRunRefused as error:
         raise BenchmarkRefused(str(error)) from error
     parts = str(runtime_arn or "").strip().split(":")
     if len(parts) != 6 or parts[:3] != ["arn", "aws", "bedrock-agentcore"] or not parts[5].startswith("runtime/"):
@@ -185,7 +208,7 @@ class CallBudget:
 
     def take(self, path: str) -> None:
         if self.made >= self.limit:
-            raise retrieval.LiveCallLimitExceeded(f"call limit {self.limit} reached")
+            raise LiveCallLimitExceeded(f"call limit {self.limit} reached")
         self.made += 1
         self.by_path[path] += 1
 
@@ -236,7 +259,7 @@ def build_clients(
     converse = boto3.client(
         "bedrock-runtime",
         region_name=region,
-        config=config(retrieval.LIVE_MODEL_TIMEOUT_SECONDS),
+        config=config(LIVE_MODEL_TIMEOUT_SECONDS),
     )
     return (
         BudgetedClient(runtime, budget, "agentcore"),
@@ -286,7 +309,7 @@ def failure_kind(error: BaseException) -> str:
     from agentcore_runtime.models import FastChatContractError
     from backend.providers import ProviderUnavailableError
 
-    if isinstance(error, (retrieval.LiveStructuredOutputError, FastChatContractError)):
+    if isinstance(error, (LiveStructuredOutputError, FastChatContractError)):
         return "parse_failure"
     if isinstance(error, ProviderUnavailableError) and error.category in PARSE_FAILURE_CATEGORIES:
         return "parse_failure"
@@ -295,7 +318,7 @@ def failure_kind(error: BaseException) -> str:
 
 def is_stop_error(error: BaseException) -> bool:
     """Credential or permission failure: every later call would fail the same way."""
-    if retrieval.is_auth_or_access_error(error):
+    if is_auth_or_access_error(error):
         return True
     return str(getattr(error, "category", "")) == "access_denied"
 
@@ -304,8 +327,8 @@ def _failed(error: BaseException, started: float, clock: Callable[[], float]) ->
     return {
         "status": "failed",
         "failure_kind": failure_kind(error),
-        "error": retrieval.exception_label(error),
-        "failure_detail": retrieval.live_failure_detail(error),
+        "error": exception_label(error),
+        "failure_detail": live_failure_detail(error),
         "total_ms": _ms(clock() - started),
     }
 
@@ -338,11 +361,11 @@ def run_agentcore_call(
         )
         returned = clock()
         if not isinstance(response, Mapping):
-            raise retrieval.LiveStructuredOutputError("runtime response is not a mapping", {"kind": "no_tool_call"})
+            raise LiveStructuredOutputError("runtime response is not a mapping", {"kind": "no_tool_call"})
         parsed = _payload_from_runtime_response(response)
         total = clock()
         result = _validated_fast_chat(parsed, request)
-    except retrieval.LiveCallLimitExceeded:
+    except LiveCallLimitExceeded:
         raise
     except Exception as error:  # noqa: BLE001 - recorded, never swallowed
         row = _failed(error, started, clock)
@@ -461,7 +484,7 @@ def make_converse_bridge(client: Any, model_id: str, *, stream: bool, clock: Cal
 
     timed = _TimedConverse(client, stream=stream, clock=clock)
 
-    class _Bridge(retrieval.LiveFastChatBridge):
+    class _Bridge(LiveFastChatBridge):
         def request_kwargs(self, payload: Mapping[str, Any]) -> dict[str, Any]:
             kwargs = super().request_kwargs(payload)
             # Same cache-point rule as the runtime (env FAST_CHAT_PROMPT_CACHE_ENABLED).
@@ -491,7 +514,7 @@ def run_converse_call(
         wire = bridge.invoke(payload)
         total = timed.returned if timed.returned is not None else clock()
         result = _validated_fast_chat(wire, request)
-    except retrieval.LiveCallLimitExceeded:
+    except LiveCallLimitExceeded:
         raise
     except Exception as error:  # noqa: BLE001 - recorded, never swallowed
         row = _failed(error, started, clock)
@@ -612,7 +635,7 @@ def run_benchmark(
     Stops after the first auth or access error in either path and never retries.
     The clients must draw from ``budget`` (``BudgetedClient``).
     """
-    provider = retrieval._live_eval_provider()
+    provider = live_eval_provider()
     bridge, timed = make_converse_bridge(converse_client, model_id, stream=converse_stream, clock=clock)
     chosen = turns_for_limit(turns, limit)
     rows: list[dict[str, Any]] = []
@@ -629,7 +652,7 @@ def run_benchmark(
         try:
             request, payload = _build_turn(provider, row)
         except Exception as error:  # noqa: BLE001 - recorded, no call was made
-            entry["build_error"] = retrieval.exception_label(error)
+            entry["build_error"] = exception_label(error)
             first_failure = first_failure or {"id": row["id"], "arm": "build", "error": entry["build_error"]}
             continue
         for arm in entry["order"]:
@@ -640,7 +663,7 @@ def run_benchmark(
                     )
                 else:
                     outcome, error = run_converse_call(bridge, timed, request, payload, clock)
-            except retrieval.LiveCallLimitExceeded:
+            except LiveCallLimitExceeded:
                 stop = True
                 break
             entry[arm] = outcome
@@ -706,8 +729,8 @@ def _build_turn(provider: Any, row: Mapping[str, Any]) -> tuple[Any, dict[str, A
     from backend.agentcore_provider import _FAST_CHAT_CONTRACT, _FAST_CHAT_PHASE
     from backend.context_planner import CONTEXT_POLICY_FAST_CHAT
 
-    decision = retrieval.gate_decision(row)
-    request = retrieval.build_live_request(row, decision, source_check=False)
+    decision = gate_decision(row)
+    request = build_live_request(row, decision, source_check=False)
     payload, _plan = provider._invoke_payload(
         request,
         _FAST_CHAT_PHASE,
@@ -788,7 +811,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _settings_for_run() -> tuple[str, str, str, str, str, str]:
     from backend.settings import settings
 
-    provider, model_id, region = retrieval.live_model_settings()
+    provider, model_id, region = live_model_settings()
     return (
         provider,
         model_id,
@@ -801,9 +824,9 @@ def _settings_for_run() -> tuple[str, str, str, str, str, str]:
 
 def load_turns() -> list[Mapping[str, Any]]:
     """Load the validated gate messages and select the pinned 50 turns."""
-    materials = retrieval.load_materials()
-    questions = retrieval.load_questions(retrieval.QUESTIONS_PATH, materials)
-    messages = retrieval.load_messages(retrieval.MESSAGES_PATH, materials, [q["id"] for q in questions])
+    materials = load_materials()
+    questions = load_questions(QUESTIONS_PATH, materials)
+    messages = load_messages(MESSAGES_PATH, materials, [q["id"] for q in questions])
     return select_benchmark_turns(messages)
 
 
@@ -830,7 +853,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             runtime_region=runtime_region,
         )
         turns = load_turns()
-    except retrieval.LiveRunRefused as error:
+    except LiveRunRefused as error:
         print(f"refused: {error}", file=sys.stderr)
         return 2
     budget = CallBudget(limit)
@@ -851,7 +874,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if result["first_failure"]:
         print(f"first failure class: {result['first_failure']['error']} ({result['first_failure']['arm']})", file=sys.stderr)
     if args.json_output:
-        retrieval._write_json_output(args.json_output, result)
+        write_json_output(args.json_output, result, run=retrieval._git_run_metadata())
     code = int(result["exit_code"])
     if code == 1:
         print("every call failed", file=sys.stderr)
