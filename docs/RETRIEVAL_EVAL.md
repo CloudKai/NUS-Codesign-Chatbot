@@ -4,6 +4,35 @@
 retrieval: recall@4, wrong-skip rate and empty-result rate. It runs offline by
 default.
 
+## Command layout (`scripts/evals/`)
+
+Each eval command is an entry point. **No command imports another command**;
+`tests/scripts/test_eval_command_boundaries.py` walks the imports with `ast` and
+fails if one does. What commands share lives in `scripts/evals/lib/`, which holds
+no `main` and starts no live call on import:
+
+| Module | Holds |
+|---|---|
+| `paths` | Repo root and the fixed dataset file paths |
+| `fixtures` | Course manifest, question and gate-message loading and validation, `eval_course_titles`, `read_training` |
+| `metrics` | `rate`, `rate_record`, wrong-skip, false-retrieve and empty-result rates, `interval` (Wilson), `p95_ms`, `evenly_spaced_indices` |
+| `output` | The `run` block (`_git_run_metadata`), `write_json_output`, `save` |
+| `offline` | `block_network`, `OfflineCourseSearch`, `RankedHit`, `rank_hits`, `accepted_targets` |
+| `gate` | `GateDecision`, `scope_inputs_for_row`, `gate_decision` (adapter over `evidence_scope`) |
+| `live` | Live-run refusals and errors, `select_live_rows`, `LiveFastChatBridge`, `build_live_request`, failure labels. Builds no client |
+| `turn_state` | Laya choice schemas, state text, `decide` |
+| `route_scoring` | Routing splits, `observe`, `apply`, `evaluate`, `assess` (takes any `predict` callable, so no model is loaded) |
+| `passage_scoring` | Passage `candidates`, `coverage`, `run` (takes an optional encoder or judge) |
+| `prepared_rows` | `PreparedRow`, `prepare_rows` (gate once per message, Laya eligibility) |
+
+Model fitting and model loading stay in the command that owns the experiment:
+`fit_laya`, `fit_setfit`, `compact_predictors` in `compare_turn_routes`;
+`benchmark_pages`, the cross-encoder and the judge in `evaluate_passage_support`;
+the Learner fit in `evaluate_laya_turn_decisions` and `evaluate_course_intent_learn`.
+The commands re-export the names they used to define (for example
+`evaluate_retrieval.gate_decision`, `compare_turn_routes.observe`), so existing
+imports keep working. CLI flags, JSON schemas and exit codes did not change.
+
 ## Run it offline
 
 ```bash
@@ -1114,7 +1143,7 @@ With 9 and 3 rows the intervals are too wide to rank these setups.
 
 `scripts/evals/evaluate_combined_gate.py` runs three arms over all 295 gate
 messages, offline, with no network, no AWS and no model call. It is a new script
-that imports the gate, loaders and rate helpers from `evaluate_retrieval.py`. It
+that takes the gate, loaders and rate helpers from `scripts/evals/lib`. It
 is separate because the Laya arm needs stored or optional-dependency inputs that
 the main offline report does not, and `evaluate_retrieval.py` is already large.
 
@@ -1351,8 +1380,9 @@ through two paths and records latency, tokens, parse failures and an estimated
 cost. It is a paid live tool. **It has not been run.** No AWS, Bedrock or
 AgentCore call was made while building it; its tests (`tests/scripts/test_benchmark_agentcore_vs_converse.py`,
 41 tests, script run) use stub clients and fail if a real client is built. It
-lives beside `evaluate_retrieval.py` because it reuses that script's gate, request
-builder, Converse bridge, failure labels and run metadata. This document is the
+lives beside `evaluate_retrieval.py` and reuses that script's gate, request
+builder, Converse bridge, failure labels and run metadata through `scripts/evals/lib`
+(`gate`, `live`, `output`). This document is the
 home for it because the turns and the Fast Chat call come from the retrieval eval.
 
 ### The 50 turns (decision recorded)
