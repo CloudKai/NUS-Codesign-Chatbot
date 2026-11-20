@@ -21,26 +21,33 @@ from backend.coaching.deep_review_context import (
     plan_deep_review_context,
     record_deep_review_context_telemetry,
 )
+from backend.coaching.evidence_scope import (
+    _COURSE_CATALOG_RETRIEVAL_CUES as _COURSE_CATALOG_RETRIEVAL_CUES,
+    FIRST_PASS_TELEMETRY_CUES,
+    POST_MODEL_TELEMETRY_CUES,
+    ScopeInputs,
+    ScopeSource,
+    decide_first_pass_scope,
+    is_chit_chat as is_chit_chat,
+    is_image_source,
+    is_searchable_student_upload,
+    local_course_intent_candidate as local_course_intent_candidate,
+    wants_course_catalog_retrieval,
+    wants_source_need_check,
+    wants_student_upload_retrieval,
+)
 from backend.coaching.mode_policy import (
-    ModePolicy,
     is_current_stage_status_request,
     is_exact_confirm_command,
-    is_terminal_completion_request,
     is_stage_progression_request,
-    is_private_attachment_question,
-    looks_like_information_request,
     manual_stage_selection_target,
     qa_evidence_gap_turn,
-    resolve_mode_policy,
     should_author_qa_evidence_gap,
 )
-from backend.retrieval_gate import INTENT_AMBIGUOUS, classify_retrieval_intent
-from backend.specialists.routing import looks_like_course_question
 from backend.coaching.workflow_navigation import (
     apply_progression_effect,
     is_compound_status_guidance_request,
     progression_effect_for,
-    workflow_skips_retrieval,
 )
 from backend.coaching.progress import (
     PROGRESS_RETRIEVING,
@@ -85,7 +92,6 @@ from backend.retrieval import (
     RetrievalSource,
     bounded_retrieval_result,
     focused_excerpt,
-    is_greeting_or_acknowledgement,
     with_course_evidence_gap,
 )
 from backend.settings import (
@@ -167,21 +173,11 @@ _CITATION_LABEL = re.compile(r"\[(S\d+)\]")
 IDEMPOTENCY_SURFACE_COACH_TURN = "coach_turn"
 IDEMPOTENCY_SURFACE_DEEP_REVIEW = "deep_review"
 
-# Cues that mean Bedrock KB should search the official course catalog even
-# when Lecture Notes / Readings are not Chat-selected.
-_COURSE_CATALOG_RETRIEVAL_CUES = frozenset(
-    {
-        "conservative_course_question",
-        "week_or_session",
-        "course_grounding",
-        "according_to_source",
-        "what_source_says",
-        "based_on_source",
-        "material_noun",
-        "compare_to_source",
-        "definitional_question",
-    }
-)
+# The decision helpers moved to ``evidence_scope``; these names stay importable
+# from here for existing callers and tests.
+_wants_course_catalog_retrieval = wants_course_catalog_retrieval
+_wants_source_need_check = wants_source_need_check
+_wants_student_upload_retrieval = wants_student_upload_retrieval
 
 logger = logging.getLogger(__name__)
 
@@ -239,65 +235,11 @@ def _stage_review_important_message_ids(
     return ids[:edge] + ids[-edge:]
 
 
-def _wants_course_catalog_retrieval(
-    student_message: str,
-    *,
-    mode_retrieve: bool,
-) -> bool:
-    """Return whether this turn should Retrieve against the course library.
-
-    Course library items are view-only in Sources. Genuine course questions
-    still need Bedrock KB over the official catalog, decided by intent cues
-    rather than Sources selection or title overlap.
-
-    Args:
-        student_message: Current student contribution.
-        mode_retrieve: Effective mode-policy retrieve flag after workflow
-            and attachment overrides.
-
-    Returns:
-        True when the Knowledge Base course catalog should be included in
-        ``retrieval_sources``.
-    """
-    if not mode_retrieve:
-        return False
-    if looks_like_course_question(student_message):
-        return True
-    classification = classify_retrieval_intent(
-        student_message,
-        has_selected_sources=False,
+def _is_image_source(source: Mapping[str, Any]) -> bool:
+    """Return whether *source* is an image (``kind`` or ``image/*`` mime)."""
+    return is_image_source(
+        kind=str(source.get("kind") or ""), mime=str(source.get("mime") or "")
     )
-    if not classification.retrieve:
-        return False
-    return bool(set(classification.cues).intersection(_COURSE_CATALOG_RETRIEVAL_CUES))
-
-
-def _wants_source_need_check(
-    *,
-    enabled: bool,
-    searched: bool,
-    evidence_scoped: bool,
-) -> bool:
-    """Return whether the first Fast Chat call may report ``needs_sources``.
-
-    The check is a second chance for turns the regex gate did not retrieve
-    for. It is off unless the setting is on, and it never applies when this
-    turn already searched a source or when the application deliberately
-    scoped evidence away (stage status, stage navigation, meta-guidance,
-    private-attachment scope, forced or lecture-help retrieval, missing image
-    bytes).
-
-    Args:
-        enabled: ``FAST_CHAT_NEEDS_SOURCES_ENABLED``.
-        searched: True when the first pass searched at least one source.
-        evidence_scoped: True when the turn's evidence scope is fixed by a
-            gate override and a fallback retrieve must not widen it.
-
-    Returns:
-        True when the prompt should ask for ``needs_sources`` and the
-        application may honour it.
-    """
-    return bool(enabled) and not searched and not evidence_scoped
 
 
 def searchable_student_uploads(
@@ -318,77 +260,11 @@ def searchable_student_uploads(
     return [
         source
         for source in sources
-        if not is_locked_course_source(source)
-        and str(source.get("kind") or "").lower() != "image"
-        and not str(source.get("mime") or "").lower().startswith("image/")
+        if is_searchable_student_upload(
+            is_course_library=is_locked_course_source(source),
+            is_image=_is_image_source(source),
+        )
     ]
-
-
-def is_chit_chat(student_message: str) -> bool:
-    """Return whether the turn is a bare greeting or acknowledgement.
-
-    Reuses existing signals only: :func:`is_greeting_or_acknowledgement`
-    (the acknowledgement set and greeting prefix that recent-message
-    grounding already uses) and :func:`looks_like_information_request`, so
-    ``hi, what does my survey say?`` is not chit-chat. Known limit: short
-    replies outside that set (``thx``, ``haha nice``, ``ok will try``) are
-    not chit-chat.
-    """
-    return is_greeting_or_acknowledgement(
-        student_message
-    ) and not looks_like_information_request(student_message)
-
-
-def local_course_intent_candidate(
-    message: str, *, intent: str, evidence_scoped: bool, searched: bool
-) -> bool:
-    """Allow local classification only on ambiguous turns with no evidence route."""
-    return (
-        intent == INTENT_AMBIGUOUS
-        and not evidence_scoped
-        and not searched
-        and not is_chit_chat(message)
-    )
-
-
-def _wants_student_upload_retrieval(
-    *,
-    enabled: bool,
-    needs_retrieval: bool,
-    has_student_upload: bool,
-    evidence_scoped: bool,
-    student_message: str,
-) -> bool:
-    """Return whether to search the selected student uploads on this turn.
-
-    The upload retrieval policy (``FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED``) ranks
-    excerpts locally, with no Bedrock or Knowledge Base call; loading the
-    uploads can still read object storage (one S3 GET per selected upload on a
-    chunk-cache miss, or every turn on the extracted-text fallback). It
-    applies only when the regex gate chose
-    not to retrieve, a non-image student upload is still in scope, no gate
-    override fixed the evidence scope (stage status, stage navigation,
-    meta-guidance, forced or lecture-help retrieval), and the turn is not
-    chit-chat. It never adds the course Knowledge Base.
-
-    Args:
-        enabled: ``FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED``.
-        needs_retrieval: The gate's decision after its overrides.
-        has_student_upload: True when :func:`searchable_student_uploads`
-            found at least one source in the turn's selected sources.
-        evidence_scoped: True when a gate override fixed the evidence scope.
-        student_message: Current student contribution. Not logged.
-
-    Returns:
-        True when the turn should run the local student-upload search.
-    """
-    return (
-        bool(enabled)
-        and not needs_retrieval
-        and bool(has_student_upload)
-        and not evidence_scoped
-        and not is_chit_chat(student_message)
-    )
 
 
 SOURCE_CHECK_MAX_TITLES = 20
@@ -3020,10 +2896,7 @@ class CoachApplicationService:
             raise ValueError("image_inputs must be resolved server-side from source_ids")
 
         selected_image_sources = [
-            source
-            for source in selected_sources
-            if str(source.get("kind") or "").lower() == "image"
-            or str(source.get("mime") or "").lower().startswith("image/")
+            source for source in selected_sources if _is_image_source(source)
         ]
         if len(selected_image_sources) > 5:
             raise ValueError(
@@ -3053,89 +2926,51 @@ class CoachApplicationService:
             str(metadata.get("learning_summary") or "").split()
         ).strip()
         gate_started = time.perf_counter()
-        mode_policy = resolve_mode_policy(
-            request.student_message,
-            selected_source_titles=[
-                str(source.get("title") or "") for source in selected_sources
-            ],
-            selected_source_filenames=[
-                str(source.get("filename") or source.get("name") or "")
-                for source in selected_sources
-            ],
-            has_selected_sources=bool(selected_sources),
-        )
-        lecture_help = request.interaction_intent == "lecture_help"
-        if lecture_help:
-            mode_policy = ModePolicy(
-                intent="high_confidence_source",
-                expected_mode="qa",
-                retrieve=True,
-                retrieval_intent=mode_policy.retrieval_intent,
-            )
-        elif request.interaction_intent == "project_coaching":
-            mode_policy = replace(mode_policy, expected_mode="coaching")
-        stage_status_request = not lecture_help and is_current_stage_status_request(
-            request.student_message
-        )
-        if stage_status_request:
-            # A current-stage lookup is sourced exclusively from the
-            # authoritative notebook journey. Authorize supplied attachments
-            # above, then remove all evidence scope before the Retrieve gate.
-            mode_policy = ModePolicy(
-                intent=mode_policy.intent,
-                expected_mode="qa",
-                retrieve=False,
-                retrieval_intent=mode_policy.retrieval_intent,
-                mixed=mode_policy.mixed,
-            )
-            snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
-            selected_image_sources = []
-            image_inputs = []
-            unresolved_image_ids = set()
-            record_field("current_stage_status_request", True)
-        progression_request = not lecture_help and (
-            is_stage_progression_request(request.student_message)
-            or is_terminal_completion_request(
-                request.student_message,
-                current_stage=authoritative_stage,
-            )
-        )
-        workflow_no_retrieve = not lecture_help and workflow_skips_retrieval(
-            request.student_message,
+        # The first-pass scope and mode rules live in
+        # ``backend/coaching/evidence_scope.py`` (pure; also used by the
+        # offline gate eval). This method builds its inputs from the
+        # authoritative snapshot, applies the result to the snapshot, records
+        # telemetry, and owns the one model call between the two decisions.
+        attachment_id_set = set(attachment_ids)
+        scope_inputs = ScopeInputs(
+            message=request.student_message,
             current_stage=authoritative_stage,
-        )
-        if progression_request or (
-            workflow_no_retrieve and not stage_status_request
-        ):
-            # Stage navigation, meta-guidance, prior-stage review, and compound
-            # status+guidance must not be hijacked by selected source titles.
-            # Pure status already cleared evidence above.
-            mode_policy = ModePolicy(
-                intent=mode_policy.intent,
-                expected_mode="coaching",
-                retrieve=False,
-                retrieval_intent=mode_policy.retrieval_intent,
-                mixed=mode_policy.mixed,
-            )
-            if progression_request:
-                record_field("stage_progression_request", True)
-            elif workflow_no_retrieve:
-                record_field("workflow_skips_retrieval", True)
-            # Keep authorization checks above, then present no evidence scope.
-            snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
-            selected_image_sources = []
-            image_inputs = []
-            unresolved_image_ids = set()
-        attachment_only_question = is_private_attachment_question(
-            request.student_message,
+            sources=tuple(
+                ScopeSource(
+                    source_id=str(source.get("id") or ""),
+                    title=str(source.get("title") or ""),
+                    filename=str(source.get("filename") or source.get("name") or ""),
+                    is_attachment=str(source.get("id") or "") in attachment_id_set,
+                    is_course_library=is_locked_course_source(source),
+                    is_image=_is_image_source(source),
+                    image_bytes_resolved=str(source.get("id") or "")
+                    not in unresolved_image_ids,
+                )
+                for source in selected_sources
+            ),
             attachment_count=len(attachment_ids),
+            interaction_intent=request.interaction_intent,
+            force_retrieval=force_retrieval,
+            frozen_history=frozen_history_revision is not None,
+            upload_retrieval_enabled=bool(
+                runtime_settings.fast_chat_upload_retrieval_enabled
+            ),
         )
-        if attachment_only_question:
+        scope = decide_first_pass_scope(scope_inputs)
+        for cue in FIRST_PASS_TELEMETRY_CUES:
+            if cue in scope.cues:
+                record_field(cue, True)
+        # Apply the scope to the request snapshot, in the order it is decided:
+        # a clear (status, progression, workflow) first, then attachment-only
+        # narrowing, which still runs after a clear.
+        if scope.scope_cleared:
+            snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
+            image_inputs = []
+        if scope.attachment_only:
             # Keep the request-scoped snapshot itself attachment-only.  The
             # first retrieval pass and the later needs_source_retrieval
             # fallback both hydrate from this snapshot; filtering only a local
             # tuple here would let fallback reintroduce selected course rows.
-            attachment_id_set = set(attachment_ids)
             snapshot = replace(
                 snapshot,
                 selected_sources=tuple(
@@ -3152,30 +2987,16 @@ class CoachApplicationService:
             # Vision inputs are evidence too. Do not retain bytes from a
             # separately selected course image after narrowing this turn to a
             # private attachment.
-            selected_image_sources = [
-                source
-                for source in selected_image_sources
-                if str(source.get("id") or "") in attachment_id_set
-            ]
             image_inputs = [
                 image
                 for image in image_inputs
                 if str(image.source_id) in attachment_id_set
             ]
-            resolved_image_ids = {str(item.source_id) for item in image_inputs}
-            unresolved_image_ids = {
-                str(source.get("id") or "")
-                for source in selected_image_sources
-                if str(source.get("id") or "") not in resolved_image_ids
-            }
-        # Freeze the post-scope evidence IDs before excluding broken image
-        # bytes from provider inputs.  A missing selected image is still an
-        # evidence gap, not permission to use model knowledge.
-        effective_source_ids = [
-            str(source.get("id") or "")
-            for source in snapshot.selected_sources
-            if str(source.get("id") or "")
-        ]
+        unresolved_image_ids = set(scope.unresolved_image_ids)
+        # The effective ids are frozen before excluding broken image bytes from
+        # provider inputs.  A missing selected image is still an evidence gap,
+        # not permission to use model knowledge.
+        effective_source_ids = list(scope.kept_source_ids)
         if unresolved_image_ids:
             # An image row with missing bytes is not evidence. Keep its ID in
             # the effective scope above so the request fails closed instead of
@@ -3188,61 +3009,8 @@ class CoachApplicationService:
                     if str(source.get("id") or "") not in unresolved_image_ids
                 ),
             )
-        missing_image_qa = bool(selected_image_sources) and (
-            len(selected_image_sources) == len(selected_sources)
-            and not image_inputs
-            and looks_like_information_request(request.student_message)
-        )
-        needs_retrieval = bool(mode_policy.retrieve)
-        # A question about the current private attachment must use that
-        # turn-scoped evidence first.  Keep the normal one-call model decision
-        # (including out_of_scope) but do not send unrelated selected course
-        # sources through the retriever for this case.
-        if attachment_only_question:
-            needs_retrieval = True
-            record_field("attachment_retrieval_scoped", True)
-        if missing_image_qa:
-            # Missing image bytes still need the fail-closed Q&A gap path even
-            # when the retrieval gate no longer treats generic questions as
-            # selected-source retrieves.
-            needs_retrieval = True
-        if force_retrieval and selected_sources:
-            needs_retrieval = True
-        include_course_catalog = (
-            needs_retrieval
-            and not attachment_only_question
-            and not stage_status_request
-            and not progression_request
-            and not (
-                workflow_no_retrieve and not stage_status_request
-            )
-            and (
-                lecture_help or _wants_course_catalog_retrieval(
-                    request.student_message,
-                    mode_retrieve=bool(mode_policy.retrieve) or force_retrieval,
-                )
-            )
-        )
-        if include_course_catalog:
-            needs_retrieval = True
-        evidence_scoped = bool(
-            lecture_help
-            or force_retrieval
-            or stage_status_request
-            or progression_request
-            or workflow_no_retrieve
-            or attachment_only_question
-            or missing_image_qa
-        )
-        if self._course_intent_classifier is not None and local_course_intent_candidate(
-            request.student_message,
-            intent=mode_policy.intent,
-            evidence_scoped=bool(
-                evidence_scoped or effective_source_ids or request.interaction_intent
-                or frozen_history_revision is not None
-            ),
-            searched=include_course_catalog,
-        ):
+        course_intent_promoted = False
+        if self._course_intent_classifier is not None and scope.course_intent_eligible:
             titles = source_check_course_titles(snapshot.visible_sources)
             if titles:
                 try:
@@ -3256,25 +3024,29 @@ class CoachApplicationService:
                 first_cutoff = runtime_settings.local_course_intent_first_turn_threshold
                 if first_cutoff is not None and is_first_student_turn(store_history):
                     cutoff = first_cutoff
-                if score is not None and score >= cutoff:
-                    include_course_catalog = needs_retrieval = True
-                    mode_policy = replace(mode_policy, expected_mode="qa", retrieve=True)
-                    record_field("local_course_intent_retrieval", True)
-        # Local student-upload search on gate skips (opt-in). Decided after
+                course_intent_promoted = score is not None and score >= cutoff
+        # Local student-upload search on gate skips (opt-in) is decided after
         # the course-catalog step, so it can never add the Knowledge Base:
-        # hydration below keeps include_course_catalog false.
-        upload_policy_only = _wants_student_upload_retrieval(
-            enabled=bool(runtime_settings.fast_chat_upload_retrieval_enabled),
-            needs_retrieval=needs_retrieval,
-            has_student_upload=bool(
-                searchable_student_uploads(snapshot.selected_sources)
-            ),
-            evidence_scoped=evidence_scoped,
-            student_message=request.student_message,
-        )
-        if upload_policy_only:
-            needs_retrieval = True
-            record_field("upload_retrieval_policy", True)
+        # hydration below keeps include_course_catalog false. The setting is
+        # read after the model call, as it always was, and the scope is decided
+        # again only when the promotion or that read changes the answer.
+        upload_retrieval_enabled = bool(runtime_settings.fast_chat_upload_retrieval_enabled)
+        if course_intent_promoted or (
+            upload_retrieval_enabled != scope_inputs.upload_retrieval_enabled
+        ):
+            scope = decide_first_pass_scope(
+                replace(scope_inputs, upload_retrieval_enabled=upload_retrieval_enabled),
+                course_intent_promoted=course_intent_promoted,
+            )
+        for cue in POST_MODEL_TELEMETRY_CUES:
+            if cue in scope.cues:
+                record_field(cue, True)
+        mode_policy = scope.mode_policy
+        needs_retrieval = scope.needs_retrieval
+        include_course_catalog = scope.include_course_catalog
+        evidence_scoped = scope.evidence_scoped
+        attachment_only_question = scope.attachment_only
+        upload_policy_only = scope.upload_policy_only
         record_field("retrieval_gate_ms", elapsed_ms(gate_started))
         record_field("retrieval_required", bool(needs_retrieval))
         record_field("mode_policy_intent", mode_policy.intent)
@@ -3454,9 +3226,7 @@ class CoachApplicationService:
                 "retrieval_required": bool(needs_retrieval),
                 "source_need_check": source_need_check,
                 "course_material_titles": course_material_titles,
-                "expected_response_mode": (
-                    "qa" if missing_image_qa else mode_policy.expected_mode
-                ),
+                "expected_response_mode": scope.expected_mode,
                 "mode_policy_intent": mode_policy.intent,
                 COUNTER_SETTINGS_KEY: parse_coaching_turns_since_deep_review(
                     metadata.get(COUNTER_SETTINGS_KEY)
