@@ -6,7 +6,7 @@ counts per category, each rate with a Wilson 95% interval.
 
 Arms:
 
-* (a) the existing rules-based gate (``scripts.evals.lib.gate.gate_decision``).
+* (a) the existing rules-based gate (``evaluate_retrieval.gate_decision``).
 * (b) gate + Laya: an ambiguous turn the gate skipped is promoted to course
   retrieval when the local course-intent classifier scores at or above its
   cutoff (``backend.coaching.execution`` rule). The cutoffs are the existing
