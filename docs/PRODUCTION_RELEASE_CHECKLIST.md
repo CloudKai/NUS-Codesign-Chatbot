@@ -1,8 +1,7 @@
 # Production release checklist
 
-Operator checklist for promoting a SHA of `Integrate-Bedrock` to the
-CloudFront + EC2 origin. No secrets, account IDs, ARNs, bucket names, or
-endpoints belong in this file — use host `.env` placeholders.
+Use this checklist to promote an approved SHA to the CloudFront + EC2 origin.
+Use placeholders for secrets and account-specific settings.
 
 Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).  
 Current SHA / CI / deploy impact: [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) (**CURRENT STATUS**).  
@@ -14,35 +13,33 @@ opens Ready; students move with Journey **Work on this stage** or typed
 `Move to`. Do not flip those flags back to Month-1 auto-advance during release
 unless product explicitly reverts.
 
-**2026-09-27 guest rollout:** The production DSQL guest-session migration and
-backup, Compose guest flag, and Caddy guest-start allowlist are recorded under
-`docs/IMPLEMENTATION_STATUS.md` → **Production guest rollout**. The older
-release-specific DSQL statement below predates this rollout. Preserve the
-additive guest table and rows when rolling back the guest flag.
+**2026-09-27 guest rollout:** Preserve the additive guest table and rows
+when rolling back the guest flag. The migration, backup, Compose flag, and
+Caddy allowlist are recorded in the
+[guest rollout evidence](https://github.com/CloudKai/NUS-Codesign-Chatbot/blob/5ffe50b514c6281be052e24ffa7f840e30f90861/docs/IMPLEMENTATION_STATUS.md#production-guest-rollout-2026-09-27).
 
-**2026-09-27 cutover:** Fast Chat first-text timing is live on AgentCore
-DEFAULT v35. The app's validated `reply_ready` preview is live with Compose
-session generation 11. The preview is a complete validated reply sent before
-persistence, not model-token streaming; a save failure must clear it. The
-approved production check remains capped at four short coach turns and
-US$0.10 total; two turns have been used across the pre/post-cutover checks.
+**2026-09-27 cutover evidence:** AgentCore DEFAULT v35 served Fast Chat
+first-text timing with Compose session generation 11. The complete validated
+`reply_ready` preview came before persistence. A save failure must clear it.
+The cutover used two turns of the approved four-turn, US$0.10 check. Obtain
+scope and cost approval for each new live check.
 
 ---
 
 ## Ordered cutover (this release)
 
-Source-ready does **not** mean AgentCore is serving the new code. AgentCore
-READY does **not** mean the EC2 image is new. Keep these gates separate.
+Record the source SHA, the published AgentCore version and the deployed EC2
+image tag at their respective gates.
 
 ### SOURCE CODE READY
 
-1. Commit/push the intended SHA on `Integrate-Bedrock-v2`.
+1. Identify the approved release SHA and confirm it is available to CI.
 2. Confirm mock CI (`mock-suite` and `agentcore-runtime-compatibility`).
 
 ### AGENTCORE PUBLISHED (existing ARN only)
 
 3. Publish a **new version** to the **existing** AgentCore runtime ARN.
-   Do **not** create a new runtime ARN.
+   Follow the [runtime publishing procedure](deploy/AWS_STATELESS_EC2.md#publish-an-agentcore-runtime-version).
 4. Wait until that new runtime version is **READY**.
 5. Move the **DEFAULT** qualifier only after READY.
 6. Increase `AGENTCORE_SESSION_GENERATION` in host `compose.prod.yaml` so warm microVMs
@@ -50,7 +47,9 @@ READY does **not** mean the EC2 image is new. Keep these gates separate.
 
 `update-agent-runtime` may move DEFAULT automatically when the new version
 becomes READY. Query the endpoint immediately after publishing and apply the
-new session generation before sending a coach turn.
+new session generation before sending a coach turn. If the runtime response
+contract changes, check that the serving FastAPI version accepts both shapes
+before publishing. Deploy the compatible parser first if needed.
 
 ### EC2 IMAGE DEPLOYED
 
@@ -74,24 +73,23 @@ remain unique Cognito subjects.
 
 | | |
 |---|---|
-| **How** | `git rev-parse HEAD` on the tree you build. Image must be built with `--build-arg GIT_SHA=<that-sha>` ([`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md) “Build and push”). |
-| **Confirm on the host** | `docker inspect --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}" "$APP_IMAGE"` and the container env `APP_GIT_SHA`. `/api/v1/health` does **not** expose the SHA. |
+| **Build and verify** | Use the approved SHA for the [immutable image build](deploy/AWS_STATELESS_EC2.md#build-and-push-ci-or-developer-machine) and [host SHA checks](deploy/AWS_STATELESS_EC2.md#ec2-refresh). |
 | **Pass** | Label and `APP_GIT_SHA` both equal the intended full SHA. |
 
 ## 2. Docker image tag (`APP_IMAGE`)
 
 | | |
 |---|---|
-| **How** | Set host `APP_IMAGE` to the ECR URI **plus an immutable tag** (the git SHA). `compose.prod.yaml` uses `image: ${APP_IMAGE}`. Refresh with `sh scripts/deploy_ecr.sh`. |
+| **How** | Set host `APP_IMAGE` to the ECR URI **plus an immutable tag** (the git SHA). `compose.prod.yaml` uses `image: ${APP_IMAGE}`. Use the [EC2 refresh procedure](deploy/AWS_STATELESS_EC2.md#ec2-refresh). |
 | **Rule** | **Never** tag or deploy `:latest`. CI’s `co-design:ci-<12-char-sha>` build is validation-only; it is not the production push. |
-| **Pass** | `docker compose -f compose.prod.yaml config` shows the immutable URI; running container matches it (`docker inspect` / `docker compose ps`). |
+| **Pass** | Effective Compose configuration and the running container both match the approved immutable image tag. |
 
 ## 3. AgentCore runtime version / DEFAULT / liveVersion
 
 | | |
 |---|---|
-| **How** | AWS console: Bedrock AgentCore → this environment’s runtime (ARN from host `.env`) → **DEFAULT** endpoint. CLI used in prior publishes: control-plane `get-agent-runtime` / DEFAULT endpoint for the runtime id parsed from `AGENTCORE_RUNTIME_ARN` (do not paste ARNs into tickets). |
-| **Expected** | Qualifier `DEFAULT`. Query the current liveVersion before this release; last documented value was **21** (slim `fast_chat`) and must not be assumed. This release publishes a **new version on the existing ARN**, waits until READY, then moves DEFAULT. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. The published runtime environment must contain `DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS=180`; this is runtime-only and must not be added to the EC2 app container. |
+| **How** | AWS console: Bedrock AgentCore → this environment’s runtime (ARN from host `.env`) → **DEFAULT** endpoint. See the [runtime publishing procedure](deploy/AWS_STATELESS_EC2.md#publish-an-agentcore-runtime-version). |
+| **Expected** | Qualifier `DEFAULT`. Record the current liveVersion before publishing. This release publishes a **new version on the existing ARN**, waits until READY, then moves DEFAULT. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. The published runtime environment must contain `DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS=180`; this is runtime-only and must not be added to the EC2 app container. |
 | **Pass** | Endpoint **READY**; DEFAULT liveVersion is the version you intend to serve; the runtime configuration reports the Deep Review Bedrock read timeout as **180s**. FastAPI host env qualifier is `DEFAULT`. |
 
 ## 4. `AGENTCORE_SESSION_GENERATION` (required on republish)
@@ -115,7 +113,7 @@ and redeploy FastAPI, or warm sessions may keep the version you just left.
 
 | | |
 |---|---|
-| **How** | Admin only: `scripts/init_dsql.py` (`--admin-user admin` as documented in [`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md)). Inspect/plan first; one DDL per transaction. |
+| **How** | Use the [admin schema procedure](deploy/AWS_STATELESS_EC2.md#admin-schema-bootstrap). Inspect and plan first, with one DDL statement per transaction. |
 | **Never** | App startup DDL. Runtime role `co_design_app`. Ad-hoc `psql` edits during release. |
 | **This release** | No new DDL beyond the additive revision/idempotency schema already in `init_dsql.py`. Confirm the cluster already has those columns (`notebooks.conversation_revision`, message revision lineage). If they are already present, **do not** re-run bootstrap “just in case” during the cutover window unless you are applying a documented additive plan. |
 | **Pass** | Host-local `/api/v1/ready` returns 200 (Caddy must **not** expose `/ready` publicly). DSQL ping succeeds. No schema change in the release ticket. |
@@ -160,7 +158,7 @@ and redeploy FastAPI, or warm sessions may keep the version you just left.
 
 ## 10. Post-deploy smoke
 
-Historical live matrix: [`MANUAL_PRODUCTION_QA.md`](MANUAL_PRODUCTION_QA.md) (dated; not current HEAD evidence). Optional **local** headed path after `sh scripts/start.sh`: `sh scripts/browser_e2e_smoke.sh` (manual Cognito; selection-mode Ready / Move to).
+The historical live matrix is available in the [August 2026 production QA report](https://github.com/CloudKai/NUS-Codesign-Chatbot/blob/b81a5b09ce622889f60fdcd743c23d7845eb9ee8/docs/MANUAL_PRODUCTION_QA.md). For a local headed run, see [browser QA](TESTING.md#browser-and-visual-qa).
 
 Ordered production smoke (selection mode):
 
@@ -170,13 +168,18 @@ Ordered production smoke (selection mode):
 4. When Ready appears, focus stays until the student moves via Journey **Work on this stage** or typed `Move to <stage>`. Do **not** expect silent auto-advance.
 5. Upload a small personal source, select it, ask a grounded question, open `[S#]` preview.
 6. Recreate the app container (no student data volume). Log in again; notebook, messages, and stage persist (DSQL + S3).
-7. Logout → signed-out gate; back-navigation does not restore protected data.
+7. Delete disposable sources and notebooks. Verify owner-scoped S3 cleanup.
+8. Verify two distinct users cannot read or mutate each other's notebooks
+   or sources. Submit the same coach request concurrently with the same
+   idempotency key. Expect one execution and one persisted turn.
+9. Sign out. Verify refresh is rejected, auth cookies are cleared, and
+   back-navigation leaves protected data hidden.
 
 Stop if health/ready fails, login loops, or coach turns return 503/`provider-unavailable`.
 
 ## 11. Rollback
 
-1. Set `APP_IMAGE` to the **previous immutable tag** (known-good SHA). Run `sh scripts/deploy_ecr.sh`.
+1. Set `APP_IMAGE` to the **previous immutable tag** (known-good SHA). Follow the [EC2 rollback procedure](deploy/AWS_STATELESS_EC2.md#ec2-refresh).
 2. If this release also published an AgentCore version: point DEFAULT back to the previous **READY** liveVersion **and** change `AGENTCORE_SESSION_GENERATION`, then recreate the app container. Version rollback without a new session generation can leave warm microVMs on the version you meant to leave.
 3. Do not roll schema forward/back during the app rollback. Additive DSQL columns already applied stay; old app code ignores extra columns.
 4. Pass: previous image SHA is running; DEFAULT liveVersion matches the rollback target; login + one coach turn succeed.

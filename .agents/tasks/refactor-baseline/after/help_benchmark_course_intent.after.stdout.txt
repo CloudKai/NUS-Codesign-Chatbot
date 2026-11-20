@@ -1,0 +1,22 @@
+usage: benchmark_course_intent.py [-h] [--checkpoint CHECKPOINT]
+                                  [--bundle BUNDLE] [--stub-ms STUB_MS]
+                                  [--passes PASSES] [--warmup WARMUP]
+                                  [--concurrency CONCURRENCY]
+                                  [--json-output JSON_OUTPUT]
+
+Measure load time, memory and per-call latency of the local course-intent
+classifier.
+
+options:
+  -h, --help            show this help message and exit
+  --checkpoint CHECKPOINT
+                        local Laya or Vega checkpoint directory
+  --bundle BUNDLE       Laya Learn bundle ZIP (needs --checkpoint)
+  --stub-ms STUB_MS     use a stand-in classifier that sleeps this long
+                        (harness check)
+  --passes PASSES       timed passes over the eligible rows
+  --warmup WARMUP       untimed calls before the passes
+  --concurrency CONCURRENCY
+                        worker threads per pass
+  --json-output JSON_OUTPUT
+                        write the result as JSON

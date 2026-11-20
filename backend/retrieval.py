@@ -12,6 +12,8 @@ authorized and selected for the active notebook.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
+import contextvars
 from dataclasses import dataclass, replace
 import logging
 import math
@@ -145,6 +147,29 @@ _CONTEXT_NAVIGATION = re.compile(
 def _compact_message_text(value: object) -> str:
     """Return normalized message content without reading message metadata."""
     return " ".join(str(value or "").split()).strip()
+
+
+def is_greeting_or_acknowledgement(message: str) -> bool:
+    """Return whether *message* is a bare acknowledgement or starts with a greeting.
+
+    Uses the same two checks as :func:`_is_substantive_recent_user_message`:
+    the message without trailing ``.!?`` is one of
+    ``_CONTEXT_ACKNOWLEDGEMENTS``, or it starts with ``_CONTEXT_GREETINGS``.
+    A greeting followed by a question still returns True; callers that need
+    chit-chat only combine this with an information-request check.
+
+    Args:
+        message: Current student contribution. Not logged.
+
+    Returns:
+        True for ``ok.``, ``Thanks!``, ``hello there``; False for empty text.
+    """
+    text = _compact_message_text(message)
+    if not text:
+        return False
+    if text.casefold().rstrip(".!?") in _CONTEXT_ACKNOWLEDGEMENTS:
+        return True
+    return bool(_CONTEXT_GREETINGS.search(text))
 
 
 def is_anaphoric_course_lookup(message: str) -> bool:
@@ -352,6 +377,13 @@ class RetrievedChunk:
     url: str | None = None
     group: str | None = None
     retrieval_origin: str = "extracted_text"
+    page: int | None = None
+    """1-based source page when the adapter reports one, else ``None``.
+
+    Only the Knowledge Base adapter can set it (from the Retrieve metadata
+    attribute ``x-amz-bedrock-kb-document-page-number``). Local extracted-text
+    chunks never carry a page. Retrieval and ranking do not read this field.
+    """
 
 
 @dataclass(frozen=True)
@@ -552,6 +584,50 @@ def with_course_evidence_gap(
     )
 
 
+def split_result_slots(total: int, course_slots: int) -> tuple[int, int]:
+    """Split *total* result slots into reserved (course, student) slots.
+
+    Both sides keep at least one slot when ``total`` is two or more, so a full
+    set of course hits can never push student uploads out of the prompt.
+
+    Args:
+        total: Final number of chunks the prompt can carry.
+        course_slots: Requested course (Knowledge Base) share.
+
+    Returns:
+        ``(course, student)`` slot counts that add up to ``total``.
+    """
+    total = max(1, int(total))
+    if total == 1:
+        return 1, 0
+    course = min(max(1, int(course_slots)), total - 1)
+    return course, total - course
+
+
+def _merge_with_reserved_slots(
+    course: Sequence[RetrievedChunk],
+    student: Sequence[RetrievedChunk],
+    *,
+    course_slots: int,
+    student_slots: int,
+) -> list[RetrievedChunk]:
+    """Keep each side's best chunks inside its reserved slots, then backfill.
+
+    Unused slots on one side go to the other side (course first), so the total
+    never exceeds ``course_slots + student_slots``. Course chunks stay ahead of
+    student chunks, each side in its own best-first order.
+    """
+    total = course_slots + student_slots
+    take_course = min(len(course), course_slots)
+    take_student = min(len(student), student_slots)
+    spare = total - take_course - take_student
+    extra_course = min(max(0, len(course) - take_course), spare)
+    take_course += extra_course
+    spare -= extra_course
+    take_student += min(max(0, len(student) - take_student), spare)
+    return [*course[:take_course], *student[:take_student]]
+
+
 class CompositeContextRetriever:
     """Split shared course sources onto Knowledge Base Retrieve and the rest locally.
 
@@ -559,6 +635,10 @@ class CompositeContextRetriever:
     :class:`LocalChunkRetriever`. A missing Knowledge Base adapter is an
     evidence gap, not fake placeholder text. Student uploads and notebook-copied
     lecture files with extracted text stay local.
+
+    The two retrievals run in parallel when a turn needs both. The merged
+    result reserves slots for each side (default 2 course + 2 student) so
+    strong course hits cannot crowd out student uploads.
     """
 
     def __init__(
@@ -567,6 +647,8 @@ class CompositeContextRetriever:
         knowledge_base: ContextRetriever | None,
         local: ContextRetriever | None = None,
         max_context_chars: int = 16_000,
+        max_chunks: int | None = None,
+        course_slots: int | None = None,
     ) -> None:
         """Compose two retrievers behind one selected-source port.
 
@@ -576,10 +658,78 @@ class CompositeContextRetriever:
             local: Retriever for student uploads (defaults to
                 :class:`LocalChunkRetriever`).
             max_context_chars: Combined prompt budget after both adapters run.
+            max_chunks: Total chunk slots across both sides. Defaults to
+                ``FAST_CHAT_RETRIEVAL_MAX_CHUNKS``.
+            course_slots: Slots reserved for course hits. Defaults to
+                ``FAST_CHAT_RETRIEVAL_COURSE_SLOTS``. The rest are reserved
+                for student uploads.
         """
+        from .settings import settings
+
         self._knowledge_base = knowledge_base
         self._local = local or LocalChunkRetriever()
         self._max_context_chars = max_context_chars
+        total = (
+            max_chunks
+            if max_chunks is not None
+            else getattr(settings, "fast_chat_retrieval_max_chunks", 4)
+        )
+        requested_course = (
+            course_slots
+            if course_slots is not None
+            else getattr(settings, "fast_chat_retrieval_course_slots", 2)
+        )
+        self._course_slots, self._student_slots = split_result_slots(
+            total, requested_course
+        )
+
+    def _retrieve_course(
+        self,
+        query: RetrievalQuery,
+        kb_sources: tuple[RetrievalSource, ...],
+    ) -> tuple[list[RetrievedChunk], str, str]:
+        """Run Knowledge Base retrieval; return (chunks, status, failure category)."""
+        if self._knowledge_base is None:
+            logger.warning(
+                "course_retrieval_config_missing kb_configured=0 "
+                "selected_course_count=%s",
+                len(kb_sources),
+            )
+            return [], "unavailable", "config_missing"
+        kb_started = time.perf_counter()
+        kb_result = self._knowledge_base.retrieve(replace(query, sources=kb_sources))
+        from backend.turn_perf import current_perf, elapsed_ms
+
+        perf = current_perf()
+        if perf is not None:
+            perf.set("course_kb_retrieval_ms", elapsed_ms(kb_started))
+        status = "ok"
+        failure_category = str(kb_result.failure_category or "")
+        if str(kb_result.course_retrieval_status or "ok") == "unavailable":
+            status = "unavailable"
+            # The Knowledge Base adapter already logged a specific category.
+        elif not kb_result.chunks:
+            status = "empty"
+            logger.info(
+                "course_retrieval_empty validated_count=0 selected_course_count=%s",
+                len(kb_sources),
+            )
+        return list(kb_result.chunks), status, failure_category
+
+    def _retrieve_student(
+        self,
+        query: RetrievalQuery,
+        local_sources: tuple[RetrievalSource, ...],
+    ) -> list[RetrievedChunk]:
+        """Run local student-upload retrieval."""
+        local_started = time.perf_counter()
+        local_result = self._local.retrieve(replace(query, sources=local_sources))
+        from backend.turn_perf import current_perf, elapsed_ms
+
+        perf = current_perf()
+        if perf is not None:
+            perf.set("student_source_retrieval_ms", elapsed_ms(local_started))
+        return list(local_result.chunks)
 
     def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Retrieve course hits from the KB adapter and uploads from local."""
@@ -609,54 +759,37 @@ class CompositeContextRetriever:
                     len(narrowed),
                 )
             kb_sources = narrowed
-        chunks: list[RetrievedChunk] = []
+        course_chunks: list[RetrievedChunk] = []
+        student_chunks: list[RetrievedChunk] = []
         course_status = "ok"
         failure_category = ""
-        if kb_sources:
-            if self._knowledge_base is None:
-                course_status = "unavailable"
-                failure_category = "config_missing"
-                logger.warning(
-                    "course_retrieval_config_missing kb_configured=0 "
-                    "selected_course_count=%s",
-                    len(kb_sources),
+        if kb_sources and local_sources and self._knowledge_base is not None:
+            # Overlap the network-bound Knowledge Base call with local ranking.
+            # The copied context keeps turn-perf recording on the same turn.
+            context = contextvars.copy_context()
+            with ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="course-retrieve"
+            ) as pool:
+                course_future = pool.submit(
+                    context.run, self._retrieve_course, query, kb_sources
                 )
-            else:
-                kb_started = time.perf_counter()
-                kb_result = self._knowledge_base.retrieve(
-                    replace(query, sources=kb_sources)
+                student_chunks = self._retrieve_student(query, local_sources)
+                course_chunks, course_status, failure_category = course_future.result()
+        else:
+            if kb_sources:
+                course_chunks, course_status, failure_category = (
+                    self._retrieve_course(query, kb_sources)
                 )
-                from backend.turn_perf import current_perf, elapsed_ms
-
-                perf = current_perf()
-                if perf is not None:
-                    perf.set("course_kb_retrieval_ms", elapsed_ms(kb_started))
-                chunks.extend(kb_result.chunks)
-                kb_status = str(kb_result.course_retrieval_status or "ok")
-                failure_category = str(kb_result.failure_category or "")
-                if kb_status == "unavailable":
-                    course_status = "unavailable"
-                    # The Knowledge Base adapter already logged a specific category.
-                elif not kb_result.chunks:
-                    course_status = "empty"
-                    logger.info(
-                        "course_retrieval_empty validated_count=0 "
-                        "selected_course_count=%s",
-                        len(kb_sources),
-                    )
-        if local_sources:
-            local_started = time.perf_counter()
-            local_result = self._local.retrieve(
-                replace(query, sources=local_sources)
-            )
-            from backend.turn_perf import current_perf, elapsed_ms
-
-            perf = current_perf()
-            if perf is not None:
-                perf.set("student_source_retrieval_ms", elapsed_ms(local_started))
-            chunks.extend(local_result.chunks)
+            if local_sources:
+                student_chunks = self._retrieve_student(query, local_sources)
+        merged = _merge_with_reserved_slots(
+            course_chunks,
+            student_chunks,
+            course_slots=self._course_slots,
+            student_slots=self._student_slots,
+        )
         formatted = bounded_retrieval_result(
-            chunks, max_context_chars=self._max_context_chars
+            merged, max_context_chars=self._max_context_chars
         )
         if kb_sources and not any(
             chunk.retrieval_origin == "knowledge_base" for chunk in formatted.chunks
@@ -1085,6 +1218,7 @@ def bounded_retrieval_result(
                 url=chunk.url,
                 group=chunk.group,
                 retrieval_origin=chunk.retrieval_origin,
+                page=chunk.page,
             )
         )
         if used >= max_context_chars:

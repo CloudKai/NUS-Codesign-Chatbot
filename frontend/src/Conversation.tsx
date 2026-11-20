@@ -11,7 +11,7 @@ import { StageRecommendation, MilestoneBanner, type Milestone } from './StageRec
 import { StageStarters } from './StageStarters';
 import { CoachCheckIn } from './CoachCheckIn';
 import { chooseCheckIn, lectureToProjectScaffold, type CheckIn } from './coachingContent';
-import { isTurn, readStream, type Citation, type Event } from './stream';
+import { REPLY_DELTAS_HEADER, citationText, isTurn, readStream, type Citation, type Event } from './stream';
 
 type Intent = 'lecture' | 'project';
 interface Attachment { id: string; title: string }
@@ -217,7 +217,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       await verify();
       const response = await fetch(receipt.message ? `${path}/messages/${encodeURIComponent(receipt.message)}/revise` : `${path}/${receipt.intent || 'lecture'}/stream`, {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
-        headers: { 'Content-Type': 'application/json' },
+        headers: receipt.message ? { 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json', ...REPLY_DELTAS_HEADER },
         body: JSON.stringify(receipt.message ? { content: receipt.text, idempotency_key: receipt.key }
           : { student_message: receipt.text, idempotency_key: receipt.key, attachment_source_ids: receipt.attachments?.map(file => file.id) ?? [] }),
       });
@@ -228,6 +228,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         if (!active.current) return;
         if (event.event === 'started') setStatus('Reading your message…');
         if (event.event === 'status') setStatus(({ queued: 'Thinking…', retrieving: 'Looking through your sources…', thinking: 'Thinking…', saving: 'Saving…' })[event.phase]);
+        // Deltas are unvalidated and unsaved: they only ever feed the preview, never saved messages.
+        if (event.event === 'reply_delta') { setPreview(current => current + event.text); setStatus('Writing your reply…'); }
+        if (event.event === 'reply_discard') setPreview('');
         if (event.event === 'reply_ready') { setPreview(event.text); setStatus('Saving…'); }
         if (event.event === 'error') { terminalError = event; setPreview(''); }
       });
@@ -459,13 +462,13 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         <button key={`${citation.label}:${citation.source_id}`} onClick={event => {
           returnScroll.current = transcript.current?.scrollTop || 0; citationButton.current = event.currentTarget;
           setDownloadError(''); setEvidence({ citation, message: message.id });
-        }}>{citation.label} · {citation.title}</button>)}</div> : null}
+        }}>{citationText(citation)}</button>)}</div> : null}
     </article>)}
     {milestone ? <MilestoneBanner milestone={milestone} onDismiss={() => setMilestone(null)} onReview={() => { setMilestone(null); openReview('Summary'); }}/> : null}
     <StageRecommendation project={project} disabled={reviewDisabled} act={decideInline}/>
     {watching ? <div className="typing" aria-hidden="true"><span className="typing-dots"><i/><i/><i/></span><span>{status}</span></div> : null}
     {evidence ? <aside className="evidence" aria-label="Cited evidence">
-      <div className="evidence-heading"><h3 ref={evidenceHeading} tabIndex={-1}>{evidence.citation.label} · {evidence.citation.title}</h3>
+      <div className="evidence-heading"><h3 ref={evidenceHeading} tabIndex={-1}>{citationText(evidence.citation)}</h3>
         <button onClick={() => {
           setEvidence(null); citationButton.current?.focus({ preventScroll: true }); transcript.current?.scrollTo(0, returnScroll.current);
         }}>Return to answer</button></div>

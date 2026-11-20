@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from .coaching.progress import emit_coach_reply_delta, reply_delta_sink_bound
 from .domain import (
     ClearCode,
     CoachRequest,
@@ -49,6 +50,40 @@ _FACIONE_BEHAVIORS_BY_STAGE = {
     "deep_analysis": [FacioneBehavior.ANALYSIS, FacioneBehavior.EVALUATION],
     "reflection": [FacioneBehavior.SELF_REGULATION, FacioneBehavior.EVALUATION],
 }
+
+
+def mock_flags_needs_sources(student_message: str) -> bool:
+    """Return the mock provider's stand-in for the model's ``needs_sources``.
+
+    This is a deterministic rule, not a judgement about course relevance: a
+    message phrased as a question or information request is reported as
+    needing sources, unless it reads as first-person or project reasoning.
+    That exclusion stands in for the real provider, which never honours the
+    flag on a coaching turn. It exists so offline tests and the offline eval
+    can drive the real two-call fallback. It says nothing about how often a
+    real model sets the flag.
+    """
+    from .coaching.mode_policy import (
+        looks_like_information_request,
+        looks_like_project_reasoning,
+    )
+
+    return looks_like_information_request(
+        student_message
+    ) and not looks_like_project_reasoning(student_message)
+
+
+def mock_needs_sources(request: CoachRequest) -> bool:
+    """Return whether the mock reports ``needs_sources`` for this request.
+
+    Only when the application asked for the check (``source_need_check``) and
+    nothing was retrieved, matching the conditions the real provider enforces.
+    """
+    return bool(
+        request.source_need_check
+        and not request.retrieved_chunks
+        and mock_flags_needs_sources(request.student_message)
+    )
 
 
 def _prior_assessed_turns(request: CoachRequest) -> int:
@@ -210,6 +245,21 @@ def _mock_review_feedback(
     return strengths, improvements
 
 
+def _emit_mock_reply_deltas(text: str, words_per_chunk: int = 4) -> None:
+    """Send the finished mock reply as preview fragments when a client wants them.
+
+    This is a simulation for offline tests and demos: the mock builds the whole
+    reply at once, so these fragments prove the transport, not model timing.
+    Real providers send only text a model has produced. A no-op without a sink.
+    """
+    if not reply_delta_sink_bound():
+        return
+    words = text.split(" ")
+    for start in range(0, len(words), words_per_chunk):
+        last = start + words_per_chunk >= len(words)
+        emit_coach_reply_delta(" ".join(words[start : start + words_per_chunk]) + ("" if last else " "))
+
+
 class DeterministicCoachProvider:
     """Return predictable structured coaching output without contacting a model.
 
@@ -238,6 +288,14 @@ class DeterministicCoachProvider:
         return "deterministic-v1"
 
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Return the mock turn, plus the mock ``needs_sources`` stand-in."""
+        result = self._assess_turn(request)
+        _emit_mock_reply_deltas(result.response_text)
+        if mock_needs_sources(request):
+            return result.model_copy(update={"needs_sources": True})
+        return result
+
+    def _assess_turn(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Build a repeatable coaching turn with visible, guided progression.
 
         An explicit recommendation keeps unit tests fully controllable. In the
@@ -254,8 +312,15 @@ class DeterministicCoachProvider:
         specialist = select_specialist(
             request.student_message, requested=request.specialist
         )
+        course_catalog_qa = (
+            request.expected_response_mode == "qa"
+            and request.retrieval_required
+            and not request.allow_model_knowledge
+            and not request.source_ids
+        )
         if request.interaction_intent == "lecture_help" or (
-            request.interaction_intent is None and specialist == SPECIALIST_QA
+            request.interaction_intent is None
+            and (specialist == SPECIALIST_QA or course_catalog_qa)
         ):
             return self._qa_result(request)
         if requested == SPECIALIST_REVIEW:

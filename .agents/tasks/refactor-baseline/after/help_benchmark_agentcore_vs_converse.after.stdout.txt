@@ -1,0 +1,20 @@
+usage: benchmark_agentcore_vs_converse.py [-h] [--live-benchmark]
+                                          [--max-live-calls MAX_LIVE_CALLS]
+                                          [--dry-run] [--converse-stream]
+                                          [--json-output JSON_OUTPUT]
+
+Benchmark AgentCore InvokeAgentRuntime against direct Bedrock Converse on the
+same 50 fixed turns. Live and paid: needs --live-benchmark and --max-live-
+calls.
+
+options:
+  -h, --help            show this help message and exit
+  --live-benchmark      Opt in to paid live calls.
+  --max-live-calls MAX_LIVE_CALLS
+                        Required. Total calls to both paths (1 to 100); a turn
+                        costs 2.
+  --dry-run             Print the plan; build no client, make no call.
+  --converse-stream     Use ConverseStream so first_text_ms is measured (needs
+                        bedrock:InvokeModelWithResponseStream).
+  --json-output JSON_OUTPUT
+                        Write the result (with a run block).

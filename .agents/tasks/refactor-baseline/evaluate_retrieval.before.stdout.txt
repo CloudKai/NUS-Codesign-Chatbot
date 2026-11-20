@@ -1,0 +1,80 @@
+mode: offline
+course search: LocalChunkRetriever over local lecture PDFs, one chunk per page (not the Knowledge Base)
+
+questions evaluated: 94
+recall@4 (material): 91/94 (96.8%)
+recall@4 (page):     78/94 (83.0%)
+empty-result rate (questions): 0/94 (0.0%)
+questions with a score tie at the rank-4 cutoff: 19
+recall@4 by expected material:
+  lecture_week_10_storytelling: 5/6 (83.3%)
+  lecture_week_1_introduction_to_innovation_v3: 2/3 (66.7%)
+  lecture_week_2_jtbd_framework_term_1_2026: 14/14 (100.0%)
+  lecture_week_4_affinity_clusters_product_values_and_features_oxymoron: 8/8 (100.0%)
+  lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026: 15/16 (93.8%)
+  lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0: 11/11 (100.0%)
+  lecture_week_9_testing_feedback_poster_design_affordance_genai: 15/15 (100.0%)
+  reading_reading_1_how_pixar_fosters_collective_creativity: 8/8 (100.0%)
+  reading_reading_2_engaging_personas: 5/5 (100.0%)
+  reading_reading_3_a_technique_for_getting_ideas_james_webb_young: 8/8 (100.0%)
+
+gate messages: 295 (retrieve 154, skip 141; all SYNTHETIC)
+wrong-skip rate: 76/154 (49.4%)
+wrong-skip rate, clear rows only: 51/113 (45.1%)
+wrong-skip rate, classifier only (before catalog step): 85/154 (55.2%)
+false-retrieve rate (extra): 7/141 (5.0%)
+empty-result rate (gate-passed course searches): 1/63 (1.6%)
+wrong-skip by category:
+  attachment_question: 0/13 (0.0%)
+  course_content: 38/61 (62.3%)
+  course_logistics: 10/11 (90.9%)
+  course_with_unrelated_upload: 1/4 (25.0%)
+  follow_up: 7/9 (77.8%)
+  informal_or_multilingual: 7/8 (87.5%)
+  mixed_project_and_course: 0/3 (0.0%)
+  named_material: 1/13 (7.7%)
+  upload_and_course: 1/12 (8.3%)
+  upload_question: 11/20 (55.0%)
+
+needs_sources second chance (STUB models, not a real model):
+  eligible messages: 189; wrong skips eligible: 76 of 76
+  oracle: wrong-skip 0/154 (0.0%); false-retrieve 7/141 (5.0%); empty 2/139 (1.4%); second model calls 76
+  mock_rule: wrong-skip 19/154 (12.3%); false-retrieve 39/141 (27.7%); empty 7/152 (4.6%); second model calls 89
+  flag_all: wrong-skip 0/154 (0.0%); false-retrieve 120/141 (85.1%); empty 18/252 (7.1%); second model calls 189
+
+upload retrieval policy (FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED, rule only, no file search):
+  rows fired: 18; upload_question misses fixed: 11 of 11
+  wrong-skip: 76/154 (49.4%) -> 61/154 (39.6%)
+  false-retrieve: 7/141 (5.0%) -> 10/141 (7.1%)
+  fixed wrong skips: gm098, gm099, gm101, gm102, gm103, gm104, gm107, gm108, gm109, gm111, gm114, gm137, gm142, gm267, gm268 (course scope only, searched an unrelated upload: gm142)
+  new false retrieves: gm276, gm277, gm282
+  needs_sources second chance lost (both settings on): 18 rows, 2 with course or both scope
+  extra prompt chars (ESTIMATE, upper bound): mean 3926.3, max 3928 per fired row; total 70674 (~17668 to 23558 tokens)
+  ambiguous_generic: wrong-skip 0 -> 0 of 0; false-retrieve 1 -> 4 of 9; fired 3; extra chars (estimate) 11778
+  course_with_unrelated_upload: wrong-skip 1 -> 0 of 4; false-retrieve 0 -> 0 of 0; fired 1; extra chars (estimate) 3928
+  follow_up: wrong-skip 7 -> 5 of 9; false-retrieve 1 -> 1 of 7; fired 2; extra chars (estimate) 7856
+  upload_and_course: wrong-skip 1 -> 0 of 12; false-retrieve 0 -> 0 of 0; fired 1; extra chars (estimate) 3928
+  upload_question: wrong-skip 11 -> 0 of 20; false-retrieve 0 -> 0 of 0; fired 11; extra chars (estimate) 43184
+
+follow-up cases (SYNTHETIC, reported apart from the 295 gate messages): 12 (retrieve 9, skip 3)
+  gate wrong-skip: 8/9 (88.9%); recoverable by needs_sources second chance: 8
+  gate false-retrieve: 0/3 (0.0%)
+  built query uses history: 1/9 (11.1%)
+  query_ok (built query, top 4 has expected material): 6/9 (66.7%)
+  end-to-end pass (gate and query): 1/9 (11.1%)
+  end-to-end pass if a perfect needs_sources model recovered every eligible gate miss (informational): 6/9 (66.7%); attributable failures then: 2
+  standalone control ok: 4/9 (44.4%)
+  contrast, history-weighted local search ok: 8/9 (88.9%)
+  verdict: 8 failures, 3 attributable (rule: 5 and 5); clearly fail: False
+  gm296 [retrieve] gate_ok=False query_ok=False standalone_ok=True query='what is it good for?'
+  gm297 [retrieve] gate_ok=False query_ok=False standalone_ok=True query='what are the axes?'
+  gm298 [retrieve] gate_ok=False query_ok=False standalone_ok=False query='what goes in each part?'
+  gm299 [retrieve] gate_ok=False query_ok=True standalone_ok=False query='how many should I focus on?'
+  gm300 [retrieve] gate_ok=True query_ok=True standalone_ok=True query='Current source question: which lecture is that from? Prior student reasoning: what is the rule of threes?'
+  gm301 [retrieve] gate_ok=False query_ok=True standalone_ok=False query='how would that change the HMW about transport at NUS?'
+  gm302 [retrieve] gate_ok=False query_ok=True standalone_ok=False query='what should I write for emotion?'
+  gm303 [retrieve] gate_ok=False query_ok=True standalone_ok=True query='and the F-pattern?'
+  gm304 [retrieve] gate_ok=False query_ok=True standalone_ok=False query='does it have any authority?'
+  gm305 [skip] gate_ok=True query_ok=n/a standalone_ok=None query='ok so i will fill one in for our bike lock idea'
+  gm306 [skip] gate_ok=True query_ok=n/a standalone_ok=None query='and also the staff at the counter'
+  gm307 [skip] gate_ok=True query_ok=n/a standalone_ok=None query='thanks, got it'

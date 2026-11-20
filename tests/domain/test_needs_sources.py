@@ -1,0 +1,1070 @@
+"""First-call ``needs_sources`` flag and its second-call fallback. No AWS.
+
+The flag sits behind ``FAST_CHAT_NEEDS_SOURCES_ENABLED`` (default off). These
+tests drive the real application path with a fake AgentCore runtime and with
+the mock provider. The mock provider's flag is a deterministic stand-in (a
+question-shaped message), so the mock tests prove the plumbing and the
+behaviour of the surrounding application, not a model's judgement.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from collections.abc import Mapping, Sequence
+from types import ModuleType
+from typing import Any
+
+import pytest
+
+from agentcore_runtime.models import (
+    FastChatTurnOutput,
+    adapt_fast_chat_turn_payload,
+)
+from backend.agentcore_provider import AgentCoreCoachProvider
+from backend.application import CoachApplicationService
+from backend.coaching.execution import (
+    SOURCE_CHECK_MAX_TITLES,
+    SOURCE_CHECK_TITLE_MAX_CHARS,
+    _coach_request_fingerprint,
+    _wants_source_need_check,
+    source_check_course_titles,
+)
+from backend.domain import CoachRequest
+from backend import course_intent
+from backend.course_intent import CourseIntentClassifier
+from backend.learning_service import LearningProgressService
+from backend.owner_context import OwnerResolver
+from backend.mock_provider import DeterministicCoachProvider, mock_flags_needs_sources
+from backend.prompts import compose_coach_prompt
+from backend.prompts.composer import (
+    _SOURCE_NEED_INSTRUCTION,
+    MAX_RUNTIME_CHARS,
+    source_check_titles_block,
+)
+from backend.providers import ProviderUnavailableError
+from backend.repositories import (
+    SQLiteNotebookRepository,
+    SQLitePhaseTransitionRepository,
+)
+from backend.retrieval import RetrievalQuery, RetrievalResult, RetrievedChunk
+from backend.settings import settings
+from backend.source_library import (
+    CourseMaterialSyncCoordinator,
+    add_text_source,
+    list_course_library_sources,
+    sync_lecture_notes_folder,
+)
+from backend.student_store import StudentStore
+from backend.workflow import CoachWorkflow
+from fake_agentcore_runtime import FakeAgentCoreRuntime
+
+_RUNTIME_ARN = (
+    "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test-harness"
+)
+# gm005 in the eval set: a course question with no regex cue word. The gate
+# skips it, so the model never sees course excerpts on the first call.
+_NO_CUE_COURSE_QUESTION = "what questions do we ask in the JTBD interview"
+_PROJECT_STATEMENT = "I think option B is stronger."
+# Question-shaped, so the mock rule would flag it, but it is project coaching.
+_COACHING_QUESTION = "Should I pick option B?"
+
+
+def _payload(
+    *,
+    mode: str = "qa",
+    text: str = "Short reply.",
+    needs_sources: Any = False,
+    needs_source_retrieval: bool = False,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "mode": mode,
+        "response_text": text,
+        "citations": [],
+        "hmw_scaffold_ready": False,
+        "needs_source_retrieval": needs_source_retrieval,
+        "needs_sources": needs_sources,
+        "out_of_scope": False,
+    }
+    if mode == "coaching":
+        body["recommendation"] = "stay"
+        body["recommendation_rationale"] = "More evidence is needed."
+    return body
+
+
+class _CourseRetriever:
+    """Return one chunk for the first source of each query; record queries."""
+
+    def __init__(self, *, error: BaseException | None = None) -> None:
+        self.queries: list[RetrievalQuery] = []
+        self._error = error
+
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        self.queries.append(query)
+        if self._error is not None:
+            raise self._error
+        source = query.sources[0]
+        chunk = RetrievedChunk(
+            source_id=source.source_id,
+            label=source.label,
+            title=source.title,
+            chunk_id="c1",
+            text="A JTBD interview asks about the struggling moment.",
+            score=0.9,
+            source_index=0,
+            chunk_index=0,
+        )
+        return RetrievalResult(
+            context=f"--- [{source.label}] {source.title} --- {chunk.text}",
+            chunks=(chunk,),
+        )
+
+
+def _store(tmp_path, monkeypatch) -> tuple[StudentStore, str]:
+    """Create a notebook with two synced course-library sources."""
+    from backend import source_library
+
+    store = StudentStore(tmp_path / "needs-sources.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    notes = tmp_path / "lecture_notes" / "lectureNotes"
+    notes.mkdir(parents=True)
+    (notes / "Week 2 JTBD.pdf").write_text("Week 2 JTBD body", encoding="utf-8")
+    monkeypatch.setattr(source_library.settings, "lecture_notes_dir", tmp_path / "lecture_notes")
+    monkeypatch.setattr(source_library.settings, "course_material_sync_enabled", True)
+    monkeypatch.setattr(source_library.settings, "course_materials_bucket", "")
+    monkeypatch.setattr(source_library.settings, "max_lecture_notes", 50)
+    monkeypatch.setattr(source_library.settings, "max_course_material_size_mb", 1)
+    sync_lecture_notes_folder(store, thread_id)
+    return store, thread_id
+
+
+def _agentcore_service(
+    store: StudentStore, client: FakeAgentCoreRuntime, retriever: Any
+) -> CoachApplicationService:
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+    )
+    return CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(provider, transitions),
+        LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=False,
+        retriever=retriever,
+    )
+
+
+def _mock_service(
+    store: StudentStore,
+    retriever: Any,
+    *,
+    course_intent_classifier: CourseIntentClassifier | None = None,
+) -> CoachApplicationService:
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    return CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=False,
+        retriever=retriever,
+        course_intent_classifier=course_intent_classifier,
+    )
+
+
+class _CourseIntentStub:
+    """Record routing calls and return a fixed score or a failure."""
+
+    def __init__(self, value: float | None | Exception) -> None:
+        self.value = value
+        self.messages: list[str] = []
+
+    def score(
+        self, message: str, history: Sequence[Mapping[str, Any]], titles: Sequence[str]
+    ) -> float | None:
+        self.messages.append(message)
+        assert titles == ["Week 2 JTBD"]
+        if isinstance(self.value, Exception):
+            raise self.value
+        return self.value
+
+
+@pytest.mark.parametrize("score", [0.95, 0.2, None, RuntimeError("unavailable")])
+def test_local_course_classifier_routes_ambiguous_turns_before_generation(
+    tmp_path, monkeypatch, score: float | None | Exception
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    monkeypatch.setattr(settings, "local_course_intent_threshold", 0.8)
+    retriever = _CourseRetriever()
+    classifier = _CourseIntentStub(score)
+    coach = _mock_service(store, retriever, course_intent_classifier=classifier)
+    prepared = coach._authoritative_request(
+        _request(thread_id, _NO_CUE_COURSE_QUESTION, "local-course-test")
+    )
+    assert classifier.messages == [_NO_CUE_COURSE_QUESTION]
+    assert len(retriever.queries) == int(score == 0.95)
+    assert prepared.allow_model_knowledge is (score != 0.95)
+    if score == 0.95:
+        assert prepared.expected_response_mode == "qa"
+        assert prepared.retrieved_chunks
+
+
+def _fake_laya_classifier(monkeypatch, tmp_path, predict) -> course_intent.LayaCourseIntentClassifier:
+    """Build the real adapter over a stand-in ``laya.Agent``; no weights are read."""
+
+    class _Agent:
+        def __init__(self, checkpoint: str, *, device: str) -> None:
+            assert device == "cpu"
+
+        def predict(self, state: str, questions: Mapping[str, Any]) -> Any:
+            return predict(state, questions)
+
+    laya = ModuleType("laya")
+    laya.Agent = _Agent
+    monkeypatch.setitem(sys.modules, "laya", laya)
+    checkpoint = tmp_path / "laya-checkpoint"
+    checkpoint.mkdir()
+    (checkpoint / "model.safetensors").touch()
+    return course_intent.LayaCourseIntentClassifier(checkpoint)
+
+
+def _valid_answer(_state: str, _questions: Mapping[str, Any]) -> dict[str, Any]:
+    return {"answers": {"retrieval": {"probabilities": {"course_evidence": 0.95}}}}
+
+
+def _raise_runtime(_state: str, _questions: Mapping[str, Any]) -> dict[str, Any]:
+    raise RuntimeError("inference failed")
+
+
+@pytest.mark.parametrize("score", [None, RuntimeError("unavailable"), ValueError("bad score")])
+def test_turn_continues_without_course_search_when_classifier_has_no_score(
+    tmp_path, monkeypatch, score: None | Exception
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    coach = _mock_service(
+        store, retriever, course_intent_classifier=_CourseIntentStub(score)
+    )
+    turn = coach.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "no-score-turn"))
+    assert turn.response_text
+    assert retriever.queries == []
+    assert turn.pending_transition is None
+    assert turn.auto_advanced_to is None
+    assert len(_assistant_messages(store, thread_id)) == 1
+
+
+@pytest.mark.parametrize(
+    "predict",
+    [
+        _raise_runtime,
+        lambda _state, _questions: {"answers": {}},
+        lambda _state, _questions: {
+            "answers": {"retrieval": {"probabilities": {"course_evidence": 2.0}}}
+        },
+    ],
+    ids=["inference-raises", "answer-missing", "score-out-of-range"],
+)
+def test_turn_continues_when_laya_inference_fails_or_returns_bad_output(
+    tmp_path, monkeypatch, predict
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    classifier = _fake_laya_classifier(monkeypatch, tmp_path, predict)
+    retriever = _CourseRetriever()
+    coach = _mock_service(store, retriever, course_intent_classifier=classifier)
+    turn = coach.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "laya-failure-turn"))
+    assert turn.response_text
+    assert retriever.queries == []
+    assert len(_assistant_messages(store, thread_id)) == 1
+    # The adapter released its single slot, so the next call still runs.
+    assert classifier._inference.acquire(blocking=False)
+    classifier._inference.release()
+
+
+def test_turn_continues_when_laya_slot_is_busy_and_valid_answer_still_retrieves(
+    tmp_path, monkeypatch
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    classifier = _fake_laya_classifier(monkeypatch, tmp_path, _valid_answer)
+    retriever = _CourseRetriever()
+    coach = _mock_service(store, retriever, course_intent_classifier=classifier)
+    assert classifier._inference.acquire(blocking=False)
+    try:
+        busy = coach.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "laya-busy-turn"))
+    finally:
+        classifier._inference.release()
+    assert busy.response_text
+    assert retriever.queries == []
+    # Control: with the slot free the same adapter scores 0.95 and the turn searches.
+    coach._authoritative_request(_request(thread_id, _NO_CUE_COURSE_QUESTION, "laya-free"))
+    assert len(retriever.queries) == 1
+
+
+def test_missing_laya_weights_or_package_fail_at_startup_not_per_turn(
+    tmp_path, monkeypatch
+) -> None:
+    missing = tmp_path / "no-checkpoint"
+    with pytest.raises(ValueError, match="model.safetensors"):
+        course_intent.LayaCourseIntentClassifier(missing)
+    with pytest.raises(ValueError, match="learner bundle"):
+        course_intent.LayaLearnCourseIntentClassifier(tmp_path, tmp_path / "no-bundle.zip")
+    present = tmp_path / "present"
+    present.mkdir()
+    (present / "model.safetensors").touch()
+    monkeypatch.setitem(sys.modules, "laya", None)
+    with pytest.raises(ImportError):
+        course_intent.LayaCourseIntentClassifier(present)
+    # The API builds the classifier while constructing its owner resolver, so a
+    # configured but unusable checkpoint stops startup; it never reaches a turn.
+    monkeypatch.setattr(settings, "local_course_intent_checkpoint", str(missing))
+    monkeypatch.setattr(settings, "local_course_intent_learner_bundle", "")
+    store = StudentStore(tmp_path / "startup.sqlite3")
+    with pytest.raises(ValueError, match="model.safetensors"):
+        OwnerResolver(
+            store,
+            oidc=object(),
+            course_sync=CourseMaterialSyncCoordinator(),
+            auto_advance_stages=False,
+        )
+
+
+def test_unset_checkpoint_builds_no_classifier(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "local_course_intent_checkpoint", "")
+    store = StudentStore(tmp_path / "unset.sqlite3")
+    resolver = OwnerResolver(
+        store,
+        oidc=object(),
+        course_sync=CourseMaterialSyncCoordinator(),
+        auto_advance_stages=False,
+    )
+    assert resolver._course_intent is None
+
+
+@pytest.mark.parametrize("prior_student_turn", [False, True])
+def test_first_turn_cutoff_uses_persisted_student_history(
+    tmp_path, monkeypatch, prior_student_turn: bool
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    store.add_message(thread_id, "assistant", "Welcome to your notebook.")
+    if prior_student_turn:
+        store.add_message(thread_id, "user", "I have a project idea.")
+    monkeypatch.setattr(settings, "local_course_intent_threshold", 0.85)
+    monkeypatch.setattr(settings, "local_course_intent_first_turn_threshold", 0.65)
+    retriever = _CourseRetriever()
+    classifier = _CourseIntentStub(0.70)
+    coach = _mock_service(store, retriever, course_intent_classifier=classifier)
+    coach._authoritative_request(_request(thread_id, _NO_CUE_COURSE_QUESTION, "cutoff"))
+    assert classifier.messages == [_NO_CUE_COURSE_QUESTION]
+    assert bool(retriever.queries) == (not prior_student_turn)
+
+
+def test_local_course_classifier_returns_grounded_qa_without_stage_transition(
+    tmp_path, monkeypatch
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    coach = _mock_service(
+        store, _CourseRetriever(), course_intent_classifier=_CourseIntentStub(0.99)
+    )
+    turn = coach.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "local-course-reply"))
+    assert turn.assessment.response_mode == "qa"
+    assert turn.assessment.citations
+    assert turn.pending_transition is None
+    assert turn.auto_advanced_to is None
+
+
+@pytest.mark.parametrize("message", ["hello", "what stage am I in?", "what is covered in Week 2?"])
+def test_existing_route_bypasses_local_course_classifier(
+    tmp_path, monkeypatch, message: str
+) -> None:
+    store, thread_id = _store(tmp_path, monkeypatch)
+    classifier = _CourseIntentStub(1.0)
+    coach = _mock_service(store, _CourseRetriever(), course_intent_classifier=classifier)
+    coach._authoritative_request(_request(thread_id, message, "local-course-bypass"))
+    assert classifier.messages == []
+
+
+def _request(thread_id: str, message: str, key: str) -> CoachRequest:
+    return CoachRequest(
+        thread_id=thread_id,
+        student_message=message,
+        current_stage="problem_identification",
+        response_detail="short",
+        idempotency_key=key,
+    )
+
+
+def _enable(monkeypatch, value: bool = True) -> None:
+    monkeypatch.setattr(settings, "fast_chat_needs_sources_enabled", value)
+
+
+def _assistant_messages(store: StudentStore, thread_id: str) -> list[dict[str, Any]]:
+    return [m for m in store.get_messages(thread_id) if m["role"] == "assistant"]
+
+
+def _trusted_instructions(call: dict[str, Any]) -> str:
+    return str(json.loads(call["payload"]).get("trusted_instructions") or "")
+
+
+# --- setting and eligibility -------------------------------------------------
+
+
+def test_setting_defaults_off() -> None:
+    from backend.settings import Settings
+
+    assert Settings.__dataclass_fields__["fast_chat_needs_sources_enabled"].default is False
+
+
+@pytest.mark.parametrize(
+    ("enabled", "searched", "scoped", "expected"),
+    [
+        (True, False, False, True),
+        (False, False, False, False),
+        (True, True, False, False),
+        (True, False, True, False),
+    ],
+)
+def test_wants_source_need_check(enabled, searched, scoped, expected) -> None:
+    assert (
+        _wants_source_need_check(
+            enabled=enabled, searched=searched, evidence_scoped=scoped
+        )
+        is expected
+    )
+
+
+# --- contract ----------------------------------------------------------------
+
+
+def test_needs_sources_is_optional_boolean_in_schema() -> None:
+    schema = FastChatTurnOutput.model_json_schema()
+    assert "needs_sources" not in (schema.get("required") or [])
+    prop = schema["properties"]["needs_sources"]
+    assert prop["type"] == "boolean"
+    assert "anyOf" not in prop
+
+
+@pytest.mark.parametrize("value", [None, "true", 1, "yes", [True]])
+def test_malformed_needs_sources_is_false(value: Any) -> None:
+    output = FastChatTurnOutput.model_validate(
+        {"mode": "qa", "response_text": "x", "needs_sources": value}
+    )
+    assert output.needs_sources is False
+
+
+def test_missing_needs_sources_defaults_false_and_true_is_kept() -> None:
+    base = {"mode": "qa", "response_text": "x"}
+    assert FastChatTurnOutput.model_validate(base).needs_sources is False
+    assert (
+        FastChatTurnOutput.model_validate({**base, "needs_sources": True}).needs_sources
+        is True
+    )
+
+
+def test_out_of_scope_clears_needs_sources() -> None:
+    output = FastChatTurnOutput.model_validate(
+        {"mode": "qa", "response_text": "x", "needs_sources": True, "out_of_scope": True}
+    )
+    assert output.needs_sources is False
+
+
+def test_adapter_carries_needs_sources_through_each_wire_shape() -> None:
+    slim = adapt_fast_chat_turn_payload(_payload(needs_sources=True))
+    assert slim.needs_sources is True
+    bare_qa = adapt_fast_chat_turn_payload(
+        {"response_text": "x", "needs_sources": True}
+    )
+    assert bare_qa.needs_sources is True
+    nested = adapt_fast_chat_turn_payload(
+        {
+            "response_text": "x",
+            "needs_sources": True,
+            "assessment": {"recommendation": "stay"},
+        }
+    )
+    assert nested.needs_sources is True
+
+
+def test_payload_without_the_field_still_validates() -> None:
+    payload = _payload()
+    del payload["needs_sources"]
+    assert adapt_fast_chat_turn_payload(payload).needs_sources is False
+
+
+# --- prompt ------------------------------------------------------------------
+
+
+def _fast_chat_runtime(**request_overrides: Any) -> str:
+    fields: dict[str, Any] = {"response_detail": "short", **request_overrides}
+    request = CoachRequest(
+        thread_id="t",
+        student_message="what is a persona",
+        current_stage="problem_identification",
+        **fields,
+    )
+    return compose_coach_prompt(
+        request, include_recent_messages=False, context_policy="fast_chat"
+    ).runtime_instructions
+
+
+def test_prompt_has_source_check_only_when_stamped() -> None:
+    assert "SOURCE CHECK" in _fast_chat_runtime(source_need_check=True)
+    assert "needs_sources" not in _fast_chat_runtime()
+
+
+@pytest.mark.parametrize("detail", ["short", "long"])
+def test_source_check_survives_runtime_budget_in_guide_and_free(detail: str) -> None:
+    runtime = _fast_chat_runtime(source_need_check=True, response_detail=detail)
+    assert "Always return needs_sources as a JSON boolean." in runtime
+
+
+# --- course material titles (FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED) ----------
+
+_TITLES = ["Week 2 JTBD Framework", "Reading 2 engaging-personas"]
+
+
+def _course_source(title: str, group: str = "Lecture Notes") -> dict[str, Any]:
+    return {
+        "id": title,
+        "title": title,
+        "metadata": {
+            "origin": "lecture_notes_folder",
+            "locked_source": True,
+            "course_material_group": group,
+        },
+    }
+
+
+def _enable_titles(monkeypatch, value: bool = True) -> None:
+    monkeypatch.setattr(settings, "fast_chat_source_check_titles_enabled", value)
+
+
+def test_titles_setting_defaults_off() -> None:
+    from backend.settings import Settings
+
+    field = Settings.__dataclass_fields__["fast_chat_source_check_titles_enabled"]
+    assert field.default is False
+
+
+def test_title_helper_keeps_course_rows_in_group_and_natural_order() -> None:
+    sources = [
+        {"id": "p", "title": "My notes.pdf", "metadata": {}},
+        _course_source("Reading 1 Pixar.pdf", "Readings"),
+        _course_source("Week 10 Storytelling.pdf"),
+        _course_source("Week 2  JTBD;  Framework.pdf"),
+        _course_source("week 10 storytelling.PDF"),
+        {**_course_source("Unlocked.pdf"), "metadata": {"origin": "lecture_notes_folder"}},
+    ]
+    assert source_check_course_titles(sources) == [
+        "Week 2 JTBD, Framework",
+        "Week 10 Storytelling",
+        "Reading 1 Pixar",
+    ]
+
+
+def test_title_helper_clips_and_caps_the_list() -> None:
+    sources = [_course_source(f"Week {i} " + "x" * 200 + ".pdf") for i in range(30)]
+    titles = source_check_course_titles(sources)
+    assert len(titles) == SOURCE_CHECK_MAX_TITLES
+    assert all(len(title) <= SOURCE_CHECK_TITLE_MAX_CHARS for title in titles)
+    assert titles[0].startswith("Week 0 ") and titles[1].startswith("Week 1 ")
+
+
+def test_source_check_without_titles_is_the_old_wording() -> None:
+    runtime = _fast_chat_runtime(source_need_check=True)
+    assert runtime == _fast_chat_runtime(source_need_check=True, course_material_titles=[])
+    assert runtime.endswith(_SOURCE_NEED_INSTRUCTION)
+    assert "COURSE MATERIAL TITLES" not in runtime
+
+
+def test_titles_block_follows_the_source_check_and_names_each_title() -> None:
+    runtime = _fast_chat_runtime(source_need_check=True, course_material_titles=_TITLES)
+    old, _, block = runtime.partition(_SOURCE_NEED_INSTRUCTION + "\n")
+    assert old and block == source_check_titles_block(_TITLES)
+    assert block.startswith("COURSE MATERIAL TITLES")
+    for title in _TITLES:
+        assert title in block
+    assert "keep out_of_scope false" in block
+    assert "greetings and thanks" in block
+
+
+def test_titles_need_the_source_check_stamp() -> None:
+    runtime = _fast_chat_runtime(course_material_titles=_TITLES)
+    assert "COURSE MATERIAL TITLES" not in runtime
+    assert "needs_sources" not in runtime
+
+
+@pytest.mark.parametrize("detail", ["short", "long"])
+def test_titles_block_fits_the_runtime_budget_and_never_clips_the_rule(
+    detail: str,
+) -> None:
+    titles = [f"Week {i} " + "y" * 75 for i in range(50)]
+    runtime = _fast_chat_runtime(
+        source_need_check=True, response_detail=detail, course_material_titles=titles
+    )
+    assert len(runtime) <= MAX_RUNTIME_CHARS
+    assert "Always return needs_sources as a JSON boolean." in runtime
+    assert runtime.endswith("project reasoning do not need sources.")
+    assert titles[0] in runtime and titles[-1] not in runtime
+
+
+def test_titles_block_is_omitted_when_no_title_fits() -> None:
+    assert source_check_titles_block(_TITLES, max_chars=50) == ""
+    assert source_check_titles_block([]) == ""
+
+
+def test_flag_and_titles_on_first_call_has_titles_and_retry_does_not(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch)
+    _enable_titles(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _payload(text="I would need the lecture first.", needs_sources=True),
+            _payload(text="Ask about the struggling moment [S1]."),
+        ]
+    )
+    service = _agentcore_service(store, client, _CourseRetriever())
+
+    service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "titles-on"))
+
+    assert len(client.calls) == 2
+    first = _trusted_instructions(client.calls[0])
+    assert "SOURCE CHECK" in first
+    assert "COURSE MATERIAL TITLES" in first
+    assert "Week 2 JTBD" in first
+    second = _trusted_instructions(client.calls[1])
+    assert "COURSE MATERIAL TITLES" not in second
+    assert "Week 2 JTBD" not in second
+
+
+def test_titles_block_lands_after_the_cache_point(tmp_path, monkeypatch) -> None:
+    """The block is in the per-turn suffix, not the cached static prefix."""
+    from agentcore_runtime.specialists.fast_chat import fast_chat_static_prefix
+    from agentcore_runtime.structured_coach import agent_system_prompt
+
+    _enable(monkeypatch)
+    _enable_titles(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(payload=_payload(mode="coaching", text="Why B?"))
+    service = _agentcore_service(store, client, _CourseRetriever())
+    service.submit(_request(thread_id, _PROJECT_STATEMENT, "titles-cache"))
+
+    monkeypatch.setenv("FAST_CHAT_PROMPT_CACHE_ENABLED", "true")
+    payload = json.loads(client.calls[0]["payload"])
+    blocks = agent_system_prompt(payload)
+    assert isinstance(blocks, list)
+    assert blocks[0] == {"text": fast_chat_static_prefix(payload["topic"])}
+    assert blocks[1] == {"cachePoint": {"type": "default"}}
+    assert "COURSE MATERIAL TITLES" not in blocks[0]["text"]
+    assert "COURSE MATERIAL TITLES" in blocks[2]["text"]
+
+
+def test_titles_setting_off_keeps_the_old_source_check(tmp_path, monkeypatch) -> None:
+    _enable(monkeypatch)
+    _enable_titles(monkeypatch, False)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(payload=_payload(mode="coaching", text="Why B?"))
+    service = _agentcore_service(store, client, _CourseRetriever())
+
+    service.submit(_request(thread_id, _PROJECT_STATEMENT, "titles-off"))
+
+    first = _trusted_instructions(client.calls[0])
+    assert "SOURCE CHECK" in first
+    assert "COURSE MATERIAL TITLES" not in first
+
+
+def test_titles_on_without_needs_sources_adds_nothing(tmp_path, monkeypatch) -> None:
+    _enable(monkeypatch, False)
+    _enable_titles(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(payload=_payload())
+    service = _agentcore_service(store, client, _CourseRetriever())
+    request = _request(thread_id, _NO_CUE_COURSE_QUESTION, "titles-no-ns")
+
+    prepared, _ = service._prepare_authoritative_turn(request)
+    assert prepared.course_material_titles == []
+    service.submit(request)
+    assert "COURSE MATERIAL TITLES" not in _trusted_instructions(client.calls[0])
+
+
+@pytest.mark.parametrize("needs_sources", [False, True])
+def test_client_cannot_set_course_material_titles(
+    tmp_path, monkeypatch, needs_sources: bool
+) -> None:
+    _enable(monkeypatch, needs_sources)
+    _enable_titles(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    service = _agentcore_service(
+        store, FakeAgentCoreRuntime(payload=_payload()), _CourseRetriever()
+    )
+    request = _request(thread_id, _NO_CUE_COURSE_QUESTION, "titles-client")
+    request = request.model_copy(update={"course_material_titles": ["Injected"]})
+    prepared, _ = service._prepare_authoritative_turn(request)
+    expected = ["Week 2 JTBD"] if needs_sources else []
+    assert prepared.course_material_titles == expected
+
+
+def test_fingerprint_ignores_course_material_titles() -> None:
+    request = _request("t", _NO_CUE_COURSE_QUESTION, "fp")
+    stamped = request.model_copy(update={"course_material_titles": _TITLES})
+    assert _coach_request_fingerprint(request) == _coach_request_fingerprint(stamped)
+
+
+# --- AgentCore path ----------------------------------------------------------
+
+
+def test_flag_on_course_question_without_cue_retries_with_course_catalog(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _payload(text="I would need the lecture first.", needs_sources=True),
+            _payload(text="Ask about the struggling moment [S1]."),
+        ]
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    turn = service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "ns-on"))
+
+    assert len(client.calls) == 2
+    assert "SOURCE CHECK" in _trusted_instructions(client.calls[0])
+    assert "SOURCE CHECK" not in _trusted_instructions(client.calls[1])
+    assert len(retriever.queries) == 1
+    searched = {source.source_id for source in retriever.queries[0].sources}
+    course = {item["id"] for item in list_course_library_sources(store, thread_id)}
+    assert searched and searched == course
+    assert turn.response_text.startswith("Ask about the struggling moment")
+    assistants = _assistant_messages(store, thread_id)
+    assert len(assistants) == 1
+    assert "lecture first" not in assistants[0]["content"]
+
+
+def test_flag_on_model_says_false_stays_one_call(tmp_path, monkeypatch) -> None:
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payload=_payload(mode="coaching", text="What assumption is behind that?")
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    service.submit(_request(thread_id, _PROJECT_STATEMENT, "ns-false"))
+
+    assert len(client.calls) == 1
+    assert retriever.queries == []
+    assert "SOURCE CHECK" in _trusted_instructions(client.calls[0])
+
+
+def test_flag_true_on_a_coaching_turn_is_ignored_and_keeps_the_first_turn(
+    tmp_path, monkeypatch
+) -> None:
+    """A flagged coaching turn is not retried; its assessment is persisted."""
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payload=_payload(
+            mode="coaching",
+            text="What would B change for your users?",
+            needs_sources=True,
+        )
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    turn = service.submit(_request(thread_id, _COACHING_QUESTION, "ns-coaching"))
+
+    assert len(client.calls) == 1
+    assert "SOURCE CHECK" in _trusted_instructions(client.calls[0])
+    assert retriever.queries == []
+    assert turn.response_text == "What would B change for your users?"
+    assert turn.assessment.response_mode == "coaching"
+    assert turn.assessment.recommendation.value == "stay"
+    assert turn.assessment.recommendation_rationale == "More evidence is needed."
+    assistants = _assistant_messages(store, thread_id)
+    assert len(assistants) == 1
+    assert assistants[0]["content"] == "What would B change for your users?"
+
+
+def test_flag_true_without_any_retrieval_source_keeps_the_first_reply(
+    tmp_path, monkeypatch
+) -> None:
+    """Documented limit: with nothing to search, the brief first reply stands."""
+    _enable(monkeypatch)
+    store = StudentStore(tmp_path / "no-sources.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payload=_payload(text="Brief reply with no course facts.", needs_sources=True)
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    turn = service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "ns-nosrc"))
+
+    assert len(client.calls) == 1
+    assert retriever.queries == []
+    assert turn.response_text == "Brief reply with no course facts."
+    assistants = _assistant_messages(store, thread_id)
+    assert [m["content"] for m in assistants] == ["Brief reply with no course facts."]
+
+
+def test_flag_off_has_no_prompt_text_and_ignores_a_volunteered_flag(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch, False)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payload=_payload(text="Answer without sources.", needs_sources=True)
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    turn = service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "ns-off"))
+
+    assert len(client.calls) == 1
+    assert retriever.queries == []
+    assert "SOURCE CHECK" not in _trusted_instructions(client.calls[0])
+    assert turn.response_text == "Answer without sources."
+
+
+def test_regex_gate_hit_retrieves_first_pass_and_skips_the_check(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payload=_payload(text="Week 2 covers JTBD [S1].", needs_sources=True)
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    service.submit(
+        _request(thread_id, "what is a creative matrix", "ns-regex-path")
+    )
+
+    assert len(retriever.queries) == 1
+    assert len(client.calls) == 1
+    assert "SOURCE CHECK" not in _trusted_instructions(client.calls[0])
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "what stage am I on?",
+        "let's go to concept generation",
+        "what should I do next",
+    ],
+)
+def test_gate_overrides_keep_evidence_scope_fixed(
+    tmp_path, monkeypatch, message: str
+) -> None:
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    service = _agentcore_service(
+        store, FakeAgentCoreRuntime(payload=_payload()), _CourseRetriever()
+    )
+    prepared, _ = service._prepare_authoritative_turn(
+        _request(thread_id, message, "ns-scope")
+    )
+    assert prepared.source_need_check is False
+
+
+def test_client_cannot_set_source_need_check(tmp_path, monkeypatch) -> None:
+    _enable(monkeypatch, False)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    service = _agentcore_service(
+        store, FakeAgentCoreRuntime(payload=_payload()), _CourseRetriever()
+    )
+    request = _request(thread_id, _NO_CUE_COURSE_QUESTION, "ns-client")
+    request = request.model_copy(update={"source_need_check": True})
+    prepared, _ = service._prepare_authoritative_turn(request)
+    assert prepared.source_need_check is False
+
+
+def test_unstamped_request_ignores_flag_even_when_setting_is_on(
+    tmp_path, monkeypatch
+) -> None:
+    """The provider drops the flag when the request was not stamped."""
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payload=_payload(mode="coaching", text="Which step is hardest?", needs_sources=True)
+    )
+    service = _agentcore_service(store, client, retriever)
+    # Meta-guidance is never stamped, yet the model returns the flag.
+    service.submit(_request(thread_id, "what should I do next", "ns-unstamped"))
+    assert len(client.calls) == 1
+    assert retriever.queries == []
+
+
+def test_retrieval_failure_on_second_chance_asks_model_to_state_the_gap(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever(error=RuntimeError("kb down"))
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _payload(text="placeholder", needs_sources=True),
+            _payload(text="I could not retrieve a validated excerpt."),
+        ]
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    turn = service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "ns-kb-down"))
+
+    assert len(client.calls) == 2
+    assert turn.response_text.startswith("I could not retrieve")
+    second = json.loads(client.calls[1]["payload"])
+    assert "unavailable" in json.dumps(second).lower()
+
+
+def test_second_call_failure_stays_inside_the_two_call_budget(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _payload(needs_sources=True),
+            {"ok": False, "error": True, "category": "structured_output_failure"},
+        ]
+    )
+    service = _agentcore_service(store, client, _CourseRetriever())
+    with pytest.raises(ProviderUnavailableError):
+        service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "ns-budget"))
+    assert len(client.calls) == 2
+    assert store.get_messages(thread_id) == []
+
+
+def test_legacy_needs_source_retrieval_still_retries_with_flag_on(
+    tmp_path, monkeypatch
+) -> None:
+    """Selected-source fallback is unchanged and does not add the catalog."""
+    _enable(monkeypatch)
+    store = StudentStore(tmp_path / "legacy.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, thread_id, "Lecture 3", "Accessibility notes")
+    retriever = _CourseRetriever()
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _payload(mode="coaching", needs_source_retrieval=True),
+            _payload(mode="coaching", text="What does that figure change?"),
+        ]
+    )
+    service = _agentcore_service(store, client, retriever)
+
+    service.submit(_request(thread_id, _PROJECT_STATEMENT, "ns-legacy"))
+
+    assert len(client.calls) == 2
+    assert len(retriever.queries) == 1
+
+
+# --- mock provider -----------------------------------------------------------
+
+
+def test_mock_rule_is_question_shaped() -> None:
+    assert mock_flags_needs_sources(_NO_CUE_COURSE_QUESTION) is True
+    assert mock_flags_needs_sources(_PROJECT_STATEMENT) is False
+
+
+def test_mock_provider_flag_on_runs_the_fallback_and_grounds_the_reply(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    service = _mock_service(store, retriever)
+
+    turn = service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "mock-on"))
+
+    assert len(retriever.queries) == 1
+    assert "struggling moment" in turn.response_text
+    assert len(_assistant_messages(store, thread_id)) == 1
+
+
+def test_mock_provider_flag_off_matches_pre_change_behaviour(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch, False)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    service = _mock_service(store, retriever)
+
+    turn = service.submit(_request(thread_id, _NO_CUE_COURSE_QUESTION, "mock-off"))
+
+    assert retriever.queries == []
+    assert "struggling moment" not in turn.response_text
+    assert len(_assistant_messages(store, thread_id)) == 1
+
+
+def test_mock_provider_flag_on_project_statement_does_not_retrieve(
+    tmp_path, monkeypatch
+) -> None:
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    service = _mock_service(store, retriever)
+
+    turn = service.submit(_request(thread_id, _PROJECT_STATEMENT, "mock-project"))
+
+    assert retriever.queries == []
+    assert turn.response_text
+    assert len(_assistant_messages(store, thread_id)) == 1
+
+
+def test_mock_provider_flag_on_coaching_question_does_not_retrieve(
+    tmp_path, monkeypatch
+) -> None:
+    """A question-shaped project message is not retried with course evidence."""
+    _enable(monkeypatch)
+    assert mock_flags_needs_sources(_COACHING_QUESTION) is False
+    store, thread_id = _store(tmp_path, monkeypatch)
+    retriever = _CourseRetriever()
+    service = _mock_service(store, retriever)
+
+    turn = service.submit(_request(thread_id, _COACHING_QUESTION, "mock-coaching-q"))
+
+    assert retriever.queries == []
+    assert "struggling moment" not in turn.response_text
+    assert turn.assessment.response_mode == "coaching"
+    assert len(_assistant_messages(store, thread_id)) == 1
+
+
+def test_mock_provider_flag_on_does_not_widen_attachment_scope(
+    tmp_path, monkeypatch
+) -> None:
+    """A private-attachment question stays attachment-scoped (no stamp)."""
+    from backend.source_library import CHAT_ATTACHMENT_ORIGIN, add_file_sources
+
+    _enable(monkeypatch)
+    store, thread_id = _store(tmp_path, monkeypatch)
+    attachment = add_file_sources(
+        store,
+        thread_id,
+        [("notes.pdf", b"Private attachment evidence", "application/pdf")],
+        origin=CHAT_ATTACHMENT_ORIGIN,
+        selected=False,
+    )[0]
+    service = _mock_service(store, _CourseRetriever())
+    request = CoachRequest(
+        thread_id=thread_id,
+        student_message="Could you outline the attached PDF",
+        current_stage="problem_identification",
+        response_detail="short",
+        attachment_source_ids=[attachment["id"]],
+        idempotency_key="mock-attachment",
+    )
+    prepared, _ = service._prepare_authoritative_turn(request)
+    assert prepared.source_need_check is False

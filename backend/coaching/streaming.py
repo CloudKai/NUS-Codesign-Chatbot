@@ -48,12 +48,19 @@ def coach_events(
     request: CoachRequest,
     *,
     before_submit: Callable[[], None] | None = None,
+    reply_deltas: bool = False,
 ) -> Iterator[dict[str, Any] | BaseException]:
     """Dispatch once before acknowledging; finish saving even if a reader leaves.
 
     ``started`` acknowledges worker dispatch, not durable completion. Only
     ``done`` acknowledges a saved turn. Exceptions are returned to the transport
     for logging and conversion with ``stream_error``; previews remain ephemeral.
+
+    ``reply_deltas`` adds ``reply_delta`` events (unvalidated partial reply
+    text) and ``reply_discard``. Transports pass it only for clients that asked
+    for deltas, so older clients still see the original event set. Whenever a
+    turn ends in failure after text was previewed, ``reply_discard`` precedes
+    the terminal error.
     """
     bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = queue.SimpleQueue()
 
@@ -63,13 +70,32 @@ def coach_events(
     def reply(text: str) -> None:
         bus.put({"event": "reply_ready", "text": text})
 
+    previewed = False
+
+    def reply_delta(text: str | None) -> None:
+        nonlocal previewed
+        if text is None:
+            if previewed:
+                previewed = False
+                bus.put({"event": "reply_discard"})
+            return
+        previewed = True
+        bus.put({"event": "reply_delta", "text": text})
+
     def worker() -> None:
         try:
             if before_submit is not None:
                 before_submit()
-            turn = coach.submit(request, progress=progress, reply=reply)
+            turn = coach.submit(
+                request,
+                progress=progress,
+                reply=reply,
+                **({"reply_delta": reply_delta} if reply_deltas else {}),
+            )
             bus.put({"event": "done", "turn": turn.model_dump(mode="json")})
         except BaseException as error:
+            if reply_deltas and previewed:
+                bus.put({"event": "reply_discard"})
             bus.put(error)
         finally:
             bus.put(None)

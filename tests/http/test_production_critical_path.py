@@ -238,6 +238,8 @@ def test_authenticated_production_critical_path_survives_restart_and_cleanup(
             "label": "S1",
             "title": "crossing-notes.txt",
             "excerpt": evidence.decode(),
+            # Local extracted-text sources never carry a page.
+            "page": None,
         }
     ]
     pending = turn["pending_transition"]

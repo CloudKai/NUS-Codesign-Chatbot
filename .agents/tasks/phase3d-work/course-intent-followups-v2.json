@@ -1,0 +1,204 @@
+{
+  "previous": {
+    "metrics": {
+      "wrong_skip": {
+        "numerator": 1,
+        "denominator": 9,
+        "rate": 0.1111
+      },
+      "false_retrieve": {
+        "numerator": 0,
+        "denominator": 3,
+        "rate": 0.0
+      },
+      "promoted_outside_course_scope": 0
+    },
+    "rows": [
+      {
+        "id": "gm296",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9508153448093959
+      },
+      {
+        "id": "gm297",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9368182350932193
+      },
+      {
+        "id": "gm298",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9968035235025038
+      },
+      {
+        "id": "gm299",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9723148760885955
+      },
+      {
+        "id": "gm300",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": true,
+        "score": null
+      },
+      {
+        "id": "gm301",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.8548933991028875
+      },
+      {
+        "id": "gm302",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9657645785593816
+      },
+      {
+        "id": "gm303",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9796396743261184
+      },
+      {
+        "id": "gm304",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9036268399787026
+      },
+      {
+        "id": "gm305",
+        "expected": "skip",
+        "expected_scope": "none",
+        "baseline_retrieve": false,
+        "score": 0.6132838312770078
+      },
+      {
+        "id": "gm306",
+        "expected": "skip",
+        "expected_scope": "none",
+        "baseline_retrieve": false,
+        "score": 0.04894335140723715
+      },
+      {
+        "id": "gm307",
+        "expected": "skip",
+        "expected_scope": "none",
+        "baseline_retrieve": false,
+        "score": 0.058929478416983844
+      }
+    ]
+  },
+  "revised": {
+    "metrics": {
+      "wrong_skip": {
+        "numerator": 4,
+        "denominator": 9,
+        "rate": 0.4444
+      },
+      "false_retrieve": {
+        "numerator": 0,
+        "denominator": 3,
+        "rate": 0.0
+      },
+      "promoted_outside_course_scope": 0
+    },
+    "rows": [
+      {
+        "id": "gm296",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.945958190068914
+      },
+      {
+        "id": "gm297",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.5754453115297947
+      },
+      {
+        "id": "gm298",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9567768609403702
+      },
+      {
+        "id": "gm299",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9379325858478467
+      },
+      {
+        "id": "gm300",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": true,
+        "score": null
+      },
+      {
+        "id": "gm301",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9817649988983386
+      },
+      {
+        "id": "gm302",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9425082452504252
+      },
+      {
+        "id": "gm303",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.8962527909222366
+      },
+      {
+        "id": "gm304",
+        "expected": "retrieve",
+        "expected_scope": "course",
+        "baseline_retrieve": false,
+        "score": 0.9359618672742744
+      },
+      {
+        "id": "gm305",
+        "expected": "skip",
+        "expected_scope": "none",
+        "baseline_retrieve": false,
+        "score": 0.17177387560087812
+      },
+      {
+        "id": "gm306",
+        "expected": "skip",
+        "expected_scope": "none",
+        "baseline_retrieve": false,
+        "score": 0.03676288024366854
+      },
+      {
+        "id": "gm307",
+        "expected": "skip",
+        "expected_scope": "none",
+        "baseline_retrieve": false,
+        "score": 0.5947467861994143
+      }
+    ]
+  }
+}

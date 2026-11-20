@@ -1,0 +1,1 @@
+wrote .agents/tasks/refactor-baseline/after/stub_snapshots.after.json

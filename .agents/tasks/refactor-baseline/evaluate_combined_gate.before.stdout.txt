@@ -1,0 +1,402 @@
+# Combined offline gate evaluation
+
+Rows: 295. The existing cutoffs were used and not tuned on these rows: the 0.8 default (settings.local_course_intent_threshold) and, for Laya Learn, the two cutoffs selected earlier on the calibration split. This script reads them and never fits or searches a cutoff.
+
+Arm (c) wording is a STUB MODEL BOUND, not a measurement: oracle flags exactly the rows labelled retrieve, mock_rule is the repo's keyword rule, flag_all flags every stamped turn. Only a live run measures whether the titles change a real model's flags.
+
+Intervals are Wilson 95%. Marks: S = fewer than 30 rows, VS = fewer than 10.
+
+Laya runtime here: cannot re-run (the 'laya' package is not installed; no --checkpoint was given).
+
+## Arm (a), all rows
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+
+### Arm (a) by category, all rows
+
+**Wrong skip by category**
+
+| Category | Rows | (a) gate |
+|---|---|---|
+| ambiguous_generic | 0 | n/a (0/0) |
+| attachment_question | 13 | 0/13 = 0.0% [0.0, 22.8] S |
+| course_content | 61 | 38/61 = 62.3% [49.8, 73.4] |
+| course_logistics | 11 | 10/11 = 90.9% [62.3, 98.4] S |
+| course_with_unrelated_upload | 4 | 1/4 = 25.0% [4.6, 69.9] VS |
+| follow_up | 9 | 7/9 = 77.8% [45.3, 93.7] VS |
+| greeting_thanks_chitchat | 0 | n/a (0/0) |
+| informal_or_multilingual | 8 | 7/8 = 87.5% [52.9, 97.8] VS |
+| mixed_project_and_course | 3 | 0/3 = 0.0% [0.0, 56.1] VS |
+| named_material | 13 | 1/13 = 7.7% [1.4, 33.3] S |
+| not_in_course_material | 0 | n/a (0/0) |
+| out_of_scope | 0 | n/a (0/0) |
+| procedural_ui | 0 | n/a (0/0) |
+| project_mentions_course | 0 | n/a (0/0) |
+| project_reasoning | 0 | n/a (0/0) |
+| stage_meta_guidance | 0 | n/a (0/0) |
+| stage_navigation | 0 | n/a (0/0) |
+| upload_and_course | 12 | 1/12 = 8.3% [1.5, 35.4] S |
+| upload_question | 20 | 11/20 = 55.0% [34.2, 74.2] S |
+
+**False retrieve by category**
+
+| Category | Rows | (a) gate |
+|---|---|---|
+| ambiguous_generic | 9 | 1/9 = 11.1% [2.0, 43.5] VS |
+| attachment_question | 0 | n/a (0/0) |
+| course_content | 0 | n/a (0/0) |
+| course_logistics | 0 | n/a (0/0) |
+| course_with_unrelated_upload | 0 | n/a (0/0) |
+| follow_up | 7 | 1/7 = 14.3% [2.6, 51.3] VS |
+| greeting_thanks_chitchat | 33 | 0/33 = 0.0% [0.0, 10.4] |
+| informal_or_multilingual | 0 | n/a (0/0) |
+| mixed_project_and_course | 0 | n/a (0/0) |
+| named_material | 0 | n/a (0/0) |
+| not_in_course_material | 4 | 1/4 = 25.0% [4.6, 69.9] VS |
+| out_of_scope | 7 | 1/7 = 14.3% [2.6, 51.3] VS |
+| procedural_ui | 20 | 2/20 = 10.0% [2.8, 30.1] S |
+| project_mentions_course | 9 | 1/9 = 11.1% [2.0, 43.5] VS |
+| project_reasoning | 31 | 0/31 = 0.0% [0.0, 11.0] |
+| stage_meta_guidance | 10 | 0/10 = 0.0% [0.0, 27.8] S |
+| stage_navigation | 11 | 0/11 = 0.0% [0.0, 25.9] S |
+| upload_and_course | 0 | n/a (0/0) |
+| upload_question | 0 | n/a (0/0) |
+
+## Laya source `laya_multilingual_0.8` (from stored results, not re-run)
+
+Laya checkpoint laya-multilingual, serial, stored cutoff 0.8. Cutoffs: {"threshold": 0.8}. File: /projects/sandbox/NUS-Codesign-Chatbot/.agents/tasks/phase3d-work/multilingual.json.
+
+Eligible rows 147 of 295; with a decision 94; without 53.
+
+Reproduces the stored summary: True ({"file": {"wrong_skip": [62, 109], "false_retrieve": [2, 60]}, "recomputed": {"wrong_skip": [62, 109], "false_retrieve": [2, 60]}, "match": true}).
+
+Consistency with the gate at this commit: {"stored_rows": 169, "ids_not_in_gate_set": [], "gate_mismatch_ids": [], "eligibility_mismatch_ids": [], "consistent": true}
+
+### Mode `floor`: unscored eligible rows are not promoted (the least Laya can do) (295 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 65/154 = 42.2% [34.7, 50.1] | 7/141 = 5.0% [2.4, 9.9] | 11 | 0 | 0 | 0 to 0 | 22,000 to 29,333 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/154 = 0.0% [0.0, 2.4] | 7/141 = 5.0% [2.4, 9.9] | 76 | 65 | 178 | 70,844 to 94,459 | 152,000 to 202,667 | 461,500 / 19,500 |
+| (c) + wording, stub bound `mock_rule` | 16/154 = 10.4% [6.5, 16.2] | 39/141 = 27.7% [20.9, 35.6] | 92 | 81 | 178 | 70,844 to 94,459 | 184,000 to 245,333 | 575,100 / 24,300 |
+| (c) + wording, stub bound `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 178 | 178 | 70,844 to 94,459 | 378,000 to 504,000 | 1,263,800 / 53,400 |
+
+**Wrong skip by category**
+
+| Category | Rows | (a) gate | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|---|---|
+| ambiguous_generic | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| attachment_question | 13 | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S |
+| course_content | 61 | 38/61 = 62.3% [49.8, 73.4] | 33/61 = 54.1% [41.7, 66.0] | 0/61 = 0.0% [0.0, 5.9] | 7/61 = 11.5% [5.7, 21.8] | 0/61 = 0.0% [0.0, 5.9] |
+| course_logistics | 11 | 10/11 = 90.9% [62.3, 98.4] S | 7/11 = 63.6% [35.4, 84.8] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S |
+| course_with_unrelated_upload | 4 | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 0/4 = 0.0% [0.0, 49.0] VS | 0/4 = 0.0% [0.0, 49.0] VS | 0/4 = 0.0% [0.0, 49.0] VS |
+| follow_up | 9 | 7/9 = 77.8% [45.3, 93.7] VS | 7/9 = 77.8% [45.3, 93.7] VS | 0/9 = 0.0% [0.0, 29.9] VS | 2/9 = 22.2% [6.3, 54.7] VS | 0/9 = 0.0% [0.0, 29.9] VS |
+| greeting_thanks_chitchat | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| informal_or_multilingual | 8 | 7/8 = 87.5% [52.9, 97.8] VS | 4/8 = 50.0% [21.5, 78.5] VS | 0/8 = 0.0% [0.0, 32.4] VS | 2/8 = 25.0% [7.1, 59.1] VS | 0/8 = 0.0% [0.0, 32.4] VS |
+| mixed_project_and_course | 3 | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS |
+| named_material | 13 | 1/13 = 7.7% [1.4, 33.3] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S |
+| not_in_course_material | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| out_of_scope | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| procedural_ui | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| project_mentions_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| project_reasoning | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| stage_meta_guidance | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| stage_navigation | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| upload_and_course | 12 | 1/12 = 8.3% [1.5, 35.4] S | 1/12 = 8.3% [1.5, 35.4] S | 0/12 = 0.0% [0.0, 24.2] S | 1/12 = 8.3% [1.5, 35.4] S | 0/12 = 0.0% [0.0, 24.2] S |
+| upload_question | 20 | 11/20 = 55.0% [34.2, 74.2] S | 11/20 = 55.0% [34.2, 74.2] S | 0/20 = 0.0% [0.0, 16.1] S | 3/20 = 15.0% [5.2, 36.0] S | 0/20 = 0.0% [0.0, 16.1] S |
+
+**False retrieve by category**
+
+| Category | Rows | (a) gate | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|---|---|
+| ambiguous_generic | 9 | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 8/9 = 88.9% [56.5, 98.0] VS | 9/9 = 100.0% [70.1, 100.0] VS |
+| attachment_question | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_content | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_logistics | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_with_unrelated_upload | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| follow_up | 7 | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 4/7 = 57.1% [25.1, 84.2] VS | 7/7 = 100.0% [64.6, 100.0] VS |
+| greeting_thanks_chitchat | 33 | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 2/33 = 6.1% [1.7, 19.6] | 33/33 = 100.0% [89.6, 100.0] |
+| informal_or_multilingual | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| mixed_project_and_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| named_material | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| not_in_course_material | 4 | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 4/4 = 100.0% [51.0, 100.0] VS | 4/4 = 100.0% [51.0, 100.0] VS |
+| out_of_scope | 7 | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 4/7 = 57.1% [25.1, 84.2] VS | 7/7 = 100.0% [64.6, 100.0] VS |
+| procedural_ui | 20 | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 15/20 = 75.0% [53.1, 88.8] S | 20/20 = 100.0% [83.9, 100.0] S |
+| project_mentions_course | 9 | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 9/9 = 100.0% [70.1, 100.0] VS |
+| project_reasoning | 31 | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 1/31 = 3.2% [0.6, 16.2] | 31/31 = 100.0% [89.0, 100.0] |
+| stage_meta_guidance | 10 | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S |
+| stage_navigation | 11 | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S |
+| upload_and_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| upload_question | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+
+**Extra calls and tokens by category** (per cell: extra searches / extra model calls / rule stamped on turns / rule + titles tokens 4 to 3 cpt / excerpt tokens upper bound 4 to 3 cpt)
+
+| Category | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|
+| ambiguous_generic | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 7 / 7 / 8 / 3,184 to 4,245 / 14,000 to 18,667 | 8 / 8 / 8 / 3,184 to 4,245 / 16,000 to 21,333 |
+| attachment_question | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| course_content | 5 / 0 / 0 / 0 to 0 / 10,000 to 13,333 | 38 / 33 / 33 / 13,134 to 17,512 / 76,000 to 101,333 | 31 / 26 / 33 / 13,134 to 17,512 / 62,000 to 82,667 | 38 / 33 / 33 / 13,134 to 17,512 / 76,000 to 101,333 |
+| course_logistics | 3 / 0 / 0 / 0 to 0 / 6,000 to 8,000 | 10 / 7 / 7 / 2,786 to 3,715 / 20,000 to 26,667 | 10 / 7 / 7 / 2,786 to 3,715 / 20,000 to 26,667 | 10 / 7 / 7 / 2,786 to 3,715 / 20,000 to 26,667 |
+| course_with_unrelated_upload | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| follow_up | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 7 / 7 / 13 / 5,174 to 6,899 / 14,000 to 18,667 | 8 / 8 / 13 / 5,174 to 6,899 / 16,000 to 21,333 | 13 / 13 / 13 / 5,174 to 6,899 / 26,000 to 34,667 |
+| greeting_thanks_chitchat | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 33 / 13,134 to 17,512 / 0 to 0 | 2 / 2 / 33 / 13,134 to 17,512 / 4,000 to 5,333 | 33 / 33 / 33 / 13,134 to 17,512 / 66,000 to 88,000 |
+| informal_or_multilingual | 3 / 0 / 0 / 0 to 0 / 6,000 to 8,000 | 7 / 4 / 4 / 1,592 to 2,123 / 14,000 to 18,667 | 5 / 2 / 4 / 1,592 to 2,123 / 10,000 to 13,333 | 7 / 4 / 4 / 1,592 to 2,123 / 14,000 to 18,667 |
+| mixed_project_and_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| named_material | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 0 / 0 / 1 / 398 to 531 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| not_in_course_material | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 3 / 1,194 to 1,592 / 0 to 0 | 3 / 3 / 3 / 1,194 to 1,592 / 6,000 to 8,000 | 3 / 3 / 3 / 1,194 to 1,592 / 6,000 to 8,000 |
+| out_of_scope | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 6 / 2,388 to 3,184 / 0 to 0 | 3 / 3 / 6 / 2,388 to 3,184 / 6,000 to 8,000 | 6 / 6 / 6 / 2,388 to 3,184 / 12,000 to 16,000 |
+| procedural_ui | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 18 / 7,164 to 9,552 / 0 to 0 | 13 / 13 / 18 / 7,164 to 9,552 / 26,000 to 34,667 | 18 / 18 / 18 / 7,164 to 9,552 / 36,000 to 48,000 |
+| project_mentions_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 8 / 8 / 8 / 3,184 to 4,245 / 16,000 to 21,333 |
+| project_reasoning | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 31 / 12,338 to 16,451 / 0 to 0 | 1 / 1 / 31 / 12,338 to 16,451 / 2,000 to 2,667 | 31 / 31 / 31 / 12,338 to 16,451 / 62,000 to 82,667 |
+| stage_meta_guidance | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| stage_navigation | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| upload_and_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 0 / 0 / 1 / 398 to 531 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| upload_question | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 11 / 11 / 11 / 4,378 to 5,837 / 22,000 to 29,333 | 8 / 8 / 11 / 4,378 to 5,837 / 16,000 to 21,333 | 11 / 11 / 11 / 4,378 to 5,837 / 22,000 to 29,333 |
+
+### Mode `ceiling`: unscored eligible rows are all promoted (the most Laya can do) (295 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 64/154 = 41.6% [34.1, 49.5] | 59/141 = 41.8% [34.0, 50.1] | 64 | 0 | 0 | 0 to 0 | 128,000 to 170,667 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/154 = 0.0% [0.0, 2.4] | 59/141 = 41.8% [34.0, 50.1] | 128 | 64 | 125 | 49,750 to 66,333 | 256,000 to 341,333 | 454,400 / 19,200 |
+| (c) + wording, stub bound `mock_rule` | 15/154 = 9.7% [6.0, 15.4] | 76/141 = 53.9% [45.7, 61.9] | 130 | 66 | 125 | 49,750 to 66,333 | 260,000 to 346,667 | 468,600 / 19,800 |
+| (c) + wording, stub bound `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 125 | 125 | 49,750 to 66,333 | 378,000 to 504,000 | 887,500 / 37,500 |
+
+### Mode `scored_only`: unscored eligible rows are left out; every kept row has an exact decision (242 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 75/153 = 49.0% [41.2, 56.9] | 7/89 = 7.9% [3.9, 15.4] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 64/153 = 41.8% [34.3, 49.8] | 7/89 = 7.9% [3.9, 15.4] | 11 | 0 | 0 | 0 to 0 | 22,000 to 29,333 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/153 = 0.0% [0.0, 2.5] | 7/89 = 7.9% [3.9, 15.4] | 75 | 64 | 125 | 49,750 to 66,333 | 150,000 to 200,000 | 454,400 / 19,200 |
+| (c) + wording, stub bound `mock_rule` | 15/153 = 9.8% [6.0, 15.6] | 24/89 = 27.0% [18.8, 37.0] | 77 | 66 | 125 | 49,750 to 66,333 | 154,000 to 205,333 | 468,600 / 19,800 |
+| (c) + wording, stub bound `flag_all` | 0/153 = 0.0% [0.0, 2.5] | 68/89 = 76.4% [66.6, 84.0] | 136 | 125 | 125 | 49,750 to 66,333 | 272,000 to 362,667 | 887,500 / 37,500 |
+
+## Laya source `laya_typed_decisions_0.8` (from stored results, not re-run)
+
+Laya checkpoint laya-typed-decisions, serial, stored cutoff 0.8. Cutoffs: {"threshold": 0.8}. File: /projects/sandbox/NUS-Codesign-Chatbot/.agents/tasks/phase3d-work/typed-decisions.json.
+
+Eligible rows 147 of 295; with a decision 94; without 53.
+
+Reproduces the stored summary: True ({"file": {"wrong_skip": [73, 109], "false_retrieve": [2, 60]}, "recomputed": {"wrong_skip": [73, 109], "false_retrieve": [2, 60]}, "match": true}).
+
+Consistency with the gate at this commit: {"stored_rows": 169, "ids_not_in_gate_set": [], "gate_mismatch_ids": [], "eligibility_mismatch_ids": [], "consistent": true}
+
+### Mode `floor`: unscored eligible rows are not promoted (the least Laya can do) (295 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/154 = 0.0% [0.0, 2.4] | 7/141 = 5.0% [2.4, 9.9] | 76 | 76 | 189 | 75,222 to 100,296 | 152,000 to 202,667 | 539,600 / 22,800 |
+| (c) + wording, stub bound `mock_rule` | 19/154 = 12.3% [8.0, 18.5] | 39/141 = 27.7% [20.9, 35.6] | 89 | 89 | 189 | 75,222 to 100,296 | 178,000 to 237,333 | 631,900 / 26,700 |
+| (c) + wording, stub bound `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 189 | 189 | 75,222 to 100,296 | 378,000 to 504,000 | 1,341,900 / 56,700 |
+
+**Wrong skip by category**
+
+| Category | Rows | (a) gate | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|---|---|
+| ambiguous_generic | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| attachment_question | 13 | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S |
+| course_content | 61 | 38/61 = 62.3% [49.8, 73.4] | 38/61 = 62.3% [49.8, 73.4] | 0/61 = 0.0% [0.0, 5.9] | 8/61 = 13.1% [6.8, 23.8] | 0/61 = 0.0% [0.0, 5.9] |
+| course_logistics | 11 | 10/11 = 90.9% [62.3, 98.4] S | 10/11 = 90.9% [62.3, 98.4] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S |
+| course_with_unrelated_upload | 4 | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 0/4 = 0.0% [0.0, 49.0] VS | 0/4 = 0.0% [0.0, 49.0] VS | 0/4 = 0.0% [0.0, 49.0] VS |
+| follow_up | 9 | 7/9 = 77.8% [45.3, 93.7] VS | 7/9 = 77.8% [45.3, 93.7] VS | 0/9 = 0.0% [0.0, 29.9] VS | 2/9 = 22.2% [6.3, 54.7] VS | 0/9 = 0.0% [0.0, 29.9] VS |
+| greeting_thanks_chitchat | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| informal_or_multilingual | 8 | 7/8 = 87.5% [52.9, 97.8] VS | 7/8 = 87.5% [52.9, 97.8] VS | 0/8 = 0.0% [0.0, 32.4] VS | 4/8 = 50.0% [21.5, 78.5] VS | 0/8 = 0.0% [0.0, 32.4] VS |
+| mixed_project_and_course | 3 | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS |
+| named_material | 13 | 1/13 = 7.7% [1.4, 33.3] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S |
+| not_in_course_material | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| out_of_scope | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| procedural_ui | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| project_mentions_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| project_reasoning | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| stage_meta_guidance | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| stage_navigation | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| upload_and_course | 12 | 1/12 = 8.3% [1.5, 35.4] S | 1/12 = 8.3% [1.5, 35.4] S | 0/12 = 0.0% [0.0, 24.2] S | 1/12 = 8.3% [1.5, 35.4] S | 0/12 = 0.0% [0.0, 24.2] S |
+| upload_question | 20 | 11/20 = 55.0% [34.2, 74.2] S | 11/20 = 55.0% [34.2, 74.2] S | 0/20 = 0.0% [0.0, 16.1] S | 3/20 = 15.0% [5.2, 36.0] S | 0/20 = 0.0% [0.0, 16.1] S |
+
+**False retrieve by category**
+
+| Category | Rows | (a) gate | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|---|---|
+| ambiguous_generic | 9 | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 8/9 = 88.9% [56.5, 98.0] VS | 9/9 = 100.0% [70.1, 100.0] VS |
+| attachment_question | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_content | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_logistics | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_with_unrelated_upload | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| follow_up | 7 | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 4/7 = 57.1% [25.1, 84.2] VS | 7/7 = 100.0% [64.6, 100.0] VS |
+| greeting_thanks_chitchat | 33 | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 2/33 = 6.1% [1.7, 19.6] | 33/33 = 100.0% [89.6, 100.0] |
+| informal_or_multilingual | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| mixed_project_and_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| named_material | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| not_in_course_material | 4 | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 4/4 = 100.0% [51.0, 100.0] VS | 4/4 = 100.0% [51.0, 100.0] VS |
+| out_of_scope | 7 | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 4/7 = 57.1% [25.1, 84.2] VS | 7/7 = 100.0% [64.6, 100.0] VS |
+| procedural_ui | 20 | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 15/20 = 75.0% [53.1, 88.8] S | 20/20 = 100.0% [83.9, 100.0] S |
+| project_mentions_course | 9 | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 9/9 = 100.0% [70.1, 100.0] VS |
+| project_reasoning | 31 | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 1/31 = 3.2% [0.6, 16.2] | 31/31 = 100.0% [89.0, 100.0] |
+| stage_meta_guidance | 10 | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S |
+| stage_navigation | 11 | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S |
+| upload_and_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| upload_question | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+
+**Extra calls and tokens by category** (per cell: extra searches / extra model calls / rule stamped on turns / rule + titles tokens 4 to 3 cpt / excerpt tokens upper bound 4 to 3 cpt)
+
+| Category | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|
+| ambiguous_generic | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 7 / 7 / 8 / 3,184 to 4,245 / 14,000 to 18,667 | 8 / 8 / 8 / 3,184 to 4,245 / 16,000 to 21,333 |
+| attachment_question | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| course_content | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 38 / 38 / 38 / 15,124 to 20,165 / 76,000 to 101,333 | 30 / 30 / 38 / 15,124 to 20,165 / 60,000 to 80,000 | 38 / 38 / 38 / 15,124 to 20,165 / 76,000 to 101,333 |
+| course_logistics | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 10 / 10 / 10 / 3,980 to 5,307 / 20,000 to 26,667 | 10 / 10 / 10 / 3,980 to 5,307 / 20,000 to 26,667 | 10 / 10 / 10 / 3,980 to 5,307 / 20,000 to 26,667 |
+| course_with_unrelated_upload | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| follow_up | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 7 / 7 / 13 / 5,174 to 6,899 / 14,000 to 18,667 | 8 / 8 / 13 / 5,174 to 6,899 / 16,000 to 21,333 | 13 / 13 / 13 / 5,174 to 6,899 / 26,000 to 34,667 |
+| greeting_thanks_chitchat | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 33 / 13,134 to 17,512 / 0 to 0 | 2 / 2 / 33 / 13,134 to 17,512 / 4,000 to 5,333 | 33 / 33 / 33 / 13,134 to 17,512 / 66,000 to 88,000 |
+| informal_or_multilingual | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 7 / 7 / 7 / 2,786 to 3,715 / 14,000 to 18,667 | 3 / 3 / 7 / 2,786 to 3,715 / 6,000 to 8,000 | 7 / 7 / 7 / 2,786 to 3,715 / 14,000 to 18,667 |
+| mixed_project_and_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| named_material | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 0 / 0 / 1 / 398 to 531 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| not_in_course_material | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 3 / 1,194 to 1,592 / 0 to 0 | 3 / 3 / 3 / 1,194 to 1,592 / 6,000 to 8,000 | 3 / 3 / 3 / 1,194 to 1,592 / 6,000 to 8,000 |
+| out_of_scope | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 6 / 2,388 to 3,184 / 0 to 0 | 3 / 3 / 6 / 2,388 to 3,184 / 6,000 to 8,000 | 6 / 6 / 6 / 2,388 to 3,184 / 12,000 to 16,000 |
+| procedural_ui | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 18 / 7,164 to 9,552 / 0 to 0 | 13 / 13 / 18 / 7,164 to 9,552 / 26,000 to 34,667 | 18 / 18 / 18 / 7,164 to 9,552 / 36,000 to 48,000 |
+| project_mentions_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 8 / 8 / 8 / 3,184 to 4,245 / 16,000 to 21,333 |
+| project_reasoning | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 31 / 12,338 to 16,451 / 0 to 0 | 1 / 1 / 31 / 12,338 to 16,451 / 2,000 to 2,667 | 31 / 31 / 31 / 12,338 to 16,451 / 62,000 to 82,667 |
+| stage_meta_guidance | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| stage_navigation | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| upload_and_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 0 / 0 / 1 / 398 to 531 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| upload_question | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 11 / 11 / 11 / 4,378 to 5,837 / 22,000 to 29,333 | 8 / 8 / 11 / 4,378 to 5,837 / 16,000 to 21,333 | 11 / 11 / 11 / 4,378 to 5,837 / 22,000 to 29,333 |
+
+### Mode `ceiling`: unscored eligible rows are all promoted (the most Laya can do) (295 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 75/154 = 48.7% [40.9, 56.5] | 59/141 = 41.8% [34.0, 50.1] | 53 | 0 | 0 | 0 to 0 | 106,000 to 141,333 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/154 = 0.0% [0.0, 2.4] | 59/141 = 41.8% [34.0, 50.1] | 128 | 75 | 136 | 54,128 to 72,171 | 256,000 to 341,333 | 532,500 / 22,500 |
+| (c) + wording, stub bound `mock_rule` | 18/154 = 11.7% [7.5, 17.7] | 76/141 = 53.9% [45.7, 61.9] | 127 | 74 | 136 | 54,128 to 72,171 | 254,000 to 338,667 | 525,400 / 22,200 |
+| (c) + wording, stub bound `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 136 | 136 | 54,128 to 72,171 | 378,000 to 504,000 | 965,600 / 40,800 |
+
+### Mode `scored_only`: unscored eligible rows are left out; every kept row has an exact decision (242 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 75/153 = 49.0% [41.2, 56.9] | 7/89 = 7.9% [3.9, 15.4] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 75/153 = 49.0% [41.2, 56.9] | 7/89 = 7.9% [3.9, 15.4] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/153 = 0.0% [0.0, 2.5] | 7/89 = 7.9% [3.9, 15.4] | 75 | 75 | 136 | 54,128 to 72,171 | 150,000 to 200,000 | 532,500 / 22,500 |
+| (c) + wording, stub bound `mock_rule` | 18/153 = 11.8% [7.6, 17.8] | 24/89 = 27.0% [18.8, 37.0] | 74 | 74 | 136 | 54,128 to 72,171 | 148,000 to 197,333 | 525,400 / 22,200 |
+| (c) + wording, stub bound `flag_all` | 0/153 = 0.0% [0.0, 2.5] | 68/89 = 76.4% [66.6, 84.0] | 136 | 136 | 136 | 54,128 to 72,171 | 272,000 to 362,667 | 965,600 / 40,800 |
+
+## Laya source `laya_learn_per_turn_holdout` (from stored results, not re-run)
+
+Laya Learn, per-turn cutoffs, 84 holdout rows. Cutoffs: {"learn": 0.8563768182025443, "learn_first_turn": 0.6455845832824707}. File: /projects/sandbox/NUS-Codesign-Chatbot/.agents/tasks/phase3d-work/course-intent-by-turn.json.
+
+Eligible rows 147 of 295; with a decision 41; without 106.
+
+Reproduces the stored summary: True ({"file": {"wrong_skip": [15, 51], "false_retrieve": [2, 33]}, "recomputed": {"wrong_skip": [15, 51], "false_retrieve": [2, 33]}, "match": true}).
+
+Consistency with the gate at this commit: {"stored_rows": 84, "ids_not_in_gate_set": [], "gate_mismatch_ids": [], "eligibility_mismatch_ids": [], "consistent": true}
+
+### Mode `floor`: unscored eligible rows are not promoted (the least Laya can do) (295 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 67/154 = 43.5% [35.9, 51.4] | 7/141 = 5.0% [2.4, 9.9] | 9 | 0 | 0 | 0 to 0 | 18,000 to 24,000 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/154 = 0.0% [0.0, 2.4] | 7/141 = 5.0% [2.4, 9.9] | 76 | 67 | 180 | 71,640 to 95,520 | 152,000 to 202,667 | 475,700 / 20,100 |
+| (c) + wording, stub bound `mock_rule` | 18/154 = 11.7% [7.5, 17.7] | 39/141 = 27.7% [20.9, 35.6] | 90 | 81 | 180 | 71,640 to 95,520 | 180,000 to 240,000 | 575,100 / 24,300 |
+| (c) + wording, stub bound `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 180 | 180 | 71,640 to 95,520 | 378,000 to 504,000 | 1,278,000 / 54,000 |
+
+**Wrong skip by category**
+
+| Category | Rows | (a) gate | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|---|---|
+| ambiguous_generic | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| attachment_question | 13 | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S | 0/13 = 0.0% [0.0, 22.8] S |
+| course_content | 61 | 38/61 = 62.3% [49.8, 73.4] | 32/61 = 52.5% [40.2, 64.5] | 0/61 = 0.0% [0.0, 5.9] | 7/61 = 11.5% [5.7, 21.8] | 0/61 = 0.0% [0.0, 5.9] |
+| course_logistics | 11 | 10/11 = 90.9% [62.3, 98.4] S | 8/11 = 72.7% [43.4, 90.2] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S |
+| course_with_unrelated_upload | 4 | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 0/4 = 0.0% [0.0, 49.0] VS | 0/4 = 0.0% [0.0, 49.0] VS | 0/4 = 0.0% [0.0, 49.0] VS |
+| follow_up | 9 | 7/9 = 77.8% [45.3, 93.7] VS | 7/9 = 77.8% [45.3, 93.7] VS | 0/9 = 0.0% [0.0, 29.9] VS | 2/9 = 22.2% [6.3, 54.7] VS | 0/9 = 0.0% [0.0, 29.9] VS |
+| greeting_thanks_chitchat | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| informal_or_multilingual | 8 | 7/8 = 87.5% [52.9, 97.8] VS | 6/8 = 75.0% [40.9, 92.8] VS | 0/8 = 0.0% [0.0, 32.4] VS | 4/8 = 50.0% [21.5, 78.5] VS | 0/8 = 0.0% [0.0, 32.4] VS |
+| mixed_project_and_course | 3 | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS | 0/3 = 0.0% [0.0, 56.1] VS |
+| named_material | 13 | 1/13 = 7.7% [1.4, 33.3] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S | 1/13 = 7.7% [1.4, 33.3] S | 0/13 = 0.0% [0.0, 22.8] S |
+| not_in_course_material | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| out_of_scope | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| procedural_ui | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| project_mentions_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| project_reasoning | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| stage_meta_guidance | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| stage_navigation | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| upload_and_course | 12 | 1/12 = 8.3% [1.5, 35.4] S | 1/12 = 8.3% [1.5, 35.4] S | 0/12 = 0.0% [0.0, 24.2] S | 1/12 = 8.3% [1.5, 35.4] S | 0/12 = 0.0% [0.0, 24.2] S |
+| upload_question | 20 | 11/20 = 55.0% [34.2, 74.2] S | 11/20 = 55.0% [34.2, 74.2] S | 0/20 = 0.0% [0.0, 16.1] S | 3/20 = 15.0% [5.2, 36.0] S | 0/20 = 0.0% [0.0, 16.1] S |
+
+**False retrieve by category**
+
+| Category | Rows | (a) gate | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|---|---|
+| ambiguous_generic | 9 | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 8/9 = 88.9% [56.5, 98.0] VS | 9/9 = 100.0% [70.1, 100.0] VS |
+| attachment_question | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_content | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_logistics | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| course_with_unrelated_upload | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| follow_up | 7 | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 4/7 = 57.1% [25.1, 84.2] VS | 7/7 = 100.0% [64.6, 100.0] VS |
+| greeting_thanks_chitchat | 33 | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 0/33 = 0.0% [0.0, 10.4] | 2/33 = 6.1% [1.7, 19.6] | 33/33 = 100.0% [89.6, 100.0] |
+| informal_or_multilingual | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| mixed_project_and_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| named_material | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| not_in_course_material | 4 | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 1/4 = 25.0% [4.6, 69.9] VS | 4/4 = 100.0% [51.0, 100.0] VS | 4/4 = 100.0% [51.0, 100.0] VS |
+| out_of_scope | 7 | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 1/7 = 14.3% [2.6, 51.3] VS | 4/7 = 57.1% [25.1, 84.2] VS | 7/7 = 100.0% [64.6, 100.0] VS |
+| procedural_ui | 20 | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 2/20 = 10.0% [2.8, 30.1] S | 15/20 = 75.0% [53.1, 88.8] S | 20/20 = 100.0% [83.9, 100.0] S |
+| project_mentions_course | 9 | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 1/9 = 11.1% [2.0, 43.5] VS | 9/9 = 100.0% [70.1, 100.0] VS |
+| project_reasoning | 31 | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 0/31 = 0.0% [0.0, 11.0] | 1/31 = 3.2% [0.6, 16.2] | 31/31 = 100.0% [89.0, 100.0] |
+| stage_meta_guidance | 10 | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S | 0/10 = 0.0% [0.0, 27.8] S |
+| stage_navigation | 11 | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S | 0/11 = 0.0% [0.0, 25.9] S |
+| upload_and_course | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+| upload_question | 0 | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) | n/a (0/0) |
+
+**Extra calls and tokens by category** (per cell: extra searches / extra model calls / rule stamped on turns / rule + titles tokens 4 to 3 cpt / excerpt tokens upper bound 4 to 3 cpt)
+
+| Category | (b) gate + Laya | (c) + wording, stub bound `oracle` | (c) + wording, stub bound `mock_rule` | (c) + wording, stub bound `flag_all` |
+|---|---|---|---|---|
+| ambiguous_generic | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 7 / 7 / 8 / 3,184 to 4,245 / 14,000 to 18,667 | 8 / 8 / 8 / 3,184 to 4,245 / 16,000 to 21,333 |
+| attachment_question | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| course_content | 6 / 0 / 0 / 0 to 0 / 12,000 to 16,000 | 38 / 32 / 32 / 12,736 to 16,981 / 76,000 to 101,333 | 31 / 25 / 32 / 12,736 to 16,981 / 62,000 to 82,667 | 38 / 32 / 32 / 12,736 to 16,981 / 76,000 to 101,333 |
+| course_logistics | 2 / 0 / 0 / 0 to 0 / 4,000 to 5,333 | 10 / 8 / 8 / 3,184 to 4,245 / 20,000 to 26,667 | 10 / 8 / 8 / 3,184 to 4,245 / 20,000 to 26,667 | 10 / 8 / 8 / 3,184 to 4,245 / 20,000 to 26,667 |
+| course_with_unrelated_upload | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| follow_up | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 7 / 7 / 13 / 5,174 to 6,899 / 14,000 to 18,667 | 8 / 8 / 13 / 5,174 to 6,899 / 16,000 to 21,333 | 13 / 13 / 13 / 5,174 to 6,899 / 26,000 to 34,667 |
+| greeting_thanks_chitchat | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 33 / 13,134 to 17,512 / 0 to 0 | 2 / 2 / 33 / 13,134 to 17,512 / 4,000 to 5,333 | 33 / 33 / 33 / 13,134 to 17,512 / 66,000 to 88,000 |
+| informal_or_multilingual | 1 / 0 / 0 / 0 to 0 / 2,000 to 2,667 | 7 / 6 / 6 / 2,388 to 3,184 / 14,000 to 18,667 | 3 / 2 / 6 / 2,388 to 3,184 / 6,000 to 8,000 | 7 / 6 / 6 / 2,388 to 3,184 / 14,000 to 18,667 |
+| mixed_project_and_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| named_material | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 0 / 0 / 1 / 398 to 531 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| not_in_course_material | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 3 / 1,194 to 1,592 / 0 to 0 | 3 / 3 / 3 / 1,194 to 1,592 / 6,000 to 8,000 | 3 / 3 / 3 / 1,194 to 1,592 / 6,000 to 8,000 |
+| out_of_scope | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 6 / 2,388 to 3,184 / 0 to 0 | 3 / 3 / 6 / 2,388 to 3,184 / 6,000 to 8,000 | 6 / 6 / 6 / 2,388 to 3,184 / 12,000 to 16,000 |
+| procedural_ui | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 18 / 7,164 to 9,552 / 0 to 0 | 13 / 13 / 18 / 7,164 to 9,552 / 26,000 to 34,667 | 18 / 18 / 18 / 7,164 to 9,552 / 36,000 to 48,000 |
+| project_mentions_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 0 / 0 / 8 / 3,184 to 4,245 / 0 to 0 | 8 / 8 / 8 / 3,184 to 4,245 / 16,000 to 21,333 |
+| project_reasoning | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 31 / 12,338 to 16,451 / 0 to 0 | 1 / 1 / 31 / 12,338 to 16,451 / 2,000 to 2,667 | 31 / 31 / 31 / 12,338 to 16,451 / 62,000 to 82,667 |
+| stage_meta_guidance | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| stage_navigation | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 0 / 0 / 0 / 0 to 0 / 0 to 0 |
+| upload_and_course | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 | 0 / 0 / 1 / 398 to 531 / 0 to 0 | 1 / 1 / 1 / 398 to 531 / 2,000 to 2,667 |
+| upload_question | 0 / 0 / 0 / 0 to 0 / 0 to 0 | 11 / 11 / 11 / 4,378 to 5,837 / 22,000 to 29,333 | 8 / 8 / 11 / 4,378 to 5,837 / 16,000 to 21,333 | 11 / 11 / 11 / 4,378 to 5,837 / 22,000 to 29,333 |
+
+### Mode `ceiling`: unscored eligible rows are all promoted (the most Laya can do) (295 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 76/154 = 49.4% [41.6, 57.2] | 7/141 = 5.0% [2.4, 9.9] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 27/154 = 17.5% [12.3, 24.3] | 73/141 = 51.8% [43.6, 59.9] | 115 | 0 | 0 | 0 to 0 | 230,000 to 306,667 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/154 = 0.0% [0.0, 2.4] | 73/141 = 51.8% [43.6, 59.9] | 142 | 27 | 74 | 29,452 to 39,269 | 284,000 to 378,667 | 191,700 / 8,100 |
+| (c) + wording, stub bound `mock_rule` | 9/154 = 5.8% [3.1, 10.7] | 84/141 = 59.6% [51.3, 67.3] | 144 | 29 | 74 | 29,452 to 39,269 | 288,000 to 384,000 | 205,900 / 8,700 |
+| (c) + wording, stub bound `flag_all` | 0/154 = 0.0% [0.0, 2.4] | 120/141 = 85.1% [78.3, 90.0] | 189 | 74 | 74 | 29,452 to 39,269 | 378,000 to 504,000 | 525,400 / 22,200 |
+
+### Mode `scored_only`: unscored eligible rows are left out; every kept row has an exact decision (189 rows)
+
+| Arm | Wrong skip | False retrieve | Extra searches | Extra model calls (stub) | Rule stamped on turns | Rule + titles prompt tokens (4 to 3 chars/token, estimate) | Excerpt tokens, upper bound (4 to 3 chars/token) | Second-call tokens in/out (estimate) |
+|---|---|---|---|---|---|---|---|---|
+| (a) gate | 36/114 = 31.6% [23.8, 40.6] | 7/75 = 9.3% [4.6, 18.0] | 0 | 0 | 0 | 0 to 0 | 0 to 0 | 0 / 0 |
+| (b) gate + Laya | 27/114 = 23.7% [16.8, 32.3] | 7/75 = 9.3% [4.6, 18.0] | 9 | 0 | 0 | 0 to 0 | 18,000 to 24,000 | 0 / 0 |
+| (c) + wording, stub bound `oracle` | 0/114 = 0.0% [0.0, 3.3] | 7/75 = 9.3% [4.6, 18.0] | 36 | 27 | 74 | 29,452 to 39,269 | 72,000 to 96,000 | 191,700 / 8,100 |
+| (c) + wording, stub bound `mock_rule` | 9/114 = 7.9% [4.2, 14.3] | 18/75 = 24.0% [15.8, 34.8] | 38 | 29 | 74 | 29,452 to 39,269 | 76,000 to 101,333 | 205,900 / 8,700 |
+| (c) + wording, stub bound `flag_all` | 0/114 = 0.0% [0.0, 3.3] | 54/75 = 72.0% [61.0, 80.9] | 83 | 74 | 74 | 29,452 to 39,269 | 166,000 to 221,333 | 525,400 / 22,200 |
+

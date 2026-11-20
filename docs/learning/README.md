@@ -18,7 +18,7 @@ This is a teaching companion to the existing architecture and operations documen
 | [6. Running without AWS and extending LangGraph](#6-running-without-aws-and-extending-langgraph) | What already works locally; replacement services; graph design; persistence and migration steps |
 | [7. Scaling, operations, and design decisions](#7-scaling-operations-and-architectural-tradeoffs) | Current limits, bottlenecks, capacity math, distributed coordination, queues, observability, cost and security |
 | [8. Interview preparation and learning exercises](#8-interview-preparation-and-a-practical-study-plan) | Short and detailed explanations, likely questions, honest contribution narratives, debugging exercises and glossary |
-| [Code-derived reference](REFERENCE.md) | Route inventory, full table definitions and indexes, module index, and dependency pins |
+| [Generate the code-derived reference](#generate-the-code-derived-reference) | Route inventory, full table definitions and indexes, module index, and dependency pins |
 
 Start with chapters 1–2 to understand the whole product. Read 3–5 while following the linked Python modules. Read 6–8 after you can explain a single request without using the phrase “the AI handles it.” The reference is for lookup, not sequential reading.
 
@@ -39,13 +39,15 @@ Start with chapters 1–2 to understand the whole product. Read 3–5 while foll
 
 No production changes, live model calls, student-data queries, or database migrations were made to prepare this handbook. Existing application test results are identified as historical. Documentation validation checks links, syntax/inventory extraction, and agreement with inspected code; it does not certify the running service.
 
-The appendix can be regenerated without importing application settings or accessing a database:
+## Generate the code-derived reference
+
+Generate the appendix from the current checkout without importing application settings or accessing a database:
 
 ```sh
 .venv/bin/python docs/learning/build_reference.py
 ```
 
-This command writes only `docs/learning/REFERENCE.md`. It parses source text and SQL string literals; it does not execute the application. Review the generated diff after code changes.
+This command writes only `docs/learning/REFERENCE.md`. It parses source text and SQL string literals; it does not execute the application. Open the generated file to browse the current inventory. Git ignores this output.
 
 
 ## 1. System and services
@@ -121,7 +123,7 @@ The checked Compose file uses the Docker `json-file` logging driver with rotatio
 
 **psycopg** connects Python to the PostgreSQL-compatible DSQL interface. **boto3/botocore** call AWS APIs. The local database path uses Python's SQLite facilities. These are infrastructure adapters, not domain rules.
 
-Repository package pins are listed in the [reference appendix](REFERENCE.md). The FastAPI image and AgentCore runtime have separate dependency manifests and must be validated separately.
+Repository package pins are listed in the [generated reference appendix](#generate-the-code-derived-reference). The FastAPI image and AgentCore runtime have separate dependency manifests and must be validated separately.
 
 ### 1.5 Application service ownership
 
@@ -295,7 +297,7 @@ This is an example, not a credentialed command. Omit source/history fields unles
 | Review | `POST/GET /api/v1/threads/{thread_id}/deep-review` | Enqueue or inspect explicit review job |
 | Lecturer | `/api/v1/professor/...` | Protected aggregates, notebook evidence, research review |
 
-The [reference](REFERENCE.md) lists all literal route registrations, handlers, declared responses, and dependency defaults. Some routes exist conditionally. The list is not a claim that all routes are reachable on the public hostname.
+The [generated reference](#generate-the-code-derived-reference) lists all literal route registrations, handlers, declared responses, and dependency defaults. Some routes exist conditionally. The list is not a claim that all routes are reachable on the public hostname.
 
 ### 2.7 Streaming: what actually travels?
 
@@ -306,6 +308,8 @@ The route returns `application/x-ndjson`: newline-delimited JSON. Each line is a
 {"event":"status","phase":"example-phase","label":"Example progress label"}
 {"event":"done","turn":{"response_text":"...","assessment":{}}}
 ```
+
+Two further events exist for clients that opt in (header `X-Coach-Reply-Deltas: 1`, with `COACH_STREAM_REPLY_DELTAS_ENABLED` on, default off): `{"event":"reply_delta","text":"..."}` carries an unvalidated, ephemeral fragment of the reply being generated, and `{"event":"reply_discard"}` withdraws every fragment so far. `reply_ready` remains the validated reply and `done` the only saved acknowledgement. Only the mock and direct Bedrock Converse providers produce fragments; the AgentCore Runtime path returns one JSON object and sends none.
 
 The last example abbreviates the required assessment fields; it is not a valid standalone `CoachTurn` fixture. Actual code also emits a small `graph` summary and structured `error` events. The `example-phase` value is illustrative, not a real progress enum.
 
@@ -493,7 +497,7 @@ Locally the project uses **SQLite**, an embedded SQL database stored in a file. 
 
 Structured data stays in SQL; large file bytes stay in object storage. A source row stores an object key such as `users/<owner>/notebooks/<notebook>/sources/<source>/raw/notes.pdf`. That key locates an S3 object in production or a corresponding file through the local adapter. SQL does not need a binary copy of the PDF to manage selection and ownership.
 
-The current schema has **ten tables**, not five. The exact definitions and indexes are included in the [reference](REFERENCE.md), extracted from [SQLite schema](../../backend/persistence/store/sqlite_schema.py) and [DSQL schema](../../backend/persistence/dsql_schema.py).
+The current schema has **ten tables**, not five. The exact definitions and indexes are included in the [generated reference](#generate-the-code-derived-reference), extracted from [SQLite schema](../../backend/persistence/store/sqlite_schema.py) and [DSQL schema](../../backend/persistence/dsql_schema.py).
 
 ### 4.2 Every table and why it exists
 
@@ -1237,7 +1241,7 @@ Check the app image's immutable Git revision and the actual AgentCore DEFAULT ve
 
 #### Q19. Is the UI streaming model tokens?
 
-The inspected coach route streams NDJSON progress and a final validated/persisted turn. It is not raw token streaming. A later stream error can appear inside an HTTP 200 response, so the client must process event types and terminal state.
+The inspected coach route streams NDJSON progress and a final validated/persisted turn. It is not raw token streaming unless the client opts in to `reply_delta` events (see 2.7), and then only for providers that can produce partial text; those fragments are never saved. A later stream error can appear inside an HTTP 200 response, so the client must process event types and terminal state.
 
 #### Q20. How do you protect students from each other?
 

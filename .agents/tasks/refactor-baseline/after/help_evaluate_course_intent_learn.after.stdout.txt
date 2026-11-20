@@ -1,0 +1,11 @@
+usage: evaluate_course_intent_learn.py [-h] --checkpoint CHECKPOINT
+                                       --bundle-output BUNDLE_OUTPUT
+                                       --json-output JSON_OUTPUT
+
+Fit and evaluate a fixed Laya Learn bundle on synthetic course messages.
+
+options:
+  -h, --help            show this help message and exit
+  --checkpoint CHECKPOINT
+  --bundle-output BUNDLE_OUTPUT
+  --json-output JSON_OUTPUT

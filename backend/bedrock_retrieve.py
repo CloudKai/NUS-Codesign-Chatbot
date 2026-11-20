@@ -38,6 +38,7 @@ from .settings import settings
 logger = logging.getLogger(__name__)
 
 _DEFAULT_RESULTS = 4
+_DEFAULT_CANDIDATES = 12
 _MAX_CONTEXT_CHARS = 16_000
 _DEFAULT_RETRIEVE_TIMEOUT_SECONDS = 10.0
 _RETRIEVE_CONNECT_TIMEOUT_SECONDS = 2.0
@@ -51,6 +52,9 @@ _retrieve_max_workers = 0
 _retrieve_admitted = 0
 _retrieve_occupancy_lock = threading.Lock()
 COURSE_MATERIAL_METADATA_KEY = "course_material_id"
+# Metadata attribute Bedrock Knowledge Bases add to each chunk when the
+# document was chunked (not "no chunking"). See docs/RETRIEVAL_EVAL.md.
+PAGE_NUMBER_METADATA_KEY = "x-amz-bedrock-kb-document-page-number"
 _S3_VIRTUAL_HOST = re.compile(
     r"^(?P<bucket>.+)\.s3(?:[.-](?:dualstack\.)?(?:[a-z0-9-]+))?\.amazonaws\.com$",
     re.IGNORECASE,
@@ -449,6 +453,41 @@ def _result_score(item: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _result_page(item: Mapping[str, Any]) -> int | None:
+    """Return the 1-based page of one Retrieve hit, or ``None`` when absent.
+
+    Reads the ``metadata`` attribute ``x-amz-bedrock-kb-document-page-number``.
+    The AWS reference documents ``metadata`` as a string-to-JSON-value map and
+    does not state the value type, so an int, an integral float and a digit
+    string are accepted. Booleans, fractions, zero, negatives and anything
+    else mean no page. Never raises and never guesses.
+
+    Args:
+        item: One ``retrievalResults`` element.
+
+    Returns:
+        A page number of 1 or more, or ``None``.
+    """
+    metadata = item.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return None
+    value = metadata.get(PAGE_NUMBER_METADATA_KEY)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not (cleaned.isascii() and cleaned.isdigit()):
+            return None
+        value = int(cleaned)
+    elif isinstance(value, float):
+        if not value.is_integer():
+            return None
+        value = int(value)
+    if isinstance(value, int) and value >= 1:
+        return value
+    return None
+
+
 def _course_material_ids(sources: tuple[RetrievalSource, ...]) -> list[str]:
     """Return unique selected course_material_id values for a KB metadata filter."""
     ordered: list[str] = []
@@ -501,6 +540,7 @@ class BedrockKnowledgeBaseRetriever:
         *,
         region: str = "us-west-2",
         number_of_results: int | None = None,
+        max_results: int | None = None,
         max_context_chars: int = _MAX_CONTEXT_CHARS,
         course_bucket: str = "",
         client: Any | None = None,
@@ -508,15 +548,19 @@ class BedrockKnowledgeBaseRetriever:
         knowledge_base_type: str | None = None,
         retrieve_timeout_seconds: float | None = None,
         metadata_filter_mode: str | None = None,
+        page_citations: bool | None = None,
     ) -> None:
         """Create the adapter with an injected or lazily constructed client.
 
         Args:
             knowledge_base_id: Bedrock Knowledge Base id (non-secret).
             region: AWS region for the data-plane client.
-            number_of_results: Retrieve ``numberOfResults``. Defaults to the
-                Fast Chat chunk budget so MANAGED search does not fetch unused
-                hits.
+            number_of_results: Retrieve ``numberOfResults``, the candidate
+                count. Defaults to ``KNOWLEDGE_BASE_RETRIEVE_CANDIDATES``
+                (12 to 16). Candidates are validated and then trimmed to
+                ``max_results``. Never lower than ``max_results``.
+            max_results: Validated chunks kept after ranking by score.
+                Defaults to the Fast Chat chunk budget.
             max_context_chars: Prompt budget after selected-source filtering.
             course_bucket: Required to accept a hit. Empty drops every hit
                 because the bucket cannot be positively confirmed.
@@ -533,11 +577,14 @@ class BedrockKnowledgeBaseRetriever:
             metadata_filter_mode: ``required``, ``degraded_unfiltered``, or
                 ``disabled``. Default follows settings (production target
                 ``required``).
+            page_citations: Whether to copy the Knowledge Base page attribute
+                onto each chunk. Defaults to
+                ``KNOWLEDGE_BASE_PAGE_CITATIONS_ENABLED``.
         """
         self._knowledge_base_id = str(knowledge_base_id or "").strip()
         self._region = str(region or "").strip() or "us-west-2"
-        if number_of_results is None:
-            self._number_of_results = max(
+        if max_results is None:
+            self._max_results = max(
                 1,
                 int(
                     getattr(
@@ -548,7 +595,18 @@ class BedrockKnowledgeBaseRetriever:
                 ),
             )
         else:
-            self._number_of_results = max(1, int(number_of_results))
+            self._max_results = max(1, int(max_results))
+        if number_of_results is None:
+            candidates = int(
+                getattr(
+                    settings,
+                    "knowledge_base_retrieve_candidates",
+                    _DEFAULT_CANDIDATES,
+                )
+            )
+        else:
+            candidates = int(number_of_results)
+        self._number_of_results = max(1, candidates, self._max_results)
         self._max_context_chars = max(1, int(max_context_chars))
         self._course_bucket = str(course_bucket or "").strip()
         self._client = client
@@ -582,6 +640,11 @@ class BedrockKnowledgeBaseRetriever:
             if self._metadata_filter_mode not in _FILTER_MODES:
                 self._metadata_filter_mode = "required"
         self._strict_metadata_filter = self._metadata_filter_mode == "required"
+        self._page_citations = (
+            bool(getattr(settings, "knowledge_base_page_citations_enabled", True))
+            if page_citations is None
+            else bool(page_citations)
+        )
         if knowledge_base_type is None:
             self._knowledge_base_type = str(
                 getattr(settings, "normalized_knowledge_base_type", "vector")
@@ -921,6 +984,13 @@ class BedrockKnowledgeBaseRetriever:
             return RetrievalResult(
                 context="", chunks=(), course_retrieval_status="empty"
             )
+        # Best candidates first so the cut to ``max_results`` keeps the top
+        # validated hits. ``sorted`` is stable, so equal scores keep the
+        # order Retrieve returned.
+        raw_hits = sorted(
+            raw_hits,
+            key=lambda hit: -_result_score(hit) if isinstance(hit, Mapping) else 0.0,
+        )
         chunks: list[RetrievedChunk] = []
         per_source: dict[str, int] = {}
         drop_bucket = 0
@@ -975,6 +1045,7 @@ class BedrockKnowledgeBaseRetriever:
                     url=source.url,
                     group=source.group,
                     retrieval_origin="knowledge_base",
+                    page=_result_page(item) if self._page_citations else None,
                 )
             )
         _record_kb_perf(
@@ -989,7 +1060,8 @@ class BedrockKnowledgeBaseRetriever:
         )
         logger.info(
             "course_retrieval_hit_count raw_hits=%s validated_count=%s "
-            "filter=%s filter_mode=%s drop_bucket=%s drop_key=%s drop_empty=%s",
+            "filter=%s filter_mode=%s drop_bucket=%s drop_key=%s drop_empty=%s "
+            "page_count=%s",
             len(raw_hits),
             len(chunks),
             int(used_filter),
@@ -997,6 +1069,7 @@ class BedrockKnowledgeBaseRetriever:
             drop_bucket,
             drop_key,
             drop_empty,
+            sum(1 for chunk in chunks if chunk.page is not None),
         )
         if settings.co_design_rag_debug:
             titles = [str(source.title or "")[:80] for source in course_sources[:8]]
@@ -1016,7 +1089,9 @@ class BedrockKnowledgeBaseRetriever:
                 len(chunks),
             )
         formatted = bounded_retrieval_result(
-            chunks, max_context_chars=self._max_context_chars
+            chunks,
+            max_context_chars=self._max_context_chars,
+            max_chunks=self._max_results,
         )
         if not formatted.chunks:
             logger.info(
@@ -1077,6 +1152,9 @@ def configured_context_retriever(
             getattr(settings, "normalized_knowledge_base_type", "vector")
         ),
         number_of_results=int(
+            getattr(settings, "knowledge_base_retrieve_candidates", _DEFAULT_CANDIDATES)
+        ),
+        max_results=int(
             getattr(settings, "fast_chat_retrieval_max_chunks", _DEFAULT_RESULTS)
         ),
         retrieve_timeout_seconds=float(

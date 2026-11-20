@@ -1,0 +1,102 @@
+[
+  {
+    "material_id": "lecture_week_1_introduction_to_innovation_v3",
+    "object_key": "course/lectureNotes/Week 1 Introduction to innovation v3.pdf",
+    "local_path": "lecture_notes/lectureNotes/Week 1 Introduction to innovation v3.pdf",
+    "filename": "Week 1 Introduction to innovation v3.pdf",
+    "group": "Lecture Notes",
+    "source_id": "c09d4eeb-060d-5cc4-ab46-dec2f5b0e835",
+    "pdf_pages": 32,
+    "pages_without_text": 27
+  },
+  {
+    "material_id": "lecture_week_10_storytelling",
+    "object_key": "course/lectureNotes/Week 10 Storytelling.pdf",
+    "local_path": "lecture_notes/lectureNotes/Week 10 Storytelling.pdf",
+    "filename": "Week 10 Storytelling.pdf",
+    "group": "Lecture Notes",
+    "source_id": "544fa468-a8ef-5861-9264-fb423edfeb0d",
+    "pdf_pages": 27,
+    "pages_without_text": 1
+  },
+  {
+    "material_id": "lecture_week_2_jtbd_framework_term_1_2026",
+    "object_key": "course/lectureNotes/Week 2 JTBD Framework Term 1 2026.pdf",
+    "local_path": "lecture_notes/lectureNotes/Week 2 JTBD Framework Term 1 2026.pdf",
+    "filename": "Week 2 JTBD Framework Term 1 2026.pdf",
+    "group": "Lecture Notes",
+    "source_id": "3e90c362-2ef9-57f7-99d6-6a917b715782",
+    "pdf_pages": 88,
+    "pages_without_text": 0
+  },
+  {
+    "material_id": "lecture_week_4_affinity_clusters_product_values_and_features_oxymoron",
+    "object_key": "course/lectureNotes/Week 4 Affinity Clusters Product Values and Features Oxymoron.pdf",
+    "local_path": "lecture_notes/lectureNotes/Week 4 Affinity Clusters Product Values and Features Oxymoron.pdf",
+    "filename": "Week 4 Affinity Clusters Product Values and Features Oxymoron.pdf",
+    "group": "Lecture Notes",
+    "source_id": "718349a0-b5c6-5b4c-b2f6-64c27ecf9447",
+    "pdf_pages": 83,
+    "pages_without_text": 48
+  },
+  {
+    "material_id": "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026",
+    "object_key": "course/lectureNotes/Week 7 Concept Generation, Prioritization, Prototyping 2 Mar 2026.pdf",
+    "local_path": "lecture_notes/lectureNotes/Week 7 Concept Generation, Prioritization, Prototyping 2 Mar 2026.pdf",
+    "filename": "Week 7 Concept Generation, Prioritization, Prototyping 2 Mar 2026.pdf",
+    "group": "Lecture Notes",
+    "source_id": "1efcb98e-3eb9-5ab9-a8f1-73370edfbefc",
+    "pdf_pages": 92,
+    "pages_without_text": 2
+  },
+  {
+    "material_id": "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0",
+    "object_key": "course/lectureNotes/Week 8 Prototyping Plan Metaphors Analogy in Design v0.pdf",
+    "local_path": "lecture_notes/lectureNotes/Week 8 Prototyping Plan Metaphors Analogy in Design v0.pdf",
+    "filename": "Week 8 Prototyping Plan Metaphors Analogy in Design v0.pdf",
+    "group": "Lecture Notes",
+    "source_id": "e7d43f6f-81dd-5228-9ff5-e9163dea795f",
+    "pdf_pages": 71,
+    "pages_without_text": 4
+  },
+  {
+    "material_id": "lecture_week_9_testing_feedback_poster_design_affordance_genai",
+    "object_key": "course/lectureNotes/Week 9 Testing Feedback Poster Design Affordance GenAI.pdf",
+    "local_path": "lecture_notes/lectureNotes/Week 9 Testing Feedback Poster Design Affordance GenAI.pdf",
+    "filename": "Week 9 Testing Feedback Poster Design Affordance GenAI.pdf",
+    "group": "Lecture Notes",
+    "source_id": "6f2bec7d-8081-5e3e-9ce4-908d8ea2e19e",
+    "pdf_pages": 99,
+    "pages_without_text": 1
+  },
+  {
+    "material_id": "reading_reading_1_how_pixar_fosters_collective_creativity",
+    "object_key": "course/readings/Reading 1 How Pixar fosters collective creativity.pdf",
+    "local_path": "lecture_notes/readings/Reading 1 How Pixar fosters collective creativity.pdf",
+    "filename": "Reading 1 How Pixar fosters collective creativity.pdf",
+    "group": "Readings",
+    "source_id": "cc303372-e32d-5b4e-af8d-c8d8e8ff00f3",
+    "pdf_pages": 16,
+    "pages_without_text": 3
+  },
+  {
+    "material_id": "reading_reading_2_engaging_personas",
+    "object_key": "course/readings/Reading 2 engaging-personas.pdf",
+    "local_path": "lecture_notes/readings/Reading 2 engaging-personas.pdf",
+    "filename": "Reading 2 engaging-personas.pdf",
+    "group": "Readings",
+    "source_id": "92de36cb-758a-560f-ab9d-6ad91393d6b8",
+    "pdf_pages": 7,
+    "pages_without_text": 0
+  },
+  {
+    "material_id": "reading_reading_3_a_technique_for_getting_ideas_james_webb_young",
+    "object_key": "course/readings/Reading 3 A-technique-for-getting-ideas-james-webb-young.pdf",
+    "local_path": "lecture_notes/readings/Reading 3 A-technique-for-getting-ideas-james-webb-young.pdf",
+    "filename": "Reading 3 A-technique-for-getting-ideas-james-webb-young.pdf",
+    "group": "Readings",
+    "source_id": "0f58fe58-cc6c-577b-b5c0-18b2d3e8dbbb",
+    "pdf_pages": 20,
+    "pages_without_text": 0
+  }
+]

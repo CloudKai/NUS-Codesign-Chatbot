@@ -17,9 +17,11 @@ import base64
 import binascii
 import json
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
+from .coaching.progress import emit_coach_reply_delta, reply_delta_sink_bound
+from .coaching.reply_text import ReplyTextExtractor
 from .usage import GenerationUsage, copy_usage, generation_call
 from .domain import (
     CoachImageInput,
@@ -329,11 +331,21 @@ def _iter_stream_events(stream_response: Any) -> Iterator[Any]:
         raise _translate_bedrock_error(error) from error
 
 
-def _payload_from_stream(stream_response: Any) -> dict[str, Any]:
+def _payload_from_stream(
+    stream_response: Any,
+    *,
+    on_reply_text: Callable[[str], None] | None = None,
+    usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Assemble ConverseStream events into the same JSON object as ``converse``.
 
     Args:
         stream_response: The boto3 ``converse_stream`` return value.
+        on_reply_text: Optional preview sink. It receives each newly decoded
+            piece of the tool input's top-level ``response_text`` while the
+            stream is read. The returned payload is still parsed from the
+            complete tool input, and the caller validates it.
+        usage: Optional dict that receives the ``metadata`` event token usage.
 
     Returns:
         The JSON object for ``ProviderCoachOutput``.
@@ -343,6 +355,7 @@ def _payload_from_stream(stream_response: Any) -> dict[str, Any]:
     text_parts: list[str] = []
     stop_reason = ""
     saw_event = False
+    extractor = ReplyTextExtractor() if on_reply_text is not None else None
     for event in _iter_stream_events(stream_response):
         if not isinstance(event, Mapping):
             raise ProviderUnavailableError(_MALFORMED_FAILURE)
@@ -358,12 +371,20 @@ def _payload_from_stream(stream_response: Any) -> dict[str, Any]:
             if isinstance(inner, Mapping):
                 tool_delta = inner.get("toolUse")
                 if isinstance(tool_delta, Mapping) and "input" in tool_delta:
-                    tool_parts.append(str(tool_delta.get("input") or ""))
+                    fragment = str(tool_delta.get("input") or "")
+                    tool_parts.append(fragment)
+                    if extractor is not None and on_reply_text is not None:
+                        piece = extractor.feed(fragment)
+                        if piece:
+                            on_reply_text(piece)
                 if isinstance(inner.get("text"), str):
                     text_parts.append(inner["text"])
         stop = event.get("messageStop")
         if isinstance(stop, Mapping) and stop.get("stopReason"):
             stop_reason = str(stop.get("stopReason") or "")
+        metadata = event.get("metadata")
+        if usage is not None and isinstance(metadata, Mapping) and isinstance(metadata.get("usage"), Mapping):
+            usage.update(metadata["usage"])
 
     if not saw_event:
         raise ProviderUnavailableError(_MALFORMED_FAILURE)
@@ -539,7 +560,22 @@ class BedrockCoachProvider:
         """
         kwargs = self._converse_kwargs(request)
         try:
-            response = self._runtime_client().converse(**kwargs)
+            client = self._runtime_client()
+            if reply_delta_sink_bound() and callable(getattr(client, "converse_stream", None)):
+                # The caller asked for partial reply text: read ConverseStream and
+                # preview ``response_text`` as it arrives. Validation is unchanged.
+                stream_usage: dict[str, Any] = {}
+                payload = _payload_from_stream(
+                    client.converse_stream(**kwargs),
+                    on_reply_text=emit_coach_reply_delta,
+                    usage=stream_usage,
+                )
+                copy_usage(meter, stream_usage, {
+                    "inputTokens": "input_tokens", "outputTokens": "output_tokens",
+                    "cacheReadInputTokens": "cache_read_tokens", "cacheWriteInputTokens": "cache_write_tokens",
+                })
+                return _validated_result(payload, request)
+            response = client.converse(**kwargs)
             if not isinstance(response, Mapping):
                 raise ProviderUnavailableError(_MALFORMED_FAILURE)
             copy_usage(meter, dict(response.get("usage") or {}), {

@@ -13,3 +13,6 @@ reset-quarantine/
 .cursorignore
 .streamlit/secrets.toml
 artifacts/evals/
+
+# Generated learning reference
+/docs/learning/REFERENCE.md

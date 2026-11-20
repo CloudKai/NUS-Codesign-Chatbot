@@ -491,8 +491,8 @@ class _FakeCourseRetriever:
 def test_mixed_course_kb_and_precomputed_student_chunks() -> None:
     """Course hits stay on the KB adapter; student hits use local artifacts.
 
-    Sequential CompositeContextRetriever only. Combined bound is the retriever
-    default (16_000 chars).
+    CompositeContextRetriever runs both sides in parallel. Combined bound is the
+    retriever default (16_000 chars).
     """
     student_text = "I observed older pedestrians waiting at the school gate."
     artifact = build_chunk_artifact(source_id="upload-1", text=student_text)

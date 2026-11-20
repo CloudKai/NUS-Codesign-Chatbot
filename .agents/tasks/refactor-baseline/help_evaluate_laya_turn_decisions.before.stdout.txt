@@ -1,0 +1,13 @@
+usage: evaluate_laya_turn_decisions.py [-h] --checkpoint CHECKPOINT
+                                       --output-dir OUTPUT_DIR
+                                       [--track {all,routing,evidence}]
+                                       [--saved-bundles SAVED_BUNDLES]
+
+Train and evaluate local Laya Learn decision heads without application calls.
+
+options:
+  -h, --help            show this help message and exit
+  --checkpoint CHECKPOINT
+  --output-dir OUTPUT_DIR
+  --track {all,routing,evidence}
+  --saved-bundles SAVED_BUNDLES

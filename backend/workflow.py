@@ -57,6 +57,7 @@ def _review_orchestration(
         "deep_review_succeeded": bool(provider_result.deep_review_succeeded),
         "review_trigger": provider_result.review_trigger,
         "needs_source_retrieval": bool(provider_result.needs_source_retrieval),
+        "needs_sources": bool(provider_result.needs_sources),
     }
 
 
@@ -184,6 +185,10 @@ def _promote_free_mode_advance(
     if str(assessment.response_mode or "").strip().lower() == "qa":
         return assessment
     if assessment.recommendation is None:
+        return assessment
+    if assessment.recommendation_defaulted:
+        # The model never judged readiness: it omitted the recommendation and
+        # ``stay`` was recorded. That omission must not open a Next proposal.
         return assessment
     if not str(request.student_message or "").strip():
         return assessment
@@ -387,6 +392,16 @@ class CoachWorkflow:
         """
         data = self._last_review_orchestration.get(thread_id) or {}
         return bool(data.get("needs_source_retrieval"))
+
+    def peek_needs_sources(self, thread_id: str) -> bool:
+        """Return whether the latest first call set ``needs_sources``.
+
+        Does not consume orchestration flags. Used by the application-owned
+        RAG fallback before persist. The provider only sets the flag when the
+        request carried ``source_need_check``.
+        """
+        data = self._last_review_orchestration.get(thread_id) or {}
+        return bool(data.get("needs_sources"))
 
     def take_review_orchestration(self, thread_id: str) -> dict[str, Any]:
         """Consume Review orchestration flags after a provider turn.

@@ -8,6 +8,16 @@ mock, OpenAI, and Bedrock Converse, and is the token-budget stand-in for
 AgentCore planning. Do not treat those two packages as competing curricula
 on the live AgentCore path.
 
+The two copies are kept on purpose, and the stage files with the same name
+in both (`problem_identification`, `concept_generation`,
+`design_specification`, `reflection`) are guarded by
+`tests/domain/test_prompt_stage_drift.py`. `problem_identification.md` must stay
+byte-identical. The other three differ only by the runtime-only CORE FOCUS and
+READINESS SIGNALS blocks (pinned by hash), plus the position of the Facione
+paragraph in `reflection.md`. Editing a shared paragraph in only one copy, or
+changing a pinned block, fails the test. Change both copies together, or update
+the pinned values in the test when a divergence is intended.
+
 ## Ownership
 
 ```text
@@ -140,26 +150,10 @@ changes.
 
 ## Current RAG structure
 
-| Layer | Current development behavior |
-|---|---|
-| Ingestion | Existing upload/text/URL/course-sync code extracts bounded text. Raw bytes and derived text remain separate objects under S3 in production. |
-| Source authority | `sources.selected` plus notebook ownership determines the only documents eligible for a turn. Unselected and other-notebook sources never reach retrieval. |
-| Query | Current student message has the strongest weight. The last two student messages, project context, and learning summary provide lower-weight continuity. |
-| Chunking | `LocalChunkRetriever` uses sentence-aware ~1,800-character chunks with 220-character overlap. FastAPI hydrates selected student sources from disposable `derived/chunks.v1.json` when valid (in-process LRU); missing or invalid artifacts fall back to chunking extracted text at query time. No new database migration is needed. |
-| Ranking | Deterministic weighted lexical/BM25-style scoring uses term rarity, phrase overlap, title matches, and source diversity. Generic queries receive bounded representative excerpts. |
-| Budget | Fast chat: deterministic retrieval gate, then at most `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4) chunks and `FAST_CHAT_RETRIEVAL_MAX_CHARS` (default 8,000) characters. Deep Review may use the larger composer ceiling. |
-| Images | Selected images travel as model image inputs; a text marker preserves their stable `[S#]` mapping. |
-| Citations | `[S#]` is stable for the selected-source order. Internal chunk IDs such as `S1-C2` are audit metadata only and are never student-facing citation syntax. |
-| Audit | The assistant message records `retrieval_refs` containing source ID, stable label, chunk ID, focused excerpt, and score. `source_refs` remains reserved for sources actually cited in the response. |
-
-The retriever sees full extracted text locally, but the generation model sees
-only the selected excerpts. Citation previews are focused around the matching
-query evidence instead of the beginning of the document. Production generation
-may use AgentCore Runtime (`MODEL_PROVIDER=agentcore`); the user payload is
-this application's composed CDE2300 prompt plus bounded DSQL history as
-Converse `messages`. Do not copy the POC CDE2500 Q&A specialist prompt.
-Coaching must not receive Knowledge Base tools. Course grounding uses
-server-side `Retrieve` when `KNOWLEDGE_BASE_ID` is set.
+See [RAG architecture](RAG_ARCHITECTURE.md) for source selection, retrieval
+budgets, ranking, and citation mapping. The composer receives bounded text
+excerpts and stable source labels. Selected images travel as separate model
+inputs, with a text marker preserving the corresponding `[S#]` label.
 
 ## Prompt structure
 
@@ -179,6 +173,26 @@ The composer orders and delimits these sections:
 6. the current student message;
 7. runtime rules for language, detail, grounding, citations, and structured
    assessment.
+
+When `FAST_CHAT_NEEDS_SOURCES_ENABLED=true` and the gate retrieved nothing for
+a fast-chat turn, the runtime rules also carry a SOURCE CHECK paragraph
+(`_SOURCE_NEED_INSTRUCTION` in `backend/prompts/composer.py`) for the optional
+`needs_sources` output field. The runtime copy only documents the field
+(`agentcore_runtime/prompts/fast_chat.md`, the Fast Chat contract in
+`structured_coach.py`) and defers to that paragraph, so the cacheable static
+prefix does not depend on the setting. No shared stage file changed, so
+`tests/domain/test_prompt_stage_drift.py` is unchanged.
+
+With `FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED=true` as well (default false), a
+COURSE MATERIAL TITLES block follows the SOURCE CHECK paragraph. It lists the
+notebook's Lecture Notes and Readings titles (`source_check_course_titles` in
+`backend/coaching/execution.py`, from the notebook's locked course sources) and
+says that a question about a concept, framework, method or term covered by
+those titles needs sources, while navigation, UI help, greetings and the
+student's own project reasoning do not. It is part of the per-turn runtime
+rules, after the cache point, and is fitted into `MAX_RUNTIME_CHARS` by
+dropping titles from the end, so the rule text is never clipped. Neither
+prompt copy changed.
 
 Retrieved content is explicitly untrusted evidence. It cannot override shared,
 stage, authorization, workflow, or runtime instructions. The shared prompt
@@ -215,46 +229,10 @@ block unless a provider opts into the same planner.
 
 ## Production Knowledge Base path
 
-```text
-Streamlit
-    ↓
-FastAPI
-    ↓
-DSQL current_stage
-    ↓
-selected source IDs + notebook/user filter
-    ↓
-Bedrock Knowledge Base `Retrieve` adapter implementing ContextRetriever
-(locked Lecture Notes/Readings only; student uploads stay local)
-    ↓
-RetrievalResult (stable source IDs/labels + chunks)
-    ↓
-same PromptComposer + same educational workflow
-    ↓
-configured generation provider (AgentCore Runtime, or Bedrock/OpenAI fallback)
-```
-
-`backend/bedrock_retrieve.py` implements this adapter. `configured_context_retriever()`
-always returns `CompositeContextRetriever`. A live Knowledge Base id is injected
-only when the provider is not mock and `MOCK_OPENAI` is false. Empty
-`KNOWLEDGE_BASE_ID` keeps `knowledge_base=None` so virtual course sources
-become an evidence gap instead of local placeholder chunks. It:
-
-- filters retrieval by selected source IDs already loaded for the notebook;
-- sends a `course_material_id` Knowledge Base metadata filter when ids exist,
-  then retries without the filter if that returns no hits (compatibility until
-  the KB is re-ingested with metadata);
-- maps S3 locations onto locked course `object_key` values and `[S#]` labels
-  using exact canonical key equality (URL-decoded, slash-normalized, S3 URI
-  extracted). Suffix matching is not used, so `week1.pdf` cannot match
-  `archive/week1.pdf` or `myweek1.pdf`;
-- returns bounded `RetrievedChunk` values with `retrieval_origin`;
-- uses Knowledge Base `Retrieve`, then feeds the existing composer/workflow, so
-  stage decisions and persistence do not move into `RetrieveAndGenerate`;
-- drops results whose S3 keys are outside the selected notebook sources.
-
-The application already enforces the final scope check, so a faulty adapter
-cannot introduce another notebook's chunk.
+FastAPI supplies bounded excerpts from the [course material retrieval path](RAG_ARCHITECTURE.md#course-material-rag)
+to the same composer and workflow used for other text evidence. Coaching uses
+the CDE2300 prompts in this repository. The application retrieves course
+evidence server-side before generation.
 
 ## Package layout
 

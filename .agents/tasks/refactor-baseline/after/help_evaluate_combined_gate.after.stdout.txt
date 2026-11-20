@@ -1,0 +1,52 @@
+usage: evaluate_combined_gate.py [-h] [--results-dir RESULTS_DIR]
+                                 [--multilingual MULTILINGUAL]
+                                 [--typed-decisions TYPED_DECISIONS]
+                                 [--learn LEARN] [--checkpoint CHECKPOINT]
+                                 [--bundle BUNDLE] [--threshold THRESHOLD]
+                                 [--first-turn-threshold FIRST_TURN_THRESHOLD]
+                                 [--per-category-modes PER_CATEGORY_MODES]
+                                 [--json-output JSON_OUTPUT]
+
+Combined offline gate evaluation: gate, gate + Laya, gate + Laya + title wording.
+
+Offline only: no network, no AWS, no model call. It composes three arms over
+all gate messages and reports wrong-skip, false-retrieve and extra-call/token
+counts per category, each rate with a Wilson 95% interval.
+
+Arms:
+
+* (a) the existing rules-based gate (``evaluate_retrieval.gate_decision``).
+* (b) gate + Laya: an ambiguous turn the gate skipped is promoted to course
+  retrieval when the local course-intent classifier scores at or above its
+  cutoff (``backend.coaching.execution`` rule). The cutoffs are the existing
+  ones. They are read from the stored results or the setting; this script never
+  fits or searches a cutoff, and nothing here is tuned on the gate rows.
+* (c) gate + Laya + course-title wording: arm (b) plus the SOURCE CHECK rule
+  with course titles. The wording effect is a STUB MODEL BOUND, not a
+  measurement: ``oracle`` (best case), ``mock_rule`` and ``flag_all`` (worst case
+  for false retrieves and extra calls). Only a live run measures wording.
+
+Laya decisions come from one of two places, and each source says which:
+
+* ``re-run``: ``--checkpoint`` loads the local weights and scores every eligible
+  row in this process (needs the ``laya`` package and the weights).
+* ``from stored results, not re-run``: per-row decisions stored by earlier runs
+  (``.agents/tasks/phase3d-work/*.json``). Those files cover only some rows, so
+  the unscored eligible rows are bracketed (see ``MODES``).
+
+options:
+  -h, --help            show this help message and exit
+  --results-dir RESULTS_DIR
+                        folder with the stored phase3d JSON files
+  --multilingual MULTILINGUAL
+  --typed-decisions TYPED_DECISIONS
+  --learn LEARN
+  --checkpoint CHECKPOINT
+                        re-run Laya from local weights (needs the laya package)
+  --bundle BUNDLE       Laya Learn bundle; with --checkpoint loads the Learn classifier
+  --threshold THRESHOLD
+                        re-run cutoff (default: the setting)
+  --first-turn-threshold FIRST_TURN_THRESHOLD
+  --per-category-modes PER_CATEGORY_MODES
+                        comma list of floor, ceiling, scored_only
+  --json-output JSON_OUTPUT

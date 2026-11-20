@@ -1,0 +1,31 @@
+sufficient	What time does registration close?	Course notice: Registration closes at 5 p.m. on Thursday.
+insufficient	What time does registration close?	Course notice: The registration form is online. Bring your student card to the first briefing.
+partial	What time does registration close and where do I submit it?	Course notice: Registration closes at 5 p.m. on Thursday.
+sufficient	What time does registration close and where do I submit it?	Course notice: Registration closes at 5 p.m. on Thursday. Submit your registration through the class portal.
+insufficient	What time does registration close and where do I submit it?	Course notice: The second briefing will cover registration, assessment and attendance.
+sufficient	Which two materials did the team test in the rain?	Test log: The team took the recycled cardboard and coated cotton prototypes outside during the rain.
+insufficient	Which two materials did the team test in the rain?	Test log: The team considered plastic, cardboard and cotton before making prototypes.
+partial	Which two materials did the team test in the rain?	Test log: We used recycled cardboard for the first outdoor rain test. The second material is listed in a missing appendix.
+sufficient	How many seconds did Trial Three take and did the light turn on?	Trial log: Trial Three finished after 23 seconds. The indicator lit during the final step.
+partial	How many seconds did Trial Three take and did the light turn on?	Trial log: The indicator lit during the final step in Trial Three.
+insufficient	How many seconds did Trial Three take and did the light turn on?	Trial log: In Trial Two the indicator lit at 10 seconds.
+sufficient	What does the guide mean by task switching?	Training guide: Task switching is moving your attention between two different tasks.
+insufficient	What does the guide mean by task switching?	Training guide: Today we cover task switching, memory and workload.
+partial	How does the guide define task switching, and which task was interrupted in the observation notes?	Guide: Task switching is moving your attention between tasks. | Observation notes: The researcher sat next to the information desk.
+sufficient	How does the guide define task switching, and which task was interrupted in the observation notes?	Observation notes: The clerk paused ticket sorting to answer a call. | Guide: Task switching is moving attention between tasks.
+insufficient	How does the guide define task switching, and which task was interrupted in the observation notes?	Guide: Chapter 8 is about task switching. | Observation notes: The room was busy.
+partial	What did the rubric require for references and the word limit?	Submission checklist: Add a reference list that names every cited source. The length guide is on a separate sheet.
+sufficient	What did the rubric require for references and the word limit?	Submission checklist: Add a reference list for all cited sources. Keep the body under 600 words.
+insufficient	What did the rubric require for references and the word limit?	Submission checklist: Name the file using your team number and use PDF format.
+sufficient	Why did the second group stop the exercise?	Facilitator log: Group Two stopped after a wheel came loose. They waited for the replacement.
+insufficient	Why did the second group stop the exercise?	Facilitator log: Group Two stopped after 15 minutes. The exercise was scheduled for 30 minutes.
+partial	Why did the second group stop and when did they restart?	Facilitator log: Group Two stopped when a wheel came loose.
+sufficient	Why did the second group stop and when did they restart?	Facilitator log: Group Two stopped when a wheel came loose. They restarted at 10:45 after replacing it.
+partial	根据指导和我的记录，应该观察什么？哪个用户错过了提示？	选定的观察笔记：游客小林没有看到出口的蓝色提示。
+sufficient	根据指导和我的记录，应该观察什么？哪个用户错过了提示？	指导：记录用户在哪里停顿或绕路。 | 观察笔记：游客小林没有看到出口的蓝色提示。
+insufficient	根据指导和我的记录，应该观察什么？哪个用户错过了提示？	指导：观察时间为三十分钟。 | 观察笔记：今天有五位游客。
+sufficient	What did the design team try instead of labels?	Project notes: The team removed the labels and used different shapes to mark each switch.
+insufficient	What did the design team try instead of labels?	Project notes: The study compared two designs. The label colour was blue in both.
+partial	In what order should we do the prototype walkthrough and where did two users pause?	Walkthrough guide: Start at the entrance, then find the help button, then try to leave. | Trial notes: Two users needed help but no location was recorded.
+sufficient	In what order should we do the prototype walkthrough and where did two users pause?	Trial notes: Two users paused at the help button. | Walkthrough guide: Start at the entrance, locate help, then try to leave.
+insufficient	In what order should we do the prototype walkthrough and where did two users pause?	Guide: Walkthroughs help identify navigation issues. | Trial notes: Two users chatted while waiting.

@@ -1,0 +1,14 @@
+usage: compare_turn_routes.py [-h] --checkpoint CHECKPOINT --output-dir
+                              OUTPUT_DIR [--reuse]
+                              {laya,compact}
+
+Fit and evaluate CPU routing candidates on fixed synthetic splits.
+
+positional arguments:
+  {laya,compact}
+
+options:
+  -h, --help            show this help message and exit
+  --checkpoint CHECKPOINT
+  --output-dir OUTPUT_DIR
+  --reuse               reload fitted bundle already in output directory

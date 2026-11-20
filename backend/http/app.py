@@ -42,7 +42,6 @@ from backend.http.notebook_reader import register_notebook_reader
 from backend.upload_queue import SourceUploadCoordinator
 from starlette.concurrency import run_in_threadpool
 from backend.persistence.guest_sessions import GUEST_SESSION_TTL
-from backend.coaching.progress import PROGRESS_LABELS
 from backend.operational_metrics import (
     configure_operational_loggers,
     record_coach_rate_limit,
@@ -2281,12 +2280,23 @@ def create_app(
         Progress phases correspond to execution boundaries. ``reply_ready``
         contains the final validated text before persistence and is ephemeral.
         This endpoint does not emit fake token slices of a completed reply.
+
+        A client that sends ``X-Coach-Reply-Deltas: 1`` while
+        ``COACH_STREAM_REPLY_DELTAS_ENABLED`` is on also receives
+        ``reply_delta`` fragments the provider produced while generating, and
+        ``reply_discard`` when they are withdrawn. Fragments are unvalidated
+        and ephemeral; only ``done`` acknowledges a saved turn. Clients that
+        do not send the header get the original event set.
         """
 
         request = _with_idempotency_header(request, http_request)
         if not owner.store.get_thread(request.thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
         selected_source_count = _selected_source_count(owner, request.thread_id)
+        reply_deltas = bool(
+            settings.coach_stream_reply_deltas_enabled
+            and http_request.headers.get("x-coach-reply-deltas", "").strip() == "1"
+        )
 
         stream_request_id = str(
             getattr(http_request.state, "request_id", None) or "-"
@@ -2329,7 +2339,9 @@ def create_app(
                 if auth_ms is not None:
                     record_field("auth_context_ms", auth_ms)
 
-            for item in coach_events(owner.coach, request, before_submit=initialize):
+            for item in coach_events(
+                owner.coach, request, before_submit=initialize, reply_deltas=reply_deltas,
+            ):
                 if isinstance(item, BaseException):
                     if isinstance(item, RateLimitExceeded):
                         _record_coach_rate_limit(

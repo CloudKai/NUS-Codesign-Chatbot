@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.application import CoachApplicationService
 from backend.domain import CoachImageInput, CoachRequest, CoachTurn, EducationalAssessment
@@ -344,3 +346,150 @@ def test_attachment_prompt_note_names_current_turn_files() -> None:
     prepared = PromptComposer().compose(context)
     assert "muarc157.pdf" in prepared.runtime_instructions
     assert "muarc157.pdf" in prepared.trusted_instructions
+
+
+# ---- page numbers on [S#] citations -----------------------------------------
+
+
+class PagedChunkRetriever:
+    """Return one or more chunks per selected source, each with a given page."""
+
+    def __init__(self, chunks_by_index: dict[int, list[int | None]]) -> None:
+        self.chunks_by_index = chunks_by_index
+
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        """Return chunks in the given order (first chunk per source is strongest)."""
+        sources = list(query.sources)
+        chunks = []
+        for index, pages in self.chunks_by_index.items():
+            source = sources[index]
+            for rank, page in enumerate(pages, start=1):
+                chunks.append(
+                    RetrievedChunk(
+                        source_id=source.source_id,
+                        label=source.label,
+                        title=source.title,
+                        chunk_id=f"{source.label}-KB{rank}",
+                        text=f"{source.title} passage {rank} with a 12 percent finding.",
+                        score=0.9 - rank / 100,
+                        source_index=int(source.label[1:]),
+                        chunk_index=rank,
+                        retrieval_origin="knowledge_base",
+                        page=page,
+                    )
+                )
+        context = " ".join(f"--- [{c.label}] {c.title} --- {c.text}" for c in chunks)
+        return RetrievalResult(context=context, chunks=tuple(chunks))
+
+
+def _paged_service(tmp_path, retriever, reply: str):
+    store = StudentStore(tmp_path / "pages.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(
+        payload={
+            "mode": "qa",
+            "response_text": reply,
+            "recommendation": "stay",
+            "recommendation_rationale": "More evidence is still needed.",
+            "citations": [],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
+        }
+    )
+    notebooks = SQLiteNotebookRepository(store)  # type: ignore[arg-type]
+    transitions = SQLitePhaseTransitionRepository(store)  # type: ignore[arg-type]
+    service = CoachApplicationService(
+        store,  # type: ignore[arg-type]
+        notebooks,
+        CoachWorkflow(
+            AgentCoreCoachProvider(
+                _RUNTIME_ARN,
+                region="us-west-2",
+                qualifier="DEFAULT",
+                timeout_seconds=110.0,
+                max_retries=0,
+                client=client,
+            ),
+            transitions,
+        ),
+        LearningProgressService(store, notebooks, transitions),  # type: ignore[arg-type]
+        retriever=retriever,
+    )
+    return service, thread_id
+
+
+def test_citations_carry_the_page_of_the_strongest_chunk_or_none(
+    tmp_path, monkeypatch
+) -> None:
+    """A paged source cites its best chunk's page; an unpaged source has no page."""
+    storage = CountingFileStorage()
+    _enable_shared_catalog(monkeypatch, storage)
+    _seed_catalog(storage, 4)
+    monkeypatch.setattr(settings, "fast_chat_retrieval_max_chunks", 8)
+    # Source 0: strongest chunk on page 12, weaker chunk on page 3.
+    # Source 1: strongest chunk has no page, weaker chunk has page 8.
+    # Source 2: no page anywhere.
+    retriever = PagedChunkRetriever({0: [12, 3], 1: [None, 8], 2: [None]})
+    service, thread_id = _paged_service(
+        tmp_path, retriever, "Week 1 says so [S1]. Week 2 agrees [S2]. Week 3 too [S3]."
+    )
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="What do the lectures say about accessibility?",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="cite-pages",
+        )
+    )
+
+    cited = {item.label: item for item in turn.assessment.citations}
+    assert set(cited) == {"S1", "S2", "S3"}
+    assert cited["S1"].page == 12
+    assert cited["S2"].page is None
+    assert cited["S3"].page is None
+    dumped = [item.model_dump(mode="json") for item in turn.assessment.citations]
+    assert [item["page"] for item in dumped] == [12, None, None]
+
+
+def test_retrieved_chunk_reference_keeps_the_page() -> None:
+    """``_retrieve_for_turn`` copies the page onto the auditable chunk reference."""
+    from backend.retrieval import RetrievalSource
+
+    service = object.__new__(CoachApplicationService)
+    service._retriever = PagedChunkRetriever({0: [5], 1: [None]})  # type: ignore[attr-defined]
+    sources = tuple(
+        RetrievalSource(
+            source_id=f"id-{index}",
+            label=f"S{index}",
+            title=f"Week {index}",
+            text="",
+            group="lectureNotes",
+            object_key=f"course/lectureNotes/week-{index}.pdf",
+        )
+        for index in (1, 2)
+    )
+    chunks, _context = service._retrieve_for_turn(
+        student_message="What does week 1 say?",
+        current_stage="problem_identification",
+        retrieval_sources=sources,
+        project_context="",
+        conversation_summary="",
+        recent_messages=[],
+    )
+    assert [(c.label, c.page) for c in chunks] == [("S1", 5), ("S2", None)]
+
+
+def test_saved_citations_without_a_page_still_load() -> None:
+    """Citations stored before this field existed validate with ``page=None``."""
+    from backend.domain import CitationReference
+
+    old = CitationReference.model_validate(
+        {"source_id": "a", "label": "S1", "title": "Week 1", "excerpt": "x"}
+    )
+    assert old.page is None
+    assert CitationReference.model_validate({**old.model_dump(), "page": 4}).page == 4
+    with pytest.raises(ValueError):
+        CitationReference.model_validate({**old.model_dump(), "page": 0})

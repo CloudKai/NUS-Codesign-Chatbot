@@ -302,6 +302,8 @@ Decide Coaching versus Q&A internally; this turn is Fast Chat, not a locked Coac
   required for this turn and was not supplied because retrieval was skipped;
   otherwise false. Always return this field as a JSON boolean. After FastAPI
   already retrieved for this turn, this must stay false.
+- needs_sources: optional JSON boolean, false unless the trusted runtime
+  rules contain a SOURCE CHECK instruction that asks for it.
 - out_of_scope: always a JSON boolean; true only at high confidence when the
   latest request or attachment is clearly unrelated to both CDE2300 course
   content and the student's active CDE2300 design project. Technical or
@@ -1326,6 +1328,10 @@ def structured_wire_payload(output: BaseModel) -> dict[str, Any]:
     payload = output.model_dump(mode="json")
     if isinstance(output, FastChatTurnOutput):
         payload["schema_id"] = FAST_CHAT_SCHEMA_ID
+        if output.recommendation_defaulted:
+            # Observability marker only. The backend reads it for a perf
+            # field; the recommendation itself is already ``stay``.
+            payload["recommendation_defaulted"] = True
     return payload
 
 

@@ -1,0 +1,54 @@
+usage: evaluate_retrieval.py [-h] [--questions QUESTIONS]
+                             [--messages MESSAGES] [--followups FOLLOWUPS]
+                             [--materials MATERIALS]
+                             [--json-output JSON_OUTPUT] [--live-kb]
+                             [--live-model] [--max-live-calls MAX_LIVE_CALLS]
+                             [--ids ID[,ID...]]
+                             [--categories CATEGORY[,CATEGORY...]]
+                             [--expected-decision {retrieve,skip}]
+                             [--skip-sample N] [--compare-source-check]
+
+Offline retrieval eval (recall@4, wrong-skip, empty-result). Live Knowledge
+Base use needs --live-kb and --max-live-calls.
+
+options:
+  -h, --help            show this help message and exit
+  --questions QUESTIONS
+  --messages MESSAGES
+  --followups FOLLOWUPS
+                        synthetic follow-up cases, reported apart from the
+                        gate messages (offline mode)
+  --materials MATERIALS
+  --json-output JSON_OUTPUT
+                        also write the full result as JSON
+  --live-kb             OPT-IN. Call the real Bedrock Knowledge Base (costs
+                        money). Needs --max-live-calls.
+  --live-model          OPT-IN. Send each gate message through the first fast-
+                        chat call on the real Bedrock model with needs_sources
+                        on (costs money). Needs --max-live-calls. Cannot be
+                        combined with --live-kb.
+  --max-live-calls MAX_LIVE_CALLS
+                        Mandatory with --live-kb or --live-model: hard limit
+                        on calls (--live-kb: 1 to 100 Retrieve calls; --live-
+                        model: 1 to 500 model calls).
+  --ids ID[,ID...]      --live-model only: send only these gate message ids
+                        (comma-separated, may be repeated; kept in file
+                        order). An unknown id is refused. With --categories,
+                        rows matching either are kept. --max-live-calls
+                        applies after all filters.
+  --categories CATEGORY[,CATEGORY...]
+                        --live-model only: send only rows of these categories
+                        (comma-separated, may be repeated). An unknown
+                        category is refused. With --ids, rows matching either
+                        are kept.
+  --expected-decision {retrieve,skip}
+                        --live-model only: after --ids/--categories, keep only
+                        rows with this label.
+  --skip-sample N       --live-model only: then add N skip-labelled rows not
+                        already selected, evenly spaced over the remaining
+                        skip rows in file order (deterministic).
+  --compare-source-check
+                        --live-model only: send each chosen message twice,
+                        with the SOURCE CHECK rule on and then off. --max-
+                        live-calls counts calls, so floor(N / 2) messages are
+                        sent; N must be at least 2.

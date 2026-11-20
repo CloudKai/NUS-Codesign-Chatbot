@@ -1,0 +1,5115 @@
+{
+ "attachment_course_comparison": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [
+   "Persona.txt"
+  ],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    3
+   ],
+   [
+    "student_source_precomputed_hit",
+    3
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    3
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Persona.txt",
+    "Survey results",
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [
+   "Persona.txt",
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "attachment_only_question": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [
+   "Persona.txt"
+  ],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    49
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "attachment_retrieval_scoped",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    49
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Persona.txt"
+   ]
+  ],
+  "source_ids": [
+   "Persona.txt"
+  ],
+  "source_need_check": false
+ },
+ "attachment_with_progression": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [
+   "Persona.txt"
+  ],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "stage_progression_request",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "attachment_with_stage_status": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [
+   "Persona.txt"
+  ],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    0
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "current_stage_status_request",
+    true
+   ],
+   [
+    "attachment_retrieval_scoped",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "chit_chat_policy_on": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": true
+ },
+ "course_cue_question": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    53
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    53
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "course_cue_question_with_laya": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": 0,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    53
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    53
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "course_cue_question_with_upload": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    2
+   ],
+   [
+    "student_source_precomputed_hit",
+    2
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    2
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Survey results",
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "force_retrieval_attachment": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [
+   "Persona.txt"
+  ],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    49
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "attachment_retrieval_scoped",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    49
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Persona.txt"
+   ]
+  ],
+  "source_ids": [
+   "Persona.txt"
+  ],
+  "source_need_check": false
+ },
+ "force_retrieval_course_cue": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    2
+   ],
+   [
+    "student_source_precomputed_hit",
+    2
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    2
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Survey results",
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "force_retrieval_no_sources": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "force_retrieval_status": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    0
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "current_stage_status_request",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "force_retrieval_with_upload": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Survey results"
+   ]
+  ],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "laya_below_cutoff": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": 1,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": true
+ },
+ "laya_no_score": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": 1,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": true
+ },
+ "laya_promotes": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": 1,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "local_course_intent_retrieval",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    53
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "local_course_intent_retrieval",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    53
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "laya_promotes_then_upload_policy": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": 0,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "upload_retrieval_policy",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "upload_retrieval_policy",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Survey results"
+   ]
+  ],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "laya_skipped_for_chit_chat": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": 0,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": true
+ },
+ "laya_skipped_with_interaction_intent": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": 0,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": true
+ },
+ "laya_skipped_with_selected_source": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": 0,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": true
+ },
+ "lecture_help": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    2
+   ],
+   [
+    "student_source_precomputed_hit",
+    2
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    2
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Survey results",
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "lecture_help_course_question": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    53
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    53
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "lecture_help_with_status_words": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    2
+   ],
+   [
+    "student_source_precomputed_hit",
+    2
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    2
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Survey results",
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "missing_image_attachment_only": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [
+   "Persona.txt"
+  ],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    49
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "attachment_retrieval_scoped",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    49
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Persona.txt"
+   ]
+  ],
+  "source_ids": [
+   "Persona.txt"
+  ],
+  "source_need_check": false
+ },
+ "missing_image_not_a_request": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [
+   "Sketch.png"
+  ],
+  "source_need_check": true
+ },
+ "missing_image_question": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    0
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [
+   "Sketch.png"
+  ],
+  "source_need_check": false
+ },
+ "missing_image_with_upload": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [
+   "Sketch.png",
+   "Survey results"
+  ],
+  "source_need_check": true
+ },
+ "no_cue_no_classifier": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": true
+ },
+ "plain_course_question": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": true
+ },
+ "project_coaching_course_question": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    2
+   ],
+   [
+    "student_source_precomputed_hit",
+    2
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    2
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "high_confidence_source",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "high_confidence_source"
+   ],
+   [
+    "course_catalog_retrieval",
+    true
+   ],
+   [
+    "course_catalog_source_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Survey results",
+    "Week 2 JTBD.pdf"
+   ]
+  ],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "project_coaching_status": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "current_stage_status_request",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "resolved_image_question": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 1,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [
+   "Sketch.png"
+  ],
+  "source_need_check": true
+ },
+ "stage_progression": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "stage_progression_request",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "stage_status": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "qa",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "current_stage_status_request",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "status_then_guidance": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "workflow_skips_retrieval",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ },
+ "upload_question_policy_off": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "source_need_check",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": true
+ },
+ "upload_question_policy_on": {
+  "allow_model_knowledge": false,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "upload_retrieval_policy",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "student_source_chunk_artifact_load_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_chunk_parse_ms",
+    "<ms>"
+   ],
+   [
+    "hydrate_total_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_selected_count",
+    1
+   ],
+   [
+    "student_source_precomputed_hit",
+    1
+   ],
+   [
+    "student_source_chunk_cache_miss",
+    1
+   ],
+   [
+    "retrieval_count",
+    1
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "upload_retrieval_policy",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    true
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    1
+   ],
+   [
+    "retrieved_context_chars",
+    52
+   ],
+   [
+    "rag_used",
+    true
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": true,
+  "retrieved_chunks": 1,
+  "searched": [
+   [
+    "Survey results"
+   ]
+  ],
+  "source_ids": [
+   "Survey results"
+  ],
+  "source_need_check": false
+ },
+ "workflow_meta_guidance": {
+  "allow_model_knowledge": true,
+  "attachment_titles": [],
+  "classifier_calls": null,
+  "expected_response_mode": "coaching",
+  "fields": [
+   [
+    "notebook_load_count",
+    1
+   ],
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "image_inputs": 0,
+  "mode_policy_intent": "ambiguous",
+  "record_field_calls": [
+   [
+    "notebook_load_ms",
+    "<ms>"
+   ],
+   [
+    "history_source_join_ms",
+    "<ms>"
+   ],
+   [
+    "workflow_skips_retrieval",
+    true
+   ],
+   [
+    "retrieval_gate_ms",
+    "<ms>"
+   ],
+   [
+    "retrieval_required",
+    false
+   ],
+   [
+    "mode_policy_intent",
+    "ambiguous"
+   ],
+   [
+    "retrieval_total_ms",
+    "<ms>"
+   ],
+   [
+    "course_kb_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "student_source_retrieval_ms",
+    "<ms>"
+   ],
+   [
+    "retrieved_chunk_count",
+    0
+   ],
+   [
+    "retrieved_context_chars",
+    0
+   ],
+   [
+    "rag_used",
+    false
+   ],
+   [
+    "memory_load_ms",
+    "<ms>"
+   ]
+  ],
+  "retrieval_required": false,
+  "retrieved_chunks": 0,
+  "searched": [],
+  "source_ids": [],
+  "source_need_check": false
+ }
+}

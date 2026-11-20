@@ -45,3 +45,7 @@ Thinking Path stage.
 **Notebook sources**:
 Reference materials shared across the chats in a notebook. A message attachment
 is a file the student includes with an individual chat message.
+
+**Evidence scope**:
+The set of source types a student turn needs for a grounded answer. It can
+include official course materials, selected notebook sources, both, or neither.

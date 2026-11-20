@@ -1,0 +1,17 @@
+usage: evaluate_passage_support.py [-h] --checkpoint CHECKPOINT
+                                   [--bundle BUNDLE]
+                                   [--rank-report RANK_REPORT] --output OUTPUT
+                                   {rank,judge}
+
+Compare lexical and cross-encoder ranks and judge actual retrieved evidence
+offline.
+
+positional arguments:
+  {rank,judge}
+
+options:
+  -h, --help            show this help message and exit
+  --checkpoint CHECKPOINT
+  --bundle BUNDLE
+  --rank-report RANK_REPORT
+  --output OUTPUT

@@ -10,6 +10,11 @@ For any architecture, backend, persistence, model-provider, source-retrieval,
 or workflow task, read `docs/LOCAL_DEMO_IMPLEMENTATION.md` before editing. For
 small, isolated UI fixes, read only the relevant source and this file.
 
+For every repository change, check whether it affects existing documentation
+or needs new guidance. Update the affected guides as part of the same change.
+Use the [docs index](docs/README.md) to find the right guide. When moving or
+renaming docs, update incoming links and verify the affected links and commands.
+
 Use `docs/IMPLEMENTATION_STATUS.md` to resume work. Update it at the end of
 each completed implementation phase with evidence, migration notes, risks, and
 the next exact action.

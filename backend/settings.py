@@ -308,8 +308,19 @@ class Settings:
     knowledge_base_retrieve_timeout_seconds: int = _bounded_int(
         "KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS", 10, 2, 30
     )
+    # Retrieve over-fetches candidates, the adapter validates them (bucket, key,
+    # text), then keeps the best FAST_CHAT_RETRIEVAL_MAX_CHUNKS. Bounded 12-16.
+    knowledge_base_retrieve_candidates: int = _bounded_int(
+        "KNOWLEDGE_BASE_RETRIEVE_CANDIDATES", 12, 12, 16
+    )
     knowledge_base_retrieve_executor_workers: int = _bounded_int(
         "KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS", 4, 1, 16
+    )
+    # Pass the Knowledge Base page attribute through to [S#] citations. The
+    # attribute is documented but its numbering and presence for this
+    # Knowledge Base are unverified, so operators can switch it off.
+    knowledge_base_page_citations_enabled: bool = _boolean(
+        "KNOWLEDGE_BASE_PAGE_CITATIONS_ENABLED", True
     )
     co_design_rag_debug: bool = _boolean("CO_DESIGN_RAG_DEBUG", False)
     model_context_limit_tokens: int = int(
@@ -347,6 +358,61 @@ class Settings:
     )
     fast_chat_retrieval_max_chunks: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHUNKS", 4, 1, 8
+    )
+    # Slots reserved for course (Knowledge Base) results out of
+    # FAST_CHAT_RETRIEVAL_MAX_CHUNKS. The remainder is reserved for student
+    # uploads. A side that returns fewer hits releases its unused slots.
+    fast_chat_retrieval_course_slots: int = _bounded_int(
+        "FAST_CHAT_RETRIEVAL_COURSE_SLOTS", 2, 1, 8
+    )
+    # Ask the first Fast Chat call whether the answer needs course or source
+    # excerpts that the regex gate did not retrieve (``needs_sources``). A
+    # true answer triggers the existing one-retry fallback with the course
+    # catalog included. Default OFF: the model's flag rate cannot be measured
+    # offline, a flagged turn costs a second model call, and the AgentCore
+    # runtime must be redeployed with the new field first.
+    fast_chat_needs_sources_enabled: bool = _boolean(
+        "FAST_CHAT_NEEDS_SOURCES_ENABLED", False
+    )
+    # Add the notebook's Lecture Notes / Readings titles to the SOURCE CHECK
+    # rule on turns already stamped with ``source_need_check`` (so only when
+    # FAST_CHAT_NEEDS_SOURCES_ENABLED is on). Default OFF: the live run
+    # measured the wording without titles; only a live run can measure this.
+    fast_chat_source_check_titles_enabled: bool = _boolean(
+        "FAST_CHAT_SOURCE_CHECK_TITLES_ENABLED", False
+    )
+    local_course_intent_checkpoint: str = os.getenv(
+        "LOCAL_COURSE_INTENT_CHECKPOINT", ""
+    ).strip()
+    local_course_intent_learner_bundle: str = os.getenv(
+        "LOCAL_COURSE_INTENT_LEARNER_BUNDLE", ""
+    ).strip()
+    local_course_intent_threshold: float = _unit_interval(
+        "LOCAL_COURSE_INTENT_THRESHOLD", 0.8
+    )
+    local_course_intent_first_turn_threshold: float | None = (
+        _unit_interval("LOCAL_COURSE_INTENT_FIRST_TURN_THRESHOLD", local_course_intent_threshold)
+        if os.getenv("LOCAL_COURSE_INTENT_FIRST_TURN_THRESHOLD", "").strip() else None
+    )
+    # Search the selected student uploads when the regex gate skipped
+    # retrieval and the turn is not navigation or chit-chat. The excerpt
+    # ranking is local (no Bedrock or Knowledge Base call), but loading the
+    # uploads can add one storage GET (S3 in production) per selected upload
+    # on a chunk-cache miss, or every turn on the extracted-text fallback.
+    # Never adds the course Knowledge Base. Default OFF: it sends upload
+    # excerpts on turns that do not need them (up to
+    # FAST_CHAT_RETRIEVAL_MAX_CHARS more prompt characters per turn).
+    fast_chat_upload_retrieval_enabled: bool = _boolean(
+        "FAST_CHAT_UPLOAD_RETRIEVAL_ENABLED", False
+    )
+    # Allow ``/api/v1/coach/turn/stream`` to send ``reply_delta`` events when
+    # the browser also asks for them (header ``X-Coach-Reply-Deltas: 1``). The
+    # text is unvalidated and ephemeral; ``reply_ready`` and ``done`` stay the
+    # only validated and saved events. Only providers that can produce partial
+    # reply text emit deltas (mock, direct Bedrock Converse). The AgentCore
+    # Runtime path returns one JSON object and emits none. Default OFF.
+    coach_stream_reply_deltas_enabled: bool = _boolean(
+        "COACH_STREAM_REPLY_DELTAS_ENABLED", False
     )
     fast_chat_retrieval_max_chars: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHARS", 8_000, 1_000, 24_000

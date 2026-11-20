@@ -2,7 +2,7 @@
 
 This is a deliberately small Markdown renderer for this repository's teaching
 documents. It handles the prose, headings, lists, tables, fenced code, and
-Mermaid source blocks used in the handbook and codebase structure guide. It
+Mermaid source blocks used in the handbook and architecture appendix. It
 does not execute Markdown, diagram, or application code.
 """
 
@@ -32,10 +32,8 @@ from reportlab.platypus import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEARNING_DIR = Path(__file__).resolve().parent
 OUTPUT = PROJECT_ROOT / "output/pdf/co-design-chatbot-learning-handbook.pdf"
-SOURCES = [
-    LEARNING_DIR / "README.md",
-    PROJECT_ROOT / "docs/CODEBASE_STRUCTURE.md",
-]
+HANDBOOK = LEARNING_DIR / "README.md"
+ARCHITECTURE = PROJECT_ROOT / "docs/LOCAL_DEMO_IMPLEMENTATION.md"
 
 
 def styles() -> dict[str, ParagraphStyle]:
@@ -197,10 +195,10 @@ def table_from_lines(lines: list[str], st: dict[str, ParagraphStyle]) -> Table:
     return table
 
 
-def render_markdown(path: Path, st: dict[str, ParagraphStyle]) -> list[object]:
+def render_markdown(markdown: str, st: dict[str, ParagraphStyle]) -> list[object]:
     """Render supported Markdown blocks from one source file."""
     story: list[object] = []
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = markdown.splitlines()
     index = 0
     paragraph: list[str] = []
 
@@ -275,9 +273,15 @@ def page_number(canvas, document) -> None:
 
 def build() -> None:
     """Create the handbook PDF from the selected Markdown sources."""
-    missing = [str(path) for path in SOURCES if not path.is_file()]
-    if missing:
-        raise FileNotFoundError(f"Missing handbook sources: {missing}")
+    handbook = HANDBOOK.read_text(encoding="utf-8")
+    architecture = ARCHITECTURE.read_text(encoding="utf-8")
+    appendix = re.search(
+        r"^## Repository layout and placement rules\n(.*?)(?=^## |\Z)",
+        architecture,
+        re.MULTILINE | re.DOTALL,
+    )
+    if appendix is None:
+        raise ValueError("Missing repository layout section in the architecture guide")
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     st = styles()
     document = SimpleDocTemplate(
@@ -310,12 +314,10 @@ def build() -> None:
     for label in ("Learning handbook, chapters 1–8", "Codebase structure appendix"):
         story.append(Paragraph(clean_text(label), st["bullet"], bulletText="•"))
     story.append(PageBreak())
-    for source_index, source in enumerate(SOURCES):
-        if source.name == "CODEBASE_STRUCTURE.md":
-            story.append(Paragraph("Appendix: Codebase Structure", st["h1"]))
-        story.extend(render_markdown(source, st))
-        if source_index < len(SOURCES) - 1:
-            story.append(PageBreak())
+    story.extend(render_markdown(handbook, st))
+    story.append(PageBreak())
+    story.append(Paragraph("Appendix: Codebase Structure", st["h1"]))
+    story.extend(render_markdown(appendix.group(1), st))
     document.build(story, onFirstPage=page_number, onLaterPages=page_number)
 
 

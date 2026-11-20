@@ -10,9 +10,10 @@ import time
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from backend.context_planner import memory_from_metadata
+from backend.course_intent import CourseIntentClassifier, is_first_student_turn
 from backend.coaching.deep_review_context import (
     DEEP_REVIEW_CHECKPOINT_VERSION,
     bind_supporting_message_ids,
@@ -20,26 +21,33 @@ from backend.coaching.deep_review_context import (
     plan_deep_review_context,
     record_deep_review_context_telemetry,
 )
+from backend.coaching.evidence_scope import (
+    _COURSE_CATALOG_RETRIEVAL_CUES as _COURSE_CATALOG_RETRIEVAL_CUES,
+    FIRST_PASS_TELEMETRY_CUES,
+    POST_MODEL_TELEMETRY_CUES,
+    ScopeInputs,
+    ScopeSource,
+    decide_first_pass_scope,
+    is_chit_chat as is_chit_chat,
+    is_image_source,
+    is_searchable_student_upload,
+    local_course_intent_candidate as local_course_intent_candidate,
+    wants_course_catalog_retrieval,
+    wants_source_need_check,
+    wants_student_upload_retrieval,
+)
 from backend.coaching.mode_policy import (
-    ModePolicy,
     is_current_stage_status_request,
     is_exact_confirm_command,
-    is_terminal_completion_request,
     is_stage_progression_request,
-    is_private_attachment_question,
-    looks_like_information_request,
     manual_stage_selection_target,
     qa_evidence_gap_turn,
-    resolve_mode_policy,
     should_author_qa_evidence_gap,
 )
-from backend.retrieval_gate import classify_retrieval_intent
-from backend.specialists.routing import looks_like_course_question
 from backend.coaching.workflow_navigation import (
     apply_progression_effect,
     is_compound_status_guidance_request,
     progression_effect_for,
-    workflow_skips_retrieval,
 )
 from backend.coaching.progress import (
     PROGRESS_RETRIEVING,
@@ -47,8 +55,10 @@ from backend.coaching.progress import (
     PROGRESS_THINKING,
     CoachProgressCallback,
     CoachReplyCallback,
+    CoachReplyDeltaCallback,
     coach_progress,
     emit_coach_progress,
+    emit_coach_reply_discard,
     emit_coach_reply_ready,
 )
 from backend.coaching.progress_fields import meaningful_progress_fields
@@ -163,20 +173,11 @@ _CITATION_LABEL = re.compile(r"\[(S\d+)\]")
 IDEMPOTENCY_SURFACE_COACH_TURN = "coach_turn"
 IDEMPOTENCY_SURFACE_DEEP_REVIEW = "deep_review"
 
-# Cues that mean Bedrock KB should search the official course catalog even
-# when Lecture Notes / Readings are not Chat-selected.
-_COURSE_CATALOG_RETRIEVAL_CUES = frozenset(
-    {
-        "conservative_course_question",
-        "week_or_session",
-        "course_grounding",
-        "according_to_source",
-        "what_source_says",
-        "based_on_source",
-        "material_noun",
-        "compare_to_source",
-    }
-)
+# The decision helpers moved to ``evidence_scope``; these names stay importable
+# from here for existing callers and tests.
+_wants_course_catalog_retrieval = wants_course_catalog_retrieval
+_wants_source_need_check = wants_source_need_check
+_wants_student_upload_retrieval = wants_student_upload_retrieval
 
 logger = logging.getLogger(__name__)
 
@@ -234,37 +235,87 @@ def _stage_review_important_message_ids(
     return ids[:edge] + ids[-edge:]
 
 
-def _wants_course_catalog_retrieval(
-    student_message: str,
-    *,
-    mode_retrieve: bool,
-) -> bool:
-    """Return whether this turn should Retrieve against the course library.
+def _is_image_source(source: Mapping[str, Any]) -> bool:
+    """Return whether *source* is an image (``kind`` or ``image/*`` mime)."""
+    return is_image_source(
+        kind=str(source.get("kind") or ""), mime=str(source.get("mime") or "")
+    )
 
-    Course library items are view-only in Sources. Genuine course questions
-    still need Bedrock KB over the official catalog, decided by intent cues
-    rather than Sources selection or title overlap.
+
+def searchable_student_uploads(
+    sources: Iterable[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """Return the student's own non-image sources from *sources*.
+
+    Course library rows (Lecture Notes / Readings) are dropped: they are
+    searched only through the Knowledge Base. Images are dropped: their
+    evidence reaches the model as image input, not as text retrieval.
 
     Args:
-        student_message: Current student contribution.
-        mode_retrieve: Effective mode-policy retrieve flag after workflow
-            and attachment overrides.
+        sources: Selected (and attached) notebook sources after scoping.
 
     Returns:
-        True when the Knowledge Base course catalog should be included in
-        ``retrieval_sources``.
+        The sources local text retrieval can search, in input order.
     """
-    if not mode_retrieve:
-        return False
-    if looks_like_course_question(student_message):
-        return True
-    classification = classify_retrieval_intent(
-        student_message,
-        has_selected_sources=False,
-    )
-    if not classification.retrieve:
-        return False
-    return bool(set(classification.cues).intersection(_COURSE_CATALOG_RETRIEVAL_CUES))
+    return [
+        source
+        for source in sources
+        if is_searchable_student_upload(
+            is_course_library=is_locked_course_source(source),
+            is_image=_is_image_source(source),
+        )
+    ]
+
+
+SOURCE_CHECK_MAX_TITLES = 20
+SOURCE_CHECK_TITLE_MAX_CHARS = 80
+_COURSE_TITLE_GROUP_ORDER = {"lecture notes": 0, "readings": 1}
+_FILE_EXTENSION = re.compile(r"\.[A-Za-z0-9]{1,5}$")
+_TITLE_NUMBER = re.compile(r"(\d+)")
+
+
+def _natural_title_key(title: str) -> list[Any]:
+    """Sort key that puts ``Week 2`` before ``Week 10``."""
+    return [
+        int(part) if index % 2 else part
+        for index, part in enumerate(_TITLE_NUMBER.split(title.casefold()))
+    ]
+
+
+def source_check_course_titles(sources: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Return compact course material titles for the SOURCE CHECK rule.
+
+    Uses the notebook's locked course sources (Lecture Notes / Readings),
+    the same set a flagged turn hands to the Knowledge Base. A title is the
+    filename without its extension, whitespace collapsed, ``;`` replaced
+    (it separates titles in the prompt) and clipped to
+    ``SOURCE_CHECK_TITLE_MAX_CHARS``. Duplicates (case-insensitive) are
+    dropped. Lecture Notes come before Readings, natural order inside each
+    group, at most ``SOURCE_CHECK_MAX_TITLES`` titles.
+
+    Args:
+        sources: Visible notebook sources (``TurnSnapshot.visible_sources``).
+
+    Returns:
+        Ordered titles; empty when the notebook has no course sources.
+    """
+    entries: list[tuple[int, list[Any], str]] = []
+    seen: set[str] = set()
+    for source in sources:
+        if not is_locked_course_source(source):
+            continue
+        raw = " ".join(str(source.get("title") or "").split())
+        title = _FILE_EXTENSION.sub("", raw).replace(";", ",").strip()
+        title = title[:SOURCE_CHECK_TITLE_MAX_CHARS].rstrip()
+        key = title.casefold()
+        if not title or key in seen:
+            continue
+        seen.add(key)
+        group = str((source.get("metadata") or {}).get("course_material_group") or "")
+        order = _COURSE_TITLE_GROUP_ORDER.get(group.strip().casefold(), 2)
+        entries.append((order, _natural_title_key(title), title))
+    entries.sort(key=lambda entry: (entry[0], entry[1]))
+    return [title for _, _, title in entries[:SOURCE_CHECK_MAX_TITLES]]
 
 
 def _quote_offsets(text: str, quote: str) -> tuple[int, int] | None:
@@ -382,6 +433,8 @@ def _coach_request_fingerprint(
             "idempotency_key",
             "expected_response_mode",
             "mode_policy_intent",
+            # Server-filled; excluded so existing markers keep their digest.
+            "course_material_titles",
         },
     )
     # Existing saved retry markers predate this additive public field.
@@ -591,6 +644,7 @@ class CoachApplicationService:
         auto_advance_stages: bool = False,
         retriever: ContextRetriever | None = None,
         generation_admission: GenerationAdmission | None = None,
+        course_intent_classifier: CourseIntentClassifier | None = None,
     ) -> None:
         self._store = store
         self._notebooks = notebooks
@@ -599,6 +653,7 @@ class CoachApplicationService:
         self._auto_advance_stages = auto_advance_stages
         self._retriever = retriever or LocalChunkRetriever()
         self._generation_admission = generation_admission or configured_generation_admission()
+        self._course_intent_classifier = course_intent_classifier
 
     def _rate_limit_user_key(self) -> str:
         """Return the authenticated store owner key for coach rate limiting.
@@ -799,6 +854,7 @@ class CoachApplicationService:
         server_owned_specialist: str | None = None,
         progress: CoachProgressCallback | None = None,
         reply: CoachReplyCallback | None = None,
+        reply_delta: CoachReplyDeltaCallback | None = None,
     ) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
 
@@ -818,8 +874,12 @@ class CoachApplicationService:
         events. It must not receive student text.
         *reply* receives the validated, final response text before persistence;
         callers must discard that preview if the turn fails to save.
+        *reply_delta* receives unvalidated partial reply fragments from
+        providers that can stream them, and ``None`` when the fragments so far
+        are withdrawn (the retry after a source check). It is ephemeral and is
+        never persisted.
         """
-        with usage_operation("chat", request.thread_id, admission=self._generation_admission) as usage, coach_progress(progress, reply):
+        with usage_operation("chat", request.thread_id, admission=self._generation_admission) as usage, coach_progress(progress, reply, reply_delta):
             turn = self._submit_body(
                 request,
                 execution_lease_held=execution_lease_held,
@@ -2434,6 +2494,7 @@ class CoachApplicationService:
                     excerpt=excerpt,
                     score=chunk.score,
                     retrieval_origin=str(chunk.retrieval_origin or ""),
+                    page=chunk.page,
                 )
             )
         return retrieved_chunks, retrieval_result.context
@@ -2499,55 +2560,94 @@ class CoachApplicationService:
     ) -> tuple[CoachRequest, CoachTurn]:
         """Retry once with application RAG when Haiku reports missing evidence.
 
+        Two first-call flags can start the retry:
+
+        * ``needs_source_retrieval`` (original): selected sources exist and
+          the gate skipped them. Retrieves from selected sources only.
+        * ``needs_sources`` (``FAST_CHAT_NEEDS_SOURCES_ENABLED``): the first
+          call said a correct answer needs course or source excerpts that the
+          regex gate did not fetch. Retrieves from selected sources and the
+          course catalog, like a first-pass catalog hit. Honoured only when
+          this request carried ``source_need_check``.
+
         The first model result is not persisted. The retry stays inside the
-        same notebook execution lease and idempotency claim. A second
-        ``needs_source_retrieval`` flag cannot trigger another retrieve.
-        Hydrated retrieval sources come from the request-scoped snapshot
-        when the first pass already retrieved. Idle first passes skip
-        hydration, so this retry hydrates selected student sources once.
+        same notebook execution lease and idempotency claim. The retry request
+        clears ``source_need_check`` and sets ``retrieval_required``, so a
+        second flag cannot trigger another retrieve. Hydrated retrieval
+        sources come from the request-scoped snapshot when the first pass
+        already retrieved. Idle first passes skip hydration, so this retry
+        hydrates selected student sources once.
         """
         record_field("rag_fallback_used", False)
         record_field("rag_fallback_model_calls", 1)
         if str(request.specialist or "").strip().lower() == "review":
             return request, turn
-        if request.retrieval_required:
-            return request, turn
         if request.retrieved_chunks:
             return request, turn
-        if not request.source_ids:
-            return request, turn
+        source_need = bool(request.source_need_check) and (
+            self._workflow.peek_needs_sources(request.thread_id)
+        )
+        if not source_need:
+            if request.retrieval_required:
+                return request, turn
+            if not request.source_ids:
+                return request, turn
         if _agentcore_turn_budget_exhausted():
             record_field("rag_fallback_skipped_budget", True)
             logger.info(
                 "rag_fallback_skipped reason=agentcore_invoke_budget_exhausted"
             )
             return request, turn
-        if not self._workflow.peek_needs_source_retrieval(request.thread_id):
+        if not source_need and not self._workflow.peek_needs_source_retrieval(
+            request.thread_id
+        ):
             return request, turn
-        snapshot = self._hydrate_retrieval_sources(snapshot)
+        snapshot = self._hydrate_retrieval_sources(
+            snapshot, include_course_catalog=source_need
+        )
         retrieval_sources = snapshot.retrieval_sources
         if not retrieval_sources:
             return request, turn
         record_field("rag_fallback_used", True)
+        record_field(
+            "rag_fallback_trigger",
+            "needs_sources" if source_need else "needs_source_retrieval",
+        )
         emit_coach_progress(PROGRESS_RETRIEVING)
-        chunks, context = self._retrieve_for_turn(
-            student_message=request.student_message,
-            current_stage=request.current_stage,
-            retrieval_sources=retrieval_sources,
-            project_context=request.student_project_context,
-            conversation_summary=request.conversation_summary,
-            recent_messages=list(request.history),
-            timing_field="rag_fallback_retrieval_ms",
-        )
-        retried = request.model_copy(
-            update={
-                "retrieved_chunks": chunks,
-                "source_context": context,
-                "retrieval_required": True,
-            }
-        )
+        try:
+            chunks, context = self._retrieve_for_turn(
+                student_message=request.student_message,
+                current_stage=request.current_stage,
+                retrieval_sources=retrieval_sources,
+                project_context=request.student_project_context,
+                conversation_summary=request.conversation_summary,
+                recent_messages=list(request.history),
+                timing_field="rag_fallback_retrieval_ms",
+            )
+        except ValueError:
+            raise
+        except Exception:
+            if not source_need:
+                raise
+            # The first answer used no course evidence, so it must not be
+            # shown as if retrieval had been unnecessary. Ask the model to
+            # state the evidence gap, as the first-pass retrieve failure does.
+            chunks, context = [], COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
+        update: dict[str, Any] = {
+            "retrieved_chunks": chunks,
+            "source_context": context,
+            "retrieval_required": True,
+            "source_need_check": False,
+            "course_material_titles": [],
+        }
+        if source_need:
+            # Course-catalog turns fail closed instead of using model
+            # knowledge, the same as a first-pass catalog retrieve.
+            update["allow_model_knowledge"] = False
+        retried = request.model_copy(update=update)
         if self._generation_admission is None:
             emit_coach_progress(PROGRESS_THINKING)
+        emit_coach_reply_discard()  # the first pass is replaced, not shown
         agent_started = time.perf_counter()
         turn = self._workflow.run(retried)
         perf = current_perf()
@@ -2796,10 +2896,7 @@ class CoachApplicationService:
             raise ValueError("image_inputs must be resolved server-side from source_ids")
 
         selected_image_sources = [
-            source
-            for source in selected_sources
-            if str(source.get("kind") or "").lower() == "image"
-            or str(source.get("mime") or "").lower().startswith("image/")
+            source for source in selected_sources if _is_image_source(source)
         ]
         if len(selected_image_sources) > 5:
             raise ValueError(
@@ -2829,89 +2926,51 @@ class CoachApplicationService:
             str(metadata.get("learning_summary") or "").split()
         ).strip()
         gate_started = time.perf_counter()
-        mode_policy = resolve_mode_policy(
-            request.student_message,
-            selected_source_titles=[
-                str(source.get("title") or "") for source in selected_sources
-            ],
-            selected_source_filenames=[
-                str(source.get("filename") or source.get("name") or "")
-                for source in selected_sources
-            ],
-            has_selected_sources=bool(selected_sources),
-        )
-        lecture_help = request.interaction_intent == "lecture_help"
-        if lecture_help:
-            mode_policy = ModePolicy(
-                intent="high_confidence_source",
-                expected_mode="qa",
-                retrieve=True,
-                retrieval_intent=mode_policy.retrieval_intent,
-            )
-        elif request.interaction_intent == "project_coaching":
-            mode_policy = replace(mode_policy, expected_mode="coaching")
-        stage_status_request = not lecture_help and is_current_stage_status_request(
-            request.student_message
-        )
-        if stage_status_request:
-            # A current-stage lookup is sourced exclusively from the
-            # authoritative notebook journey. Authorize supplied attachments
-            # above, then remove all evidence scope before the Retrieve gate.
-            mode_policy = ModePolicy(
-                intent=mode_policy.intent,
-                expected_mode="qa",
-                retrieve=False,
-                retrieval_intent=mode_policy.retrieval_intent,
-                mixed=mode_policy.mixed,
-            )
-            snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
-            selected_image_sources = []
-            image_inputs = []
-            unresolved_image_ids = set()
-            record_field("current_stage_status_request", True)
-        progression_request = not lecture_help and (
-            is_stage_progression_request(request.student_message)
-            or is_terminal_completion_request(
-                request.student_message,
-                current_stage=authoritative_stage,
-            )
-        )
-        workflow_no_retrieve = not lecture_help and workflow_skips_retrieval(
-            request.student_message,
+        # The first-pass scope and mode rules live in
+        # ``backend/coaching/evidence_scope.py`` (pure; also used by the
+        # offline gate eval). This method builds its inputs from the
+        # authoritative snapshot, applies the result to the snapshot, records
+        # telemetry, and owns the one model call between the two decisions.
+        attachment_id_set = set(attachment_ids)
+        scope_inputs = ScopeInputs(
+            message=request.student_message,
             current_stage=authoritative_stage,
-        )
-        if progression_request or (
-            workflow_no_retrieve and not stage_status_request
-        ):
-            # Stage navigation, meta-guidance, prior-stage review, and compound
-            # status+guidance must not be hijacked by selected source titles.
-            # Pure status already cleared evidence above.
-            mode_policy = ModePolicy(
-                intent=mode_policy.intent,
-                expected_mode="coaching",
-                retrieve=False,
-                retrieval_intent=mode_policy.retrieval_intent,
-                mixed=mode_policy.mixed,
-            )
-            if progression_request:
-                record_field("stage_progression_request", True)
-            elif workflow_no_retrieve:
-                record_field("workflow_skips_retrieval", True)
-            # Keep authorization checks above, then present no evidence scope.
-            snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
-            selected_image_sources = []
-            image_inputs = []
-            unresolved_image_ids = set()
-        attachment_only_question = is_private_attachment_question(
-            request.student_message,
+            sources=tuple(
+                ScopeSource(
+                    source_id=str(source.get("id") or ""),
+                    title=str(source.get("title") or ""),
+                    filename=str(source.get("filename") or source.get("name") or ""),
+                    is_attachment=str(source.get("id") or "") in attachment_id_set,
+                    is_course_library=is_locked_course_source(source),
+                    is_image=_is_image_source(source),
+                    image_bytes_resolved=str(source.get("id") or "")
+                    not in unresolved_image_ids,
+                )
+                for source in selected_sources
+            ),
             attachment_count=len(attachment_ids),
+            interaction_intent=request.interaction_intent,
+            force_retrieval=force_retrieval,
+            frozen_history=frozen_history_revision is not None,
+            upload_retrieval_enabled=bool(
+                runtime_settings.fast_chat_upload_retrieval_enabled
+            ),
         )
-        if attachment_only_question:
+        scope = decide_first_pass_scope(scope_inputs)
+        for cue in FIRST_PASS_TELEMETRY_CUES:
+            if cue in scope.cues:
+                record_field(cue, True)
+        # Apply the scope to the request snapshot, in the order it is decided:
+        # a clear (status, progression, workflow) first, then attachment-only
+        # narrowing, which still runs after a clear.
+        if scope.scope_cleared:
+            snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
+            image_inputs = []
+        if scope.attachment_only:
             # Keep the request-scoped snapshot itself attachment-only.  The
             # first retrieval pass and the later needs_source_retrieval
             # fallback both hydrate from this snapshot; filtering only a local
             # tuple here would let fallback reintroduce selected course rows.
-            attachment_id_set = set(attachment_ids)
             snapshot = replace(
                 snapshot,
                 selected_sources=tuple(
@@ -2928,30 +2987,16 @@ class CoachApplicationService:
             # Vision inputs are evidence too. Do not retain bytes from a
             # separately selected course image after narrowing this turn to a
             # private attachment.
-            selected_image_sources = [
-                source
-                for source in selected_image_sources
-                if str(source.get("id") or "") in attachment_id_set
-            ]
             image_inputs = [
                 image
                 for image in image_inputs
                 if str(image.source_id) in attachment_id_set
             ]
-            resolved_image_ids = {str(item.source_id) for item in image_inputs}
-            unresolved_image_ids = {
-                str(source.get("id") or "")
-                for source in selected_image_sources
-                if str(source.get("id") or "") not in resolved_image_ids
-            }
-        # Freeze the post-scope evidence IDs before excluding broken image
-        # bytes from provider inputs.  A missing selected image is still an
-        # evidence gap, not permission to use model knowledge.
-        effective_source_ids = [
-            str(source.get("id") or "")
-            for source in snapshot.selected_sources
-            if str(source.get("id") or "")
-        ]
+        unresolved_image_ids = set(scope.unresolved_image_ids)
+        # The effective ids are frozen before excluding broken image bytes from
+        # provider inputs.  A missing selected image is still an evidence gap,
+        # not permission to use model knowledge.
+        effective_source_ids = list(scope.kept_source_ids)
         if unresolved_image_ids:
             # An image row with missing bytes is not evidence. Keep its ID in
             # the effective scope above so the request fails closed instead of
@@ -2964,49 +3009,70 @@ class CoachApplicationService:
                     if str(source.get("id") or "") not in unresolved_image_ids
                 ),
             )
-        missing_image_qa = bool(selected_image_sources) and (
-            len(selected_image_sources) == len(selected_sources)
-            and not image_inputs
-            and looks_like_information_request(request.student_message)
-        )
-        needs_retrieval = bool(mode_policy.retrieve)
-        # A question about the current private attachment must use that
-        # turn-scoped evidence first.  Keep the normal one-call model decision
-        # (including out_of_scope) but do not send unrelated selected course
-        # sources through the retriever for this case.
-        if attachment_only_question:
-            needs_retrieval = True
-            record_field("attachment_retrieval_scoped", True)
-        if missing_image_qa:
-            # Missing image bytes still need the fail-closed Q&A gap path even
-            # when the retrieval gate no longer treats generic questions as
-            # selected-source retrieves.
-            needs_retrieval = True
-        if force_retrieval and selected_sources:
-            needs_retrieval = True
-        include_course_catalog = (
-            needs_retrieval
-            and not attachment_only_question
-            and not stage_status_request
-            and not progression_request
-            and not (
-                workflow_no_retrieve and not stage_status_request
+        course_intent_promoted = False
+        if self._course_intent_classifier is not None and scope.course_intent_eligible:
+            titles = source_check_course_titles(snapshot.visible_sources)
+            if titles:
+                try:
+                    score = self._course_intent_classifier.score(
+                        request.student_message, store_history, titles
+                    )
+                except Exception as exc:
+                    logger.warning("local_course_intent_failed category=%s", type(exc).__name__)
+                    score = None
+                cutoff = runtime_settings.local_course_intent_threshold
+                first_cutoff = runtime_settings.local_course_intent_first_turn_threshold
+                if first_cutoff is not None and is_first_student_turn(store_history):
+                    cutoff = first_cutoff
+                course_intent_promoted = score is not None and score >= cutoff
+        # Local student-upload search on gate skips (opt-in) is decided after
+        # the course-catalog step, so it can never add the Knowledge Base:
+        # hydration below keeps include_course_catalog false. The setting is
+        # read after the model call, as it always was, and the scope is decided
+        # again only when the promotion or that read changes the answer.
+        upload_retrieval_enabled = bool(runtime_settings.fast_chat_upload_retrieval_enabled)
+        if course_intent_promoted or (
+            upload_retrieval_enabled != scope_inputs.upload_retrieval_enabled
+        ):
+            scope = decide_first_pass_scope(
+                replace(scope_inputs, upload_retrieval_enabled=upload_retrieval_enabled),
+                course_intent_promoted=course_intent_promoted,
             )
-            and (
-                lecture_help or _wants_course_catalog_retrieval(
-                    request.student_message,
-                    mode_retrieve=bool(mode_policy.retrieve) or force_retrieval,
-                )
-            )
-        )
-        if include_course_catalog:
-            needs_retrieval = True
+        for cue in POST_MODEL_TELEMETRY_CUES:
+            if cue in scope.cues:
+                record_field(cue, True)
+        mode_policy = scope.mode_policy
+        needs_retrieval = scope.needs_retrieval
+        include_course_catalog = scope.include_course_catalog
+        evidence_scoped = scope.evidence_scoped
+        attachment_only_question = scope.attachment_only
+        upload_policy_only = scope.upload_policy_only
         record_field("retrieval_gate_ms", elapsed_ms(gate_started))
         record_field("retrieval_required", bool(needs_retrieval))
         record_field("mode_policy_intent", mode_policy.intent)
         retrieved_chunks: list[RetrievalChunkReference] = []
         retrieval_result_context = ""
-        if needs_retrieval:
+        if upload_policy_only:
+            # Loading the uploads can read object storage (S3 on a chunk-cache
+            # miss or the extracted-text fallback). The gate did not ask for
+            # this search, so a storage failure must not fail the turn.
+            try:
+                snapshot = self._hydrate_retrieval_sources(
+                    snapshot,
+                    include_course_catalog=include_course_catalog,
+                )
+            except ValueError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "upload_retrieval_policy_hydrate_failed category=%s",
+                    type(exc).__name__,
+                )
+                record_field("upload_retrieval_policy_failed", True)
+                record_field("retrieval_required", False)
+                needs_retrieval = False
+                snapshot = replace(snapshot, retrieval_sources=())
+        elif needs_retrieval:
             snapshot = self._hydrate_retrieval_sources(
                 snapshot,
                 include_course_catalog=include_course_catalog,
@@ -3049,21 +3115,34 @@ class CoachApplicationService:
                 # "no matching excerpt" response.
                 raise
             except Exception:
-                # A source Q&A turn cannot fall through to the provider when
-                # retrieval itself fails: doing so would let model knowledge or
-                # prior assistant prose become an unsupported course answer.
-                # Image-only Q&A remains provider-owned because its evidence is
-                # the resolved image input, not textual retrieval. A mixed turn
-                # with any textual selected source must still fail closed.
-                image_only = bool(image_inputs) and all(
-                    str(source.kind or "").lower() == "image"
-                    or str(source.mime or "").lower().startswith("image/")
-                    for source in retrieval_sources
-                )
-                if mode_policy.expected_mode != "qa" or image_only:
-                    raise
-                retrieved_chunks = []
-                retrieval_result_context = COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
+                if upload_policy_only:
+                    # The gate did not ask for this search, so its failure
+                    # must not fail the turn. Continue as if the policy had
+                    # not fired (the needs_sources check may still apply).
+                    record_field("upload_retrieval_policy_failed", True)
+                    record_field("retrieval_required", False)
+                    needs_retrieval = False
+                    retrieved_chunks = []
+                    retrieval_result_context = ""
+                    snapshot = replace(snapshot, retrieval_sources=())
+                    retrieval_sources = ()
+                else:
+                    # A source Q&A turn cannot fall through to the provider
+                    # when retrieval itself fails: doing so would let model
+                    # knowledge or prior assistant prose become an
+                    # unsupported course answer. Image-only Q&A remains
+                    # provider-owned because its evidence is the resolved
+                    # image input, not textual retrieval. A mixed turn with
+                    # any textual selected source must still fail closed.
+                    image_only = bool(image_inputs) and all(
+                        str(source.kind or "").lower() == "image"
+                        or str(source.mime or "").lower().startswith("image/")
+                        for source in retrieval_sources
+                    )
+                    if mode_policy.expected_mode != "qa" or image_only:
+                        raise
+                    retrieved_chunks = []
+                    retrieval_result_context = COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
         else:
             record_field("retrieval_total_ms", 0)
             record_field("course_kb_retrieval_ms", 0)
@@ -3071,6 +3150,19 @@ class CoachApplicationService:
         record_field("retrieved_chunk_count", len(retrieved_chunks))
         record_field("retrieved_context_chars", len(retrieval_result_context))
         record_field("rag_used", bool(retrieved_chunks))
+        source_need_check = _wants_source_need_check(
+            enabled=bool(runtime_settings.fast_chat_needs_sources_enabled),
+            searched=bool(needs_retrieval and retrieval_sources),
+            evidence_scoped=evidence_scoped,
+        )
+        if source_need_check:
+            record_field("source_need_check", True)
+        course_material_titles: list[str] = []
+        if source_need_check and runtime_settings.fast_chat_source_check_titles_enabled:
+            course_material_titles = source_check_course_titles(
+                snapshot.visible_sources
+            )
+            record_field("source_check_title_count", len(course_material_titles))
         response_language = " ".join(
             str(metadata.get("response_language") or "English").split()
         )[:50]
@@ -3132,9 +3224,9 @@ class CoachApplicationService:
                 # server-owned specialist is stamped after this method.
                 "specialist": None,
                 "retrieval_required": bool(needs_retrieval),
-                "expected_response_mode": (
-                    "qa" if missing_image_qa else mode_policy.expected_mode
-                ),
+                "source_need_check": source_need_check,
+                "course_material_titles": course_material_titles,
+                "expected_response_mode": scope.expected_mode,
                 "mode_policy_intent": mode_policy.intent,
                 COUNTER_SETTINGS_KEY: parse_coaching_turns_since_deep_review(
                     metadata.get(COUNTER_SETTINGS_KEY)
@@ -3340,6 +3432,7 @@ class CoachApplicationService:
                     request.student_message,
                     limit=240,
                 ),
+                page=retrieved.page if retrieved is not None else None,
             )
         record_field("citation_source_resolution_count", resolved)
         return catalog

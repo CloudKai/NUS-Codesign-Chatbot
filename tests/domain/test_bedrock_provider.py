@@ -481,3 +481,61 @@ def test_readiness_requires_bedrock_model_id(tmp_path, monkeypatch: pytest.Monke
     response = client.get("/api/v1/ready")
     assert response.status_code == 503
     assert "BEDROCK_MODEL_ID" in response.json()["detail"]
+
+
+def _stream_pieces(payload: dict[str, Any], size: int = 9) -> list[dict[str, Any]]:
+    """Split a tool-input JSON object into many small ConverseStream deltas."""
+    raw = json.dumps(payload)
+    events: list[dict[str, Any]] = [
+        {"contentBlockStart": {"start": {"toolUse": {"toolUseId": "t1", "name": "coach_turn"}}}}
+    ]
+    events += [
+        {"contentBlockDelta": {"delta": {"toolUse": {"input": raw[i : i + size]}}}}
+        for i in range(0, len(raw), size)
+    ]
+    events += [
+        {"contentBlockStop": {}},
+        {"messageStop": {"stopReason": "tool_use"}},
+        {"metadata": {"usage": {"inputTokens": 11, "outputTokens": 7}}},
+    ]
+    return events
+
+
+def test_reply_text_streams_through_converse_stream_only_when_a_sink_is_bound():
+    from backend.coaching.progress import coach_progress
+
+    payload = _output(response_text="Which trade-off still needs evidence?")
+    plain = FakeBedrockRuntime(payload=payload)
+    _provider(plain).assess(_request())
+    assert len(plain.converse_calls) == 1 and plain.stream_calls == []
+
+    client = FakeBedrockRuntime(stream_events=_stream_pieces(payload))
+    fragments: list[str | None] = []
+    with coach_progress(None, None, fragments.append):
+        result = _provider(client).assess(_request())
+    assert client.converse_calls == [] and len(client.stream_calls) == 1
+    assert len(fragments) > 1
+    assert "".join(fragments) == payload["response_text"] == result.response_text
+
+
+def test_streamed_text_then_invalid_output_still_fails_validation():
+    from backend.coaching.progress import coach_progress
+
+    payload = _output()
+    payload["assessment"]["recommendation"] = "not-a-decision"
+    client = FakeBedrockRuntime(stream_events=_stream_pieces(payload))
+    fragments: list[str | None] = []
+    with coach_progress(None, None, fragments.append):
+        with pytest.raises(ProviderUnavailableError, match="malformed"):
+            _provider(client).assess(_request())
+    assert "".join(f for f in fragments if f) == payload["response_text"]
+
+
+def test_stream_error_after_partial_text_is_a_provider_failure():
+    from backend.coaching.progress import coach_progress
+
+    events = _stream_pieces(_output())[:4]  # truncated: no stop, no end
+    client = FakeBedrockRuntime(stream_events=events)
+    with coach_progress(None, None, lambda text: None):
+        with pytest.raises(ProviderUnavailableError):
+            _provider(client).assess(_request())
