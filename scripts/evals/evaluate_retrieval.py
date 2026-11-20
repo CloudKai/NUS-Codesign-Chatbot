@@ -25,6 +25,13 @@ and extra model calls by category. ``--ids``, ``--categories``,
 each chosen row with the SOURCE CHECK rule on and then off (two calls per row,
 both counted by ``--max-live-calls``). Tests use a stub client only.
 
+LIVE KB GATE mode (``--live-kb-gate``) is off by default. It runs only with
+``--max-live-calls N`` (1 to 295) and sends one Knowledge Base ``Retrieve`` per
+gate message through the production adapter, recording the top validated
+score, result count and elapsed ms per message id (no message text). It stops
+after the first auth or access error (exit 3). Built for the head-to-head
+routing comparison; never run by tests.
+
 Every ``--json-output`` file (all modes) carries a ``run`` block with the git
 SHA, a dirty flag and a UTC timestamp.
 
@@ -126,6 +133,16 @@ from scripts.evals.lib.live import (  # noqa: E402
     LiveStructuredOutputError as LiveStructuredOutputError,
     _refuse_unknown as _refuse_unknown,
     select_live_rows,
+)
+from scripts.evals.lib.kb_gate import (  # noqa: E402
+    build_retriever as _build_gate_retriever,
+    course_sources as _gate_course_sources,
+    kb_gate_exit_code,
+    kb_region as _gate_kb_region,
+    kb_settings_record as _gate_kb_settings_record,
+    LIVE_KB_GATE_CAP,
+    RecordingRetrieveClient,
+    run_gate_calls,
 )
 from scripts.evals.lib.output import (  # noqa: E402
     _git_run_metadata,
@@ -352,6 +369,51 @@ def _build_live_client(region: str, limit: int) -> CountingClient:
         "bedrock-agent-runtime",
         region_name=region,
         config=Config(retries={"total_max_attempts": 1, "mode": "standard"}),
+    )
+    return CountingClient(client, limit)
+
+
+def check_live_gate_request(max_live_calls: int | None, environ: Mapping[str, str]) -> int:
+    """Validate the ``--live-kb-gate`` opt-in and return the approved call limit.
+
+    Makes no network call and imports no AWS library.
+
+    Raises:
+        LiveRunRefused: If the call limit is missing or outside 1 to 295, or
+            the Knowledge Base is not configured.
+    """
+    if max_live_calls is None:
+        raise LiveRunRefused(
+            "--live-kb-gate requires --max-live-calls N (1 to "
+            f"{LIVE_KB_GATE_CAP}); no call limit was given"
+        )
+    if not 1 <= max_live_calls <= LIVE_KB_GATE_CAP:
+        raise LiveRunRefused(f"--max-live-calls must be between 1 and {LIVE_KB_GATE_CAP}")
+    for name in ("KNOWLEDGE_BASE_ID", "COURSE_MATERIALS_BUCKET"):
+        if not str(environ.get(name, "")).strip():
+            raise LiveRunRefused(f"{name} is not set; the live Knowledge Base is not configured")
+    return max_live_calls
+
+
+def _build_live_gate_client(region: str, limit: int, timeout_seconds: float) -> CountingClient:
+    """Create the real AWS client with the production client config.
+
+    Same retry and timeout settings as ``BedrockKnowledgeBaseRetriever._runtime_client``.
+    Only called after ``check_live_gate_request``.
+    """
+    import boto3
+    from botocore.config import Config
+
+    from backend.bedrock_retrieve import _RETRIEVE_CONNECT_TIMEOUT_SECONDS
+
+    client = boto3.client(
+        "bedrock-agent-runtime",
+        region_name=region,
+        config=Config(
+            retries={"total_max_attempts": 1, "mode": "standard"},
+            read_timeout=timeout_seconds,
+            connect_timeout=min(_RETRIEVE_CONNECT_TIMEOUT_SECONDS, timeout_seconds),
+        ),
     )
     return CountingClient(client, limit)
 
@@ -1952,6 +2014,15 @@ def build_parser() -> argparse.ArgumentParser:
         "CHECK rule on and then off. --max-live-calls counts calls, so "
         "floor(N / 2) messages are sent; N must be at least 2.",
     )
+    parser.add_argument(
+        "--live-kb-gate",
+        action="store_true",
+        help="OPT-IN. Send one Knowledge Base Retrieve per gate message through the "
+        "production adapter and record the top validated score, result count and "
+        "elapsed ms (costs money). Needs --max-live-calls N (1 to "
+        f"{LIVE_KB_GATE_CAP}); stops after the first auth or access error. "
+        "Cannot be combined with --live-kb, --live-model or the row filters.",
+    )
     return parser
 
 
@@ -2043,8 +2114,106 @@ def _main_live_model(args: argparse.Namespace) -> int:
     return code
 
 
+LIVE_KB_GATE_DEFINITION = (
+    "One Knowledge Base Retrieve per gate message through "
+    "BedrockKnowledgeBaseRetriever with production settings (course_material_id "
+    "filter, candidate count, validation of bucket, key and text). top_score is "
+    "the highest score among validated chunks, or null when none survived; "
+    "result_count is the number of validated chunks kept (at most max_results); "
+    "raw_hit_count is what Retrieve returned before validation; elapsed_ms is "
+    "measured around the adapter call. A failed or empty call is recorded with "
+    "its status and failure_category. Rows carry ids and categories only, no "
+    "message or history text."
+)
+
+
+def format_live_kb_gate_report(result: Mapping[str, Any]) -> str:
+    """Render the ``--live-kb-gate`` result as plain text (ids and counts only)."""
+    summary = result["summary"]
+    answered = summary["elapsed_ms_answered"]
+    lines = [
+        "mode: live_kb_gate (one Knowledge Base Retrieve per gate message)",
+        f"live calls made: {result['live_calls_made']} of limit {result['live_call_limit']}",
+        f"rows recorded: {summary['rows_recorded']} of {summary['rows_requested']} requested",
+        "status counts: "
+        + (", ".join(f"{k}={v}" for k, v in summary["status_counts"].items()) or "none"),
+        f"rows with a validated hit: {summary['rows_with_validated_hit']}",
+        f"elapsed ms (answered calls): n={answered['n']} p50={answered['p50']} p95={answered['p95']}",
+    ]
+    if summary["failure_categories"]:
+        lines.append(
+            "failure categories: "
+            + ", ".join(f"{k}={v}" for k, v in summary["failure_categories"].items())
+        )
+    return "\n".join(lines)
+
+
+def _main_live_kb_gate(args: argparse.Namespace) -> int:
+    """Run ``--live-kb-gate``: refuse before any client exists, else call Retrieve."""
+    try:
+        conflicts = [
+            flag
+            for flag, given in (
+                ("--live-kb", args.live_kb),
+                ("--live-model", args.live_model),
+                ("--ids", args.ids is not None),
+                ("--categories", args.categories is not None),
+                ("--expected-decision", args.expected_decision is not None),
+                ("--skip-sample", bool(args.skip_sample)),
+                ("--compare-source-check", args.compare_source_check),
+            )
+            if given
+        ]
+        if conflicts:
+            raise LiveRunRefused(f"--live-kb-gate cannot be combined with {', '.join(conflicts)}")
+        limit = check_live_gate_request(args.max_live_calls, os.environ)
+    except LiveRunRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    materials = load_materials(args.materials)
+    questions = load_questions(args.questions, materials)
+    messages = load_messages(args.messages, materials, [q["id"] for q in questions])
+    kb_settings = _gate_kb_settings_record()
+    counting = _build_live_gate_client(
+        _gate_kb_region(), limit, float(kb_settings["timeout_seconds"])
+    )
+    client = RecordingRetrieveClient(counting, limit)
+    outcome = run_gate_calls(
+        messages,
+        retriever=_build_gate_retriever(client),
+        client=client,
+        sources=_gate_course_sources(materials),
+        limit=limit,
+    )
+    result = {
+        "mode": "live_kb_gate",
+        "definition": LIVE_KB_GATE_DEFINITION,
+        "set": args.messages.name,
+        "messages_in_set": len(messages),
+        "live_calls_made": client.calls,
+        "live_call_limit": limit,
+        "kb_settings": kb_settings,
+        **outcome,
+    }
+    print(format_live_kb_gate_report(result))
+    if args.json_output:
+        _write_json_output(args.json_output, result)
+    code = kb_gate_exit_code(result)
+    if code == 3:
+        print(
+            f"stopped on the first auth or access error ({outcome['first_auth_error']['exception']}) "
+            f"at {outcome['first_auth_error']['id']}",
+            file=sys.stderr,
+        )
+    elif code == 1:
+        print("no call was answered", file=sys.stderr)
+    return code
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.live_kb_gate:
+        return _main_live_kb_gate(args)
     if args.live_model:
         return _main_live_model(args)
     if (
