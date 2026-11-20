@@ -2,7 +2,7 @@
 import type { Project } from './api';
 import { Icon } from './Icon';
 
-export type Milestone = { kind: 'stage'; completed: number; total: number; next: string } | { kind: 'finished' };
+export type Milestone = { kind: 'stage'; completed: number; total: number; next: string; from: string } | { kind: 'finished' };
 
 export function StageRecommendation({ project, disabled, act }: {
   project: Project; disabled: boolean; act: (route: string, body: object) => Promise<void>;
@@ -22,8 +22,8 @@ export function StageRecommendation({ project, disabled, act }: {
   </section>;
 }
 
-export function MilestoneBanner({ milestone, onDismiss, onReview }: {
-  milestone: Milestone; onDismiss: () => void; onReview: () => void;
+export function MilestoneBanner({ milestone, onDismiss, onReview, onReflect }: {
+  milestone: Milestone; onDismiss: () => void; onReview: () => void; onReflect: (stage: string) => void;
 }) {
   return <section className="milestone" role="status" aria-label="Milestone">
     <span className="milestone-icon" aria-hidden="true"><Icon name="flag"/></span>
@@ -32,7 +32,8 @@ export function MilestoneBanner({ milestone, onDismiss, onReview }: {
         ? <><strong>Stage {milestone.completed} of {milestone.total} complete</strong><span>Next: {milestone.next}</span></>
         : <><strong>You finished the Thinking Path</strong><span>Open Review to see your summary, strengths and how your idea scores.</span></>}
     </div>
-    {milestone.kind === 'finished' ? <button onClick={onReview}>Open Review</button> : null}
+    {milestone.kind === 'finished' ? <button onClick={onReview}>Open Review</button>
+      : <button onClick={() => onReflect(milestone.from)}>Add a reflection</button>}
     <button className="icon-button" aria-label="Dismiss milestone" title="Dismiss" onClick={onDismiss}><Icon name="close"/></button>
   </section>;
 }

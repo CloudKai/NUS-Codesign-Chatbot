@@ -149,6 +149,22 @@ stage markers express actual ordered stages, never invented scores or rewards.
 - **Recovery:** preserve actionable errors, pending-write checks, disabled states
   and unsaved streaming labels even when simplifying ordinary status copy.
 
+- **Hints, tools and reflection:** the starter row above the composer leads with a
+  **Need a hint?** chip that inserts a request for a small nudge, then **Stronger hint**
+  after one use (resets when the stage changes). Stage chips can carry fill-in tools such
+  as the Problem identification empathy map and the Concept generation comparison.
+  After a confirmed stage move, the milestone banner offers an optional **Add a
+  reflection**. Everything inserts editable text and never sends. The row shows two chips
+  plus the hint chip, scrolls sideways on phones, and hides while a check-in or milestone
+  is showing so only one prompt competes for attention at a time.
+- **Scaffold insertion:** an empty draft or an untouched earlier scaffold is replaced.
+  Words the student typed are kept and the scaffold is added below them.
+- **Home recap:** the Continue card quotes the student's latest saved contribution
+  under "You last shared".
+- **Project summary:** the Review header has a download button that saves a Markdown
+  copy of the summary, strengths, areas to improve, scores and each stage's work.
+  It is built in the browser from the project view; nothing is invented.
+
 ## Do's and Don'ts
 - Do use icons for familiar actions and text for ambiguous learning choices.
 - Do preserve focus, keyboard names and reduced-motion preferences.

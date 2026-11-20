@@ -94,6 +94,13 @@ export function HomeView({ owner, name, entries, summaries, locked, openChat, st
   const folder = (chat: Notebook) => entries.find(entry => entry.id === chat.parent_notebook_id && entry.kind === 'notebook')?.name;
   const stage = project?.stages.find(item => item.id === project.current_stage);
   const skills = skillSummary(project?.review?.facione_scores ?? []);
+  // The student's own latest saved contribution, so Home shows the companion remembers their work.
+  const lastShared = (() => {
+    if (!project) return '';
+    const ordered = [...project.stages].sort((a, b) => Number(b.id === project.current_stage) - Number(a.id === project.current_stage));
+    const text = ordered.map(item => item.student_work[item.student_work.length - 1]?.text).find(Boolean)?.trim() ?? '';
+    return text.length > 160 ? `${text.slice(0, 157).trimEnd()}…` : text;
+  })();
   const when = useMemo(() => greeting(new Date()), []);
 
   return <section className="home" aria-labelledby="home-title">
@@ -106,7 +113,8 @@ export function HomeView({ owner, name, entries, summaries, locked, openChat, st
           <span>{lastActive(summaries[latest.id], folder(latest))}</span>
         </div>
         <h2>{latest.name}</h2>
-        {summaries[latest.id]?.preview ? <p className="continue-preview">{summaries[latest.id].preview}</p> : null}
+        {lastShared || summaries[latest.id]?.preview
+          ? <p className="continue-preview">{lastShared ? <span className="continue-label">You last shared</span> : null}{lastShared ? `“${lastShared}”` : summaries[latest.id].preview}</p> : null}
         {project && stage && hasProjectWork(project) ? <div className="continue-progress">
           <StageStepper stages={project.stages} currentStage={project.current_stage} pending={!!project.pending} compact/>
           <p><strong>{stage.label}</strong></p>

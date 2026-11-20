@@ -705,3 +705,19 @@ html[data-reduce-motion] .typing-dots i { opacity: .7; }
 .work-list[data-scroll] { max-height: 240px; overflow-y: auto; padding-inline-end: 4px; overscroll-behavior: contain; }
 .fb-list[data-expanded] { max-height: 340px; overflow-y: auto; padding-inline-end: 4px; overscroll-behavior: contain; }
 .composer textarea { max-height: 200px; }
+
+/* Hints, reflection, export, Home recap */
+.hint-chip { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: var(--soft); }
+.hint-chip .icon { width: 14px; height: 14px; }
+.stage-chips .hint-chip { display: inline-flex; }
+.review-header-actions { display: flex; align-items: center; gap: 2px; }
+.continue-label { display: block; margin-bottom: 2px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.milestone .icon-button { margin-inline-start: auto; }
+
+@media (max-width: 767px) {
+  .stage-starters .stage-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-block: 2px; }
+  .stage-starters .stage-chips::-webkit-scrollbar { display: none; }
+  .stage-starters .stage-chips button { flex: none; white-space: nowrap; min-height: 40px; }
+  .stage-starters:not(.more) .extra-chip { display: inline-flex; }
+  .chips-more { display: none; }
+}

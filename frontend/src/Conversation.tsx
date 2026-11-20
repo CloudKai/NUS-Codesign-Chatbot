@@ -10,7 +10,7 @@ import { ModeSwitch } from './ModeSwitch';
 import { StageRecommendation, MilestoneBanner, type Milestone } from './StageRecommendation';
 import { StageStarters } from './StageStarters';
 import { CoachCheckIn } from './CoachCheckIn';
-import { chooseCheckIn, lectureToProjectScaffold, type CheckIn } from './coachingContent';
+import { chooseCheckIn, hintScaffold, lectureToProjectScaffold, reflectionScaffold, type CheckIn } from './coachingContent';
 import { REPLY_DELTAS_HEADER, citationText, isTurn, readStream, type Citation, type Event } from './stream';
 
 type Intent = 'lecture' | 'project';
@@ -62,6 +62,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const [pathOpen, setPathOpen] = useState(false);
   const [pathTab, setPathTab] = useState<{ tab?: 'Summary' | 'Progression'; n: number }>({ n: 0 });
   const [milestone, setMilestone] = useState<Milestone | null>(null);
+  const [hintLevel, setHintLevel] = useState(0);
+  useEffect(() => { setHintLevel(0); }, [project.current_stage]);
   const [transition, setTransition] = useState<{ from: string; to: string } | null>(null);
   const allDone = useRef(project.stages.every(stage => stage.completed));
   const checkInKey = `codesign-checkin:${owner}:${page.notebook.id}`;
@@ -377,7 +379,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     if (project.stages.every(stage => stage.completed)) { setMilestone({ kind: 'finished' }); return; }
     const completed = project.stages.findIndex(stage => stage.id === transition.from) + 1;
     const next = project.stages.find(stage => stage.id === transition.to)?.label;
-    if (completed > 0 && next) setMilestone({ kind: 'stage', completed, total: project.stages.length, next });
+    const from = project.stages.find(stage => stage.id === transition.from)?.label ?? '';
+    if (completed > 0 && next) setMilestone({ kind: 'stage', completed, total: project.stages.length, next, from });
   }, [transition, project]);
 
   function closePath() {
@@ -409,7 +412,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const projectWork = hasProjectWork(project);
   const stageNumber = Math.max(0, project.stages.findIndex(stage => stage.id === project.current_stage)) + 1;
   const turnBusy = watching || checking || moving || uploading || !!pending;
-  const checkIn = !checkInHidden && !isEmpty && !turnBusy && !text.trim() && !projectUncertain && !(pathOpen && compactScreen)
+  const checkIn = !checkInHidden && !milestone && !isEmpty && !turnBusy && !text.trim() && !projectUncertain && !(pathOpen && compactScreen)
     ? chooseCheckIn(project, summary, intent, dismissedRules) : null;
   function dismissCheckIn(item: CheckIn) {
     const next = [...dismissedRules, item.rule];
@@ -418,6 +421,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     try { sessionStorage.setItem(checkInKey, JSON.stringify(next)); } catch { /* Optional tab preference. */ }
   }
   const showChips = intent === 'project' && showStarters && !isEmpty && !checkIn && !text.trim() && !turnBusy;
+  // The composer dock changes height when a check-in or the suggestions appear. Keep the latest message in view.
+  useEffect(() => {
+    if (stickToLatest.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
+  }, [checkIn?.rule, showChips, startersCollapsed]);
   const openReview = (tab?: 'Summary' | 'Progression') => { setPathTab(value => ({ tab, n: value.n + 1 })); setPathOpen(true); };
   async function decideInline(route: string, body: object) {
     await stageAction(route, body);
@@ -499,7 +506,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           setDownloadError(''); setEvidence({ citation, message: message.id });
         }}>{citationText(citation)}</button>)}</div> : null}
     </article>)}
-    {milestone ? <MilestoneBanner milestone={milestone} onDismiss={() => setMilestone(null)} onReview={() => { setMilestone(null); openReview('Summary'); }}/> : null}
+    {milestone ? <MilestoneBanner milestone={milestone} onDismiss={() => setMilestone(null)} onReview={() => { setMilestone(null); openReview('Summary'); }}
+      onReflect={from => { setMilestone(null); insertScaffold(reflectionScaffold(from), 'project'); }}/> : null}
     <StageRecommendation project={project} disabled={reviewDisabled} act={decideInline}/>
     {watching ? <div className="typing" aria-hidden="true"><span className="typing-dots"><i/><i/><i/></span><span>{status}</span></div> : null}
     {evidence ? <aside className="evidence" aria-label="Cited evidence">
@@ -522,7 +530,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     </div></div>
     <div className="composer-dock"><div className="chat-column">
     {checkIn ? <CoachCheckIn checkIn={checkIn} onAct={item => insertScaffold(item.scaffold, 'project')} onDismiss={dismissCheckIn}/> : null}
-    {showChips ? <StageStarters stageId={project.current_stage} disabled={externalBlocked} collapsed={startersCollapsed} setCollapsed={setStartersCollapsed} onChoose={choosePrompt}/> : null}
+    {showChips ? <StageStarters stageId={project.current_stage} disabled={externalBlocked} collapsed={startersCollapsed} setCollapsed={setStartersCollapsed} onChoose={choosePrompt}
+      hintLevel={hintLevel} onHint={() => { insertScaffold(hintScaffold(hintLevel, stageLabel), 'project'); setHintLevel(level => Math.min(level + 1, 2)); }}/> : null}
     <form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
       <input ref={attachmentInput} hidden type="file" multiple aria-label="Attach files to your message" onChange={event => {
         const files = Array.from(event.target.files ?? []);
@@ -563,7 +572,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           closePath();
         }
       }}>
-      <ThinkingPath key={pathTab.n} project={project} initialTab={pathTab.tab} insertScaffold={insertScaffold}
+      <ThinkingPath key={pathTab.n} project={project} title={displayTitle} initialTab={pathTab.tab} insertScaffold={insertScaffold}
         disabled={reviewDisabled}
         act={stageAction} startInChat={startDesignChat} onClose={closePath} status={reviewStatus}>
         {projectUncertain && !moving ? <p className="review-recovery" role="alert">Check saved project before another action. <button disabled={busy} onClick={() => void refreshProject()}>Refresh saved project</button></p> : null}

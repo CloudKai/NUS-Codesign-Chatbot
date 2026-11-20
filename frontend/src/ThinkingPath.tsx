@@ -3,13 +3,14 @@ import { useRef, useState, type ReactNode } from 'react';
 import type { Project, ReviewFeedback, Stage } from './api';
 import { CoachText } from './CoachText';
 import { Icon } from './Icon';
+import { downloadProject } from './projectExport';
 import { buildScaffold, improveScaffold, practiceScaffold, skillExplanation, skillLevel, skillSummary, skillTip } from './coachingContent';
 
 const reviewTabs = ['Summary', 'Progression'] as const;
 
 /** Show saved feedback and the explicit Thinking Path actions for this chat. */
-export function ThinkingPath({ project, disabled, act, startInChat, onClose, status, children, insertScaffold, initialTab }: {
-  project: Project; disabled: boolean; insertScaffold: (text: string, switchTo?: 'project') => void; initialTab?: (typeof reviewTabs)[number]; act: (route: string, body: object) => Promise<void>;
+export function ThinkingPath({ project, title, disabled, act, startInChat, onClose, status, children, insertScaffold, initialTab }: {
+  project: Project; title: string; disabled: boolean; insertScaffold: (text: string, switchTo?: 'project') => void; initialTab?: (typeof reviewTabs)[number]; act: (route: string, body: object) => Promise<void>;
   startInChat: () => void; onClose: () => void; status: string; children: ReactNode;
 }) {
   const [activeTab, setActiveTab] = useState<(typeof reviewTabs)[number]>(
@@ -18,6 +19,7 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
   const tabButtons = useRef<Array<HTMLButtonElement | null>>([]);
   const [opened, setOpened] = useState('');
   const [heroOpen, setHeroOpen] = useState(false);
+  const [saved, setSaved] = useState('');
   const [showTips, setShowTips] = useState(false);
   const current = project.stages.find(stage => stage.id === project.current_stage)!;
   const done = project.stages.filter(stage => stage.completed).length;
@@ -43,7 +45,11 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
     <div className="review-toolbar">
       <header className="review-header">
         <h2 id="review-heading" tabIndex={-1}>Review</h2>
-        <button className="icon-button" aria-label="Close Review" title="Close Review" onClick={onClose}><Icon name="close"/></button>
+        <div className="review-header-actions">
+          <button className="icon-button" aria-label="Download project summary" title="Download project summary"
+            onClick={() => { downloadProject(project, title); setSaved('Project summary downloaded.'); window.setTimeout(() => setSaved(''), 4000); }}><Icon name="download"/></button>
+          <button className="icon-button" aria-label="Close Review" title="Close Review" onClick={onClose}><Icon name="close"/></button>
+        </div>
       </header>
       <div className="review-tabs" role="tablist" aria-label="Review views">
         {reviewTabs.map((tab, index) => {
@@ -67,7 +73,7 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
         })}
       </div>
     </div>
-    <p className="review-status supporting" role="status">{status}</p>
+    <p className="review-status supporting" role="status">{saved || status}</p>
     {children}
     <section id="review-panel-summary" role="tabpanel" aria-labelledby="review-tab-summary"
       hidden={activeTab !== 'Summary'} tabIndex={0}>

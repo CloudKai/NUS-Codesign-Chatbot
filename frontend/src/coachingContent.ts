@@ -6,13 +6,13 @@ export interface Starter { label: string; text: string }
 /** Stage ids match backend THINKING_STAGES. Unknown ids use the generic starters. */
 const STAGE_STARTERS: Record<string, Starter[]> = {
   problem_identification: [
-    { label: 'Who is affected?', text: 'The people affected by my problem are…\nHelp me check whether I understand their situation and needs.' },
+    { label: 'Empathy map', text: 'Empathy map for (who is affected):\nSays: \nThinks: \nDoes: \nFeels: \n\nWhat stands out to me: ' },
     { label: 'Sharpen my problem', text: 'My problem statement right now is…\nHelp me make it clearer and more specific.' },
     { label: 'Why does it matter?', text: 'This problem matters because…\nWhat evidence would show that it really is a problem worth solving?' },
   ],
   concept_generation: [
     { label: 'Give me three alternatives', text: 'My current idea is…\nGive me three genuinely different alternatives to consider.' },
-    { label: 'Compare two of my ideas', text: 'Idea A is… Idea B is…\nCompare them against my problem and tell me what trade-offs I should think about.' },
+    { label: 'Compare my ideas', text: 'Comparing my ideas:\nIdea A: \nIdea B: \nWhat matters most (for example safety, cost, ease of use): \n\nI think the better fit is… because…' },
     { label: 'Pick a direction', text: 'The concept I am leaning towards is…\nHelp me test whether it is the right one to develop.' },
   ],
   design_specification: [
@@ -36,6 +36,16 @@ const GENERIC_STARTERS: Starter[] = [
   { label: 'Test an assumption', text: 'One assumption I am making is…\nWhat evidence would challenge it?' },
   { label: 'What next?', text: 'I am not sure what to do next on my project.\nWhat should I think about?' },
 ];
+
+/** Progressive hints: a nudge first, then a more specific one. Neither asks for the answer. */
+export function hintScaffold(level: number, stage: string) {
+  return level <= 0
+    ? `I'm stuck on ${stage}.\n\nPlease give me a small hint, such as a question or a nudge. Don't give me the answer. `
+    : `Your last hint helped a little, but I'm still stuck on ${stage}.\n\nPlease give me a more specific hint. Don't write the answer for me. `;
+}
+
+/** One optional line after a stage move, to build the habit of noticing how thinking changed. */
+export const reflectionScaffold = (stage: string) => `Looking back on ${stage}, what changed in my thinking: `;
 
 /** Up to three starters for a stage. */
 export function starterChips(stageId: string): Starter[] {
