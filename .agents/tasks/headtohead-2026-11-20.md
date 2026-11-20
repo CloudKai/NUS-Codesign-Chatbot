@@ -1,6 +1,6 @@
 # Head-to-head: Laya routing vs KB-score routing (2026-11-20)
 
-Branch `improvement/backend`, head `758de0b` when the analysis ran. **Nothing live ran.** No AWS, Bedrock, AgentCore, Knowledge Base or other paid call, and no run that loads Laya weights. The two live inputs (the KB-score JSON and an all-rows Laya file) do not exist. **No arm can be declared the winner until both exist.** This report is a status of the build and of what can be said offline.
+Branch `improvement/backend`. The analysis code was last changed in `52d0729`, and the offline results were regenerated at that commit. **Nothing live ran.** No AWS, Bedrock, AgentCore, Knowledge Base or other paid call, and no run that loads Laya weights. The two live inputs (the KB-score JSON and an all-rows Laya file) do not exist. **No arm can be declared the winner until both exist.** This report is a status of the build and of what can be said offline.
 
 Labels follow the pre-registration: **measured** (computed by code from data in this repository), **bound** (a one-sided limit from a stated assumption), **missing** (no data). Message text appears nowhere in this report or in the outputs it describes. Only ids and category names are used.
 
@@ -19,7 +19,10 @@ Labels follow the pre-registration: **measured** (computed by code from data in 
 | `1f6acb6` | 2026-11-20T09:45:05Z | Laya host-noted all-rows run |
 | `a1bd91e` | 2026-11-20T09:52:04Z | `--extra-messages` |
 | `758de0b` | 2026-11-20T09:54:56Z | docs |
-| offline run | 2026-11-20T09:55:21Z | `generated_at_utc` in `offline-results.json` (the `run` block names git sha `758de0b`, clean tree) |
+| offline run (first) | 2026-11-20T09:55:21Z | at `758de0b`, clean tree |
+| `8736bf9` | 2026-11-20T10:07:24Z | first version of this report |
+| `52d0729` | 2026-11-20T10:13:28Z | review fixes: KB file settings check, status docs |
+| offline run (current) | 2026-11-20T10:13:32Z | `generated_at_utc` in `offline-results.json`; the `run` block names git sha `52d0729`, clean tree. Every figure below is identical to the first run |
 
 The plan commit predates all analysis code and the only results. The plan records that no per-half figure was computed or read before it was written.
 
@@ -53,7 +56,7 @@ Only the holdout half is reported. Calibration rows only choose `T`, and no `T` 
 
 ## 4. Measured
 
-Computed by code at `758de0b`, no KB file:
+Computed by code at `52d0729` (identical at `758de0b`), no KB file:
 
 - The split and its sizes (section 3).
 - Arm A's and arm B's search decisions from `backend/coaching/evidence_scope.py` (`decide_first_pass_scope`), and arm C's skip decisions: 44 of 295 rows are skipped by C. The first rule to fire is greeting 11, stage navigation 21, personal reasoning 12 (`skip_rules_arm_c` in the JSON).
@@ -180,11 +183,11 @@ python -m scripts.evals.compare_routing_arms \
 # Laya Learn file: add  --laya-full-kind learn
 ```
 
-`<TYPE>`, `<N>`, `<GB>` and `<arm64|x86_64>` are **unfilled until the operator runs command 2**. Command 2 refuses to start with a placeholder, a missing flag, or a non-positive vCPU or RAM value. The harness records the values as given and compares them with the machine, and a mismatch is recorded, not fatal.
+`<TYPE>`, `<N>`, `<GB>` and `<arm64|x86_64>` are **unfilled until the operator runs command 2**. **Compatibility change.** `benchmark_course_intent.py --checkpoint` used to start without host flags and now exits 2 unless all four host flags are given. Earlier real-model invocations need the flags added; `--stub-ms` runs do not. The docs state this. Command 2 refuses to start with a placeholder, a missing flag, or a non-positive vCPU or RAM value. The harness records the values as given and compares them with the machine, and a mismatch is recorded, not fatal.
 
-`--live-kb-gate` refuses to run without `--max-live-calls N` (1 to 295), sends one attempt per message, stops on the first auth or access error, records the git sha and timestamp, and writes ids, scores, counts and timings only.
+`compare_routing_arms` refuses a `--kb-gate` (or `--extra-kb-gate`) file whose recorded `kb_settings` differ from the plan (`candidates` 12, `max_results` 4, `filter_mode` `required`) or lack that block, so a file made under other settings cannot supply `T` or a `measured` label. `--live-kb-gate` refuses to run without `--max-live-calls N` (1 to 295), sends one attempt per message, stops on the first auth or access error, records the git sha and timestamp, and writes ids, scores, counts and timings only.
 
-**IAM** (`docs/RETRIEVAL_EVAL.md`, "IAM for the live gate"): `bedrock:Retrieve` on `arn:aws:bedrock:<region>:<account-id>:knowledge-base/<KB-ID>`. `bedrock:RetrieveAndGenerate` is not needed. Status: verified against AWS documentation (the Service Authorization Reference and the Retrieve API page), **not tested on a real account**. The repo runbook `docs/deploy/AWS_STATELESS_EC2.md` grants the same action on the same resource form.
+**IAM** (`docs/RETRIEVAL_EVAL.md`, "IAM for the live gate"): `bedrock:Retrieve` on `arn:aws:bedrock:<region>:<account-id>:knowledge-base/<KB-ID>`. `bedrock:RetrieveAndGenerate` is not needed. Status: verified against AWS documentation ([Service Authorization Reference for Amazon Bedrock](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonbedrock.html), which lists `Retrieve` with the `knowledge-base` resource type, and the [Retrieve API page](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_agent-runtime_Retrieve.html), which gives the endpoint and accepts a KB id or ARN but does not state the IAM policy), **not tested on a real account**. The repo runbook `docs/deploy/AWS_STATELESS_EC2.md` grants the same action on the same resource form.
 
 **Cost** (`docs/RETRIEVAL_EVAL.md`, "Cost estimate"): at most 295 Retrieve calls. At the user-supplied $1 per 1,000 calls that is $0.295, about $0.30. The $1 price is an assumption and is not checked against an AWS price page. The gate makes no model, Converse or S3 call. Worst-case wall time is about 49 minutes if every call hit the 10 s read timeout. Other AWS billing for a Retrieve is **unknown** (third-party pages disagree for managed and vector-store Knowledge Bases, and none was confirmed against AWS). The Laya host run makes no AWS call, and the host's own price is not estimated. The analysis command is offline and free.
 
@@ -241,22 +244,22 @@ The command defaults to the stored Laya files in `.agents/tasks/phase3d-work`. E
 
 Commands from the mock-CI environment (`MOCK_OPENAI=true MODEL_PROVIDER=mock OPENAI_API_KEY= USE_LOCAL_API=false AUTO_ADVANCE_STAGES=false APP_ENV=development`, `-p no:cacheprovider`, Python 3.12 venv).
 
-| | Baseline at `e9bebcb` | Now at `758de0b` |
+| | Baseline at `e9bebcb` | Now at `52d0729` |
 |---|---|---|
-| passed | 2905 | **3041** |
+| passed | 2905 | **3046** |
 | failed | 2 | 2 |
 | skipped | 1 | 1 |
 | ruff (`ruff check --no-cache .`, 0.11.13) | All checks passed | All checks passed |
 
 - **No new failure.** The same two tests fail now as in the baseline, both `assert 404 == 200` on `GET /` because `frontend/dist` is not built: `tests/http/test_notebook_reader.py::test_pilot_serves_only_built_public_assets` and `::test_default_workspace_and_streamlit_gate`. In the baseline they also failed when rerun alone, so they are stable and unrelated to this work. Phase 4 recorded 0 failures when `dist` is built.
 - The one skip is the whole `tests/domain/test_strands_first_cycle_middleware.py` module (`strands` is not installed).
-- Delta of +136 passed, all in `tests/scripts`: 287 passed at the baseline commit and 423 now. The four new test files hold 28 (live gate), 43 (compare), 18 (host note) and 35 (extra messages), which is 124. The other 12 are extra cases in `test_eval_command_boundaries.py` (39 became 41 collected checks) and other existing parametrised checks that discover new scripts and modules. No existing test file was edited. Only `tests/AGENTS.md` and the four new test files changed under `tests/`.
-- Wall time of the full run was 140.5 s. No flaky test appeared.
+- Delta of +141 passed, all in `tests/scripts`: 287 passed at the baseline commit and 428 now. The four new test files hold 28 (live gate), 48 (compare, five of them the KB-settings cases added in `52d0729`), 18 (host note) and 35 (extra messages), which is 129. The other 12 are extra cases in `test_eval_command_boundaries.py` (39 became 41 collected checks) and other existing parametrised checks that discover new scripts and modules. No existing test file was edited. Only `tests/AGENTS.md` and the four new test files changed under `tests/`.
+- The full run at `52d0729` took 150.7 s (the run at `758de0b` took 140.5 s and gave 3041 passed). No flaky test appeared.
 - Nothing under `backend/`, `agentcore_runtime/` or `frontend/` changed between `e9bebcb` and `HEAD`. All settings stay at their defaults (off). No production routing changed, and no new gate rule was added.
 
 ## 13. Commits of this work
 
-All authored and committed by `CloudKai <kaiming_01@live.com>` on both sides, with no Kiro or co-author text (checked with `git log --format='%h %an|%cn'`). All are on `improvement/backend`.
+All authored and committed by `CloudKai <kaiming_01@live.com>` on both sides, with no attribution lines in any message (checked with `git log --format='%h %an|%cn'`). All are on `improvement/backend`.
 
 | SHA | Subject |
 |---|---|
@@ -266,7 +269,9 @@ All authored and committed by `CloudKai <kaiming_01@live.com>` on both sides, wi
 | `1f6acb6` | feat(evals): host-noted all-rows Laya run |
 | `a1bd91e` | feat(evals): optional extra human-labelled messages |
 | `758de0b` | docs: head-to-head routing comparison commands, IAM, cost, pre-registration |
-| (this commit) | docs: head-to-head report; its sha is in the final hand-off message |
+| `8736bf9` | docs: head-to-head routing report (offline arms A and B, live inputs missing) |
+| `52d0729` | fix(evals): check KB file settings against the plan, correct status docs |
+| (this commit) | docs: head-to-head report revised after review; its sha is in the final hand-off message |
 
 ## 14. Risks
 
@@ -287,7 +292,8 @@ All authored and committed by `CloudKai <kaiming_01@live.com>` on both sides, wi
 3. **Laya weight licences.** Someone must read the four model cards. M6 stays `unknown` for weights until then.
 4. **Startup behaviour and timeout** (open from Phase 4): fail startup or fall back to the gate on a missing checkpoint, and whether to add an inference timeout. No change was made here.
 5. **Real messages.** Whether to supply anonymised, human-labelled messages for `--extra-messages`.
-6. **Whether to enable anything.** Nothing is enabled. All settings stay default off, and this report changes no routing decision.
+6. **Keep the host flags mandatory?** `benchmark_course_intent.py --checkpoint` now requires the four host flags (a behaviour change from before this work). Keep it, or make the flags optional and accept all-rows files without a host note.
+7. **Whether to enable anything.** Nothing is enabled. All settings stay default off, and this report changes no routing decision.
 
 ## 16. Amendments to the plan
 
