@@ -1060,17 +1060,59 @@ python -m scripts.evals.benchmark_course_intent --stub-ms 5 --passes 3 --warmup 
 
 # Laya (laya==0.4.37 or 0.4.38 installed; local checkpoint; serial)
 python -m scripts.evals.benchmark_course_intent --checkpoint /path/to/laya-multilingual \
-  --passes 3 --warmup 5 --json-output /tmp/laya-resources.json
+  --passes 3 --warmup 5 --host-instance-type <TYPE> --host-vcpu <N> --host-ram-gb <GB> --host-arch <arm64|x86_64> \
+  --json-output /tmp/laya-resources.json
 
 # Laya Learn (laya==0.4.38 and vegaml==0.17.1; Vega checkpoint with backbone/ and a bundle)
 python -m scripts.evals.benchmark_course_intent --checkpoint /path/to/vega \
   --bundle /path/to/course-learner.zip --passes 3 --warmup 5 \
+  --host-instance-type <TYPE> --host-vcpu <N> --host-ram-gb <GB> --host-arch <arm64|x86_64> \
   --json-output /tmp/laya-learn-resources.json
 
 # Contention: eight threads against the single inference slot
 python -m scripts.evals.benchmark_course_intent --checkpoint /path/to/laya-multilingual \
-  --passes 1 --warmup 5 --concurrency 8 --json-output /tmp/laya-concurrency8.json
+  --passes 1 --warmup 5 --concurrency 8 \
+  --host-instance-type <TYPE> --host-vcpu <N> --host-ram-gb <GB> --host-arch <arm64|x86_64> \
+  --json-output /tmp/laya-concurrency8.json
 ```
+
+**Host notes (required with `--checkpoint`).** `--host-instance-type`, `--host-vcpu`,
+`--host-ram-gb` and `--host-arch` (`arm64` or `x86_64`) are the operator's description of
+the machine. The harness records them as given in a `host_note` block next to what the
+process observed (`platform.machine()`, `os.cpu_count()`). A mismatch is recorded, never
+fixed, and nothing is filled in from the machine. A real-model run refuses without all
+four, and a value that is still a `<...>` placeholder is refused. With `--stub-ms` they
+are optional.
+
+**All-rows run for the head-to-head comparison.** The stored Laya decisions cover only
+94, 94 and 41 of the 147 eligible rows, so the comparison reports a floor, a ceiling and
+a scored-only reading. To replace them with one exact reading, run the multilingual
+checkpoint on the host whose figures are to be reported (fill in the four host values;
+not run here):
+
+```bash
+python -m scripts.evals.benchmark_course_intent --checkpoint /path/to/laya-multilingual \
+  --passes 3 --warmup 5 --host-instance-type <TYPE> --host-vcpu <N> --host-ram-gb <GB> --host-arch <arm64|x86_64> \
+  --json-output .agents/tasks/headtohead-prereg/laya-all-rows-multilingual.json
+# Laya Learn: use  --checkpoint /path/to/vega --bundle /path/to/course-learner.zip  instead
+```
+
+The result has the harness's existing keys plus `host_note` and `rows`: one object for
+each of the 295 gate messages with `id`, `first_turn`, `status` (`scored`, `busy`,
+`error` or `not_eligible`), `score` and `ms`. The row values come from the first timed
+pass. Memory (`memory.peak_rss_mib`, `memory.load_delta_rss_mib`) and latency are in the
+same file. Then:
+
+```bash
+python -m scripts.evals.compare_routing_arms --kb-gate .agents/tasks/headtohead-prereg/kb-gate.json \
+  --laya-full .agents/tasks/headtohead-prereg/laya-all-rows-multilingual.json \
+  --json-output .agents/tasks/headtohead-prereg/comparison.json
+# Laya Learn file: add  --laya-full-kind learn
+```
+
+`compare_routing_arms` applies the unchanged cutoffs (0.8, or the Learn per-turn
+cutoffs) and refuses a stub file, an unknown id, or a file missing any eligible row.
+Until such a file exists, no all-rows Laya comparison has been made.
 
 Run it on the intended production host (the output records platform, CPU count,
 package versions and torch threads) and compare `memory.peak_rss_mib` with the container

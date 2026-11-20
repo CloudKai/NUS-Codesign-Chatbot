@@ -17,6 +17,17 @@ Exactly one classifier source is required:
 
 Every figure describes the machine it ran on. The output says so; it is not a
 production-hardware measurement unless it was run on that hardware.
+
+All-rows output for ``compare_routing_arms --laya-full``. The result carries ``rows``,
+one object per gate message (all of them, in file order), and ``host_note``. A row has
+``id``, ``first_turn``, ``status`` (``scored``, ``busy``, ``error`` or ``not_eligible``),
+``score`` (the classifier score, null unless scored) and ``ms`` (the call's wall time in
+milliseconds, null for a row that was not called). ``status``, ``score`` and ``ms`` come
+from the first timed pass only; no message text is written. ``host_note`` holds what
+the operator passed (``--host-instance-type``, ``--host-vcpu``, ``--host-ram-gb``,
+``--host-arch``) beside what this process observed. Nothing is detected or filled in:
+``--checkpoint`` refuses to run without all four. Run it on the host whose figures
+are to be reported.
 """
 
 from __future__ import annotations
@@ -135,6 +146,59 @@ def environment_block() -> dict[str, Any]:
     }
 
 
+_ARCH_NAMES = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
+HOST_ARCHES = ("arm64", "x86_64")
+
+
+def host_note_block(args: argparse.Namespace) -> dict[str, Any] | None:
+    """Return the operator's host notes beside what this process observed, or None.
+
+    The four values are recorded exactly as passed. The observed values are a
+    cross-check, not a source: a difference is recorded and never stops the run.
+    """
+    given = {
+        "instance_type": args.host_instance_type,
+        "vcpu": args.host_vcpu,
+        "ram_gb": args.host_ram_gb,
+        "arch": args.host_arch,
+    }
+    if all(value is None for value in given.values()):
+        return None
+    machine = platform.machine()
+    observed_arch = _ARCH_NAMES.get(machine.lower())
+    cpus = os.cpu_count()
+    return {
+        **given,
+        "source": "operator arguments; nothing was detected or filled in",
+        "observed": {"machine": machine, "cpu_count": cpus},
+        "arch_matches_observed": None if observed_arch is None or given["arch"] is None else observed_arch == given["arch"],
+        "vcpu_matches_observed": None if cpus is None or given["vcpu"] is None else cpus == given["vcpu"],
+    }
+
+
+def all_rows_output(prepared: Sequence[Any], detail: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Return one record per gate message: first-pass call results, or ``not_eligible``."""
+    by_id = {str(item["id"]): item for item in detail}
+    rows: list[dict[str, Any]] = []
+    for row in prepared:
+        call = by_id.get(row.id)
+        if call is None:
+            rows.append(
+                {"id": row.id, "first_turn": row.first_turn, "status": "not_eligible", "score": None, "ms": None}
+            )
+        else:
+            rows.append(
+                {
+                    "id": row.id,
+                    "first_turn": row.first_turn,
+                    "status": call["status"],
+                    "score": call["score"],
+                    "ms": call["ms"],
+                }
+            )
+    return rows
+
+
 def build_classifier(args: argparse.Namespace) -> tuple[Any, str]:
     """Return ``(classifier, kind)`` for the chosen source."""
     if args.stub_ms is not None:
@@ -152,11 +216,14 @@ def score_rows(
     titles: Sequence[str],
     *,
     concurrency: int,
+    detail: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Score ``rows`` once each and return per-call timings and outcome counts.
 
     A ``None`` score is a busy or abstaining call. An exception is counted and
     the call is left out of the latency figures, as the API treats it as no score.
+    When ``detail`` is a list, one ``{id, status, score, ms}`` record per call is
+    appended to it (the all-rows output); the returned summary is unchanged.
     """
 
     def one(row: Any) -> tuple[str, float, float | None, bool]:
@@ -175,6 +242,16 @@ def score_rows(
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             results = list(pool.map(one, rows))
     wall = perf_counter() - started
+    if detail is not None:
+        detail.extend(
+            {
+                "id": row_id,
+                "status": "error" if failed else "busy" if score is None else "scored",
+                "score": score,
+                "ms": round(ms, 3),
+            }
+            for row_id, ms, score, failed in results
+        )
     scored = [ms for _, ms, score, failed in results if score is not None and not failed]
     return {
         "concurrency": concurrency,
@@ -187,8 +264,17 @@ def score_rows(
     }
 
 
-def run_benchmark(args: argparse.Namespace, rows: Sequence[Any], titles: Sequence[str]) -> dict[str, Any]:
-    """Load the classifier, warm it, then time ``args.passes`` passes over ``rows``."""
+def run_benchmark(
+    args: argparse.Namespace,
+    rows: Sequence[Any],
+    titles: Sequence[str],
+    *,
+    first_pass_detail: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Load the classifier, warm it, then time ``args.passes`` passes over ``rows``.
+
+    ``first_pass_detail``, when given, receives the per-row records of the first pass.
+    """
     memory_before = memory_snapshot()
     load_started = perf_counter()
     classifier, kind = build_classifier(args)
@@ -201,8 +287,14 @@ def run_benchmark(args: argparse.Namespace, rows: Sequence[Any], titles: Sequenc
         warmup_ms.append(round((perf_counter() - started) * 1000, 2))
     memory_warm = memory_snapshot()
     passes = [
-        score_rows(classifier, rows, titles, concurrency=args.concurrency)
-        for _ in range(args.passes)
+        score_rows(
+            classifier,
+            rows,
+            titles,
+            concurrency=args.concurrency,
+            detail=first_pass_detail if index == 0 else None,
+        )
+        for index in range(args.passes)
     ]
     memory_after = memory_snapshot()
     return {
@@ -242,6 +334,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--warmup", type=int, default=5, help="untimed calls before the passes")
     parser.add_argument("--concurrency", type=int, default=1, help="worker threads per pass")
     parser.add_argument("--json-output", type=Path, help="write the result as JSON")
+    host = parser.add_argument_group(
+        "host notes", "what the operator reports about this machine; required with --checkpoint"
+    )
+    host.add_argument("--host-instance-type", help="instance type of this host, as the operator reports it")
+    host.add_argument("--host-vcpu", type=int, help="vCPU count of this host")
+    host.add_argument("--host-ram-gb", type=float, help="RAM of this host in GB")
+    host.add_argument("--host-arch", choices=HOST_ARCHES, help="CPU architecture of this host")
     return parser
 
 
@@ -260,6 +359,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.passes < 1 or args.warmup < 0 or args.concurrency < 1:
         parser.error("passes and concurrency must be positive and warmup not negative")
 
+    if args.checkpoint is not None:
+        # A missing package is the first, clearest failure; the host notes come next.
+        importlib.import_module("laya")
+    host_values = (args.host_instance_type, args.host_vcpu, args.host_ram_gb, args.host_arch)
+    if args.checkpoint is not None and any(value is None for value in host_values):
+        parser.error(
+            "--checkpoint needs --host-instance-type, --host-vcpu, --host-ram-gb and --host-arch "
+            "(the operator's notes; nothing is filled in)"
+        )
+    if args.host_instance_type is not None and (
+        not args.host_instance_type.strip() or any(c in args.host_instance_type for c in "<>")
+    ):
+        parser.error("--host-instance-type must be the real instance type, not a placeholder")
+    if (args.host_vcpu is not None and args.host_vcpu < 1) or (
+        args.host_ram_gb is not None and args.host_ram_gb <= 0
+    ):
+        parser.error("--host-vcpu and --host-ram-gb must be positive")
+
     os.environ["HF_HUB_OFFLINE"] = "1"
     from scripts.evals.lib.fixtures import (
         eval_course_titles,
@@ -276,15 +393,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     materials = load_materials(MATERIALS_PATH)
     questions = load_questions(QUESTIONS_PATH, materials)
     messages = load_messages(MESSAGES_PATH, materials, [row["id"] for row in questions])
-    rows = [row for row in prepare_rows(messages) if row.eligible]
+    prepared = prepare_rows(messages)
+    rows = [row for row in prepared if row.eligible]
     titles = eval_course_titles(materials)
+    first_pass: list[dict[str, Any]] = []
     result = {
         "gate_messages": len(messages),
         "eligible_rows": len(rows),
         "course_titles": len(titles),
         "environment": environment_block(),
-        **run_benchmark(args, rows, titles),
+        "host_note": host_note_block(args),
+        **run_benchmark(args, rows, titles, first_pass_detail=first_pass),
     }
+    result["rows"] = all_rows_output(prepared, first_pass)
     if args.json_output is not None:
         write_json_output(args.json_output, result)
     print(json.dumps(result, indent=2, sort_keys=True))
