@@ -1,6 +1,11 @@
 /** Five-step Thinking Path indicator built only from API stage data. */
-import type { Stage } from './api';
+import type { Project, Stage } from './api';
 import { Icon } from './Icon';
+
+/** True once the chat has saved project work, a completed stage, or a pending stage decision. */
+export function hasProjectWork(project: Pick<Project, 'stages' | 'pending'>) {
+  return !!project.pending || project.stages.some(stage => stage.completed || stage.student_work.length > 0);
+}
 
 export function StageStepper({ stages, currentStage, pending, onOpen, compact = false }: {
   stages: Pick<Stage, 'id' | 'label' | 'completed'>[]; currentStage: string; pending: boolean;

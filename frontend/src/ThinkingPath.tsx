@@ -17,12 +17,17 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
   );
   const tabButtons = useRef<Array<HTMLButtonElement | null>>([]);
   const [opened, setOpened] = useState('');
+  const [heroOpen, setHeroOpen] = useState(false);
+  const [showTips, setShowTips] = useState(false);
   const current = project.stages.find(stage => stage.id === project.current_stage)!;
   const done = project.stages.filter(stage => stage.completed).length;
   const pending = project.pending;
   const review = project.review;
   const scores = review?.facione_scores ?? [];
   const skills = skillSummary(scores);
+  const stageIndex = project.stages.findIndex(stage => stage.id === current.id);
+  const summaryText = review?.summary || current.coach_summary || '';
+  const longSummary = summaryText.length > 260;
   async function decide(route: string, body: object) {
     await act(route, body);
     document.getElementById('review-heading')?.focus({ preventScroll: true });
@@ -66,27 +71,42 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
     {children}
     <section id="review-panel-summary" role="tabpanel" aria-labelledby="review-tab-summary"
       hidden={activeTab !== 'Summary'} tabIndex={0}>
-      <section className="review-section" aria-labelledby="review-summary">
-        <h3 id="review-summary">Discussion summary</h3>
-        <CoachText text={review?.summary || current.coach_summary || 'A summary will appear after the coach has reviewed your design reasoning.'}/>
+      <section className="review-card review-hero" aria-labelledby="review-summary">
+        <p className="hero-eyebrow">Stage {stageIndex + 1} of {project.stages.length}</p>
+        <div className="hero-steps" aria-hidden="true">
+          {project.stages.map(stage => <span key={stage.id} data-state={stage.id === current.id ? 'current' : stage.completed ? 'done' : undefined}/>)}
+        </div>
+        <h3 id="review-summary" className="hero-title">{current.label}</h3>
+        {summaryText
+          ? <div id="hero-summary" className="hero-summary" data-clamped={(longSummary && !heroOpen) || undefined}><CoachText text={summaryText}/></div>
+          : <p className="supporting">A summary will appear after the coach has reviewed your design reasoning.</p>}
+        {longSummary ? <button className="card-link" aria-expanded={heroOpen} aria-controls="hero-summary" onClick={() => setHeroOpen(open => !open)}>
+          {heroOpen ? 'Show less' : 'Read more'}</button> : null}
       </section>
-      <ReviewFeedbackSection title="Strengths" groups={review?.strengths ?? []} stages={project.stages} currentStage={current.id}
-        action="Build on this" onAct={item => insertScaffold(buildScaffold(item), 'project')}/>
-      <ReviewFeedbackSection title="Areas to improve" groups={review?.improvements ?? []} stages={project.stages} currentStage={current.id}
-        action="Work on this" onAct={item => insertScaffold(improveScaffold(item), 'project')}/>
-      <section className="review-section" aria-labelledby="review-facione">
-        <h3 id="review-facione">How your idea scores</h3>
-        <p className="supporting">These scores are feedback on your critical thinking. They are not a grade.{skills ? ' The tips below are a general guide for each score, not a review of your work.' : ''}</p>
+      <FeedbackCard tone="strength" title="Strengths" icon="check" groups={review?.strengths ?? []} stages={project.stages} currentStage={current.id}
+        action="Build on this" empty="Strengths will show up after the coach reviews your work." onAct={item => insertScaffold(buildScaffold(item), 'project')}/>
+      <FeedbackCard tone="improve" title="Areas to improve" icon="arrow" groups={review?.improvements ?? []} stages={project.stages} currentStage={current.id}
+        action="Work on this" empty="Ideas to work on will show up after the coach reviews your work." onAct={item => insertScaffold(improveScaffold(item), 'project')}/>
+      <section className="review-card" aria-labelledby="review-facione">
+        <header className="card-head">
+          <span className="card-icon" aria-hidden="true"><Icon name="spark"/></span>
+          <h3 id="review-facione">How your idea scores</h3>
+          {skills ? <button className="card-link card-head-action" aria-pressed={showTips} onClick={() => setShowTips(show => !show)}>{showTips ? 'Hide tips' : 'Show tips'}</button> : null}
+        </header>
+        <p className="supporting">Feedback on your critical thinking, not a grade.{skills ? ' Tips are a general guide for each score.' : ''}</p>
         {skills ? <div className="skill-highlights">
-          {skills.strongest !== skills.grow ? <div className="skill-tile strong">
+          {skills.strongest !== skills.grow ? <p className="skill-strong-line">
             <span className="skill-tile-label">Strongest</span>
             <strong>{skills.strongest}</strong>
             <span className="skill-tile-score">{skillLevel(skills.strongestScore)} · {skills.strongestScore}/4</span>
-          </div> : null}
+          </p> : null}
           <div className="skill-tile grow">
-            <span className="skill-tile-label">{skills.strongest !== skills.grow ? 'Grow next' : 'Keep building'}</span>
-            <strong>{skills.grow}</strong>
-            <span className="skill-tile-score">{skillLevel(skills.growScore)} · {skills.growScore}/4</span>
+            <div className="skill-grow-main">
+              <span className="skill-tile-label">{skills.strongest !== skills.grow ? 'Grow next' : 'Keep building'}</span>
+              <strong>{skills.grow}</strong>
+              <span className="skill-tile-score">{skillLevel(skills.growScore)} · {skills.growScore}/4</span>
+              <span className="skill-tile-tip">{skillTip(skills.grow, skills.growScore)}</span>
+            </div>
             <button disabled={disabled} onClick={() => insertScaffold(practiceScaffold(skills.grow), 'project')}>Practice this</button>
           </div>
         </div> : <p className="skill-empty">Your skill scores will appear here as you share your thinking with the coach.</p>}
@@ -98,8 +118,8 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
                 : <span className="skill-value"><span className="skill-level">{skillLevel(item.score)}</span> {item.score}/4</span>}
             </div>
             <div className="skill-pips" aria-hidden="true">{[1, 2, 3, 4].map(step => <span key={step} data-on={(item.score ?? 0) >= step || undefined}/>)}</div>
-            {item.score !== null ? <p className="skill-note" title={skillExplanation(item.dimension) || undefined}>{skillTip(item.dimension, item.score)}</p>
-              : skillExplanation(item.dimension) ? <p className="skill-note">{skillExplanation(item.dimension)}</p> : null}
+            {showTips ? <p className="skill-note" title={skillExplanation(item.dimension) || undefined}>
+              {item.score !== null ? skillTip(item.dimension, item.score) : skillExplanation(item.dimension)}</p> : null}
           </li>)}
         </ul> : <details className="review-disclosure">
           <summary>The six skills</summary>
@@ -111,84 +131,127 @@ export function ThinkingPath({ project, disabled, act, startInChat, onClose, sta
     </section>
     <section id="review-panel-progression" role="tabpanel" aria-labelledby="review-tab-progression"
       hidden={activeTab !== 'Progression'} tabIndex={0}>
-      <section className="next-action" aria-label="Current stage and next step">
-        <h3>Next step</h3>
-        <p className="review-current-stage">{current.label}</p>
-        <p>{current.next_action}</p>
-        {!pending ? <button disabled={disabled} onClick={startInChat}>Start in chat <Icon name="chevronRight"/></button> : null}
-      </section>
-      {pending ? <div className="recommendation">
-        <h4>Recommendation: {project.stages.find(stage => stage.id === pending.to_stage)?.label}</h4>
-        <p>{pending.rationale}</p>
-        <p className="supporting">Your active stage stays {current.label} until you confirm.</p>
+      {pending ? <section className="review-card recommendation-card" aria-labelledby="recommendation-title">
+        <p className="hero-eyebrow">Decision needed</p>
+        <h3 id="recommendation-title" className="hero-title">Ready for {project.stages.find(stage => stage.id === pending.to_stage)?.label}?</h3>
+        <p className="next-text">{pending.rationale}</p>
+        <p className="supporting">You stay in {current.label} until you confirm.</p>
         <div className="stage-actions">
           <button className="primary" disabled={disabled} onClick={() => void decide(`resolve/${encodeURIComponent(pending.id)}`, { accepted: true })}>Confirm next stage</button>
           <button disabled={disabled} onClick={() => void decide(`resolve/${encodeURIComponent(pending.id)}`, { accepted: false })}>Stay here</button>
         </div>
-      </div> : null}
-      <h3 className="path-title">Thinking Path</h3>
-      <div className="path-progress"><strong>{done} of {project.stages.length}</strong> stages completed</div>
-      <progress aria-label="Thinking Path progress" max={project.stages.length} value={done}/>
-      <ol aria-label="Thinking Path stages" className="stage-list">
-        {project.stages.map((stage, index) => {
-          const isCurrent = stage.id === current.id;
-          const expanded = opened === stage.id;
-          const continueLabel = stage.completed ? 'Revisit' : 'Continue';
-          return <li key={stage.id} className={isCurrent ? 'current-stage' : ''}>
-            <button className="stage-row" aria-current={isCurrent ? 'step' : undefined} aria-expanded={expanded} aria-controls={`stage-work-${stage.id}`} onClick={() => setOpened(expanded ? '' : stage.id)}>
-              <span className={`stage-number ${stage.completed ? 'completed' : ''}`} aria-hidden="true">{stage.completed ? <Icon name="check"/> : index + 1}</span>
-              <span className="stage-label">{stage.label}{stage.completed ? <span className="sr-only"> (completed)</span> : null}
-                <small className="stage-count">{stage.student_work.length} {stage.student_work.length === 1 ? 'contribution' : 'contributions'}</small></span>
-              <Icon name={expanded ? 'chevronDown' : 'chevronRight'}/>
-            </button>
-            <section hidden={!expanded} id={`stage-work-${stage.id}`} className="stage-work" aria-label={`${stage.label} saved work`}>
-              {!isCurrent ? <p>{stage.next_action}</p> : null}
-              {!isCurrent && !stage.selectable ? <p className="supporting">Stage unavailable</p> : null}
-              {!isCurrent && stage.selectable ? <button className="stage-continue" aria-label={`${continueLabel} ${stage.label}`} disabled={disabled}
-                onClick={() => void decide('select-stage', { stage_id: stage.id })}>{continueLabel} <Icon name="chevronRight"/></button> : null}
-              {expanded ? <StageWork stage={stage}/> : null}
-            </section>
-          </li>;
-        })}
-      </ol>
+      </section> : null}
+      <section className="review-card" aria-labelledby="path-title">
+        <header className="card-head">
+          <span className="card-icon" aria-hidden="true"><Icon name="path"/></span>
+          <h3 id="path-title">All stages</h3>
+        </header>
+        <ol aria-label="Thinking Path stages" className="stage-list">
+          {project.stages.map((stage, index) => {
+            const isCurrent = stage.id === current.id;
+            const expanded = opened === stage.id;
+            const count = stage.student_work.length;
+            const caption = [isCurrent ? 'Current' : stage.completed ? 'Done' : '', count ? `${count} ${count === 1 ? 'contribution' : 'contributions'}` : '']
+              .filter(Boolean).join(' · ');
+            return <li key={stage.id} className={isCurrent ? 'current-stage' : ''}>
+              <button className="stage-row" aria-current={isCurrent ? 'step' : undefined} aria-expanded={expanded} aria-controls={`stage-work-${stage.id}`} onClick={() => setOpened(expanded ? '' : stage.id)}>
+                <span className={`stage-number ${stage.completed ? 'completed' : ''}`} aria-hidden="true">{stage.completed ? <Icon name="check"/> : index + 1}</span>
+                <span className="stage-label">{stage.label}{stage.completed ? <span className="sr-only"> (completed)</span> : null}
+                  {caption ? <small className="stage-count">{caption}</small> : null}</span>
+                <Icon name={expanded ? 'chevronDown' : 'chevronRight'}/>
+              </button>
+              <section hidden={!expanded} id={`stage-work-${stage.id}`} className="stage-work" aria-label={`${stage.label} saved work`}>
+                {expanded ? <StageDetail stage={stage} isCurrent={isCurrent} disabled={disabled}
+                  onSelect={() => void decide('select-stage', { stage_id: stage.id })}/> : null}
+              </section>
+            </li>;
+          })}
+        </ol>
+      </section>
     </section>
   </section>;
 }
 
+const WORK_PREVIEW = 2;
 
-/** Show saved contributions and coach material for a stage. */
-function StageWork({ stage }: { stage: Stage }) {
-  return <div className="artifact-work">
-    {stage.coach_summary ? <section><h4>Coach summary</h4><CoachText text={stage.coach_summary}/></section> : null}
-    <section><h4>Your work</h4>
-      {stage.student_work.length ? stage.student_work.map(work => <blockquote key={work.message_id}>{work.text}</blockquote>) : <p className="supporting">Work you share in Design coaching will appear here.</p>}
-    </section>
-    {stage.feedback.length ? <section><details><summary>Saved feedback</summary>{stage.feedback.map(work => <CoachText key={work.message_id} text={work.text}/>)}</details></section> : null}
+/** Compact stage detail: next action, coach summary, and a short preview of the student's own work. */
+function StageDetail({ stage, isCurrent, disabled, onSelect }: { stage: Stage; isCurrent: boolean; disabled: boolean; onSelect: () => void }) {
+  const [allWork, setAllWork] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const work = allWork ? stage.student_work : stage.student_work.slice(0, WORK_PREVIEW);
+  const extra = stage.student_work.length - WORK_PREVIEW;
+  const longSummary = stage.coach_summary.length > 220;
+  const actionLabel = stage.completed ? 'Revisit' : 'Continue';
+  return <div className="stage-detail">
+    <p className="stage-next">{stage.next_action}</p>
+    {!isCurrent && !stage.selectable ? <p className="supporting">Not available yet.</p> : null}
+    {!isCurrent && stage.selectable ? <button className="stage-continue" aria-label={`${actionLabel} ${stage.label}`} disabled={disabled} onClick={onSelect}>
+      {actionLabel} <Icon name="chevronRight"/></button> : null}
+    {stage.coach_summary ? <div className="stage-block">
+      <h4>Coach summary</h4>
+      <div className="stage-summary" id={`stage-summary-${stage.id}`} data-clamped={(longSummary && !summaryOpen) || undefined}><CoachText text={stage.coach_summary}/></div>
+      {longSummary ? <button className="card-link" aria-expanded={summaryOpen} aria-controls={`stage-summary-${stage.id}`} onClick={() => setSummaryOpen(open => !open)}>
+        {summaryOpen ? 'Show less' : 'Read more'}</button> : null}
+    </div> : null}
+    <div className="stage-block">
+      <h4>Your work</h4>
+      {work.length ? <ul className="work-list">{work.map(item => <li key={item.message_id} className="work-quote" data-open={allWork || undefined}>{item.text}</li>)}</ul>
+        : <p className="supporting">Work you share in Design coaching will appear here.</p>}
+      {extra > 0 ? <button className="card-link" aria-expanded={allWork} onClick={() => setAllWork(open => !open)}>
+        {allWork ? 'Show less' : `Show ${extra} more`}</button> : null}
+    </div>
   </div>;
 }
 
-/** Give each feedback group a short preview and keep further items available. */
-function ReviewFeedbackSection({ title, groups, stages, currentStage, action, onAct }: {
-  title: string; groups: ReviewFeedback[]; stages: Stage[]; currentStage: string; action: string; onAct: (item: string) => void;
-}) {
-  const act = (item: string) => <button className="scaffold-action" aria-label={`${action}: ${item}`} onClick={() => onAct(item)}>{action}</button>;
+interface FeedbackEntry { text: string; stageIds: string[] }
+
+/** Merge repeated sentences across stages, with the current stage first and then the latest stages. */
+function feedbackEntries(groups: ReviewFeedback[], currentStage: string): FeedbackEntry[] {
   const populated = groups.filter(group => group.items.length);
-  const featured = populated.find(group => group.stage_id === currentStage) ?? populated[populated.length - 1];
-  const hasMore = populated.length > 1 || (featured?.items.length ?? 0) > 1;
-  return <section className="review-section">
-    <h3>{title}</h3>
-    {featured ? <div className="feedback-item"><p className="review-feedback-preview">{featured.items[0]}</p>{act(featured.items[0])}</div> : <p className="supporting">No feedback yet.</p>}
-    {hasMore ? <details className="review-disclosure">
-      <summary>{title === 'Strengths' ? 'More strengths' : 'More areas to improve'}</summary>
-      <ul className="review-feedback">
-        {populated.map(group => {
-          const items = group === featured ? group.items.slice(1) : group.items;
-          return items.length ? <li key={group.stage_id}>
-            <h4>{stages.find(stage => stage.id === group.stage_id)?.label}</h4>
-            <ul>{items.map(item => <li key={item} className="feedback-item"><span>{item}</span>{act(item)}</li>)}</ul>
-          </li> : null;
-        })}
-      </ul>
-    </details> : null}
+  const ordered = [...populated.filter(group => group.stage_id === currentStage),
+    ...populated.filter(group => group.stage_id !== currentStage).reverse()];
+  const merged = new Map<string, FeedbackEntry>();
+  for (const group of ordered) {
+    for (const raw of group.items) {
+      const text = raw.trim();
+      const entry = merged.get(text.toLowerCase());
+      if (!entry) merged.set(text.toLowerCase(), { text, stageIds: [group.stage_id] });
+      else if (!entry.stageIds.includes(group.stage_id)) entry.stageIds.push(group.stage_id);
+    }
+  }
+  return [...merged.values()];
+}
+
+const FEEDBACK_PREVIEW = 2;
+
+/** Show the top feedback in a card, with identical sentences merged and the rest one click away. */
+function FeedbackCard({ tone, title, icon, groups, stages, currentStage, action, empty, onAct }: {
+  tone: 'strength' | 'improve'; title: string; icon: 'check' | 'arrow'; groups: ReviewFeedback[]; stages: Stage[];
+  currentStage: string; action: string; empty: string; onAct: (item: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const entries = feedbackEntries(groups, currentStage);
+  const visible = expanded ? entries : entries.slice(0, FEEDBACK_PREVIEW);
+  const hidden = entries.length - FEEDBACK_PREVIEW;
+  const listId = `feedback-${tone}`;
+  const stageName = (id: string) => id === currentStage ? '' : stages.find(stage => stage.id === id)?.label ?? '';
+  const caption = (ids: string[]) => ids.length > 2 ? `${ids.length} stages` : ids.map(stageName).filter(Boolean).join(' · ');
+  return <section className={`review-card tone-${tone}`} aria-labelledby={`${listId}-title`}>
+    <header className="card-head">
+      <span className="card-icon" aria-hidden="true"><Icon name={icon}/></span>
+      <h3 id={`${listId}-title`}>{title}</h3>
+      {entries.length ? <span className="card-count" aria-label={`${entries.length} ${entries.length === 1 ? 'item' : 'items'}`}>{entries.length}</span> : null}
+    </header>
+    {entries.length ? <ul id={listId} className="fb-list">
+      {visible.map(entry => <li key={entry.text} className="fb-item">
+        <p className="fb-text">{entry.text}</p>
+        <div className="fb-meta">
+          {caption(entry.stageIds) ? <span className="fb-stage">{caption(entry.stageIds)}</span> : null}
+          <button className="scaffold-action fb-act" aria-label={`${action}: ${entry.text}`} onClick={() => onAct(entry.text)}>{action}<Icon name="chevronRight"/></button>
+        </div>
+      </li>)}
+    </ul> : <p className="supporting fb-empty">{empty}</p>}
+    {hidden > 0 ? <button className="card-link" aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded(open => !open)}>
+      {expanded ? 'Show less' : `Show ${hidden} more`}</button> : null}
   </section>;
 }

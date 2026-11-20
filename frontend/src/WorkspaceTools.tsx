@@ -252,13 +252,6 @@ export function WorkspaceTools({ session, thread, project, disabled, changed, ex
             options={[{ value: 'project', label: 'Design coaching' }, { value: 'lecture', label: 'Lecture help' }]}
             change={value => void updatePreferences({ default_mode: value })}/>
         </SettingsRow>
-        {settings ? <>
-          <SettingsRow label="Response detail" description="Applies to future coach replies in this conversation.">
-            <Segmented<NotebookSettings['response_detail']> label="Response detail" value={settings.response_detail} disabled={locked}
-              options={[{ value: 'short', label: 'Concise' }, { value: 'long', label: 'Detailed' }]}
-              change={value => void write(`${base}/settings`, { response_detail: value })}/>
-          </SettingsRow>
-        </> : null}
         <SettingsRow label="Starter prompts" htmlFor="workspace-starters" description="Show suggestions in an empty conversation.">
           <input className="settings-switch" id="workspace-starters" type="checkbox" role="switch" checked={prefs?.starter_prompts ?? true}
             disabled={locked || !prefs} onChange={event => void updatePreferences({ starter_prompts: event.target.checked })}/>

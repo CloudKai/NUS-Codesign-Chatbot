@@ -2,6 +2,7 @@
 import { useRef, useState } from 'react';
 import type { ChatSummary, Notebook } from './api';
 import { Icon } from './Icon';
+import { relativeTime } from './HomeView';
 import { originalNotebookChat, recentChats } from './notebookChats';
 import { Sources } from './Sources';
 
@@ -17,7 +18,6 @@ interface NotebookPageProps {
 }
 
 const views = ['Chats', 'Sources'] as const;
-const dateLabel = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
 /** Render the full notebook conversation list and the existing notebook source manager. */
 export function NotebookPage({ notebook, entries, summaries, owner, locked, expired, createChat, openChat }: NotebookPageProps) {
@@ -49,12 +49,13 @@ export function NotebookPage({ notebook, entries, summaries, owner, locked, expi
       {chats.length ? <ul className="folder-chats">{chats.map(chat => {
         const summary = summaries[chat.id];
         const date = new Date(summary?.activity_at ?? '');
+        const when = relativeTime(summary?.activity_at);
         return <li key={chat.id}><button className="folder-chat" disabled={locked} onClick={() => openChat(chat.id)}>
           <span className="folder-chat-text">
             <strong>{chat.name}{chat.pinned ? <Icon name="pin"/> : null}</strong>
             {summary?.preview ? <span className="folder-chat-preview">{summary.preview}</span> : null}
           </span>
-          {Number.isFinite(date.getTime()) ? <time dateTime={date.toISOString()}>{dateLabel.format(date)}</time> : null}
+          {when ? <time dateTime={date.toISOString()} title={date.toLocaleString()}>{when}</time> : null}
         </button></li>;
       })}</ul> : <p className="folder-empty supporting">Start a chat here to use this notebook’s shared sources.</p>}
     </section>

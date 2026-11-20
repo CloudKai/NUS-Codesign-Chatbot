@@ -85,8 +85,9 @@ stage markers express actual ordered stages, never invented scores or rewards.
   required. Copy, edit, feedback, sources, panel toggles, theme and send use icons.
 - **Navigation:** New Chat opens a standalone conversation. The plus button beside
   Notebooks opens the centered Create a notebook dialog. Chats can be dragged
-  by the left grip onto a notebook or back to Chats. The right ellipsis
-  opens Rename, Pin, Share, Delete and Move to notebook. Nested chats keep
+  by the left grip onto a notebook or back to Chats (grips and the Ctrl K hint are
+  hidden on touch screens). The right ellipsis opens Rename, Pin, Share, a per-chat
+  Response detail (Concise / Detailed), Delete and Move to notebook. Nested chats keep
   their history and appear in Search. Search sits between New Chat and Library.
   Its page has one title input for notebooks and chats, and a result opens the
   matching item. The keyboard shortcut focuses the same input.
@@ -98,12 +99,23 @@ stage markers express actual ordered stages, never invented scores or rewards.
   current stage. Preserve explicit intent because only project coaching can recommend
   stage progression. The explicit Start in chat action selects Design coaching.
 - **Home:** shown when no chat is open and from the Home navigation item. Greets the
-  student, offers one Continue card for the most recent chat (stage stepper, next
-  action, strongest and next-to-grow skills when scored) and up to three recent rows.
+  student, offers one Continue card for the most recent chat and up to three recent rows.
+  Chats without a saved preview (empty, untitled) are never listed. When the chat has project
+  work the card shows the stage stepper and strongest and next-to-grow skills. A pending
+  stage decision replaces the next-action text with "Ready for {stage}?" and Move on / Stay
+  here, which use the in-chat resolve endpoint and lock rules.
   With no chats it explains the five stages and offers Start my design project and
   Ask a lecture question.
-- **Stage stepper:** five dots in the chat header from API stage data; opens Progression.
-  A dot marks a pending stage decision.
+- **Chat header:** the title is a breadcrumb inside a notebook ("Notebook › Chat"; the notebook
+  part opens the notebook and truncates first), so there is no separate folder row. One Review
+  button replaces the stepper and the old Review button. When the chat has project work (saved
+  student work, a completed stage or a pending recommendation) it shows compact progress such
+  as "2/5 · Concept generation" (stage name hidden below 768px). One dot marks a pending stage
+  decision, and the button then opens Progression. Chats with no project work show plain Review.
+  The stage stepper component remains on Home's Continue card only, under the same condition.
+- **Chat mode on open:** a saved chat reopens in the mode of the student's latest turn when
+  saved project data shows it; otherwise Design coaching if the chat has project work, else
+  Lecture help. A saved draft intent wins.
 - **Inline recommendation and milestone:** a pending recommendation appears after the last
   message with Move to / Stay here. A milestone banner appears only after a confirmed move
   that the refreshed project confirms, or when all stages are observed complete.
@@ -119,12 +131,14 @@ stage markers express actual ordered stages, never invented scores or rewards.
   (each item has Build on this / Work on this), and "How your idea scores": Facione
   scores as feedback, not a grade, with strongest skill, skill to grow and Practice.
   Progression contains the Thinking Path, next step, stage decisions, and per-stage
-  saved work with real contribution counts.
+  saved work with real contribution counts. Feedback items name their stage only when it is
+  not the current one. Strongest skill is one compact line; Grow next is a full-width row.
   Review opens on Summary unless a stage decision is pending. Coach Markdown
   renders without raw HTML or inline images.
 - **Settings:** a centered page uses the Figma groups Profile, Appearance,
   Learning, and Your data. Rows align on desktop and stack at narrow widths.
-  Theme, appearance switches, and default mode use owner-scoped preferences.
+  Theme, appearance switches, and default mode use owner-scoped preferences. Per-chat
+  response detail lives in the chat's ⋯ menu, not here.
 - **Sources and Library:** students manage shared sources in the notebook’s
   Sources tab. Chats can attach files and inspect citations. Upload and Add
   from Library lead the notebook Sources toolbar. Added sources show their

@@ -261,14 +261,14 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           owner={session.owner_id} locked={workspaceLocked} expired={() => void reader.reload()}
           createChat={() => workspaceActions.current?.createChat(folder.id)} openChat={openChat}/> : null}
         {showHome ? <HomeView owner={session.owner_id} name={preferences?.display_name || (session.kind === 'guest' ? '' : session.display_name)}
-          entries={reader.notebooks} summaries={reader.chatSummaries} locked={workspaceLocked} openChat={openChat} startChat={startChat}/> : null}
+          entries={reader.notebooks} summaries={reader.chatSummaries} locked={workspaceLocked} openChat={openChat} startChat={startChat}
+          expired={() => void reader.reload()}
+          decided={async id => { if (reader.page?.notebook.id === id) await reader.open(id, false, true); else await reader.refreshList(); }}/> : null}
         {view === 'settings' ? <div className="settings-host" ref={setSettingsHost}/> : null}
         <div className="reading-content" hidden={view !== 'chat' || showHome}>
-        {parentFolder ? <div className="chat-folder-bar"><button className="chat-folder-back" disabled={workspaceLocked} onClick={() => openFolder(parentFolder.id)}>
-          <Icon name="folder"/><span>{parentFolder.name}</span>
-        </button></div> : null}
         {reader.page && reader.project ? <Conversation key={`${session.owner_id}:${reader.page.notebook.id}`} page={reader.page} project={reader.project} owner={session.owner_id}
           displayTitle={reader.page.notebook.kind === 'notebook' ? 'Original chat' : undefined}
+          parent={parentFolder ? { name: parentFolder.name, open: () => openFolder(parentFolder.id), disabled: workspaceLocked } : undefined}
           onHelp={() => setHelpOpen(true)} preferredIntent={preferences?.default_mode ?? 'lecture'}
           showStarters={preferences?.starter_prompts ?? true} reduceMotion={preferences?.reduce_motion ?? false}
           summary={reader.chatSummaries[reader.page.notebook.id]} startIntent={startIntents.current[reader.page.notebook.id]}

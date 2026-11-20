@@ -1,7 +1,7 @@
 /** Sidebar actions for one chat, including confirmation for permanent deletion. */
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Notebook } from './api';
+import { get, type Notebook, type NotebookSettings } from './api';
 import { Icon } from './Icon';
 
 export interface ChatCommands {
@@ -28,6 +28,8 @@ export function ChatActions({ chat, anchor, locked, canMove, commands, onClose, 
   const [name, setName] = useState(chat.name);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [detail, setDetail] = useState<NotebookSettings['response_detail'] | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
 
@@ -55,6 +57,31 @@ export function ChatActions({ chat, anchor, locked, canMove, commands, onClose, 
     }
     if (view === 'rename' || view === 'delete') dialog.current?.showModal();
   }, [view, anchor]);
+
+  const settingsPath = `/api/v1/reader/threads/${encodeURIComponent(chat.id)}/settings`;
+  useEffect(() => {
+    const controller = new AbortController();
+    get<NotebookSettings>(settingsPath, controller.signal)
+      .then(value => { if (value.notebook.id === chat.id) setDetail(value.response_detail); })
+      .catch(() => { /* Without saved settings the response detail choice stays hidden. */ });
+    return () => controller.abort();
+  }, [settingsPath, chat.id]);
+
+  /** Save the per-chat reply length, then re-read it so the menu shows what the server kept. */
+  async function chooseDetail(value: NotebookSettings['response_detail']) {
+    if (detailBusy || locked || value === detail) return;
+    setDetailBusy(true);
+    try {
+      await fetch(settingsPath, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response_detail: value }) });
+    } catch { /* A lost response can still have saved; the read below decides. */ }
+    try {
+      const saved = await get<NotebookSettings>(settingsPath, new AbortController().signal);
+      setDetail(saved.response_detail);
+      report(saved.response_detail === value ? `Replies in this chat will be ${value === 'short' ? 'concise' : 'detailed'}.` : 'Could not change response detail. Try again.', saved.response_detail !== value);
+    } catch { report('Could not verify response detail. Try again.', true); }
+    finally { setDetailBusy(false); close(); }
+  }
 
   function close() {
     onClose();
@@ -105,6 +132,14 @@ export function ChatActions({ chat, anchor, locked, canMove, commands, onClose, 
       return chat.pinned ? 'Chat unpinned.' : 'Chat pinned.';
     })}><Icon name="pin"/> {chat.pinned ? 'Unpin' : 'Pin'}</button>
     <button role="menuitem" disabled={locked} onClick={() => runImmediate(() => commands.share(chat))}><Icon name="share"/> Share</button>
+    {detail ? <div className="menu-group" role="group" aria-label="Response detail for this chat">
+      <span className="menu-group-label" aria-hidden="true">Response detail</span>
+      <div className="menu-segmented">
+        {([['short', 'Concise'], ['long', 'Detailed']] as const).map(([value, label]) =>
+          <button key={value} role="menuitemradio" aria-checked={detail === value} disabled={locked || detailBusy}
+            onClick={() => void chooseDetail(value)}>{label}</button>)}
+      </div>
+    </div> : null}
     <button role="menuitem" className="danger-action" disabled={locked} onClick={() => setView('delete')}><Icon name="trash"/> Delete</button>
     <button role="menuitem" className="move-menu-action" disabled={locked || !canMove} onClick={onMove}><Icon name="folder"/> Move to notebook…</button>
   </div>, document.body);
