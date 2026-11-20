@@ -293,6 +293,121 @@ nothing was re-run. Full tables, sources and denominators are in
 Rollback: none needed, documentation only. Next action: Phase 4 item 1 (the
 coaching-mode greeting failure).
 
+### Calibrated routing and passage comparison
+
+Keep the existing gate serving students. Laya improved exact evidence scope on
+the fresh set but exceeded the unnecessary-retrieval limit. SetFit tied the
+gate on exact scope and missed both retrieval-error limits. On the 307 historical
+turns, the gate scored 211, Laya 218 and SetFit 229. Those turns were used only
+for regression. Both classifiers selected cutoffs of 0.4 for scope and 0.6 for
+mode from ten separate calibration turns.
+
+| Fresh measure | Gate | Laya with fallback | SetFit with fallback |
+| --- | ---: | ---: | ---: |
+| Exact scope | 13/25 | 16/25 | 13/25 |
+| Correct coach mode | 15/25 | 23/25 | 21/25 |
+| Unnecessary retrieval | 0/10 | 3/10 | 2/10 |
+| Missed retrieval | 10/15 | 1/15 | 5/15 |
+
+Fresh exact-scope counts below include descriptive 95% Wilson intervals. The
+25 turns come from four scenario families, so these intervals overstate the
+independence of related turns.
+
+| Fresh slice | Gate | Laya | SetFit |
+| --- | ---: | ---: | ---: |
+| Selected file | 4/15 (11%–52%) | 7/15 (25%–70%) | 4/15 (11%–52%) |
+| Saved prior student turn | 6/8 (41%–93%) | 4/8 (22%–78%) | 5/8 (31%–86%) |
+| Both sources needed | 1/5 (4%–62%) | 2/5 (12%–77%) | 0/5 (0%–43%) |
+| Multilingual | 2/5 (12%–77%) | 3/5 (23%–88%) | 2/5 (12%–77%) |
+
+Both policies preserved all 41 routes explicitly recognized by the gate.
+A subsequent review flagged two additional workflow paraphrases in the frozen
+fresh set. The existing gate left both unrecognized. Laya initiated retrieval
+on both, and SetFit did so on one. Including those probes, preservation was
+41/43 for Laya and 42/43 for SetFit. The audit flags are used only for reporting.
+
+| Warm CPU path | One request p50 / p95 | Eight requests p50 / p95 | Busy fallbacks at eight |
+| --- | ---: | ---: | ---: |
+| Laya | 898.2 / 1023.0 ms | 0.2 / 892.7 ms | 56/64 |
+| SetFit native | 19.1 / 24.9 ms | 0.2 / 19.3 ms | 56/64 |
+| SetFit ONNX | 20.7 / 39.4 ms | 0.2 / 22.2 ms | 56/64 |
+
+Native and ONNX agreed on both raw heads and both effective decisions on all
+342 turns. A clean offline SetFit refit reproduced every saved probability
+vector and cutoff. The single inference slot served one request per wave. Concurrent
+medians primarily measure gate fallback. Eight waves on this Mac give a
+development-machine estimate.
+
+Reranking the same eight authorized candidates raised expected-page recall
+from 78/94 to 82/94 with median added latency of 314 ms per question.
+On the four fact-annotated questions, both orders found a supporting page for
+4/4. All requested facts were present for 3/4 lexical and 2/4 reranked lists.
+Laya abstained on all 40 individual passages and top-four lists. It called
+zero of the 33 incomplete contexts sufficient, with zero decided incomplete
+contexts from which to estimate conditional error.
+
+The [reproduction guide](RETRIEVAL_EVAL.md#evaluate-evidence-scope-coach-mode-and-excerpt-sufficiency)
+covers the routing evaluator, passage evaluator, grouped datasets, model
+revisions and commands. Fitted bundles, ONNX graph, per-turn predictions,
+latency samples, candidate orders and judge decisions are saved locally under
+`artifacts/evals/turn-comparison/`. The original sufficiency bundle remains
+under `artifacts/evals/laya-turn-decisions-sol/`.
+
+Validation passed 109 focused tests and 2,602 full-suite tests with one
+optional skip. Compile, scoped Ruff and Git whitespace checks passed. All
+changes are confined to offline evaluation, fixtures, tests and guides.
+Rollback requires no student-data migration or deployment action. Start the
+next routing experiment with fresh rows 7, 17 and 24 in the Laya report.
+All three had a selected file and needed no retrieval. Keep these as regression
+cases and evaluate any revised policy on newly labelled families. Keep the
+sufficiency judge offline. Haiku/Sonnet selection requires its separate
+answer-quality and cost benchmark.
+
+### Offline Laya experiment for three turn decisions
+
+Sol authored 38 examples for evidence scope and coach mode and 31 for
+excerpt sufficiency. The [offline evaluator](RETRIEVAL_EVAL.md#evaluate-evidence-scope-coach-mode-and-excerpt-sufficiency)
+fit and reloaded both Laya Learn bundles with networking blocked. Existing
+evidence-scope labels were kept out of fitting. Coach mode used labels
+derived from existing categories, and sufficiency used controlled passage
+swaps rather than independently reviewed search results.
+
+On 307 labelled turns, exact evidence scope fell from 211/307 with the gate
+to 182/307 with Laya and gate fallback. Wrong skips fell from 84/163 to 3/163,
+while unnecessary retrieval rose from 7/144 to 110/144. Laya improved on
+selected-file turns (18/37 to 23/37) and follow-ups (12/28 to 19/28), but lost
+on turns needing both source types (10/12 to 5/12). The coach-mode head
+matched 124/137 category-derived labels. The sufficiency head failed its
+internal comparison with Vega. Vega then abstained on all 48 controlled cases.
+Serial routing inference p95 was 2.29 seconds on the development Mac.
+
+The 110 focused retrieval tests, evaluator checks, Ruff, and Git whitespace
+checks passed. Reports and bundles are in the ignored local directory
+`artifacts/evals/laya-turn-decisions-sol/`. There is no runtime change, data
+migration, or deployment rollback. Haiku and Sonnet remain configured as
+before. Keep the classroom gate and Phase 4 streaming plan. If routing work
+resumes, predefine a narrow selected-file or follow-up policy, calibrate it on
+a separate split, and measure independently labelled scope and host latency
+before any runtime trial.
+
+### Sol-authored training examples for Laya Learn
+
+The offline experiment added 34 eligible examples to the 76-example training
+set and recalibrated the thresholds on the original 61 rows. Across 60 new
+synthetic messages, both bundles missed 6/30 requests needing retrieval and
+falsely retrieved on 0/30 skips. On the earlier 84-row holdout, wrong-skips
+fell from 15/51 to 13/51 (25.5%) and false retrieves stayed at 2/33 (6.1%).
+Sol authored both the additional training examples and the new test set.
+The test messages have no exact overlap with training or calibration, and
+the labels lack independent review. The benchmark ran with networking
+disabled.
+
+The experiment requires no runtime changes or data migration. The previous
+bundle remains the rollback artifact for an opt-in demo. Keep the classroom
+gate as configured and proceed to Phase 4 streaming. The experiment inputs,
+script, report and bundle are in
+[phase3d-work/sol-teacher](../.agents/tasks/phase3d-work/sol-teacher/).
+
 ### First-turn calibration for Laya Learn
 
 The pilot can use a separate cutoff before the first saved student message.
@@ -384,11 +499,12 @@ verify a separate storage migration. [Library and citation behavior](RAG_ARCHITE
 | --- | --- |
 | [#28 Classroom capacity and cost](https://github.com/CloudKai/NUS-Codesign-Chatbot/issues/28) | Open. The mock rehearsal completed three 80-submission waves after the SQLite waiter fix. Obtain the actual gross AWS bill and credit dates, permitted processing locations, and a lecturer-approved wait target. Then assess live throughput, restore evidence, and full operating cost. |
 | [#29 React release](https://github.com/CloudKai/NUS-Codesign-Chatbot/issues/29) | Open and depends on the classroom gate. Record the participant comparison, accessibility and capability gaps, and demonstrate rollback against the same saved data. |
-| Two course modules | Proposed. Start with module membership, owner scope, and corpus isolation before exposing the second route. The hosting plan covers the shared S$30 budget and overlapping 80- or 160-enrolment peaks. |
+| Two course modules | Proposed. Start with module membership, owner scope, and corpus isolation before exposing the second route. The readiness guide covers the shared S$30 budget and overlapping class peaks. |
 
 [Capacity evidence](operations/CLASSROOM_CAPACITY_GATE.md) ·
 [Decision register and release checks](operations/CLASSROOM_READINESS_DECISIONS.md) ·
-[Hosting plan](deploy/HOSTING_PLAN.md)
+[Post-credit hosting](operations/CLASSROOM_READINESS_DECISIONS.md#post-credit-hosting) ·
+[Second course module](operations/CLASSROOM_READINESS_DECISIONS.md#second-course-module-proposal)
 
 ### Documentation consolidation
 
@@ -408,6 +524,34 @@ The previous working-tree documents are backed up at
 `/private/tmp/codesign-docs-before-tightening-2m_inlg6`. Application runtime
 and deployment configuration were outside this phase. For the next technical
 phase, use the classroom [decision register](operations/CLASSROOM_READINESS_DECISIONS.md#evidence-and-decision-register).
+
+### Task-based documentation index
+
+The [documentation index](README.md) now follows five reader tasks. The
+[architecture guide](LOCAL_DEMO_IMPLEMENTATION.md#repository-layout-and-placement-rules)
+includes the package map, placement rules and compatibility imports. The
+[provider guide](providers/MODEL_PROVIDERS.md) covers AgentCore and direct
+Bedrock. Mock load commands live in [testing](TESTING.md#mock-load-probe),
+and pilot monitoring and deployment commands live in the
+[AWS runbook](deploy/AWS_STATELESS_EC2.md). The
+[release checklist](PRODUCTION_RELEASE_CHECKLIST.md) links to the August QA
+report at a fixed revision. The
+[decision register](operations/CLASSROOM_READINESS_DECISIONS.md#post-credit-hosting)
+records the S$30 ceiling, the AWS decision and the second-module proposal.
+
+Verified local Markdown links and heading anchors, the pinned QA Git blob,
+script and example paths, and all six example files. The code reference and
+handbook PDF generators ran successfully. The three-owner mock load probe
+accepted all three turns, the cost examples produced their expected totals,
+and the AgentCore smoke CLI passed its dry run. The full mock suite passed
+2,595 tests with dependency deprecation warnings. `git diff --check` passed.
+GitHub HTTP verification was unavailable because DNS could not resolve the
+host. The pinned report is present in the tracked remote branch history.
+
+This change needs no runtime, API, configuration or data migration. Previous
+tracked documents remain recoverable from Git. The Sol evaluation artifacts
+and findings are preserved. The next technical phase is Phase 4 streaming,
+using the [coach stream implementation](../backend/coaching/streaming.py).
 
 ## Earlier evidence
 

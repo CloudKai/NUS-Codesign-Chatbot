@@ -11,7 +11,8 @@ expiry date, balance and service restrictions remain unverified. Plan on ordinar
 cash-funded operation after credits. The working budget remains **S$30/month for
 hosting, generation and retrieval together**. The user is open to OpenAI and
 other hosts, and confirms the project team can maintain a VPS. Singapore-only
-residency is **not yet confirmed**. No host/model has been selected.
+residency is **not yet confirmed**. A replacement host and model still need
+evaluation if the current AWS stack misses the gates below.
 
 Local commit `9992bc46082fb3c0d7970aa4210779503fdbedb4` fixes the reproduced
 SQLite queue failure; all310 normal submissions saved in the final rehearsal,
@@ -20,77 +21,50 @@ That is mock HTTP engineering evidence, not live provider or rendered-client
 capacity. The [capacity gate](CLASSROOM_CAPACITY_GATE.md),
 [cost accounting](../COST_ACCOUNTING.md) and
 [learning baseline](../LEARNING_BASELINE.md) remain the acceptance authorities.
-The benchmark shortlist below records the 2026-11-17 options. The later
-[Singapore hosting plan](../deploy/HOSTING_PLAN.md) covers
-two modules, the custom domain, and the Luna/Sol and Haiku/Sonnet comparison.
 
-## November 17 benchmark shortlist
+## Post-credit hosting
 
-**One small VPS, the existing Python application, durable state/files, an
-explicitly validated course retriever, and direct OpenAI API calls.** Compare
-GPT-5.4 nano with GPT-5.4 mini on the same educational cases; choose only after
-quality, citations, structured assessments and budget behavior pass. GPT-5 nano
-is a cheaper comparison candidate, with coaching quality unproven here.
+Keep the current AWS stack for the next class while credits cover it. After
+credits, compare the gross AWS bill with the shared S$30/month ceiling.
+Include hosting, generation, retrieval and ingestion, file storage and
+transfer, identity, backups, logs, tax, and headroom. Use the
+[cost report](../COST_ACCOUNTING.md) and include any AWS services retained
+during a pilot. Keep AWS if it fits with headroom and passes the
+[classroom capacity gate](CLASSROOM_CAPACITY_GATE.md).
 
-This is a recommendation for a separately scoped benchmark, not a migration
-approval or proof that80 students fit a particular server. Keeping the current
-AWS system running temporarily requires counting its concurrent charges.
+If AWS misses either gate, benchmark one VM in an approved region with the
+existing app and a tested PostgreSQL adapter. Measure the classroom burst,
+restart and off-host restore, time to first visible text, and queue wait.
+Validate retrieval and page citations on canonical course PDFs before
+replacing the managed Knowledge Base. Compare routine coaching and explicit
+Deep Review with the current Haiku/Sonnet baseline under separately approved
+call and cost limits. Confirm permitted locations for hosting, data, backups,
+logs, and model processing. A Singapore-hosted app can still use global
+inference. Keep a stable student-facing hostname across any approved cutover.
 
-### Hosting shortlist: published prices checked 2026-11-17
+Keep DSQL authoritative until an isolated migration has verified owner and
+record IDs, transcripts and revisions, stage decisions, file references,
+identity and idempotency. Rehearse an encrypted off-host restore. For cutover,
+pause writes, reconcile the final copy and verify it before reopening. If a
+rollback follows new writes, reconcile them before redirecting students.
 
-Amounts below are USD/month unless marked EUR. These are building-block prices,
-not complete SGD bills. No promotional grant offsets are assumed.
+## Second course module proposal
 
-| Candidate | Verified building blocks | Assessment for this project |
-| --- | --- | --- |
-| DigitalOcean Basic VPS |2 GiB/1 vCPU/50 GiB: US$12. Weekly percentage-based VM backup adds20%: US$14.40 subtotal. [Compute](https://www.digitalocean.com/pricing/droplets), [backups](https://www.digitalocean.com/pricing/backups) | Leading fixed-price benchmark because the team can operate a VPS.2 GiB is an untested candidate, not a capacity floor. Application-consistent independent backups, auth, tax, transfer and other costs remain. Verify region/stock at selection. |
-| Railway containers | Hobby US$5 minimum including first US$5 usage; RAM US$10/GB-month, CPU US$20/vCPU-month, volume US$0.15/GB-month, egress US$0.05/GB. [Plans](https://docs.railway.com/pricing/plans) | Alternative if managed deployment convenience outweighs variable billing. US$5 is not an always-on stack price. For an invented1 GiB average RAM +0.1 average vCPU +5 GiB disk +10 GiB egress, resource subtotal is US$13.25, including the minimum once; no capacity claim. Confirm plan suitability for institution use. |
-| Render paid Python/container service |512 MB/<1 CPU US$7;2 GB/1 CPU US$25; disk US$0.25/GB-month. Workspace fees can be additional. [Pricing](https://render.com/pricing) | US$7 tier leaves little demonstrated memory margin for the combined app;2 GB compute alone uses most of this budget before AI. Default files are ephemeral, requiring a persistent disk or external state. [Disk constraints](https://render.com/docs/disks) |
-| Hetzner | Current regional page has region-dependent EUR pricing. [Regional catalogue](https://www.hetzner.com/cloud/regular-performance/) | Secondary quote candidate only. Do not apply an EU headline to Singapore: the extracted location columns are insufficient for a firm selected-region quote. Confirm country, size, IPv4, tax, stock, traffic and backups before ranking. |
+Run both modules on one deployment under a stable hostname, with dedicated
+entry paths and a switcher for dual enrollees. Introduce server-side module
+membership with student and lecturer roles before exposing a second route.
+Bind each workspace and guest session to its module. Apply module membership
+and existing owner permissions to reads, writes, downloads, exports and
+lecturer reports.
 
-The measured390176KiB API process maximum excludes driver, Streamlit clients,
-OS, ingestion spikes and a replacement index/database. It does not validate a
-512 MB host or show the whole application fits within2 GiB under class load.
-
-### OpenAI API comparison: USD per million tokens
-
-Standard text rates from official model pages, checked 2026-11-17. No cache
-savings, Batch discount or promotional credits are assumed in the arithmetic.
-
-| Model | Input | Cached input | Output | Role in comparison |
-| --- | ---: | ---: | ---: | --- |
-| [GPT-5 nano](https://developers.openai.com/api/docs/models/gpt-5-nano) |0.05|0.005|0.40| Cheapest baseline; no established coaching quality. |
-| [GPT-5.4 nano](https://developers.openai.com/api/docs/models/gpt-5.4-nano) |0.20|0.02|1.25| Budget-first evaluation candidate. |
-| [GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini) |0.75|0.075|4.50| Higher-cost comparison candidate; no automatic fallback selection. |
-
-Regional processing endpoints for5.4 nano/mini have a documented10% price uplift;
-confirm approved processing location before choosing rates. Model features and
-prices do not establish educational suitability. Reasoning tokens are charged
-as output; visible response length alone cannot bound spending.
-[Reasoning and output limits](https://developers.openai.com/api/docs/guides/reasoning).
-
-Illustrative workload: one call/turn,3,000 input and500 **total billable output**
-tokens,80 students. These are hypothetical inputs, not measured monthly usage.
-
-| Turns per student/month | Total calls | GPT-5 nano USD | GPT-5.4 nano USD | GPT-5.4 mini USD |
-| --- | ---: | ---: | ---: | ---: |
-|10|800|0.28|0.98|3.60|
-|30|2,400|0.84|2.94|10.80|
-|100|8,000|2.80|9.80|36.00|
-
-Formula: calls × (input_tokens × input_rate + billable_output_tokens × output_rate)
-/1,000,000. At16,000 input/2,000 total output per call,2,400 calls instead cost
-US$3.84/13.68/50.40 respectively. Structured JSON, growing history, reasoning,
-images, failures, retries, RAG recovery, Deep Review and checkpoints can change
-both tokens and call counts. These scenarios are not conservative ceilings.
-
-Example subtotal only: US$14.40 VPS/weekly VM backup +US$2.94 nano scenario =
-**US$17.34/month before remaining costs**. At a purely hypothetical SGD/USD
-conversion of1.35, that would be S$23.41. This is **not a current FX quote** and
-leaves only S$6.59 for all missing costs and positive approved headroom. Use the
-actual billed FX/tax basis; the example establishes no S$30 pass. Mini at the
-same workload makes the subtotal US$25.20 before extras, requiring a different
-funding/usage plan at that illustrative FX rate.
+Scope each module's readings, assignments, rubric, Knowledge Base retrieval,
+citations and cache keys. Validate the Thinking Path with the second lecturer
+before enabling Project coaching. Back up existing records before migration,
+verify their cohort and keep ambiguous records out of the second module until
+reconciled. Test separate notebooks and identical reading filenames across
+both modules, dual enrollment, saved links, lecturer exports, and history after
+restart. Track use per module against the shared ceiling and rehearse combined
+peak arrivals if classes overlap.
 
 ## Repository work required before any switch or paid evaluation
 
@@ -224,10 +198,11 @@ reused, not replaced by a new study or analytics implementation.
 
 ## Next exact action
 
-Confirm data-location requirements and the current bill/credit expiry; then scope
-one disposable VPS/model compatibility benchmark with explicit token/output and
-cost limits. No purchase or paid evaluation approval is inferred from willingness
-to use OpenAI. Obtain the lecturer's wait limits and schedule actual participants
+Confirm data-location requirements, the gross AWS bill, and credit expiry.
+Scope a disposable VM and model compatibility benchmark with explicit
+token/output and cost limits if AWS misses the budget or classroom gate.
+Obtain separate approval for purchases or paid evaluation. Obtain the
+lecturer's wait limits and schedule actual participants
 in parallel through the responsible humans. Keep #28 open/#29 blocked, publication
 LOCAL, and the current system/data intact until a separately approved migration.
 

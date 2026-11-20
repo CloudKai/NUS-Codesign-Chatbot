@@ -112,27 +112,128 @@ multiple hosts/DSQL require a shared admission adapter before release. See
 reconciliation, recovery, and unsettled classroom wait/cost gates. No student
 schema/data migration or AWS/paid operation was performed.
 
-The layers above are the behavior contract. Current code ownership:
-
-| Concern | Implementation | Compatibility import |
-|---|---|---|
-| FastAPI composition, student and professor routes | `backend/http/app.py` | `backend/api.py` |
-| Five-phase journey, review, Facione projection | `backend/learning/` | `backend/student_journey.py` |
-| Coach-turn execution, research-observation persist | `backend/coaching/execution.py` | `backend/application.py` |
-| Source ingestion, course sync, context, image projection | `backend/sources/` | `backend/source_library.py` |
-| Chat, sources, Journey/Review, runtime facade | `ui/panels/`, `ui/services/runtime.py` | `ui/chat.py`, `ui/sources.py`, `ui/studio.py`, `ui/runtime.py` |
-| DSQL admin bootstrap (five-phase marker + research DDL) | `scripts/dsql/cli.py` | `scripts/init_dsql.py` |
-
-Leave `ui/professor.py`, professor CSS, `backend/professor_analytics/`, and
-`backend/research/` in place. Keep research SQL on `StudentStore`. Do not
-restore six coaching stages or drop professor/research routes.
-
-See [`CODEBASE_STRUCTURE.md`](CODEBASE_STRUCTURE.md) for the placement map.
-
 Production AgentCore pedagogy is not this local mock path. Canonical
 specialist and stage prompts live in `agentcore_runtime/`. FastAPI still
 owns identity, RAG authorization, transcript persistence, and stage
 transitions.
+
+## Repository layout and placement rules
+
+```text
+streamlit_app.py              thin Streamlit entrypoint
+frontend/                     React student workspace
+ui/                           presentation, dialogs, session/view state, CSS
+  panels/                     chat, source, Journey/Review implementations
+  professor.py                lecturer Research/analytics workbench
+  services/                   cached API/application resource facades
+backend/
+  api.py                      FastAPI compatibility facade
+  http/app.py                 FastAPI composition, routes and HTTP errors
+  api_client.py               typed client used by Streamlit
+  application.py              coaching compatibility facade
+  coaching/                   coach execution, review context, and turn state
+  workspace_service.py        workspace use cases and transcript export
+  learning_service.py         transition confirmation and stage selection
+  domain.py                   Pydantic API/workflow contracts
+  student_journey.py          learning compatibility facade
+  learning/                   five-phase stages, journey rules and review projection
+  workflow.py                 one LangGraph coach workflow
+  prompts/                    shared and five-phase provider-neutral prompts
+  professor_analytics/        lecturer overview and Research application services
+  research/                   observation/review/adjudication models and adapters
+  source_library.py           source compatibility facade
+  sources/                    ingestion, course sync, context, image projection
+  retrieval.py                retrieval port, local chunk retriever, composite splitter
+  retrieval_gate.py           deterministic non-LLM retrieve / skip classifier
+  bedrock_retrieve.py         Bedrock Knowledge Base Retrieve adapter
+  sources/kb_metadata.py      canonical course_material_id + sidecar payload
+  repositories.py             narrow store-backed repository adapters
+  student_store.py            stable persistence facade and remaining operations
+  persistence/store/          contracts, schema/migrations, extracted operations
+  persistence/                DSQL, local-file, memory, and S3 adapters/ports
+  providers.py                OpenAI adapter and provider selection
+  bedrock_provider.py         Amazon Bedrock Converse coach adapter
+  agentcore_provider.py       Amazon Bedrock AgentCore Runtime coach adapter
+  specialists/                compatibility helpers and explicit Deep Review
+  mock_provider.py            deterministic offline coach
+  agentcore_harness_provider.py  isolated Luna InvokeHarness eval adapter
+  auth_*.py / cognito_*.py    Cognito/OIDC boundary and cookie behavior
+tests/                        domain/, persistence/, http/, ui/, scripts/ suites
+scripts/                      startup, validation and operator entrypoints
+  dsql/                       DSQL catalog, migration and execution implementation
+  agentcore/harness_patch/    compatibility re-export for the runtime
+agentcore_runtime/            canonical AgentCore prompts, specialists, and contracts
+docs/                         architecture, tests, deployment, and classroom guides
+```
+
+### Streamlit presentation
+
+Put panels, dialogs, widget callbacks, session-view state, and responsive
+helpers in `ui/`. Panels call `ui.runtime.WorkspaceFacade` and typed coach
+helpers. They must not import database drivers, model SDKs, LangGraph, or read
+storage paths directly.
+
+The React student workspace lives in `frontend/`. Keep Streamlit CSS in the
+matching `ui/assets/styles/` partial and its browser-side layout helpers in
+`ui/layout/`. Keep `streamlit_app.py` a thin composition root so AppTest can
+load the complete application.
+
+### HTTP/API boundary
+
+Public request and response models belong in `backend/domain.py`.
+`backend/http/app.py` is the application/owner composition root and owns workspace
+CRUD, coach, learning, graph, readiness, transition, and professor/research HTTP
+orchestration. Do not split professor routes into a second app.
+Routes validate HTTP input, call an application service, and map structured
+failures. Mirror client changes in `backend/api_client.py` and contract tests.
+
+Do not place educational decisions, SQL, object-store calls, or provider prompt
+construction in route functions.
+
+### Application and domain logic
+
+Use `CoachApplicationService` for coaching-turn orchestration,
+`WorkspaceService` for workspace CRUD, and `LearningProgressService` for stage
+decisions. Keep the five research-aligned phase definitions and review projections in
+`backend/learning/`; keep provider-neutral request/assessment contracts in
+`domain.py`. Lecturer Research coding models stay in `backend/research/`.
+
+Use a focused class when it owns dependencies or state. Prefer a typed pure
+function for deterministic transformations. Do not add wrapper classes or
+interfaces without a real substitution/test boundary.
+
+### Persistence and external services
+
+Store-facing behavior belongs behind repository or storage ports. SQLite and
+DSQL must preserve the same logical semantics. Local and S3 file storage must
+preserve owner/notebook/source key scope. Provider-specific JSON and SDK types
+stay inside provider adapters.
+
+Schema changes require an explicit additive migration and tests. Application
+startup must never run DSQL DDL. See [`DATABASE.md`](DATABASE.md).
+
+### Tests
+
+Place a regression beside the closest behavior boundary rather than creating a
+generic test dump. API contract changes normally need service, route, client,
+and UI-path coverage. External services use fakes only in the default suite.
+See [`TESTING.md`](TESTING.md).
+
+### Compatibility modules
+
+`ui.chat`, `ui.sources`, `ui.studio` and `ui.runtime` preserve established
+imports while implementations live in `ui.panels` and `ui.services`.
+`backend.api`, `backend.application`, `backend.student_journey` and
+`backend.source_library` preserve established imports while implementation is
+owned by `backend.http`, `backend.coaching`, `backend.learning` and
+`backend.sources`.
+`ui/professor.py` and `ui/assets/styles/70-professor.css` stay in place.
+Keep research writes on `StudentStore` so coach-turn persistence remains atomic.
+`ui/column_resize.py`, `ui/sources_scroll.py`, and `ui/composer_layout.py`
+re-export the corresponding `ui.layout` modules. `StudentChatEngine` in
+`backend/chat_service.py` is retained for compatibility tests and is not the
+current Streamlit fallback. Do not extend these seams with new student
+behavior.
 
 ## Target layers and interfaces
 
@@ -210,9 +311,9 @@ backend and remains a documented capability gap; no folder parity is claimed. Ad
 Streamlit-only workflows and existing literal Markdown rendering are recorded in the
 pilot README; this bounded engineering slice does not authorize a default frontend switch.
 
-Streamlit remains the frontend entrypoint. It only renders state and calls a
-typed API client; it must not call SQLite, local files, model SDKs, LangChain,
-or LangGraph directly.
+`streamlit_app.py` remains the entrypoint for the protected Streamlit workspace.
+Streamlit renders state and calls a typed API client. Keep SQLite, filesystem,
+model SDK, LangChain and LangGraph access behind FastAPI and its services.
 
 ### API
 
@@ -386,7 +487,8 @@ generation-only and must not call RetrieveAndGenerate. AgentCore is the
 production generation path: FastAPI stays the application; the runtime is not
 the student UI. Invokes are stateless so DSQL/SQLite ``messages`` remain the
 only durable transcript. Do not port POC JSON, DynamoDB, or AgentCore session
-caches as chat history.
+caches as chat history. See the [model provider guide](providers/MODEL_PROVIDERS.md)
+for provider contracts, settings, IAM, streaming, and validation.
 
 Retrieval is notebook-isolated and source-first. The current local adapter
 creates sentence-aware overlapping chunks from extracted selected-source text

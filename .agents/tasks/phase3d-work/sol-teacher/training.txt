@@ -1,0 +1,42 @@
++ what are the three kinds of needs in jobs to be done
+- could you help me make this description of my user's needs less wordy
++ how do struggling moments tell us what job a product does
+- my group found a struggling moment at a busy crossing, help us decide what to observe next
++ whats the difference between a goal a value and a feature
+- my features are a button and a light. help me choose better words
++ what are the steps to make an affinity cluster
+- here are our four labels: late, loud, dark, confusing. help me group them
++ whats the point of an oxymoron when designing something
+- does Quiet Alarm sound like a good name for our product
++ what does a creative matrix put along its axes
+- give us some ideas for making bus stops more comfortable
++ how does dot voting work when we prioritize ideas
+- which of my two ideas sounds more feasible given our three-day deadline
++ how is a prototype different from a finished product
+- we need a prototype by tomorrow and only have cardboard. help me plan it
++ can you explain the difference between analogy and metaphor in design
+- give me a catchy comparison for my foldable desk so the pitch sounds better
++ whats an affordance and how is it different from a feature
+- users keep pushing my sliding door mockup, brainstorm ways i could change it
++ what belongs in a storyboard for a design concept
+- improve this caption for our storyboard: the student waits for the bus
++ why do designers make personas from interview data
+- rewrite this persona as a short paragraph for my submission
++ what do the slides mean by functional needs
+- what does the word fiduciary mean
++ 讲一下怎么用 dots 来投票选点子
+- 帮我把我的产品介绍写得更清楚一点
++ i don't get the point of the affinity grouping thing
+- i don't get how to rename this notebook
++ what should the poster communicate at first glance
+- make my poster heading shorter: a community centred waiting solution
++ what's the purpose of testing a rough prototype with users
+- i only have two hours with my teammates to build our model, help me make a schedule
++ persona vs a demographic profile?
+- tips for exporting a spreadsheet to pdf?
++ What kind of information is in the course persona template? || I was reading about personas. || We discussed how a persona is based on patterns in user research.
+- Can you make that sound less wordy? || Our idea helps friends plan meals around dietary needs. || Your idea helps friends coordinate meals that work for everyone.
++ Can you show a different example of it? || What is an oxymoron in design? || It combines two deliberately opposing ideas.
+- Can you show another way to word it? || My pitch says the door sticks in the morning. || You could say the door gets jammed at the start of the day.
++ What are the other two categories? || Is convenience a functional benefit? || Functional value is about what the product helps users do.
+- Can you turn that into one sentence? || The main benefit is that the lamp shows when the bus is due. || The lamp displays bus arrival information. It could reduce uncertainty.

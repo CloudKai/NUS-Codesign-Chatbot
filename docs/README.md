@@ -1,20 +1,37 @@
 # Documentation
 
-Start with the [local setup](../README.md). Use the map below to find the guide
-for the change or operational decision you are making.
+Start with the [local setup](../README.md) to run the app offline.
 
-| Area | Guides |
-| --- | --- |
-| Architecture | [Application and workflow](LOCAL_DEMO_IMPLEMENTATION.md), [code map](CODEBASE_STRUCTURE.md), [database](DATABASE.md), [RAG](RAG_ARCHITECTURE.md), [prompts](PROMPT_ARCHITECTURE.md) |
-| Security | [Identity, guest access, and course material publication](SECURITY_BOUNDARIES.md) |
-| Deploy | [AWS runbook](deploy/AWS_STATELESS_EC2.md), [release checklist](PRODUCTION_RELEASE_CHECKLIST.md), [manual QA](MANUAL_PRODUCTION_QA.md), [required course KB filters](KB_REQUIRED_MODE_RUNBOOK.md) |
-| Providers | [AgentCore Runtime](providers/AGENTCORE_ADAPTER.md), [direct Bedrock](providers/BEDROCK_ADAPTER.md) |
-| Classroom | [Capacity and recovery](operations/CLASSROOM_CAPACITY_GATE.md), [readiness and pilot gates](operations/CLASSROOM_READINESS_DECISIONS.md), [hosting and two modules](deploy/HOSTING_PLAN.md) |
-| Operations | [Cost accounting](COST_ACCOUNTING.md), [generation admission](GENERATION_ADMISSION.md), [load probe](operations/LOAD_PROBE.md), [research reset](operations/RESEARCH_DATA_RESET.md), [retrieval evaluation](RETRIEVAL_EVAL.md) |
-| Contribute | [Current status](IMPLEMENTATION_STATUS.md), [issues and contribution workflow](CONTRIBUTING.md), [testing](TESTING.md) |
-| Product and design | [Product brief](../PRODUCT.md), [glossary](../GLOSSARY.md), [React design](../frontend/DESIGN.md), [Streamlit design](../DESIGN.md) |
-| Study | [Learning handbook](learning/README.md), [learning measures and research coding](LEARNING_BASELINE.md) |
+## Understand the system
 
-`examples/` contains synthetic cost inputs and mock capacity results. The
-system presentation is an overview for course stakeholders. The learning
-handbook and generated reference are teaching aids with a dated baseline.
+- [Architecture and package ownership](LOCAL_DEMO_IMPLEMENTATION.md)
+- [Database and migrations](DATABASE.md)
+- [Identity, guest access, and course material security](SECURITY_BOUNDARIES.md)
+- [Retrieval and citations](RAG_ARCHITECTURE.md) and [prompt architecture](PROMPT_ARCHITECTURE.md)
+- [Product brief](../PRODUCT.md), [glossary](../GLOSSARY.md), [React design](../frontend/DESIGN.md), and [Streamlit design](../DESIGN.md)
+
+## Develop and test
+
+- [Contribution and issue workflow](CONTRIBUTING.md) and [implementation status](IMPLEMENTATION_STATUS.md)
+- [Testing and mock load probes](TESTING.md)
+- [Retrieval evaluation](RETRIEVAL_EVAL.md)
+
+## Deploy
+
+- [AWS deployment runbook](deploy/AWS_STATELESS_EC2.md)
+- [Production release checklist](PRODUCTION_RELEASE_CHECKLIST.md)
+- [Model providers](providers/MODEL_PROVIDERS.md)
+- [Required course Knowledge Base filters](KB_REQUIRED_MODE_RUNBOOK.md)
+
+## Run the classroom
+
+- [Capacity and recovery rehearsal](operations/CLASSROOM_CAPACITY_GATE.md)
+- [Readiness decisions, post-credit hosting, and a second module](operations/CLASSROOM_READINESS_DECISIONS.md)
+- [Cost accounting](COST_ACCOUNTING.md) and [generation admission](GENERATION_ADMISSION.md)
+- [Research data reset](operations/RESEARCH_DATA_RESET.md)
+
+## Study
+
+- [Learning handbook](learning/README.md) and [code-derived reference generator](learning/README.md#generate-the-code-derived-reference)
+- [Learning measures and research coding](LEARNING_BASELINE.md)
+- [Stakeholder system overview (PowerPoint)](CDE2300_Design_Thinking_Companion_System_Documentation.pptx)

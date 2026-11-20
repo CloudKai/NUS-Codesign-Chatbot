@@ -193,6 +193,7 @@ class RankedHit:
     score: float
     source_index: int = 0
     chunk_index: int = 0
+    text: str = ""
 
 
 @dataclass(frozen=True)
@@ -603,10 +604,9 @@ def _titles_and_names(entries: Sequence[Mapping[str, Any]]) -> tuple[list[str], 
 def gate_decision(row: Mapping[str, Any]) -> GateDecision:
     """Compose the repo's retrieval gate for one message row.
 
-    Mirrors ``CoachingExecution._prepare_authoritative_turn`` (``execution.py``,
-    about lines 2832 to 3034) for a normal chat turn (no ``lecture_help``, no
-    forced retrieval). Not modelled: image bytes, and the second-call
-    ``needs_source_retrieval`` fallback, which needs a model.
+    Mirrors the first-pass mode and scope rules, including explicit interaction
+    modes when supplied. Image bytes, forced retrieval and the model-driven
+    second-chance retrieval path are outside this offline comparison.
 
     The effective decision is 'retrieve' only when a source is searched: the
     course catalog (``include_course_catalog``) or at least one personal file.
@@ -633,13 +633,14 @@ def gate_decision(row: Mapping[str, Any]) -> GateDecision:
         selected_source_filenames=filenames,
         has_selected_sources=bool(everything),
     )
-    status = is_current_stage_status_request(message)
+    lecture_help = row.get("explicit_mode") == "lecture_help"
+    status = not lecture_help and is_current_stage_status_request(message)
     progression = is_stage_progression_request(message) or is_terminal_completion_request(
         message, current_stage=stage
     )
     workflow_no_retrieve = workflow_skips_retrieval(message, current_stage=stage)
-    cleared = status or progression or workflow_no_retrieve
-    mode_retrieve = bool(policy.retrieve) and not cleared
+    cleared = not lecture_help and (status or progression or workflow_no_retrieve)
+    mode_retrieve = (lecture_help or bool(policy.retrieve)) and not cleared
     attachment_only = is_private_attachment_question(
         message, attachment_count=len(attachments)
     )
@@ -654,7 +655,7 @@ def gate_decision(row: Mapping[str, Any]) -> GateDecision:
         needs
         and not attachment_only
         and not cleared
-        and _wants_course_catalog_retrieval(message, mode_retrieve=mode_retrieve)
+        and (lecture_help or _wants_course_catalog_retrieval(message, mode_retrieve=mode_retrieve))
     )
     student = needs and bool(personal)
     return GateDecision(
@@ -669,9 +670,9 @@ def gate_decision(row: Mapping[str, Any]) -> GateDecision:
         ),
         expected_mode=(
             "qa"
-            if status
+            if status or lecture_help
             else "coaching"
-            if progression or workflow_no_retrieve
+            if progression or workflow_no_retrieve or row.get("explicit_mode") == "project_coaching"
             else policy.expected_mode
         ),
         intent=str(policy.intent or ""),
@@ -753,6 +754,7 @@ class OfflineCourseSearch:
                 score=float(chunk.score),
                 source_index=chunk.source_index,
                 chunk_index=chunk.chunk_index,
+                text=chunk.text,
             )
             for chunk in result.chunks
             if chunk.score > 0.0

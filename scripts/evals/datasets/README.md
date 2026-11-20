@@ -155,3 +155,17 @@ Totals: 154 `retrieve` (107 course, 35 student_upload, 12 both) and 141 `skip`. 
 - `history` is at most 2 turns and short.
 - Image attachments (`Prototype photo.png`) follow the same label rule, but the real path treats image evidence as model input rather than text retrieval, so one row is `borderline`.
 - Messages are evaluated as normal chat (`interaction_intent` unset or `project_coaching`). The React "lecture" path (`/lecture/stream`) forces retrieval for every message, so this set does not apply to it.
+
+
+## Offline turn-decision comparison
+
+The shared training split combines `laya_routing_training.synthetic.tsv` and
+`routing_matched_train.jsonl`. Each matched family shares a source question or
+conversation. The calibration and fresh JSONL files keep related turns together
+and supply direct scope and desired-response labels. Historical gate rows
+provide a separate regression measure. `passage_fact_labels.json` maps returned
+document/page pairs and excerpt hashes to supported fact indices. An empty list
+means the excerpt supports none of that question's requested facts.
+
+Run instructions, label provenance and result definitions are in the
+[retrieval evaluation guide](../../../docs/RETRIEVAL_EVAL.md#evaluate-evidence-scope-coach-mode-and-excerpt-sufficiency).

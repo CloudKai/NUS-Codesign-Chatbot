@@ -150,26 +150,10 @@ changes.
 
 ## Current RAG structure
 
-| Layer | Current development behavior |
-|---|---|
-| Ingestion | Existing upload/text/URL/course-sync code extracts bounded text. Raw bytes and derived text remain separate objects under S3 in production. |
-| Source authority | `sources.selected` plus notebook ownership determines the only documents eligible for a turn. Unselected and other-notebook sources never reach retrieval. |
-| Query | Current student message has the strongest weight. The last two student messages, project context, and learning summary provide lower-weight continuity. |
-| Chunking | `LocalChunkRetriever` uses sentence-aware ~1,800-character chunks with 220-character overlap. FastAPI hydrates selected student sources from disposable `derived/chunks.v1.json` when valid (in-process LRU); missing or invalid artifacts fall back to chunking extracted text at query time. No new database migration is needed. |
-| Ranking | Deterministic weighted lexical/BM25-style scoring uses term rarity, phrase overlap, title matches, and source diversity. Generic queries receive bounded representative excerpts. |
-| Budget | Fast chat: deterministic retrieval gate, then at most `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4) chunks, split 2 course + 2 student-upload by `FAST_CHAT_RETRIEVAL_COURSE_SLOTS` (unused slots backfill), and `FAST_CHAT_RETRIEVAL_MAX_CHARS` (default 8,000) characters. Deep Review may use the larger composer ceiling. |
-| Images | Selected images travel as model image inputs; a text marker preserves their stable `[S#]` mapping. |
-| Citations | `[S#]` is stable for the selected-source order. Internal chunk IDs such as `S1-C2` are audit metadata only and are never student-facing citation syntax. |
-| Audit | The assistant message records `retrieval_refs` containing source ID, stable label, chunk ID, focused excerpt, and score. `source_refs` remains reserved for sources actually cited in the response. |
-
-The retriever sees full extracted text locally, but the generation model sees
-only the selected excerpts. Citation previews are focused around the matching
-query evidence instead of the beginning of the document. Production generation
-may use AgentCore Runtime (`MODEL_PROVIDER=agentcore`); the user payload is
-this application's composed CDE2300 prompt plus bounded DSQL history as
-Converse `messages`. Do not copy the POC CDE2500 Q&A specialist prompt.
-Coaching must not receive Knowledge Base tools. Course grounding uses
-server-side `Retrieve` when `KNOWLEDGE_BASE_ID` is set.
+See [RAG architecture](RAG_ARCHITECTURE.md) for source selection, retrieval
+budgets, ranking, and citation mapping. The composer receives bounded text
+excerpts and stable source labels. Selected images travel as separate model
+inputs, with a text marker preserving the corresponding `[S#]` label.
 
 ## Prompt structure
 
@@ -245,46 +229,10 @@ block unless a provider opts into the same planner.
 
 ## Production Knowledge Base path
 
-```text
-Streamlit
-    ↓
-FastAPI
-    ↓
-DSQL current_stage
-    ↓
-selected source IDs + notebook/user filter
-    ↓
-Bedrock Knowledge Base `Retrieve` adapter implementing ContextRetriever
-(locked Lecture Notes/Readings only; student uploads stay local)
-    ↓
-RetrievalResult (stable source IDs/labels + chunks)
-    ↓
-same PromptComposer + same educational workflow
-    ↓
-configured generation provider (AgentCore Runtime, or Bedrock/OpenAI fallback)
-```
-
-`backend/bedrock_retrieve.py` implements this adapter. `configured_context_retriever()`
-always returns `CompositeContextRetriever`. A live Knowledge Base id is injected
-only when the provider is not mock and `MOCK_OPENAI` is false. Empty
-`KNOWLEDGE_BASE_ID` keeps `knowledge_base=None` so virtual course sources
-become an evidence gap instead of local placeholder chunks. It:
-
-- filters retrieval by selected source IDs already loaded for the notebook;
-- sends a `course_material_id` Knowledge Base metadata filter when ids exist,
-  then retries without the filter if that returns no hits (compatibility until
-  the KB is re-ingested with metadata);
-- maps S3 locations onto locked course `object_key` values and `[S#]` labels
-  using exact canonical key equality (URL-decoded, slash-normalized, S3 URI
-  extracted). Suffix matching is not used, so `week1.pdf` cannot match
-  `archive/week1.pdf` or `myweek1.pdf`;
-- returns bounded `RetrievedChunk` values with `retrieval_origin`;
-- uses Knowledge Base `Retrieve`, then feeds the existing composer/workflow, so
-  stage decisions and persistence do not move into `RetrieveAndGenerate`;
-- drops results whose S3 keys are outside the selected notebook sources.
-
-The application already enforces the final scope check, so a faulty adapter
-cannot introduce another notebook's chunk.
+FastAPI supplies bounded excerpts from the [course material retrieval path](RAG_ARCHITECTURE.md#course-material-rag)
+to the same composer and workflow used for other text evidence. Coaching uses
+the CDE2300 prompts in this repository. The application retrieves course
+evidence server-side before generation.
 
 ## Package layout
 

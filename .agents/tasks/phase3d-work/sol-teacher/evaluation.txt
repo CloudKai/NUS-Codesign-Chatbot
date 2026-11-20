@@ -1,0 +1,60 @@
++ are jobs supposed to stay stable even when the way people get them done changes
++ what goes in the but part when we write the job statement
++ how is remembering my old purchase useful in that interview method
++ what's that coffee example meant to illustrate about value
++ do hidden needs and unspoken needs mean the same thing in this class
++ how do we go from raw interview snippets to named themes
++ what's the point of combining contradictions when brainstorming products
++ what are the two dimensions we use to rank ideas on that chart
++ when do you use a low fidelity model instead of going straight to a detailed one
++ what are we supposed to put under assumptions in the prototyping plan
++ why does the shoe example count as an analogy
++ powers of ten means change the scale of the problem right? what are the steps
++ is the final poster meant to be an A1 and what format do they want
++ what's the difference between when the eye follows an F versus a Z
++ what did the chair example show about transferring affordances
++ how do i run a user test without biasing the results according to the class
++ 交 design reflection 要写哪几部分
++ why does a good pitch need an arc
++ where do emotions go on a journey map
++ whats the three-part rule for storytelling ah
++ can people in the brain trust tell a movie director what to do
++ why do the Pixar people show unfinished work to each other
++ why do personas need to be paired with a scenario
++ what's with shuffling index cards to come up with ideas
++ when should we take a break and let our brain work on an idea, according to Young
++ whats the expected length of our midterm presentation
++ What does that part represent again? || In the job statement what goes after HELP ME? || That's where you describe the assistance you need.
++ What are the names of the four boxes? || I see a prioritisation matrix in the lecture, with two axes. || The axes break the space into four boxes.
++ Do I submit a PDF or an image for that? || We need to submit our A1 course poster. || Make sure you check the brief for submission requirements.
++ Who came up with that quote? || I remember the bit about wanting the hole instead of the drill. || It illustrates the difference between a product and the job it serves.
+- my group wants to interview at the canteen but it's too loud, brainstorm a quieter spot
+- turn this into a shorter line: my user delays leaving each morning because the queue is unpredictable
+- give feedback on our poster heading: making bus arrivals stress-free at UTown
+- could you change our storyboard captions from present tense to past tense
+- what should i do if my team doesn't agree about which interview to present
+- make a checklist from these tasks: cut foam, test hinge, photograph the result
+- can you give me a few names for my modular water bottle
+- is there a keyboard shortcut to jump to the end of my text
+- what's an API token
+- how do i switch the language on my phone
+- where do i see chats from yesterday
+- if i have four teammates can you draft a fair work rota for this weekend
+- thanks, i'll give that a go
+- 早上好，今天好累
+- turn these three observations into bullet points without changing the meaning
+- suggest two alternatives to cardboard that cost less than five dollars
+- 我这个故事有点长，帮我缩成两句话
+- we have a model that gives a beep when the tray is full; suggest a way to make the beep quieter
+- help us brainstorm names for the two groups of users we already found
+- our video is over the time limit by fifteen seconds, which line should we cut
+- make the tone less formal please || My caption is 'Passengers remain in situ until the shuttle arrives.' || That means they stay where they are until it arrives.
+- Can you put those names in alphabetical order? || Our product name options are Vista, Koru and Aster. || You've listed three short names.
+- Can you ask it again but simpler? || Help me think about what my user is feeling. || Which part of that experience seems most frustrating to your user?
+- Can we keep the shorter version? || My original heading was 'Designing a better urban mobility experience'. || The shorter version was 'Better city travel'.
+- which of these two wordings reads better to you || I wrote 'safer crossing' and 'safer streets' on my board. || The first is more specific, and the second is broader.
+- can you make that into a table || our notes say the bench is wet, the ramp is steep and the sign is small || You listed three observations about the site.
+- pls help me organise the tasks my group already agreed to do
+- what happened in yesterday's football match
+- give me feedback on this draft hypothesis: a brighter sign will reduce wrong turns
+- can you rewrite this in Singlish for our voiceover

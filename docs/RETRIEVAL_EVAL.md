@@ -454,6 +454,98 @@ reported `learn` value and `LOCAL_COURSE_INTENT_FIRST_TURN_THRESHOLD` to
 has been saved. Omitting it uses one cutoff everywhere.
 The API loads a fixed bundle. Fitting and feedback are offline.
 
+### Evaluate evidence scope, coach mode, and excerpt sufficiency
+
+Run from the repository root with Python 3.12. Use two experiment environments
+with the project requirements installed. The Laya environment uses the Vega
+setup above. For the compact environment, install the following versions.
+These dependencies belong to the offline evaluator.
+
+```sh
+python -m pip install setfit==1.1.3 sentence-transformers==3.4.1 transformers==4.57.6 \
+  torch==2.8.0 datasets==5.0.1 onnx==1.23.2 onnxruntime==1.32.0 scikit-learn==1.9.1
+```
+
+Download the two public checkpoints before starting the evaluator. The measured
+MiniLM encoder was `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+at `e8f8c211226b894fcb81acc59f3b34ba3efd5f42`. The reranker was
+`cross-encoder/ms-marco-MiniLM-L-6-v2` at `233902d25c440f23af6f7d6e94d2946bac0bee0a`.
+The measured Vega-U revision was `4d2050287982ca7a7bb0c22fd19a389f5f94474e`
+with Qwen reader `2fc06364715b967f1860aea9cf38778875588b17`.
+
+```sh
+hf download sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 \
+  --revision e8f8c211226b894fcb81acc59f3b34ba3efd5f42 --local-dir /tmp/route-mini \
+  --exclude 'onnx/*' 'openvino/*' '*.bin' '*.h5' '*.ot'
+hf download cross-encoder/ms-marco-MiniLM-L-6-v2 \
+  --revision 233902d25c440f23af6f7d6e94d2946bac0bee0a --local-dir /tmp/route-ranker \
+  --exclude 'onnx/*' 'openvino/*' '*.bin' '*.h5' '*.ot'
+```
+
+Set `LAYA_PY` and `COMPACT_PY` to the two Python executables and `VEGA` to the
+local Vega directory containing its backbone. Choose a new experiment directory.
+The four evaluation commands disable network connections.
+
+```sh
+RUN=artifacts/evals/turn-comparison-reproduction
+"$LAYA_PY" -m scripts.evals.compare_turn_routes laya \
+  --checkpoint "$VEGA" --output-dir "$RUN/laya"
+"$COMPACT_PY" -m scripts.evals.compare_turn_routes compact \
+  --checkpoint /tmp/route-mini --output-dir "$RUN/compact"
+"$COMPACT_PY" -m scripts.evals.evaluate_passage_support rank \
+  --checkpoint /tmp/route-ranker --output "$RUN/ranking.json"
+"$LAYA_PY" -m scripts.evals.evaluate_passage_support judge \
+  --checkpoint "$VEGA" --bundle artifacts/evals/laya-turn-decisions-sol/evidence.zip \
+  --rank-report "$RUN/ranking.json" --output "$RUN/judge.json"
+```
+
+To recreate the earlier sufficiency bundle, run
+`"$LAYA_PY" -m scripts.evals.evaluate_laya_turn_decisions --track evidence --checkpoint "$VEGA" --output-dir "$RUN/evidence"`
+and use `"$RUN/evidence/evidence.zip"` in the judge command.
+
+**Routing labels and policies.** Both models see the current message, selected
+titles and up to four prior user/assistant messages. The 70 training turns
+include 32 Sol-authored turns in eight matched families. Ten calibration turns
+in two further families select the highest cutoff tied for best effective
+accuracy for each head. A cutoff above one always defers to the gate. The
+25 fresh turns in four other families have direct scope and response-mode
+labels, assigned separately from Sol's training work before scoring. These
+are synthetic, model-authored labels without human adjudication. The old 307
+turns supply regression scope scores. Their inferred modes are excluded from
+mode accuracy. [Datasets](../scripts/evals/datasets/)
+
+The reference policy always serves the gate. The second policy allows an
+override when a file is selected or a saved user message exists. Explicit
+mode, workflow and attachment routes retain precedence. Unavailable sources
+and below-cutoff scores fall back to the gate. The JSON records both heads'
+raw probabilities and the effective decisions. The Laya routing experiment
+uses the calibrated maximum probability. The sufficiency evaluation honors
+Laya's own abstention decision.
+
+SetFit contrastively tunes a shared encoder on joint scope/mode labels for
+24 steps, then fits a logistic head. Native and ONNX sum joint probabilities
+for each head. ONNX includes pooling and the linear head and uses the same
+tokenizer. The latency probe measures eight warmed waves at one and eight
+simultaneous requests, with one inference slot and immediate gate fallback
+when busy. Read the busy counts alongside p50 and p95. The slice intervals
+are descriptive 95% Wilson intervals per turn. Related turns within families
+limit generalization.
+
+Advance only on a fresh exact-scope gain, unnecessary searches below 10% of
+gold skips, misses below 25% of gold retrievals, and preserved explicit scopes.
+If both qualify, use lower single-request CPU p95 to select the shadow candidate.
+The serving gate continues to answer students during any future shadow trial.
+
+**Passages.** The lexical retriever supplies up to eight authorized PDF pages.
+The cross-encoder reorders that same pool. The 94 course questions have
+existing expected-page labels. Four additional questions have independent
+fact-support annotations for 32 returned passages, including a mixed question
+whose project source is missing. The evaluator checks document, page and
+content hashes for the first 1,800 characters of each returned passage.
+It scores individual passages and the union of facts in the first four.
+The judge sees those same texts. Coverage and false-sufficient counts include
+abstentions in their stated denominators. [Fact annotations](../scripts/evals/datasets/passage_fact_labels.json)
+
 ## Run the `needs_sources` eval against the live model (opt-in, costs money)
 
 `--live-model` sends each gate message through the first Fast Chat call on the

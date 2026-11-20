@@ -82,10 +82,11 @@ browser-console cleanliness, keyboard navigation, or responsive behavior.
 Visual changes require the real app at desktop and 390 px widths in Light and
 Dark/System as applicable.
 
-`scripts/browser_e2e_smoke.sh` is a manual operator helper. It requires a
-running app, Node.js/`npx`, an installed Playwright CLI wrapper, and approved
-manual Cognito sign-in. It is not a CI dependency and must not embed
-credentials or fabricate a production auth bypass.
+For a local headed smoke, start the app with `sh scripts/start.sh` and run
+`sh scripts/browser_e2e_smoke.sh`. The helper can check selection mode
+(**Ready** and **Move to**). It requires Node.js/`npx`, an installed
+Playwright CLI wrapper, and approved manual Cognito sign-in. Keep the helper
+outside CI and use the regular sign-in flow.
 
 ## Current gaps
 
@@ -104,9 +105,116 @@ Other tooling gaps are tracked rather than overstated: Ruff is installed and
 enforced by project CI; static typing has no configured gate, coverage is not
 measured, and Markdown links are not checked in CI.
 
-The mock load probe now uses distinct owner-scoped stores, but remains a local
-SQLite/memory/mock diagnostic rather than EC2, DSQL, S3, Cognito, or provider
-capacity evidence. See [`operations/LOAD_PROBE.md`](operations/LOAD_PROBE.md).
+## Mock load probe
+
+Virtual users are **distinct authenticated owners**. The probe must not treat a
+shared `local-student` store as many students.
+
+The probe checks FastAPI concurrency, owner isolation, rate limits, SQLite
+persistence, and Knowledge Base Retrieve admission. Treat delays and latency
+percentiles as mock results. Use the [classroom capacity gate](operations/CLASSROOM_CAPACITY_GATE.md)
+for the stepped 80-session rehearsal, bounded generation, restart and restore,
+and the remaining live capacity and cost decisions.
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --users 10 --requests-per-user 5
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --scenario distinct-owners --users 100
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --scenario two-notebooks
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --scenario same-notebook
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --scenario slow-distinct-owners --users 10
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --scenario kb-pool --kb-workers 4 --users 16 --kb-delay-ms 500
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --run-phase existing
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --run-phase slow --provider-delay-ms 10000
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --run-phase kb
+PYTHONPATH=. .venv/bin/python scripts/load_probe.py --run-phase correctness
+```
+
+`--users` is clamped to 1–120. Fake provider delay is script-only (patch of
+`DeterministicCoachProvider.assess` restored on exit). Fake KB delay injects a
+client into the **real** `BedrockKnowledgeBaseRetriever`; only `client.retrieve`
+is faked. Production worker count is not changed.
+
+Scenarios:
+
+| Scenario | What it measures | Expected mock result |
+|---|---|---|
+| `sequential` | Distinct owners, sequential turns per notebook | accepted |
+| `distinct-owners` | One concurrent turn per distinct owner | N users accepted under global 120 |
+| `two-notebooks` | One owner, two notebooks, overlapping turns | both accepted (`MAX_ACTIVE_COACH_REQUESTS_PER_USER=2`) |
+| `same-notebook` | One owner, one notebook, overlapping turns | 1 accepted, 1 HTTP 429 |
+| `slow-distinct-owners` | Same as distinct-owners with a fake provider sleep | accepted; P95 ≈ fake delay, not Haiku |
+| `kb-pool` | Real Retrieve admission/validation + fake `client.retrieve` | `min(users, workers)` accepted; excess `capacity_exhausted` |
+| `kb-timeout-slot` | Fake Retrieve longer than timeout | timed-out calls keep the slot; excess fail closed |
+| `kb-fail-closed` | Fake hits from a foreign bucket | zero chunks; no unrelated evidence |
+| `slow-idempotency` | Same idempotency key replayed | HTTP 200 twice, one provider call |
+| `failed-no-partial` | Fake provider raises | no assistant turn persisted |
+| `ownership-isolation` | Distinct owners list threads / read messages | zero ownership violations |
+
+Each printed line is JSON with:
+
+`scenario`, `users`, `fake_provider_delay_ms`, `fake_kb_delay_ms`, `kb_workers`,
+`requests`, `accepted`, `rate_limited`, `capacity_exhausted`, `failed`,
+`p50_ms`, `p95_ms`, `mean_ms`, `requests_per_sec`, `peak_threads`,
+`peak_kb_admitted`, `peak_kb_worker_threads`, `rss_peak_kb`,
+`process_max_rss_kb`.
+
+`rss_peak_kb` is kept for compatibility. It is **not** exact per-scenario
+incremental memory: both RSS fields are the process-lifetime maximum RSS
+from `resource.getrusage(RUSAGE_SELF).ru_maxrss` (a high-water mark).
+`process_max_rss_kb` is the same value with a clearer name.
+
+Irrelevant fields are JSON `null`. Aggregate metrics only (no notebook IDs,
+emails, or message text).
+
+The probe uses a temporary SQLite store and the mock coach. It never calls
+AgentCore, Bedrock models, Knowledge Base, DSQL, S3, or Cognito. CLI bootstrap
+and the runtime mutation path both force `APP_ENV=development` and
+`COURSE_MATERIAL_SYNC_ENABLED=false` (snapshot/restore includes those
+fields even if `backend.settings` was already imported). RPM is raised
+to 10_000 so this measures concurrency architecture, not the production
+`COACH_REQUESTS_PER_MINUTE=8` cap. That production cap is **per
+authenticated user**, not a class-wide 8-RPM ceiling. Ninety distinct
+students each sending one request can pass the per-user RPM rule; class
+burst ceilings are global concurrency (`MAX_CONCURRENT_MODEL_CALLS`), the
+AnyIO thread limiter, AgentCore, and Knowledge Base Retrieve capacity.
+`SYNC_THREADPOOL_TOKENS` is set to 120 to match Compose.
+
+Pytest uses tiny delays only. Do not put 5–12 second sleeps on the CI path.
+
+### Constrained Docker rehearsal
+
+Local Docker with `--cpus=2 --memory=2g` approximates a CPU and memory limit for
+local mock testing. Use the target EC2 host for pilot capacity measurements.
+
+Do **not** run `compose.prod.yaml` or `scripts/start_prod.sh` for this phase:
+those wire AgentCore, DSQL, S3, and Cognito.
+
+Simplest safe method (mock + SQLite inside a constrained container):
+
+```bash
+docker run --rm \
+  --cpus=2 \
+  --memory=2g \
+  --memory-swap=2g \
+  --pids-limit=512 \
+  -e MODEL_PROVIDER=mock \
+  -e MOCK_OPENAI=true \
+  -e DATABASE_PROVIDER=sqlite \
+  -e FILE_STORAGE_PROVIDER=local \
+  -e KNOWLEDGE_BASE_ID= \
+  -e MAX_CONCURRENT_MODEL_CALLS=120 \
+  -e SYNC_THREADPOOL_TOKENS=120 \
+  -e PYTHONPATH=/work \
+  -v "$PWD":/work \
+  -w /work \
+  python:3.12-bookworm \
+  bash -c 'pip install -q -r requirements.txt && python scripts/load_probe.py --scenario distinct-owners --users 25 && python scripts/load_probe.py --scenario slow-distinct-owners --users 10 --provider-delay-ms 5000 && python scripts/load_probe.py --scenario kb-pool --kb-workers 4 --users 30 --kb-delay-ms 500'
+```
+
+If installing `requirements.txt` inside the container is too heavy, run the
+same `scripts/load_probe.py` commands on the host with `.venv/bin/python` and
+treat Docker as optional confirmation, not as a substitute for a live EC2
+pilot.
 
 ## Phase handoff
 

@@ -20,7 +20,9 @@ The origin runs an ARM64 app image from ECR. CloudFront terminates HTTPS and
 forwards cookies and WebSocket upgrades. FastAPI applies owner authorization,
 resolves citations and saves the authoritative turn. See the
 [application architecture](../LOCAL_DEMO_IMPLEMENTATION.md) for package boundaries
-and [RAG](../RAG_ARCHITECTURE.md) for evidence scope.
+and [RAG](../RAG_ARCHITECTURE.md) for evidence scope. Use the
+[release checklist](../PRODUCTION_RELEASE_CHECKLIST.md) for approval order,
+evidence and rollback decisions.
 
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
@@ -41,7 +43,8 @@ build.
 The published runtime source of truth is `agentcore_runtime/` in this
 repository (Q&A, Coaching, and Formative Review specialists). Do not treat
 AgentCore session memory, DynamoDB, or a JSON file as chat history.
-Direct Bedrock Converse remains a fallback. Course PDFs live in shared
+See [model providers](../providers/MODEL_PROVIDERS.md) for the generation
+contract and direct Bedrock fallback. Course PDFs live in shared
 `course/lectureNotes/` and `course/readings/` on the course-content bucket;
 student uploads stay under `users/`. `COURSE_MATERIAL_SYNC_ENABLED=true`
 exposes those shared objects as virtual catalog sources in the UI and does
@@ -189,7 +192,7 @@ git fetch origin
 git checkout Production-AddEditFunction   # or the branch that carries the fix
 git reset --hard origin/Production-AddEditFunction
 git log -1 --oneline
-grep -n "_prefer_ipv4_hostaddr\|connect_kwargs\|DSQL_SSLROOTCERT" scripts/init_dsql.py | head
+grep -n "_prefer_ipv4_hostaddr\|connect_kwargs\|DSQL_SSLROOTCERT" scripts/dsql/cli.py | head
 ```
 
 Prefer `git pull --ff-only origin <branch>` when the local branch can fast-forward.
@@ -401,6 +404,25 @@ that schema as a system entity and rejects that grant. The object-level table
 grant above is the required runtime grant while application tables remain in
 ``public``.
 
+## Publish an AgentCore runtime version
+
+Use the [canonical runtime source](../../agentcore_runtime/) and its
+[pinned dependencies](../../agentcore_runtime/requirements.txt). Package
+`main.py` at the zip root with vendored Linux ARM64 Python 3.14
+site-packages. The runtime does not install dependencies from the manifest.
+Set the entrypoint to `opentelemetry-instrument main.py`. The main module
+starts the app with `app.run()`.
+
+On the existing ARN, publish a new version in the AgentCore console or
+with the `update-agent-runtime` control-plane operation. Check the runtime
+and DEFAULT endpoint immediately after publishing because DEFAULT may move
+automatically once the version is READY. Use the console or the
+`get-agent-runtime` and `get-agent-runtime-endpoint` control-plane operations.
+Check the effective live version and runtime settings, then update
+`AGENTCORE_SESSION_GENERATION` in host Compose and recreate FastAPI. Use the
+[release checklist](../PRODUCTION_RELEASE_CHECKLIST.md#ordered-cutover-this-release)
+for ordering, compatibility and rollback gates.
+
 ## Build and push (CI or developer machine)
 
 ```sh
@@ -432,51 +454,40 @@ export AWS_REGION=us-west-2
 sh scripts/deploy_ecr.sh
 ```
 
-Required production `.env` keys (host-only):
+Required host settings:
 
-- `DATABASE_PROVIDER=dsql`
-- `FILE_STORAGE_PROVIDER=s3`
-- `AWS_REGION=us-west-2`
 - `DSQL_ENDPOINT=<hostname>`
-- `DSQL_USER=co_design_app`
 - `USER_UPLOADS_BUCKET=<bucket>`
-- `COURSE_MATERIALS_BUCKET=cde2300-course-content-s3`
-- `COURSE_MATERIALS_PREFIX=course/`
-- `MODEL_PROVIDER=agentcore`
-- `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
-- `AGENTCORE_QUALIFIER=DEFAULT`
-- `AGENTCORE_SESSION_AFFINITY_ENABLED=true`
-- `AGENTCORE_SESSION_GENERATION=7`
-- `AGENTCORE_MODEL_PROVIDER=bedrock`
-- `AGENTCORE_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
-- `AGENTCORE_MODEL_REGION=us-west-2`
-- `ROUTER_MODEL_PROVIDER=bedrock`
-- `ROUTER_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
-- `QA_MODEL_PROVIDER=bedrock`
-- `QA_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
-- `COACHING_MODEL_PROVIDER=bedrock`
-- `COACHING_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
-- `REVIEW_INCREMENTAL_MODEL_PROVIDER=bedrock`
-- `REVIEW_INCREMENTAL_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
-- `REVIEW_DEEP_MODEL_PROVIDER=bedrock`
-- `REVIEW_DEEP_MODEL_ID=global.anthropic.claude-sonnet-4-6`
-- `ROUTER_MIN_CONFIDENCE=0.60`
-- `DEEP_REVIEW_INTERVAL_TURNS=3`
-
-Deep Review is an explicit FastAPI route
-(`POST /api/v1/threads/{thread_id}/deep-review`), not an automatic Sonnet
-call on the Fast Chat path. `DEEP_REVIEW_INTERVAL_TURNS` still bounds the
-eligibility counter (successful Coaching turns since the last persisted Deep
-Review). Opening the Review tab does not invoke a model. FastAPI/DSQL remain
-authoritative; AgentCore never writes stage state.
-
+- `COURSE_MATERIALS_BUCKET=<bucket>`
+- `AGENTCORE_RUNTIME_ARN=<existing runtime ARN>`
 - `GUARDRAIL_ID=<configured guardrail>`
-- `GUARDRAIL_VERSION=4`
-- `KNOWLEDGE_BASE_ID=<configured KB id>` (required when shared course sync is on)
-- `KNOWLEDGE_BASE_TYPE=MANAGED` (Compose sets this; `JUQNP8AZAZ` is MANAGED)
-- `KNOWLEDGE_BASE_REGION=us-west-2` (optional; falls back to `AWS_REGION`)
-- `PUBLIC_ORIGIN=https://<cloudfront-domain>` (Compose interpolates browser URLs)
-- Cognito client values in `.streamlit/secrets.toml` (host-only)
+- `KNOWLEDGE_BASE_ID=<configured KB id>` when shared course sync is on
+- `KNOWLEDGE_BASE_REGION=us-west-2` (optional, falls back to `AWS_REGION`)
+- `PUBLIC_ORIGIN=https://<cloudfront-domain>`
+- Cognito client values in the host's `.streamlit/secrets.toml`
+
+Production Compose selects DSQL as `co_design_app`, S3 file storage, the
+`course/` prefix, a managed Knowledge Base and AgentCore DEFAULT. It also
+sets session affinity, the session generation, and the model and guardrail
+settings described in the [provider guide](../providers/MODEL_PROVIDERS.md#agentcore-settings).
+Change the session generation in Compose when publishing or rolling back a
+runtime version.
+
+To verify the release SHA on the host, compare the label on the selected
+image with `APP_GIT_SHA` in the running app container:
+
+```sh
+docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$APP_IMAGE"
+docker compose -f compose.prod.yaml config --images
+docker compose -f compose.prod.yaml ps
+docker compose -f compose.prod.yaml exec -T app printenv APP_GIT_SHA
+```
+
+For an app rollback, set `APP_IMAGE` to the prior immutable tag and repeat
+the EC2 refresh command. For a runtime rollback, point DEFAULT to the prior
+READY version, change the session generation in Compose, and recreate the
+app container. The [release checklist](../PRODUCTION_RELEASE_CHECKLIST.md#11-rollback)
+defines rollback acceptance.
 
 `/api/v1/ready` checks non-secret Cognito configuration locally (it does not
 perform OIDC discovery), queries all five required DSQL tables, and performs a
@@ -579,28 +590,40 @@ Uses two independent runtime connections and the deterministic mock provider.
 Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 `finally`.
 
-### End-to-end product smoke (real Cognito users)
+### Guarded AgentCore smoke
 
-1. Cognito login.
-2. Create notebook.
-3. Send message / generate coach turn.
-4. Upload source; preview source.
-5. Confirm stage transition. Production (`compose.prod.yaml`): coach ADVANCE
-   opens Ready; student moves with Journey **Work on this stage** or typed
-   `Move to <stage>`.
-6. Restart/remove/recreate the application container (no `/app/data` mount).
-7. Log back in; confirm notebook, messages, progress, and source still exist.
-8. Delete source/notebook; confirm S3 cleanup under the owner prefix.
-9. Logout; confirm session invalidation (refresh rejected / auth cookies cleared).
-10. Two distinct real users cannot read or mutate each other's notebooks/sources.
-11. Simultaneous duplicate coach submission with the same idempotency key converges
-    to one provider execution and one persisted turn.
+After DEFAULT is READY and an operator explicitly approves the live call
+and a cost cap, use the approved cap for a single short request. Example:
 
-Until this smoke sequence passes, the migration is **not** complete and the
-application remains **READY FOR CONTROLLED PILOT** at best.
+```sh
+PYTHONPATH=. .venv/bin/python scripts/agentcore_smoke.py \
+  --i-approve-live-agentcore \
+  --cost-cap 1.00 \
+  --max-requests 1
+```
 
-Production selection mode (`STUDENT_STAGE_SELECTION=true` in `compose.prod.yaml`):
-step 5 must **not** auto-advance focus. Ready stays open until the student moves.
+Use the [ordered product smoke](../PRODUCTION_RELEASE_CHECKLIST.md#10-post-deploy-smoke)
+to record the Cognito, persistence, source, stage, and isolation evidence.
+The application stays in controlled pilot until the production gates pass.
+
+### EC2 monitoring during a pilot
+
+| Signal | Why |
+|---|---|
+| CPU / RAM (`htop`, CloudWatch) | Coach turns and PDF extract are CPU/RAM heavy |
+| Disk free on `/` and Docker volumes | Caddy state + container logs; no student data mount |
+| `docker compose ps` / restart count | Unexpected restarts under load |
+| App container logs | Provider/rate-limit failures (must stay privacy-safe) |
+| Aurora DSQL errors | OCC conflicts, permission denials, connectivity |
+| S3 4xx/5xx | Upload/preview/delete failures |
+| Cognito auth failures | Misconfigured callback or cookie Secure flags |
+| `/api/v1/ready` via Docker healthcheck | Dependency readiness without public exposure |
+
+Compare to the [mock load baseline](../TESTING.md#mock-load-probe). For an
+approved live pilot, step through 2, 5, 10, and 25 concurrent Cognito users.
+At each step record restarts, dependency errors, AgentCore p95, and Knowledge
+Base Retrieve outcomes. Use the [classroom capacity gate](../operations/CLASSROOM_CAPACITY_GATE.md)
+for the larger release decision.
 
 ## CloudFront distribution and Caddy origin
 

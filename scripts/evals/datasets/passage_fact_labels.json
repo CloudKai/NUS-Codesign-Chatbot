@@ -1,0 +1,192 @@
+[
+  {
+    "id": "drill",
+    "question": "Who said the quarter inch drill quote and what did buyers actually want instead?",
+    "facts": [
+      "Theodore Levitt",
+      "a quarter-inch hole"
+    ],
+    "passages": {
+      "lecture_week_2_jtbd_framework_term_1_2026/57": {
+        "sha256": "b39460259de3c770abb87da4ea87d8ac857d3f38149c079edc06cf1daaac4aa6",
+        "facts": [
+          0,
+          1
+        ]
+      },
+      "lecture_week_9_testing_feedback_poster_design_affordance_genai/12": {
+        "sha256": "e3f27a563aafd32672b9afb7bac62ad2eda712b49ef29905e4dfa0ee9448b3cb",
+        "facts": []
+      },
+      "reading_reading_3_a_technique_for_getting_ideas_james_webb_young/5": {
+        "sha256": "c3cdf59e1aaa85eb2ebb0070f0e553d79380249a2362822c0bc5bf3252d75010",
+        "facts": []
+      },
+      "reading_reading_3_a_technique_for_getting_ideas_james_webb_young/12": {
+        "sha256": "60b804f8ed7ff7a24c9bc53a97393a68ed3ab226b33ea39fac480d1dfd2536d2",
+        "facts": []
+      },
+      "lecture_week_9_testing_feedback_poster_design_affordance_genai/53": {
+        "sha256": "03d635884dad0e062279728a42baaf98fa452d311112dc41f4fb541dea912085",
+        "facts": []
+      },
+      "lecture_week_9_testing_feedback_poster_design_affordance_genai/47": {
+        "sha256": "5f5c6f36065d669ce2792a440d7be2b81d4cfeb970d70e5a99fcabb92ab2a7d3",
+        "facts": []
+      },
+      "lecture_week_9_testing_feedback_poster_design_affordance_genai/49": {
+        "sha256": "83cf7ea3c8a9505b528addec7ecae81369a9566c2507354c9370462608768f8d",
+        "facts": []
+      },
+      "lecture_week_9_testing_feedback_poster_design_affordance_genai/54": {
+        "sha256": "b3d66039544201bfe0bdbe52327b3d9fdc97cc0b62231108b84488aeab93bd60",
+        "facts": []
+      }
+    }
+  },
+  {
+    "id": "interview",
+    "question": "In the JTBD exercise, how recent should the purchase be and how long do partners have for the interview?",
+    "facts": [
+      "within three months",
+      "twenty minutes"
+    ],
+    "passages": {
+      "lecture_week_2_jtbd_framework_term_1_2026/72": {
+        "sha256": "938f4309bb9c4ceafe5c4b17ce12e9301a3f475abeb4d184df6a997403094c7c",
+        "facts": [
+          0,
+          1
+        ]
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/41": {
+        "sha256": "28306f7c8efa43661f934c5e1c6373be2f77beb7716156be358edd714721bf3d",
+        "facts": []
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/42": {
+        "sha256": "d2e43fff6c334ccc0add57ae34e50be01ec9c73c78d82fb49ae7d8cc74130957",
+        "facts": []
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/50": {
+        "sha256": "ac95be75f23927a4b37890d8b663e244e5d048acf0a1e7cb5b20fbd970039944",
+        "facts": []
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/65": {
+        "sha256": "9577268eb252fd8666a8980d9813ef2bd175ef0a80b6a4a9b8fd2d563cd02070",
+        "facts": []
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/68": {
+        "sha256": "6cd6f234679f7cd6d881d7b333dba8ecec046c10f8ee2d6f22f0c41b7cf7e1f5",
+        "facts": []
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/71": {
+        "sha256": "c4686c7e8a2f1ffa69a145c8232e219be24a24ab1b0cc404c353eb38e69fd7ce",
+        "facts": []
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/53": {
+        "sha256": "48216cf1a2ae426b15e403eaba7b2e2dabea45b35a0e495c33964b3bbd87c112",
+        "facts": []
+      }
+    }
+  },
+  {
+    "id": "bench",
+    "question": "What did buyers want in the quarter inch drill quote, and what tool did the repair bench volunteers actually request?",
+    "facts": [
+      "a quarter-inch hole",
+      "tool requested by volunteers in the unavailable project notes"
+    ],
+    "passages": {
+      "lecture_week_2_jtbd_framework_term_1_2026/57": {
+        "sha256": "b39460259de3c770abb87da4ea87d8ac857d3f38149c079edc06cf1daaac4aa6",
+        "facts": [
+          0
+        ]
+      },
+      "reading_reading_3_a_technique_for_getting_ideas_james_webb_young/6": {
+        "sha256": "94720453f48fbd8f00606333d234f8aa75c9e45c7c8b0e2a1ea44a212d1164e7",
+        "facts": []
+      },
+      "reading_reading_3_a_technique_for_getting_ideas_james_webb_young/19": {
+        "sha256": "7d5e8656f2615a181e4fa23806423097c8cc71e2d131f3aa60c83bd88b8d0b91",
+        "facts": []
+      },
+      "lecture_week_4_affinity_clusters_product_values_and_features_oxymoron/20": {
+        "sha256": "e19361d93e6cb0be8bd1a3b76571e87cdc63131c69ac2ee8ad45031d5dc79523",
+        "facts": []
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/79": {
+        "sha256": "4a0b23ea8b737515b17caa2457d4bef4bef008b437c665e4ccc3aa8aea49f39f",
+        "facts": []
+      },
+      "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026/10": {
+        "sha256": "3dba344d1cdee3d44daf8fa6c6df3f1385c4f90e2b5a94a85217e3358d0ea14d",
+        "facts": []
+      },
+      "lecture_week_2_jtbd_framework_term_1_2026/74": {
+        "sha256": "428984cb7f74300a04d72d274a51030ab806bcf2de9b02e05b16d91d8baa4524",
+        "facts": []
+      },
+      "lecture_week_4_affinity_clusters_product_values_and_features_oxymoron/11": {
+        "sha256": "d3ac12e38f5548affd194933991ffafa8bb95339f465a9baf636f56605ff34ba",
+        "facts": []
+      }
+    }
+  },
+  {
+    "id": "review",
+    "question": "When is the mid term review and what share of the individual grade is the design reflection?",
+    "facts": [
+      "week five, February 9",
+      "one third of the individual grade (5 of the 15 individual percentage points)"
+    ],
+    "passages": {
+      "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0/4": {
+        "sha256": "956021d5db0210f9ce0d30fb166ddd60f6279f5a2045ea5ed786b9408a52d5a0",
+        "facts": [
+          1
+        ]
+      },
+      "lecture_week_4_affinity_clusters_product_values_and_features_oxymoron/5": {
+        "sha256": "589b24bdb09e5cd0801894e8c833da64e7db36c494d7dbb3406555af9466ac17",
+        "facts": [
+          1
+        ]
+      },
+      "lecture_week_1_introduction_to_innovation_v3/32": {
+        "sha256": "47861766ea506e19e2b7fe37e072ae38008ab77f14a291e7a3667bb62cf132ca",
+        "facts": [
+          1
+        ]
+      },
+      "lecture_week_9_testing_feedback_poster_design_affordance_genai/2": {
+        "sha256": "3564db1210300eb8e4c0a3fe8166a928d79a85807cdea6dd5f923ea224b105cf",
+        "facts": [
+          0
+        ]
+      },
+      "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0/2": {
+        "sha256": "8b320cd904945938dd8da2d648a6365c2d900b585aed16bc33ec2788d5d62b5a",
+        "facts": [
+          0
+        ]
+      },
+      "lecture_week_9_testing_feedback_poster_design_affordance_genai/1": {
+        "sha256": "7872c6aee2406b9ab5cf1ea9b89198533ec51e07b850337c7560be2a03f29d2b",
+        "facts": []
+      },
+      "lecture_week_1_introduction_to_innovation_v3/31": {
+        "sha256": "b82ccb6cf1fecb0e494d42842ab387264b1e5c72d9a157c6e6cb5659080ee174",
+        "facts": [
+          0
+        ]
+      },
+      "lecture_week_4_affinity_clusters_product_values_and_features_oxymoron/3": {
+        "sha256": "09b49367a85413a4227cd480e9221cc3646d6b2e2abfe11c50860b11131bcbf0",
+        "facts": [
+          0
+        ]
+      }
+    }
+  }
+]
