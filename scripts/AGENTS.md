@@ -19,6 +19,7 @@ logic.
 |---|---|---|
 | `start.sh` | **Canonical launcher** — FastAPI `:8000` + Streamlit `:8501` with `USE_LOCAL_API=true` | Everyday path |
 | `start_prod.sh` | Docker app entrypoint — both services on `0.0.0.0`, supervised together | Production container; sqlite/local still may use `/app/data`; DSQL+S3 does not |
+| `aws/deploy_stack.sh` | Plan or apply the CloudFormation stacks in `infra/aws/` (app tier, edge monitoring) | **Dry run by default and makes no AWS call** (`--validate-remote` adds read-only `validate-template`). Applying needs `--apply` and `--confirm-account <12-digit-id>` that matches `sts get-caller-identity`; one flag alone is refused, as are `REPLACE_ME` placeholders. Parameter files stay outside Git. Design: [`docs/deploy/AWS_ARCHITECTURE_PROPOSAL.md`](../docs/deploy/AWS_ARCHITECTURE_PROPOSAL.md). Never run against a real account without explicit approval |
 | `deploy_ecr.sh` | ECR login + `compose.prod.yaml` pull/up | Host-only; needs `APP_IMAGE` + IAM role |
 | `build.sh` | Validation-only: static reader TypeScript/build + `compileall` + full mock `pytest` | Install reader dependencies first with `npm ci --ignore-scripts --prefix frontend`; **does not** initialize or modify the live DB |
 | `init_db.py` | Explicit SQLite schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |

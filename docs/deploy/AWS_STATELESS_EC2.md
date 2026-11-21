@@ -7,6 +7,10 @@ migrate existing SQLite/uploads automatically.
 **A live DSQL + S3 smoke test is still required before declaring the migration
 complete.** Passing unit tests alone is not sufficient.
 
+See also the [architecture proposal](AWS_ARCHITECTURE_PROPOSAL.md) for a
+self-healing single-instance tier, asset caching, alarms and dry-run-safe
+templates.
+
 ## Topology
 
 ```text

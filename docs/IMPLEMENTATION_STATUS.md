@@ -2,6 +2,36 @@
 
 ## Current status
 
+### Readiness audit and hardening (branch `improvement/combined-testing1`, five features)
+
+Mock and offline only. No AWS, Bedrock or AgentCore call ran, and no script ran
+against an account. Full mock suite: 3155 tests, no failure, no skip
+(`.venv/bin/python -m pytest -q`, output in the session artifacts). Per-feature
+evidence is in the entries below and in the commit messages.
+
+| Feature | Result |
+| --- | --- |
+| Student journey over the reader routes | `tests/http/test_student_journey_readiness.py`; whitespace-only messages now 422 before any turn is saved; Home start mode, Discard for rejected questions |
+| Browser flows at 1440 px and 390 px | Parent-run scripts: `crypto.randomUUID` fallback on plain HTTP (`frontend/src/requestKey.ts`), chips hidden during the milestone banner, 44 px touch targets on phones |
+| Security | See the security entry below: download-only uploads, cross-origin write refusal, forged section tags, Windows path separators, unsafe Markdown links |
+| Answer accuracy | See the answer accuracy entry below: shared-banner pages kept; recall floors locked |
+| AWS | [Architecture proposal](deploy/AWS_ARCHITECTURE_PROPOSAL.md), `infra/aws/` templates, `scripts/aws/deploy_stack.sh` (dry run by default), `tests/test_infra_templates.py` (9 tests) |
+
+- **No migration.** No schema, data or `.env.example` change. Rollback is a revert of the commits.
+- **Open decisions for the user** (not changed because they alter what students see
+  or what the prompts say): the hard-coded older-adult example lists in
+  `backend/learning/journey.py` `personalized_stage_questions` (the app names groups and
+  stakeholders the student should find); OCR for image-only slides (86 of 535 pages
+  have no text); follow-up query rewriting; the gate wrong-skip rate (76/154);
+  silently dropped raw HTML in coach Markdown; the process-local limiter and ledger.
+- **Risks.** The templates are unvalidated by `cfn-lint` and untested in an account.
+  The cost and speed figures are estimates. The CloudFront asset behavior and the
+  deployment bundle and secret are manual steps. Latency percentiles are not
+  alarmed (needs an app change).
+- **Next exact action.** Review the proposal, then run
+  `sh scripts/aws/deploy_stack.sh --app-params <file> --edge-params <file>` with
+  `--validate-remote` in a sandbox account; apply only after the account id is confirmed.
+
 ### Security readiness pass (branch `improvement/combined-testing1`)
 
 Mock tests only; no AWS, Bedrock or AgentCore call ran. Fixes and the tests that

@@ -19,6 +19,7 @@ Start with the [local setup](../README.md) to run the app offline.
 ## Deploy
 
 - [AWS deployment runbook](deploy/AWS_STATELESS_EC2.md)
+- [AWS architecture proposal](deploy/AWS_ARCHITECTURE_PROPOSAL.md) (single self-healing app tier, templates in `infra/aws/`)
 - [Production release checklist](PRODUCTION_RELEASE_CHECKLIST.md)
 - [Model providers](providers/MODEL_PROVIDERS.md)
 - [Required course Knowledge Base filters](KB_REQUIRED_MODE_RUNBOOK.md)

@@ -54,6 +54,7 @@ modules.
 |---|---|
 | `test_architecture_contracts.py` | Façade signatures, StudentStore/OCC inventories, professor-inclusive FastAPI routes |
 | `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list, Cognito redirect, stateless prod compose, host `.env` Knowledge Base contract |
+| `test_infra_templates.py` | `infra/aws` templates parsed with a CloudFormation-tag-aware loader: no literal keys, account ids or bucket names, no default on secret parameters, no `*` resource on Bedrock or S3 write actions, group fixed at one instance; `scripts/aws/deploy_stack.sh` run with a stub `aws` that fails the test if called (dry run default, `--help`, refusal with one flag, bad id or placeholders); no AWS SDK imported |
 | `http/test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards |
 | `http/test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
 | `http/test_app_sessions.py` | Cognito refresh/ID cookie sessions, OAuth state binder, callback/logout |
