@@ -126,6 +126,22 @@ are `borderline` rows. The capital question is `clear` and is also the one new
 empty result. Recall@4 does not move, because it scores
 each question sent straight to course search and never passes through the gate.
 
+### Real-PDF recall floor and the banner-prefix fix (readiness audit)
+
+`tests/domain/test_real_lecture_retrieval.py` runs the 94 questions through
+`OfflineCourseSearch` over the real PDFs in `lecture_notes/` and fails when
+material recall@4 falls below 91/94 or page recall@4 below 79/94. It prints
+every miss. It also checks the manifest's `pages_without_text` counts against
+the PDFs (Week 1: 27 of 32 pages have no text, so those slides cannot be
+retrieved until they are OCR'd). Raise the floors in the same commit as any
+retrieval improvement.
+
+`bounded_retrieval_result` used to drop a chunk whose first 400 characters
+matched an earlier chunk from the same source. Reading 2 page 4 opens with the
+same banner as page 1, so rq086 lost its answer page. It now compares the whole
+normalized excerpt. Page recall@4 moved from 78/94 to 79/94; material recall,
+the gate numbers and the follow-up pass counts did not change.
+
 ## `needs_sources` second chance (stub models, offline)
 
 Item 2 adds an optional `needs_sources` field to the first Fast Chat call

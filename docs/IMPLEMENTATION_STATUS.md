@@ -26,6 +26,18 @@ lock them are in `tests/http/test_security_readiness.py`,
 - **Rollback.** No schema or data change. Revert the commits for the five
   rows above independently.
 
+### Answer accuracy over the real lecture PDFs (branch `improvement/combined-testing1`)
+
+Mock and offline only. Material recall@4 is 91/94 and page recall@4 is 79/94 over
+the 10 real PDFs, locked by `tests/domain/test_real_lecture_retrieval.py`.
+Knowledge Base adapter mapping and citation tests use fake hits keyed by the real
+object keys. One bug fixed: duplicate suppression compared only the first 400
+characters, so a page that opens with the same banner as an earlier page (Reading
+2 page 4) was dropped from the result and its citation lost. Not changed (needs a
+decision): OCR for image-only slides (Week 1 has 27 of 32 pages without text),
+follow-up query building, gate wrong-skip (76/154) and slide chunking. Details
+are in [Retrieval evaluation](RETRIEVAL_EVAL.md).
+
 ### Head-to-head routing comparison: Laya vs KB-score routing (built, not run; branch `improvement/backend`)
 
 No production routing change and no setting default changed (all stay off). Nothing

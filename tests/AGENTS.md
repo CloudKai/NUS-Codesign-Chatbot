@@ -76,7 +76,8 @@ modules.
 | `domain/test_runtime_model.py` | Explicit Sonnet/Luna factory, no BedrockModel(), ApplyGuardrail for Mantle, runtime pin sync |
 | `domain/test_agentcore_harness_provider.py` | Isolated Luna InvokeHarness eval adapter; trusted override; no AWS |
 | `domain/test_context_planner.py` | Full-history-first planner, compression, revision invalidation |
-| `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, required/degraded/disabled filter modes, no silent unfiltered retry, shared-executor timeouts |
+| `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping (including all 10 real lecture object keys with pages), foreign-key and unselected-deck drop, shared-banner pages kept, required/degraded/disabled filter modes, no silent unfiltered retry, shared-executor timeouts |
+| `domain/test_real_lecture_retrieval.py` | Real lecture PDFs through the real local retriever (`OfflineCourseSearch`): all 94 eval questions, material and page recall@4 floors (91 and 79), misses printed, manifest `pages_without_text` matches the PDFs, shared-banner page stays retrievable; no model or network. Real-key Knowledge Base mapping and citation cases live in `test_bedrock_retrieve.py` and `test_citation_resolution.py` |
 | `domain/test_kb_metadata.py` | Canonical `course_material_id` and Bedrock sidecar payload |
 | `scripts/test_sync_course_kb_metadata.py` | Sidecar dry-run, idempotent bytes, local verify |
 | `domain/test_fast_chat_schema.py` | Slim FastChatTurnOutput; coaching/Q&A contract matrix; generated JSON Schema rejects coaching+null recommendation and citations=null; citations required as array |

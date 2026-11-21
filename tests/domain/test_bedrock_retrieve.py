@@ -1891,3 +1891,134 @@ def test_page_survives_the_second_bounded_formatting_pass():
     )
     result = bounded_retrieval_result([chunk], max_context_chars=2_000, max_chunks=4)
     assert [c.page for c in result.chunks] == [6]
+
+
+# ---------------------------------------------------------------------------
+# Course questions against the real lecture object keys
+# ---------------------------------------------------------------------------
+
+_REAL_BUCKET = "cde2300-course-content-s3"
+
+
+def _real_materials() -> dict[str, dict[str, Any]]:
+    """Return the eval manifest of the 10 real lecture PDFs keyed by material id."""
+    from scripts.evals.lib.fixtures import load_materials
+
+    return {entry["material_id"]: entry for entry in load_materials()}
+
+
+def _real_source(material_id: str, label: str) -> RetrievalSource:
+    """Return the locked course source for one real lecture PDF."""
+    entry = _real_materials()[material_id]
+    return RetrievalSource(
+        source_id=entry["source_id"],
+        label=label,
+        title=entry["filename"],
+        text="",
+        mime="application/pdf",
+        group=entry["group"],
+        object_key=entry["object_key"],
+        course_material_id=entry["material_id"],
+        virtual_course_source=True,
+    )
+
+
+def _real_hit(
+    material_id: str,
+    text: str,
+    *,
+    page: int | None = None,
+    bucket: str = _REAL_BUCKET,
+    score: float = 0.9,
+) -> dict[str, Any]:
+    """Return one fake Retrieve hit keyed by a real lecture object key."""
+    key = _real_materials()[material_id]["object_key"]
+    hit = _hit(f"s3://{bucket}/{key}", text, score=score)
+    if page is not None:
+        hit["metadata"] = {_PAGE_KEY: page}
+    return hit
+
+
+def _real_retrieve(hits: list[dict[str, Any]], *sources: RetrievalSource):
+    """Run the adapter with a fake client over the given real sources."""
+    return BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket=_REAL_BUCKET,
+        client=FakeRetrieveClient(results=hits),
+        max_results=8,
+    ).retrieve(
+        RetrievalQuery(
+            current_message="What is the prioritisation matrix?",
+            current_stage="concept_generation",
+            sources=sources,
+        )
+    )
+
+
+_WEEK2 = "lecture_week_2_jtbd_framework_term_1_2026"
+_WEEK7 = "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026"
+_WEEK8 = "lecture_week_8_prototyping_plan_metaphors_analogy_in_design_v0"
+_WEEK9 = "lecture_week_9_testing_feedback_poster_design_affordance_genai"
+
+
+@pytest.mark.parametrize("material_id", sorted(_real_materials()))
+def test_every_real_lecture_key_maps_to_its_selected_label_and_page(material_id: str):
+    """Each of the 10 real PDF keys (commas, spaces, hyphens) is accepted when selected."""
+    result = _real_retrieve(
+        [_real_hit(material_id, "Excerpt from the real deck.", page=7)],
+        _real_source(material_id, "S3"),
+    )
+    assert [(c.label, c.page) for c in result.chunks] == [("S3", 7)]
+    assert result.chunks[0].source_id == _real_materials()[material_id]["source_id"]
+
+
+def test_real_course_hits_get_labels_by_selected_position_and_keep_pages():
+    result = _real_retrieve(
+        [
+            _real_hit(_WEEK7, "Prioritisation matrix axes.", page=60, score=0.9),
+            _real_hit(_WEEK2, "JTBD interview questions.", page=74, score=0.8),
+        ],
+        _real_source(_WEEK2, "S1"),
+        _real_source(_WEEK7, "S2"),
+    )
+    assert [(c.label, c.page) for c in result.chunks] == [("S2", 60), ("S1", 74)]
+    assert "[S2]" in result.context and "[S1]" in result.context
+
+
+def test_real_course_hits_from_foreign_bucket_or_unselected_deck_are_dropped():
+    result = _real_retrieve(
+        [
+            _real_hit(_WEEK7, "Foreign copy of the selected deck.", bucket="other-bucket"),
+            _real_hit(_WEEK9, "Unselected Week 9 testing deck.", page=30),
+            _real_hit(_WEEK7, "Selected Week 7 deck.", page=12),
+        ],
+        _real_source(_WEEK7, "S1"),
+    )
+    assert [(c.text, c.label, c.page) for c in result.chunks] == [
+        ("Selected Week 7 deck.", "S1", 12)
+    ]
+    assert "Foreign copy" not in result.context
+    assert "Unselected Week 9" not in result.context
+
+
+def test_real_course_question_with_only_unselected_hits_yields_no_sources():
+    result = _real_retrieve(
+        [_real_hit(_WEEK8, "Analogy from nature.", page=45)],
+        _real_source(_WEEK2, "S1"),
+    )
+    assert result.chunks == ()
+
+
+def test_real_course_hits_sharing_a_long_banner_prefix_are_not_dropped_as_duplicates():
+    """Poster pages that open with the same banner stay separate cited excerpts."""
+    banner = "Creative Commons license banner at the top of every page. " * 10
+    assert len(banner) > 400
+    personas = "reading_reading_2_engaging_personas"
+    result = _real_retrieve(
+        [
+            _real_hit(personas, f"{banner} Step 8 disseminate knowledge.", page=4, score=0.9),
+            _real_hit(personas, f"{banner} Step 5 construct personas.", page=5, score=0.8),
+        ],
+        _real_source(personas, "S1"),
+    )
+    assert [(c.label, c.page) for c in result.chunks] == [("S1", 4), ("S1", 5)]

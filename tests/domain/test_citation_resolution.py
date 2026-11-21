@@ -493,3 +493,93 @@ def test_saved_citations_without_a_page_still_load() -> None:
     assert CitationReference.model_validate({**old.model_dump(), "page": 4}).page == 4
     with pytest.raises(ValueError):
         CitationReference.model_validate({**old.model_dump(), "page": 0})
+
+
+def test_real_lecture_kb_hits_resolve_to_selected_labels_pages_and_no_unselected_citation() -> None:
+    """KB hits keyed by real lecture object keys become cited ``S#`` labels with pages.
+
+    Only selected decks are cited: a hit from an unselected real deck or a foreign
+    bucket never reaches the citation catalog, and a selected deck with no hit is
+    not cited.
+    """
+    from backend.bedrock_retrieve import BedrockKnowledgeBaseRetriever
+    from backend.retrieval import RetrievalSource
+    from scripts.evals.lib.fixtures import load_materials
+
+    materials = {entry["material_id"]: entry for entry in load_materials()}
+    week2 = materials["lecture_week_2_jtbd_framework_term_1_2026"]
+    week7 = materials[
+        "lecture_week_7_concept_generation_prioritization_prototyping_2_mar_2026"
+    ]
+    week9 = materials["lecture_week_9_testing_feedback_poster_design_affordance_genai"]
+    bucket = "cde2300-course-content-s3"
+
+    def hit(entry: dict[str, Any], text: str, page: int, *, bucket_name: str = bucket):
+        return {
+            "content": {"text": text},
+            "location": {
+                "type": "S3",
+                "s3Location": {"uri": f"s3://{bucket_name}/{entry['object_key']}"},
+            },
+            "metadata": {"x-amz-bedrock-kb-document-page-number": page},
+            "score": 0.9,
+        }
+
+    class Client:
+        def retrieve(self, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "retrievalResults": [
+                    hit(week2, "Ask what the person hired the product to do.", 74),
+                    hit(week9, "Unselected testing deck.", 30),
+                    hit(week2, "Foreign copy.", 3, bucket_name="other-bucket"),
+                ]
+            }
+
+    sources = tuple(
+        RetrievalSource(
+            source_id=entry["source_id"],
+            label=f"S{index}",
+            title=entry["filename"],
+            text="",
+            mime="application/pdf",
+            group=entry["group"],
+            object_key=entry["object_key"],
+            course_material_id=entry["material_id"],
+            virtual_course_source=True,
+        )
+        for index, entry in enumerate((week2, week7), start=1)
+    )
+    service = object.__new__(CoachApplicationService)
+    service._retriever = BedrockKnowledgeBaseRetriever(  # type: ignore[attr-defined]
+        "JUQNP8AZAZ", course_bucket=bucket, client=Client()
+    )
+    chunks, _context = service._retrieve_for_turn(
+        student_message="What should I ask in a JTBD interview?",
+        current_stage="problem_identification",
+        retrieval_sources=sources,
+        project_context="",
+        conversation_summary="",
+        recent_messages=[],
+    )
+    assert [(c.label, c.page) for c in chunks] == [("S1", 74)]
+
+    request = CoachRequest(
+        thread_id="t",
+        student_message="What should I ask in a JTBD interview?",
+        current_stage="problem_identification",
+        source_ids=[source.source_id for source in sources],
+        retrieved_chunks=chunks,
+        response_detail="short",
+        idempotency_key="real-kb-citations",
+    )
+    catalog = service._selected_citation_catalog(
+        request,
+        {
+            source.source_id: {"title": source.title, "kind": "course", "mime": source.mime}
+            for source in sources
+        },
+    )
+    assert set(catalog) == {"S1"}
+    assert catalog["S1"].source_id == week2["source_id"]
+    assert catalog["S1"].title == week2["filename"]
+    assert catalog["S1"].page == 74
