@@ -12,15 +12,15 @@ Path stages is a product decision, not something the slides state. Edit `COURSE_
 | Interview questions | Problem identification | Week 2, p74 |
 | Empathy map (Says, Thinks, Does, Feels) | Problem identification | Week 3 per the course overview (Week 4, p3). Slides not in the folder, so it uses the standard four quadrants. Check against the Week 3 slides. |
 | Persona (empathic title, quote, demographics, goals and frustrations, habits) | Problem identification | Week 4, p20 |
-| How Might We (action, for user, so that outcome) | Problem identification | Week 7, p30, and the app's stage prompt |
-| User journey map | Problem identification | Week 10, p24 |
-| Creative matrix with POEMS | Concept generation | Week 7, p28-30, p52 |
+| How Might We (action, for user, so that outcome) | Problem identification | Week 8, p63-69 (the How Might We section and worked examples) and Week 7, p30 (How Might We inside the creative matrix). The action, user and outcome wording comes from the app's stage prompt, not the slides. |
+| User journey map | Problem identification | Week 10, p15-24 (p24 lists the eight steps) |
+| Creative matrix with POEMS | Concept generation | Week 7, p28-30 and p52; "defer judgment, go for volume" is on p51 |
 | Crazy 8 | Concept generation | Week 4, p3 (named, no slide detail) |
 | Powers of Ten | Concept generation | Week 8, p63-66 |
 | Combine old elements | Concept generation | Week 7, p12 (Webb Young reading) |
-| Metaphor or analogy (steps 1 to 4) | Concept generation | Week 9, p15-19 |
+| Metaphor or analogy (steps 1 to 4) | Concept generation | Week 9, p14-19. The same slides are Week 8, p54-59, so the chip says Weeks 8–9. |
 | Selection criteria | Design specification | Week 7, p56 |
-| Prioritisation matrix | Design specification | Week 7, p59-60 |
+| Prioritisation matrix | Design specification | Week 7, p59-67 (importance to customer experience against difficulty) |
 | Goals, values, features | Design specification | Week 4, p30-37 |
 | Riskiest assumption | Ethics & Critical Thinking | Week 8, p39 |
 | Test questions | Ethics & Critical Thinking | Week 9, p31-32 |
@@ -42,6 +42,12 @@ and goals, values, features asks which job or goal a feature serves (Week 4, "Us
 - **Facione skill descriptions and tips:** written for this app. Facione is the app's own assessment model.
 - **Hints, reflection after a stage move, the project summary download and the Home recap:** app features that
   do not add course content.
+
+## Citation check
+
+Every row above was checked against the PDF text of `lecture_notes/` with a one-off extraction script. Each cited page
+contains the named tool, except the two rows already flagged: the empathy map (Week 3 slides are missing) and Crazy 8
+(named in the course overview only). Page counts are PDF pages, not the slide numbers printed in the footers.
 
 ## Known gaps
 

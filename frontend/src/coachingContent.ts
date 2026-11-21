@@ -14,7 +14,7 @@ const COURSE_TOOLS: Record<string, CourseTool[]> = {
   problem_identification: [
     { label: 'Job statement', week: 'Week 2', text: 'My job statement:\nWHEN I … (what is the context?)\nBUT … (what is the barrier getting in the way today?)\nHELP ME … (what is the user trying to do?)\nSO I … (what is the outcome of achieving it?)\n\nEvidence from my interview or fieldwork: ' },
     { label: 'Empathy map', week: 'Week 3', text: 'Empathy map for (who I observed or interviewed):\nSays: \nThinks: \nDoes: \nFeels: \n\nWhat surprised me: ' },
-    { label: 'How Might We', week: 'Week 7', text: 'How might we … (action or opportunity)\nfor … (user)\nso that … (desired outcome or benefit)\n\nIs it open to many different ideas, not one fixed solution? ' },
+    { label: 'How Might We', week: 'Weeks 7–8', text: 'How might we … (action or opportunity)\nfor … (user)\nso that … (desired outcome or benefit)\n\nIs it open to many different ideas, not one fixed solution? ' },
     { label: 'Persona', week: 'Week 4', text: 'My persona:\nEmpathic title: \nQuote: \nBasic demographics: \nGoals & frustrations: \nHabits/preferences: \n\nWhich details come from my fieldwork, and which are my assumptions: ' },
     { label: 'Functional, emotional, social jobs', week: 'Week 2', text: 'The jobs my user is hiring this product to do:\nFunctional: \nEmotional: \nSocial: \n' },
     { label: 'Interview questions', week: 'Week 2', text: 'Questions for my JTBD interview:\nWhen did you first think about buying something like this?\nTell me the story about buying this product.\nWhy did you buy this product?\nHow do you feel about your purchase now?\nHow did you share your buying story with friends and family?\n\nWhat I learned: ' },
