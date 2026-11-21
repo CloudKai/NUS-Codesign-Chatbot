@@ -46,9 +46,10 @@ function savedIntent(page: Page, project: Project): Intent {
 }
 
 /** Keep draft, focus and loaded transcript stable during progress and evidence inspection. */
-export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, externalBlocked, activity, onHelp, preferredIntent, showStarters, reduceMotion, onboardingRequest, summary, startIntent, displayTitle = page.notebook.name, parent }: {
+export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, externalBlocked, activity, onHelp, preferredIntent, showStarters, reduceMotion, intentRequest, summary, startIntent, displayTitle = page.notebook.name, parent }: {
   page: Page; project: Project; owner: string; refresh: () => Promise<void>; expired: () => void;
-  onHelp: () => void; preferredIntent: Intent; showStarters: boolean; reduceMotion: boolean; onboardingRequest: number;
+  onHelp: () => void; preferredIntent: Intent; showStarters: boolean; reduceMotion: boolean;
+  intentRequest?: { id: string; intent: Intent; n: number };
   externalBlocked: boolean; activity: (value: boolean) => void;
   busy: boolean; loadEarlier: () => Promise<void>;
   summary?: ChatSummary; startIntent?: Intent;
@@ -439,6 +440,29 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
   }
 
+  // Home asked this already-open empty chat to start in a given mode. Each request applies once.
+  const appliedIntent = useRef(intentRequest?.n ?? 0);
+  useEffect(() => {
+    if (!intentRequest || intentRequest.n === appliedIntent.current) return;
+    appliedIntent.current = intentRequest.n;
+    if (intentRequest.id !== page.notebook.id || pendingRef.current || turnBusy) return;
+    intentRef.current = intentRequest.intent;
+    setIntent(intentRequest.intent);
+    remember(textRef.current, null);
+  }, [intentRequest?.n]);
+
+  /** Free a question the server rejected for good. Only after a check found no saved reply, so nothing is sent twice. */
+  function discardPending() {
+    const receipt = pendingRef.current;
+    if (!receipt || checking || watching || checkedKey !== receipt.key) return;
+    const draft = textRef.current;
+    const restored = receipt.message ? (draft.trim() ? `${draft}\n\n${receipt.text}` : receipt.text) : draft;
+    setCheckedKey('');
+    remember(restored, null);
+    setStatus('Not sent. Your text is back in the composer to edit.');
+    window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
+  }
+
   return <section aria-label="Saved conversation" className={`conversation ${pathOpen ? 'review-open' : ''}`}>
     <header className="chat-heading">
       <h2 title={parent ? `${parent.name} › ${displayTitle}` : displayTitle}>
@@ -524,6 +548,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       <p className="supporting">{pending.message ? 'Pending edit' : 'Pending question'}: {pending.text}</p>
       <button disabled={checking || busy} onClick={() => void reconcile(pending)}>Check saved answer</button>
       <button disabled={checking || busy || checkedKey !== pending.key} onClick={() => void send(true)}>Retry same question</button>
+      <button disabled={checking || busy || checkedKey !== pending.key} onClick={discardPending}>Discard and edit</button>
     </div> : null}
     </div></div>
     <div className="composer-dock"><div className="chat-column">

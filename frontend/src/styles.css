@@ -739,3 +739,11 @@ html[data-reduce-motion] .typing-dots i { opacity: .7; }
 .tool-chip { min-height: 32px; padding: 3px 10px; border-radius: 16px; font-size: 13px; color: var(--secondary); gap: 6px; }
 .tool-chip small { color: var(--muted); font-size: 11px; font-weight: 400; }
 @media (max-width: 767px) { .tool-chip { min-height: 44px; } }
+
+/* Touch targets for the transcript's recovery, edit and evidence controls, and the mode switch. */
+@media (max-width: 767px) {
+  .recovery-actions button, .message-edit button, .citations button, .evidence button, .chat-column > button { min-height: 44px; }
+  .mode-switch { padding: 0; }
+  .mode-switch span { min-height: 44px; }
+  .mode-switch span > span { min-height: 0; }
+}

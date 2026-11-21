@@ -38,12 +38,11 @@ function Segmented<T extends string>({ label, value, options, disabled, change }
 
 /** Keep tools local to the verified owner; reconcile writes without replaying them. */
 export function WorkspaceTools({ session, thread, project, disabled, changed, expired, blocked, themeHost, settingsHost, ref,
-  openSettings, closeSettings, onPreferences, resetOnboarding }: {
+  openSettings, closeSettings, onPreferences }: {
   themeHost: HTMLDivElement | null; settingsHost: HTMLDivElement | null; ref: Ref<WorkspaceActions>;
   session: Session; thread?: string; project: Project | null; disabled: boolean;
   changed: (created?: string) => Promise<void>; expired: () => void; blocked: (value: boolean) => void;
   openSettings: () => void; closeSettings: () => void; onPreferences: (value: Preferences) => void;
-  resetOnboarding: () => void;
 }) {
   const owner = session.owner_id;
   const createDialog = useRef<HTMLDialogElement>(null);
@@ -307,9 +306,6 @@ export function WorkspaceTools({ session, thread, project, disabled, changed, ex
             <button disabled={locked} onClick={() => void write(`${base}/remove`, { confirmed: true })}>Confirm delete {entryName}</button>
           </div> : null}
         </> : <p className="settings-row supporting">Open a chat to manage its settings and exports.</p>}
-        <SettingsRow label="Onboarding" description="Show the getting-started card again in the current empty chat.">
-          <button onClick={() => { resetOnboarding(); setError('Onboarding restored.'); }}>Show again</button>
-        </SettingsRow>
       </section>
     </div>, settingsHost) : null}
     <button className="refresh-workspace icon-button" aria-label="Refresh workspace" title="Refresh workspace" disabled={busy} onClick={() => void refresh()}><Icon name="refresh"/></button>

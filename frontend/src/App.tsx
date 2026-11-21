@@ -54,7 +54,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const [folderId, setFolderId] = useState<string>();
   const [settingsHost, setSettingsHost] = useState<HTMLDivElement | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
-  const [onboardingRequest, setOnboardingRequest] = useState(0);
+  const [intentRequest, setIntentRequest] = useState<{ id: string; intent: 'project' | 'lecture'; n: number }>();
   const [search, setSearch] = useState('');
   const [activity, setActivity] = useState(false);
   const [workspaceBlocked, setWorkspaceBlocked] = useState(false);
@@ -131,6 +131,9 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
     pendingIntent.current = intent;
     if (reader.page?.notebook.kind === 'chat' && !reader.page.notebook.parent_notebook_id && reader.page.total_count === 0) {
       pendingIntent.current = undefined;
+      // The empty chat is already mounted, so tell it which mode the student asked to start in.
+      const emptyId = reader.page.notebook.id;
+      if (intent) setIntentRequest(value => ({ id: emptyId, intent, n: (value?.n ?? 0) + 1 }));
       setView('chat');
       closeMobileList();
       window.requestAnimationFrame(() => document.getElementById('lecture-question')?.focus({ preventScroll: true }));
@@ -215,7 +218,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           session={session} project={folderSettings ? null : reader.project} onPreferences={setPreferences}
           openSettings={() => { if (view !== 'settings') setSettingsReturn(view); setView('settings'); closeMobileList(); }}
           closeSettings={() => { setView(settingsReturn === 'notebook' && !folder ? 'chat' : settingsReturn); document.getElementById('main')?.focus(); }}
-          resetOnboarding={() => setOnboardingRequest(value => value + 1)} thread={folderSettings ? folder?.id : selectedChat?.id} disabled={activity || reader.busy}
+          thread={folderSettings ? folder?.id : selectedChat?.id} disabled={activity || reader.busy}
           blocked={setWorkspaceBlocked} expired={() => void reader.reload()} changed={async created => {
             const list = await reader.refreshList();
             if (created) {
@@ -272,7 +275,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           onHelp={() => setHelpOpen(true)} preferredIntent={preferences?.default_mode ?? 'lecture'}
           showStarters={preferences?.starter_prompts ?? true} reduceMotion={preferences?.reduce_motion ?? false}
           summary={reader.chatSummaries[reader.page.notebook.id]} startIntent={startIntents.current[reader.page.notebook.id]}
-          onboardingRequest={onboardingRequest} busy={reader.busy} externalBlocked={workspaceBlocked} activity={setActivity} refresh={async () => { if (!await reader.open(reader.page!.notebook.id, false, true)) throw new Error('Refresh failed'); }} expired={() => void reader.reload()}
+          intentRequest={intentRequest} busy={reader.busy} externalBlocked={workspaceBlocked} activity={setActivity} refresh={async () => { if (!await reader.open(reader.page!.notebook.id, false, true)) throw new Error('Refresh failed'); }} expired={() => void reader.reload()}
           loadEarlier={() => reader.open(reader.page!.notebook.id, true).then(() => {})}/> : null}
         </div>
       </main>

@@ -148,14 +148,20 @@ stage markers express actual ordered stages, never invented scores or rewards.
   13–14px text with 44px touch targets.
 - **Recovery:** preserve actionable errors, pending-write checks, disabled states
   and unsaved streaming labels even when simplifying ordinary status copy.
+  A pending question or edit offers Check saved answer, Retry same question and Discard and edit.
+  Retry and Discard unlock only after a check finds no saved reply, so nothing is sent twice. Discard
+  puts the text back in the composer under a new key, which frees a question the server rejects for good.
+  Start my design project and Ask a lecture question on Home also set the mode of an empty chat that is
+  already open. Transcript recovery, edit and citation buttons and the mode switch keep 44px targets below 768px.
 
 - **Course tools:** stage chips above the composer and the "Tools from the course" list in
   each opened Review stage insert fill-in templates taken from the CDE2300 lecture notes:
   job statement (WHEN I, BUT, HELP ME, SO I), persona, How Might We, creative matrix with
   POEMS, Crazy 8, Powers of Ten, selection criteria, prioritisation matrix, goals, values and
   features, prototyping plan, test questions and the story arc. Each shows the lecture week.
-  Do not add frameworks that are not in the notes. The Week 3 empathy map is left out until
-  its slides are in `lecture_notes/`.
+  Do not add frameworks that are not in the notes. The empathy map is included at the owner's
+  request. The Week 3 slides are not in `lecture_notes/`, so it uses the standard Says, Thinks,
+  Does, Feels quadrants (see `COURSE_CONTENT.md`).
 - **Hints and reflection:** the **Hint** button beside Send inserts one request: the student
   notes what they tried, and asks for one question back and a lecture tool if one fits,
   never the answer. Templates and hints never ask the coach to do the student's thinking.
