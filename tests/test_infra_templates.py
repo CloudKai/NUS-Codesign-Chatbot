@@ -157,6 +157,83 @@ def test_script_refuses_placeholder_parameters_and_unknown_options(tmp_path: Pat
     assert _run_script(tmp_path, "--bogus").returncode == 2
 
 
+def _fill(example: Path, target: Path) -> Path:
+    """Copy an example parameter file, keeping comments, with every placeholder filled."""
+    lines = [
+        line if line.lstrip().startswith("#") else line.replace("REPLACE_ME", "filled-value")
+        for line in example.read_text(encoding="utf-8").splitlines()
+    ]
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return target
+
+
+def test_filled_copies_of_the_examples_pass_the_dry_run(tmp_path: Path) -> None:
+    """A filled copy that keeps the example's header comments is accepted."""
+    app = _fill(INFRA / "parameters.app.example.txt", tmp_path / "app.txt")
+    edge = _fill(INFRA / "parameters.edge.example.txt", tmp_path / "edge.txt")
+    result = _run_script(tmp_path, "--app-params", str(app), "--edge-params", str(edge))
+    assert result.returncode == 0, result.stderr
+    assert "Nothing was changed" in result.stdout
+
+
+def _run_with_recording_aws(
+    tmp_path: Path, account: str, *args: str
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run the script with a stub ``aws`` that answers sts and records deploy arguments."""
+    stub = tmp_path / "bin"
+    stub.mkdir(exist_ok=True)
+    record = tmp_path / "deploy-args"
+    aws = stub / "aws"
+    aws.write_text(
+        "#!/bin/sh\n"
+        f'if [ "$1" = sts ]; then echo {account}; exit 0; fi\n'
+        f"for a in \"$@\"; do printf '%s\\n' \"$a\" >> '{record}'; done\n"
+        f"printf '%s\\n' '---' >> '{record}'\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    aws.chmod(aws.stat().st_mode | stat.S_IXUSR)
+    work = tmp_path / "work"
+    work.mkdir(exist_ok=True)
+    (work / "decoy-file").write_text("x", encoding="utf-8")
+    env = {"PATH": f"{stub}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    result = subprocess.run(
+        ["sh", str(SCRIPT), *args], capture_output=True, text=True, env=env,
+        cwd=work, check=False,
+    )
+    lines = record.read_text(encoding="utf-8").splitlines() if record.exists() else []
+    return result, lines
+
+
+def test_apply_passes_each_override_as_one_argument(tmp_path: Path) -> None:
+    """A cron value with spaces and ``*`` reaches ``aws`` as a single argument."""
+    params = _fill(INFRA / "parameters.app.example.txt", tmp_path / "app.txt")
+    with params.open("a", encoding="utf-8") as handle:
+        handle.write("ScheduleStopCron=0 15 * * *\n")
+    result, args = _run_with_recording_aws(
+        tmp_path, "123456789012",
+        "--stack", "app", "--app-params", str(params),
+        "--apply", "--confirm-account", "123456789012",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ScheduleStopCron=0 15 * * *" in args
+    assert "decoy-file" not in args
+    assert "VpcId=filled-value" in args
+    assert args[args.index("--parameter-overrides") + 1] == "VpcId=filled-value"
+    assert "cloudformation" in args and "deploy" in args
+
+
+def test_apply_refuses_when_the_account_differs(tmp_path: Path) -> None:
+    params = _fill(INFRA / "parameters.edge.example.txt", tmp_path / "edge.txt")
+    result, args = _run_with_recording_aws(
+        tmp_path, "999999999999",
+        "--stack", "edge", "--edge-params", str(params),
+        "--apply", "--confirm-account", "123456789012",
+    )
+    assert result.returncode == 3
+    assert args == []
+
+
 def test_this_module_imports_no_aws_sdk() -> None:
     """No client can be created here because no AWS SDK is imported."""
     tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))

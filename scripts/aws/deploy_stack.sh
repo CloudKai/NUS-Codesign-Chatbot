@@ -83,7 +83,7 @@ check_params() {
     echo "Parameter file not readable: $2" >&2
     exit 2
   fi
-  if [ -n "$2" ] && grep -q 'REPLACE_ME' "$2"; then
+  if [ -n "$2" ] && overrides "$2" | grep -q 'REPLACE_ME'; then
     echo "Parameter file still contains REPLACE_ME placeholders: $2" >&2
     exit 2
   fi
@@ -106,11 +106,18 @@ run_stack() {
     echo "   parameters: none supplied (needed only to apply)"
   fi
   if [ "$APPLY" = "yes" ]; then
-    # shellcheck disable=SC2046
+    # One Key=Value per argument: values such as the cron "0 15 * * *" hold
+    # spaces and "*", so they must not be word-split or glob-expanded.
+    set --
+    while IFS= read -r line; do
+      [ -n "$line" ] && set -- "$@" "$line"
+    done <<EOF
+$(overrides "$params")
+EOF
     aws cloudformation deploy --region "$region" --stack-name "$name" \
       --template-file "$template" --no-fail-on-empty-changeset \
       --capabilities $caps \
-      --parameter-overrides $(overrides "$params" | tr '\n' ' ')
+      --parameter-overrides "$@"
     return
   fi
   echo "   would run: aws cloudformation deploy --region $region --stack-name $name --template-file $template --capabilities $caps --parameter-overrides <from params file>"
