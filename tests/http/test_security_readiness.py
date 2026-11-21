@@ -661,3 +661,191 @@ def test_unsupported_file_types_are_stored_inert_and_never_extracted(world: Worl
             download = client.get(path + f"/sources/{row['id']}/content")
             assert download.headers["content-type"].startswith("application/octet-stream")
             assert download.headers["content-disposition"].startswith("attachment")
+
+
+def test_spoofed_forwarding_headers_do_not_buy_extra_guest_workspaces(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Guest admission is global, so rotating client-address headers cannot create more workspaces."""
+    from backend.guest_admission import GuestAdmissionLimiter
+
+    limiter = GuestAdmissionLimiter(per_minute=2, per_hour=10, clock=lambda: 0.0)
+    world = World(StudentStore(tmp_path / "spoof.sqlite3"), monkeypatch, guest_admission=limiter)
+    try:
+        statuses = []
+        for index in range(5):
+            client = TestClient(world.app, base_url=BASE)
+            headers = {**ORIGIN, "X-Forwarded-For": f"203.0.113.{index}", "X-Real-IP": f"198.51.100.{index}",
+                       "Forwarded": f"for=192.0.2.{index}", "CF-Connecting-IP": f"10.0.0.{index}"}
+            statuses.append(client.post("/api/v1/auth/guest/start", headers=headers).status_code)
+        assert statuses == [200, 200, 429, 429, 429]
+    finally:
+        world.close()
+
+
+def test_login_start_ceiling_holds_when_client_address_header_rotates(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """A rotating X-Forwarded-For defeats only the per-client bucket; the global bucket still stops the flood."""
+    from backend import rate_limit
+    from backend.rate_limit import LoginStartLimiter
+
+    rate_limit.reset_login_start_limiter_for_tests()
+    monkeypatch.setattr(rate_limit, "_LOGIN_LIMITER", LoginStartLimiter(per_client_per_minute=2, global_per_minute=5))
+    world = World(StudentStore(tmp_path / "login.sqlite3"), monkeypatch)
+    try:
+        client = TestClient(world.app, base_url=BASE, follow_redirects=False)
+        started = 0
+        for index in range(12):
+            response = client.get("/api/v1/auth/login", headers={"X-Forwarded-For": f"203.0.113.{index}"})
+            started += "retry-after" not in {key.lower() for key in response.headers}
+        assert started <= 5
+    finally:
+        world.close()
+        rate_limit.reset_login_start_limiter_for_tests()
+
+
+def test_concurrent_turn_slots_cannot_be_over_acquired_by_a_race() -> None:
+    """Sixteen simultaneous attempts win exactly one notebook slot, two per user, and never exceed the global cap."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from backend.rate_limit import CoachRateLimiter, RateLimitExceeded
+
+    def attempt(limiter: CoachRateLimiter, owner: str, notebook: str, gate: threading.Barrier) -> bool:
+        gate.wait(timeout=5)
+        try:
+            limiter.acquire(owner, notebook)
+        except RateLimitExceeded:
+            return False
+        return True
+
+    same = CoachRateLimiter(max_active_per_notebook=1, max_active_per_user=2, requests_per_minute=100, max_concurrent_model_calls=100)
+    gate = threading.Barrier(16)
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        wins = list(pool.map(lambda _: attempt(same, "u", "n", gate), range(16)))
+    assert sum(wins) == 1
+    spread = CoachRateLimiter(max_active_per_notebook=1, max_active_per_user=2, requests_per_minute=100, max_concurrent_model_calls=100)
+    gate = threading.Barrier(16)
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        wins = list(pool.map(lambda index: attempt(spread, "u", f"n{index}", gate), range(16)))
+    assert sum(wins) == 2
+    capped = CoachRateLimiter(max_active_per_notebook=1, max_active_per_user=2, requests_per_minute=100, max_concurrent_model_calls=5)
+    gate = threading.Barrier(16)
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        wins = list(pool.map(lambda index: attempt(capped, f"u{index}", "n", gate), range(16)))
+    assert sum(wins) == 5
+
+
+def test_generation_allowance_is_shared_by_every_guest(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """New guests do not get new allowance: the third funded call is refused across owners."""
+    import backend.owner_context as owners
+    from backend.mock_provider import DeterministicCoachProvider
+
+    class Unreconciled(DeterministicCoachProvider):
+        """Mock provider whose usage cannot be refunded, so each call keeps its reserve."""
+
+        usage_provider = "unknown"
+
+    policy = {
+        "ledger_path": str(tmp_path / "ledger.sqlite3"), "monthly_micro_sgd": 300, "headroom_micro_sgd": 100,
+        "call_reserve_micro_sgd": 100, "max_running": 2, "max_queued": 0, "max_wait_seconds": 0,
+        "lease_seconds": 600, "ceiling_evidence": "synthetic offline fixture; not actual pricing",
+    }
+    (tmp_path / "policy.json").write_text(json.dumps(policy))
+    monkeypatch.setattr(settings, "generation_admission_policy", str(tmp_path / "policy.json"), raising=False)
+    monkeypatch.setattr(owners, "configured_coach_provider", Unreconciled)
+    world = World(StudentStore(tmp_path / "budget.sqlite3"), monkeypatch)
+    try:
+        results = []
+        for index in range(3):
+            guest = world.guest()
+            path = _chat(guest)
+            response = guest.post(path + "/project/stream", json={"student_message": "Older residents struggle to cross safely.", "idempotency_key": f"g-{index}"}, headers=ORIGIN)
+            events = [json.loads(line) for line in response.text.splitlines()]
+            results.append(events[-1])
+        assert [event["event"] for event in results] == ["done", "done", "error"]
+        assert results[-1]["status"] == 429
+    finally:
+        world.close()
+
+
+class _Boom(Exception):
+    """Carries a fake secret in its message."""
+
+
+SECRET_TEXT = "sk-live-SECRET-0123456789 arn:aws:iam::123456789012:role/internal /srv/private/key.pem"
+
+
+def test_server_errors_and_provider_failures_never_echo_secrets(world: World, alice_data: dict[str, Any], monkeypatch: MonkeyPatch) -> None:
+    """An unexpected exception or a provider failure returns a generic body without its message."""
+    import backend.owner_context as owners
+    from backend.mock_provider import DeterministicCoachProvider
+
+    class Exploding(DeterministicCoachProvider):
+        """Provider that fails with a message full of secrets."""
+
+        def assess(self, request: Any) -> Any:
+            raise _Boom(SECRET_TEXT)
+
+    monkeypatch.setattr(owners, "configured_coach_provider", Exploding)
+    quiet = TestClient(world.app, base_url=BASE, raise_server_exceptions=False)
+    quiet.cookies.update(alice_data["client"].cookies)
+    path = alice_data["path"]
+    streamed = quiet.post(path + "/lecture/stream", json={"student_message": "Tell me about empathy", "idempotency_key": "boom-1"}, headers=ORIGIN)
+    legacy = quiet.post("/api/v1/coach/turn", json={
+        "thread_id": alice_data["thread"], "student_message": "Tell me about empathy", "current_stage": "problem_identification",
+        "response_detail": "short", "idempotency_key": "boom-2",
+    })
+    for response in (streamed, legacy):
+        assert "SECRET" not in response.text and "arn:aws" not in response.text and "/srv/private" not in response.text, response.text[:300]
+
+    def explode(*_args: Any, **_kwargs: Any) -> Any:
+        raise _Boom(SECRET_TEXT)
+
+    from backend.workspace_service import WorkspaceService
+
+    monkeypatch.setattr(WorkspaceService, "get_thread", explode)
+    crashed = quiet.get(path + "/settings")
+    assert crashed.status_code == 500
+    assert "SECRET" not in crashed.text and "arn:aws" not in crashed.text
+
+
+def test_logs_never_contain_tokens_private_text_or_student_messages(world: World, caplog: pytest.LogCaptureFixture) -> None:
+    """A full signed-in turn with an upload logs no cookie value, source text or student wording."""
+    alice = world.registered("alice")
+    guest = world.guest()
+    guest_secret = guest.cookies.get(settings.guest_session_cookie_name)
+    token = alice.cookies.get(settings.cognito_id_token_cookie_name)
+    message = "LOG_PROBE_student_wording_about_crossings"
+    with caplog.at_level(logging.DEBUG):
+        for client in (alice, guest):
+            path = _chat(client)
+            assert client.post(path + "/uploads", files={"files": ("n.txt", f"{NOTES} {PRIVATE}".encode(), "text/plain")}, headers=ORIGIN).status_code == 202
+            _settled(client, path)
+            _turn(client, path, f"{message} What is analogy?", "log-1")
+            _turn(client, path, f"{message} My idea", "log-2", kind="project")
+            client.get(path + "/messages/page")
+    joined = "\n".join(f"{record.name} {record.getMessage()}" for record in caplog.records)
+    assert joined
+    for secret in (PRIVATE, message, token, guest_secret, guest_secret_digest(guest_secret), "token-alice"):
+        assert secret and secret not in joined, secret[:12]
+
+
+def test_upload_failures_return_generic_bodies_without_paths(world: World, monkeypatch: MonkeyPatch) -> None:
+    """A storage failure on an attachment reports a generic message, not the internal path or exception."""
+    from backend.workspace_service import WorkspaceService
+
+    def fail(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(SECRET_TEXT)
+
+    client = world.guest()
+    path = _chat(client)
+    monkeypatch.setattr(WorkspaceService, "upload_library_files", fail)
+    response = client.post(path + "/attachments", files={"files": ("a.txt", b"hello", "text/plain")}, headers=ORIGIN)
+    assert response.status_code == 422
+    assert "SECRET" not in response.text and "/srv" not in response.text
+    listed = client.post(path + "/uploads", files={"files": ("a.txt", b"hello", "text/plain")}, headers=ORIGIN)
+    assert listed.status_code == 202
+    for _ in range(300):
+        jobs = client.get(path + "/uploads").json()
+        if jobs["jobs"] and jobs["jobs"][0]["state"] == "failed":
+            break
+        time.sleep(0.01)
+    assert "SECRET" not in json.dumps(jobs) and "/srv" not in json.dumps(jobs)
