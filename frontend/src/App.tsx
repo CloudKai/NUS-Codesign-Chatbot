@@ -1,5 +1,5 @@
 /** CDE2300 lecture and project companion over the shared coaching policy. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useReader } from './useReader';
 import { Conversation } from './Conversation';
 import { ChatNavigation } from './ChatNavigation';
@@ -10,6 +10,7 @@ import type { Preferences } from './api';
 import { WorkspaceTools, type WorkspaceActions } from './WorkspaceTools';
 import { Icon } from './Icon';
 import { HomeView } from './HomeView';
+import { ResizeHandle, SIDEBAR_LIMITS, WorkspaceLayoutContext, useWorkspaceLayout } from './workspaceLayout';
 
 /** Render authentication, notebook navigation, and saved transcript reading states. */
 export default function App() {
@@ -58,7 +59,12 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const [search, setSearch] = useState('');
   const [activity, setActivity] = useState(false);
   const [workspaceBlocked, setWorkspaceBlocked] = useState(false);
-  const [listOpen, setListOpen] = useState(() => window.innerWidth >= 1024);
+  const layout = useWorkspaceLayout();
+  // The sidebar is docked when it fits beside the chat. Otherwise it is an icon rail, with the full list as a drawer on demand.
+  const navDocked = layout.nav === 'docked';
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const listOpen = navDocked || drawerOpen;
+  const overlay = drawerOpen && !navDocked;
   const workspaceActions = useRef<WorkspaceActions>(null);
   const pendingIntent = useRef<'project' | 'lecture'>(undefined);
   const startIntents = useRef<Record<string, 'project' | 'lecture'>>({});
@@ -66,13 +72,14 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const setSection = (section: keyof typeof sections, open: boolean) => setSections(value => ({ ...value, [section]: open }));
   const promptNotebook = () => workspaceActions.current?.promptNotebook();
   const workspaceLocked = activity || reader.busy || workspaceBlocked;
-  const closeMobileList = () => { if (window.innerWidth < 1024) setListOpen(false); };
-  useEffect(() => {
-    const desktop = window.matchMedia('(min-width: 1024px)');
-    const syncNavigation = (event: MediaQueryListEvent) => setListOpen(event.matches);
-    desktop.addEventListener('change', syncNavigation);
-    return () => desktop.removeEventListener('change', syncNavigation);
-  }, []);
+  const closeMobileList = () => { if (!navDocked) setDrawerOpen(false); };
+  useEffect(() => { if (navDocked) setDrawerOpen(false); }, [navDocked]);
+  /** Dock the sidebar when it fits, otherwise slide the full list over the page. */
+  function showNavigation() {
+    if (navDocked) return;
+    if (layout.canDockNav) layout.setNavPreference('expanded');
+    else setDrawerOpen(true);
+  }
   const toggle = useRef<HTMLButtonElement>(null);
   const railToggle = useRef<HTMLButtonElement>(null);
   const accountLink = useRef<HTMLAnchorElement>(null);
@@ -83,11 +90,12 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
     searchInput.current?.focus();
   }
   function openNavigation() {
-    setListOpen(true);
+    showNavigation();
     window.requestAnimationFrame(() => document.getElementById('collapse-navigation')?.focus());
   }
   function closeNavigation() {
-    setListOpen(false);
+    if (navDocked) layout.setNavPreference('collapsed');
+    else setDrawerOpen(false);
     window.requestAnimationFrame(() => (window.innerWidth >= 768 ? railToggle : toggle).current?.focus());
   }
   useEffect(() => {
@@ -174,7 +182,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const showHome = view === 'home' || (view === 'chat' && !reader.page && !reader.busy);
   const folderSettings = view === 'notebook' || (view === 'settings' && settingsReturn === 'notebook');
 
-  return <>
+  return <WorkspaceLayoutContext.Provider value={layout}>
     <header className="app-header">
       <button ref={toggle} className="header-menu icon-button" aria-label="Open navigation" aria-expanded={listOpen} aria-controls="notebook-list" onClick={() => listOpen ? closeNavigation() : openNavigation()}><Icon name="panel"/></button>
       <Brand/>
@@ -189,8 +197,8 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
       <p>Use the Thinking Path to review your progress. When the coach recommends a new stage, you decide whether to move on.</p>
       <form method="dialog"><button>Done</button></form>
     </dialog>
-    <div className={`workspace ${listOpen ? 'nav-open' : 'nav-collapsed'}`}>
-      {listOpen ? <button className="drawer-backdrop" aria-label="Close navigation" onClick={closeNavigation}/> : null}
+    <div className={`workspace ${listOpen ? 'nav-open' : 'nav-collapsed'}`} data-nav={layout.nav} style={{ '--nav-w': `${layout.navWidth}px` } as CSSProperties}>
+      {overlay ? <button className="drawer-backdrop" aria-label="Close navigation" onClick={closeNavigation}/> : null}
       {!listOpen ? <nav className="navigation-rail" aria-label="Workspace shortcuts">
         <button ref={railToggle} className="icon-button" aria-label="Expand navigation" title="Expand navigation" onClick={openNavigation}><Icon name="panel"/></button>
         <button className="icon-button" aria-label="Home" title="Home" aria-current={showHome ? 'page' : undefined} onClick={openHome}><Icon name="home"/></button>
@@ -198,11 +206,11 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
         <button className="icon-button" aria-label="Search" aria-current={view === 'search' ? 'page' : undefined} aria-keyshortcuts="Meta+K Control+K" title="Search notebooks and chats" onClick={openSearch}><Icon name="search"/></button>
         <button className="icon-button" aria-label="Library" title="Library" onClick={openLibrary}><Icon name="book"/></button>
         <button className="icon-button rail-account" aria-label="Account" title="Account" aria-controls="notebook-list" onClick={() => {
-          setListOpen(true);
+          showNavigation();
           window.requestAnimationFrame(() => accountLink.current?.focus());
         }}><span className="profile-avatar"><Icon name="user"/></span></button>
       </nav> : null}
-      <aside onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented && event.currentTarget.contains(event.target as Node)) closeNavigation(); }} id="notebook-list" className={`notebooks ${listOpen ? 'list-open' : ''}`} aria-label="Your notebooks">
+      <aside onKeyDown={event => { if (overlay && event.key === 'Escape' && !event.defaultPrevented && event.currentTarget.contains(event.target as Node)) closeNavigation(); }} id="notebook-list" className={`notebooks ${listOpen ? 'list-open' : ''} ${overlay ? 'overlay' : ''}`} aria-label="Your notebooks">
         <div className="notebook-heading"><span>Co-design</span>
           <button id="collapse-navigation" className="icon-button" aria-label="Collapse navigation" title="Collapse navigation" onClick={closeNavigation}><Icon name="panel"/></button></div>
         <button className="nav-home" aria-current={showHome ? 'page' : undefined} onClick={openHome}><Icon name="home"/> Home</button>
@@ -241,7 +249,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
               setSettingsReturn('chat');
               try { sessionStorage.removeItem(`codesign-selected:${session.owner_id}`); } catch { /* Optional navigation restoration. */ }
             } else if (reader.page && !list.notebooks.some(item => item.id === reader.page!.notebook.id)) {
-              setListOpen(true);
+              showNavigation();
               try { sessionStorage.removeItem(`codesign-selected:${session.owner_id}`); sessionStorage.removeItem(`codesign-lecture:${session.owner_id}:${reader.page.notebook.id}`); } catch { /* Optional tab draft cleanup. */ }
               window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.nav-new')?.focus());
             }
@@ -279,6 +287,8 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           loadEarlier={() => reader.open(reader.page!.notebook.id, true).then(() => {})}/> : null}
         </div>
       </main>
+      {navDocked ? <ResizeHandle side="sidebar" label="Resize sidebar" value={layout.navWidth} min={SIDEBAR_LIMITS.min} max={layout.sidebarMax}
+        onResize={layout.resizeSidebar} onReset={layout.resetSidebar}/> : null}
     </div>
-  </>;
+  </WorkspaceLayoutContext.Provider>;
 }

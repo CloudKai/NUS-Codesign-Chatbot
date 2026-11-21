@@ -92,8 +92,8 @@ label { font-weight: 600; }
 .entry-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0 12px; }
 .course-notice { color: var(--muted); font-size: 13px; padding-top: 18px; border-top: 1px solid var(--line); }
 
-.workspace { height: calc(100dvh - var(--header-height)); display: grid; grid-template-columns: 236px minmax(0, 1fr); }
-.workspace.nav-collapsed { grid-template-columns: 60px minmax(0, 1fr); }
+.workspace { position: relative; height: calc(100dvh - var(--header-height)); display: grid; grid-template-columns: var(--nav-w, 236px) minmax(0, 1fr); }
+.reading { grid-column: 2; }
 .notebooks, .navigation-rail { background: var(--side); border-right: 1px solid var(--line); }
 .notebooks { min-width: 0; min-height: 0; overflow: hidden auto; display: flex; flex-direction: column; gap: 4px; padding: 5px 10px 10px; }
 .notebooks:not(.list-open) { display: none; }
@@ -357,24 +357,22 @@ html[data-reduce-motion] *, html[data-reduce-motion] *::before, html[data-reduce
 .remove-confirm { padding: 10px; border-radius: 9px; background: var(--soft); }
 .remove-confirm button { margin: 6px 4px 0 0; }
 
-@media (min-width: 1024px) {
-  .conversation.review-open { grid-template-columns: minmax(0, 1fr) clamp(340px, 29vw, 420px); }
-  .project-panel[open] { position: relative; width: 100%; height: 100%; max-width: none; max-height: none; grid-column: 2; grid-row: 1 / -1; border-inline-start: 1px solid var(--line); }
-}
-@media (max-width: 1023px) {
-  .workspace, .workspace.nav-collapsed { grid-template-columns: 60px minmax(0, 1fr); }
-  .reading { grid-column: 2; }
-  .notebooks.list-open { position: fixed; inset: var(--header-height) auto 0 0; z-index: 6; width: min(284px, 85vw); }
-  .drawer-backdrop { display: block; position: fixed; inset: var(--header-height) 0 0; border: 0; border-radius: 0; padding: 0; background: #10182780; z-index: 5; }
-  .drawer-backdrop:hover { background: #10182780; }
-}
+/* Review beside the chat. The width comes from the saved panel width, trimmed by the layout when space is short. */
+.conversation { position: relative; }
+.conversation.review-open[data-review="docked"] { grid-template-columns: minmax(0, 1fr) var(--review-w); }
+.conversation[data-review="docked"] .project-panel[open] { position: relative; width: 100%; height: 100%; max-width: none; max-height: none; grid-column: 2; grid-row: 1 / -1; border-inline-start: 1px solid var(--line); }
+
+/* The sidebar as a drawer when it cannot dock: tablets with a rail, and phones. */
+.notebooks.list-open.overlay { position: fixed; inset: var(--header-height) auto 0 0; z-index: 6; width: min(284px, 85vw); }
+.drawer-backdrop { display: block; position: fixed; inset: var(--header-height) 0 0; border: 0; border-radius: 0; padding: 0; background: #10182780; z-index: 5; }
+.drawer-backdrop:hover { background: #10182780; }
 @media (max-width: 767px) {
   :root { --header-height: 52px; }
   .app-header { padding-inline: 8px; gap: 3px; }
   .header-actions, .brand { gap: 3px; }
   .header-menu { display: inline-flex; }
   .header-help { display: none; }
-  .workspace, .workspace.nav-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
   .reading { grid-column: 1; }
   .navigation-rail { display: none; }
   .transcript { padding: 16px; }
@@ -384,10 +382,10 @@ html[data-reduce-motion] *, html[data-reduce-motion] *::before, html[data-reduce
   .header-menu, .theme-toggle { min-width: 44px; min-height: 44px; }
 }
 
-@media (max-width: 1023px) {
-  .project-panel[open] { position: fixed; inset: auto 0 0; width: min(100%, 620px); max-width: none; height: min(86dvh, 760px); max-height: none; margin-inline: auto; padding-bottom: env(safe-area-inset-bottom); border-radius: 16px 16px 0 0; }
-  .review-disclosure summary { min-height: 44px; }
-}
+/* Review as a drawer on tablets and full screen on phones, both dismissible. */
+.conversation[data-review="drawer"] .project-panel[open] { position: fixed; inset: 0 0 0 auto; width: min(max(var(--review-w, 380px), 380px), 94vw); height: 100dvh; max-width: none; max-height: none; margin: 0; padding-bottom: env(safe-area-inset-bottom); border-radius: 16px 0 0 16px; }
+.conversation[data-review="fullscreen"] .project-panel[open] { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding-bottom: env(safe-area-inset-bottom); border-radius: 0; }
+.conversation:not([data-review="docked"]) .review-disclosure summary { min-height: 44px; }
 
 .prompt-options .icon { width: 14px; height: 14px; }
 .composer-hint { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
@@ -688,8 +686,9 @@ html[data-reduce-motion] .typing-dots i { opacity: .7; }
 .stage-summary .coach-text { font-size: 13px; line-height: 1.5; }
 .stage-summary[data-clamped] { max-height: 4.6em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 55%, transparent); mask-image: linear-gradient(#000 55%, transparent); }
 .work-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.work-quote { padding: 8px 12px; border-inline-start: 3px solid var(--line-strong); border-radius: 0 10px 10px 0; background: var(--rail); font-size: 13px; line-height: 1.45; white-space: pre-wrap; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.work-quote[data-open] { display: block; }
+.work-quote { padding: 8px 12px; border-inline-start: 3px solid var(--line-strong); border-radius: 0 10px 10px 0; background: var(--rail); font-size: 13px; line-height: 1.45; white-space: pre-wrap; }
+.work-quote > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+.work-quote[data-open] > span { display: block; }
 .stage-detail .card-link { margin-top: 4px; }
 .review-hero .primary .icon, .stage-continue .icon, .fb-act .icon { width: 16px; height: 16px; flex: none; }
 .review-hero .primary, .stage-continue { white-space: nowrap; }
@@ -754,3 +753,31 @@ html[data-reduce-motion] .typing-dots i { opacity: .7; }
   .profile a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 6px; }
   .settings-assignment :is(input, textarea) { min-height: 44px; }
 }
+
+/* Stage detail: tools stay folded until asked for, so the stage list stays short as the chat grows. */
+.tool-toggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 36px; padding: 4px 10px; border-color: transparent; background: var(--soft); color: var(--secondary); font-size: 13px; font-weight: 600; text-align: start; }
+.tool-toggle span { flex: 1; }
+.tool-toggle small { color: var(--muted); font-size: 12px; font-weight: 500; }
+.tool-toggle .icon { width: 16px; height: 16px; flex: none; }
+.tool-list { margin-top: 8px; }
+.tool-list[hidden] { display: none; }
+@media (max-width: 767px) { .tool-toggle { min-height: 44px; } }
+
+/* My work tab: the student's own words, grouped by stage. */
+.work-group { margin-top: 14px; }
+.work-group h4 { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.work-group h4 small { color: var(--accent); font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.work-quote .work-more { display: block; margin: 2px 0 -4px; min-height: 28px; white-space: normal; }
+.stage-work-link { display: inline-flex; align-items: center; gap: 4px; justify-self: start; margin: 0; }
+.stage-work-link .icon { width: 16px; height: 16px; }
+
+/* Drag handles between the sidebar, the chat and Review. Only rendered while the panel is docked and expanded. */
+.resize-handle { position: absolute; top: 0; bottom: 0; z-index: 4; width: 14px; cursor: col-resize; touch-action: none; border-radius: 4px; }
+.resize-handle::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; margin-left: -1.5px; border-radius: 2px; background: transparent; transition: background-color .15s; }
+.resize-handle:hover::before, .resize-handle[data-dragging]::before { background: var(--accent); }
+.resize-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.resize-handle:focus-visible::before { background: var(--accent); }
+.resize-handle.sidebar { left: var(--nav-w); transform: translateX(-50%); }
+.resize-handle.review { right: var(--review-w); transform: translateX(50%); }
+body.is-resizing, body.is-resizing * { cursor: col-resize !important; user-select: none; }
+@media (prefers-reduced-motion: reduce) { .resize-handle::before { transition: none; } }

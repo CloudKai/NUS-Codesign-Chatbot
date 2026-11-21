@@ -166,6 +166,16 @@ export function practiceScaffold(dimension: string): string {
     ?? `I want to practise ${dimension}.\nHere is an example from my project…`;
 }
 
+/**
+ * True when a saved message is real student thinking. One-word commands such as "move" and a practice
+ * starter sent without any added words are left out of the Thinking Path so the list stays short.
+ */
+export function isStudentWork(text: string): boolean {
+  const plain = text.trim();
+  if (plain.split(/\s+/).length < 2) return false;
+  return !/^I want to practise [^\n]+\.\n[^\n]*(…|\.\.\.)\s*$/.test(plain);
+}
+
 export const improveScaffold = (item: string) => `Working on this feedback: “${item}”\n\nHere is how I will address it: `;
 export const buildScaffold = (item: string) => `Building on this strength: “${item}”\n\nHere is how I can take it further: `;
 export const pickUpScaffold = (stage: string, nextAction: string) =>

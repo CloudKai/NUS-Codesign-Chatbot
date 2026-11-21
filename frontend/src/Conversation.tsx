@@ -1,7 +1,8 @@
 /** Lecture composer, exact-request reconciliation and saved citation inspection. */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { ApiError, currentSession, get, type ChatSummary, type Page, type Project } from './api';
-import { ThinkingPath } from './ThinkingPath';
+import { ThinkingPath, type ReviewTab } from './ThinkingPath';
+import { REVIEW_LIMITS, ResizeHandle, useWorkspaceLayoutContext } from './workspaceLayout';
 import { Icon } from './Icon';
 import { CoachText } from './CoachText';
 import { ReasoningPrompts } from './ReasoningPrompts';
@@ -62,7 +63,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const [mode, setIntent] = useState<Intent | undefined>(initial.current.intent ?? (page.total_count ? savedIntent(page, project) : startIntent));
   const intent = mode ?? preferredIntent;
   const [pathOpen, setPathOpen] = useState(false);
-  const [pathTab, setPathTab] = useState<{ tab?: 'Summary' | 'Progression'; n: number }>({ n: 0 });
+  const [pathTab, setPathTab] = useState<{ tab?: ReviewTab; n: number }>({ n: 0 });
   const [milestone, setMilestone] = useState<Milestone | null>(null);
   const [transition, setTransition] = useState<{ from: string; to: string } | null>(null);
   const allDone = useRef(project.stages.every(stage => stage.completed));
@@ -76,13 +77,14 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const [startersCollapsed, setStartersCollapsedState] = useState(() => {
     try { return sessionStorage.getItem(startersKey) === 'collapsed'; } catch { return false; }
   });
-  const [compactScreen, setCompactScreen] = useState(() => window.matchMedia('(max-width: 1023px)').matches);
+  const layout = useWorkspaceLayoutContext();
+  const reviewDocked = layout.review === 'docked';
+  const { setReviewOpen } = layout;
+  // The sidebar gives up room while Review is docked beside the chat.
   useEffect(() => {
-    const query = window.matchMedia('(max-width: 1023px)');
-    const update = () => setCompactScreen(query.matches);
-    query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
-  }, []);
+    setReviewOpen(pathOpen);
+    return () => setReviewOpen(false);
+  }, [pathOpen, setReviewOpen]);
   function setStartersCollapsed(value: boolean) {
     setStartersCollapsedState(value);
     try { if (value) sessionStorage.setItem(startersKey, 'collapsed'); else sessionStorage.removeItem(startersKey); } catch { /* Optional tab preference. */ }
@@ -94,20 +96,12 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   useLayoutEffect(() => {
     const panel = reviewPanel.current;
     if (!panel) return;
-    const compact = window.matchMedia('(max-width: 1023px)');
-    const showReview = () => {
-      panel.close();
-      if (compact.matches) panel.showModal();
-      else panel.show();
-      panel.querySelector<HTMLElement>('#review-heading')?.focus({ preventScroll: true });
-    };
-    showReview();
-    compact.addEventListener('change', showReview);
-    return () => {
-      compact.removeEventListener('change', showReview);
-      panel.close();
-    };
-  }, [pathOpen]);
+    panel.close();
+    if (layout.review === 'docked') panel.show();
+    else panel.showModal();
+    panel.querySelector<HTMLElement>('#review-heading')?.focus({ preventScroll: true });
+    return () => panel.close();
+  }, [pathOpen, layout.review]);
   const [moving, setMoving] = useState(false);
   const [projectUncertain, setProjectUncertain] = useState(false);
   const intentRef = useRef(intent);
@@ -398,7 +392,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     const next = !current.trim() || current === lastScaffold.current ? prompt : `${current}\n\n${prompt}`;
     lastScaffold.current = next;
     remember(next, pendingRef.current);
-    if (pathOpen && window.innerWidth < 1024) setPathOpen(false);
+    if (pathOpen && !reviewDocked) setPathOpen(false);
     window.requestAnimationFrame(() => {
       const field = composer.current;
       if (!field) return;
@@ -412,7 +406,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const projectWork = hasProjectWork(project);
   const stageNumber = Math.max(0, project.stages.findIndex(stage => stage.id === project.current_stage)) + 1;
   const turnBusy = watching || checking || moving || uploading || !!pending;
-  const checkIn = !checkInHidden && !milestone && !isEmpty && !turnBusy && !text.trim() && !projectUncertain && !(pathOpen && compactScreen)
+  const checkIn = !checkInHidden && !milestone && !isEmpty && !turnBusy && !text.trim() && !projectUncertain && !(pathOpen && !reviewDocked)
     ? chooseCheckIn(project, summary, intent, dismissedRules) : null;
   function dismissCheckIn(item: CheckIn) {
     const next = [...dismissedRules, item.rule];
@@ -425,7 +419,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   useEffect(() => {
     if (stickToLatest.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
   }, [checkIn?.rule, showChips, startersCollapsed]);
-  const openReview = (tab?: 'Summary' | 'Progression') => { setPathTab(value => ({ tab, n: value.n + 1 })); setPathOpen(true); };
+  const openReview = (tab?: ReviewTab) => { setPathTab(value => ({ tab, n: value.n + 1 })); setPathOpen(true); };
   async function decideInline(route: string, body: object) {
     await stageAction(route, body);
     window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
@@ -464,7 +458,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
   }
 
-  return <section aria-label="Saved conversation" className={`conversation ${pathOpen ? 'review-open' : ''}`}>
+  return <section aria-label="Saved conversation" className={`conversation ${pathOpen ? 'review-open' : ''}`}
+    data-review={pathOpen ? layout.review : undefined} style={{ '--review-w': `${layout.reviewWidth}px` } as CSSProperties}>
     <header className="chat-heading">
       <h2 title={parent ? `${parent.name} › ${displayTitle}` : displayTitle}>
         {parent ? <><button className="crumb-parent" disabled={parent.disabled} aria-label={`Open notebook ${parent.name}`} onClick={parent.open}>
@@ -592,6 +587,12 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     </div>
     {pathOpen ? <dialog ref={reviewPanel} id="project-review" className="project-panel" aria-labelledby="review-heading"
       onCancel={event => { event.preventDefault(); closePath(); }}
+      onClick={event => {
+        // A click on the dimmed page behind a drawer dismisses it.
+        if (reviewDocked || event.target !== event.currentTarget) return;
+        const box = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) closePath();
+      }}
       onKeyDown={event => {
         if (event.key === 'Escape') {
           event.preventDefault();
@@ -604,5 +605,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         {projectUncertain && !moving ? <p className="review-recovery" role="alert">Check saved project before another action. <button disabled={busy} onClick={() => void refreshProject()}>Refresh saved project</button></p> : null}
       </ThinkingPath>
     </dialog> : null}
+    {pathOpen && reviewDocked ? <ResizeHandle side="review" label="Resize Review panel" value={layout.reviewWidth} min={REVIEW_LIMITS.min} max={layout.reviewMax}
+      onResize={layout.resizeReview} onReset={layout.resetReview}/> : null}
   </section>;
 }

@@ -162,6 +162,12 @@ stage markers express actual ordered stages, never invented scores or rewards.
   job statement (WHEN I, BUT, HELP ME, SO I), persona, How Might We, creative matrix with
   POEMS, Crazy 8, Powers of Ten, selection criteria, prioritisation matrix, goals, values and
   features, prototyping plan, test questions and the story arc. Each shows the lecture week.
+  In an opened Review stage the list stays folded behind a "Tools from the course" button.
+  Review has three tabs in this order: Progression (stages, next action, tools), Summary
+  (strengths, areas to improve, Facione) and My work (the student's own messages grouped by
+  stage, current stage first, three per stage until opened). Each opened stage links to My work.
+  One-word commands such as "move" and an unedited "I want to practise …" starter are not listed
+  as work (`isStudentWork` in `coachingContent.ts`), so the lists stay short as the chat grows.
   Do not add frameworks that are not in the notes. The empathy map is included at the owner's
   request. The Week 3 slides are not in `lecture_notes/`, so it uses the standard Says, Thinks,
   Does, Feels quadrants (see `COURSE_CONTENT.md`).
@@ -188,3 +194,23 @@ stage markers express actual ordered stages, never invented scores or rewards.
 - Contribution counts, check-ins and milestone copy are allowed when derived from saved API data.
 - Don't present image generation, folder CRUD or fabricated achievements (invented streaks,
   badges, scores or milestones) as working. Keep at most one check-in and one milestone visible.
+
+## Workspace layout and panel sizing
+
+`src/workspaceLayout.tsx` decides where the sidebar and Review sit. It uses the window width and the
+saved panel widths, not one fixed breakpoint. The chat column stays at 600 px or wider while panels are docked.
+
+1. **Room for everything:** full sidebar and Review sit beside the chat.
+2. **Review would squeeze the chat:** the sidebar becomes a 60 px icon rail first. The saved preference stays
+   "expanded", so the full sidebar returns when Review closes or the window grows.
+3. **Still too narrow:** Review shrinks toward its 320 px minimum. The saved width is never overwritten.
+4. **Still no room:** Review becomes a dismissible right-hand drawer (tablet, 768 px and wider) or a full-screen view
+   (phones, under 768 px). Click the dimmed page or press Escape to close it. The sidebar is then as it would be with Review closed.
+5. **Sidebar without Review:** docked when `width - sidebar >= 600`, otherwise a rail. The expanded list opens as an overlay drawer
+   from the rail or, on phones, the header menu. Escape and the backdrop close the overlay.
+
+**Drag handles** (`ResizeHandle`) sit on the sidebar's right edge and Review's left edge. They exist only while that panel is docked and expanded.
+Pointer drag updates the width live inside the limits (sidebar 200 to 360, Review 320 to 640) and never takes the chat below 600 px. Arrow keys
+move 16 px (Shift: 64), Home or double-click resets to the defaults (236 and 380). The handle has `role="separator"` with
+`aria-valuenow`, a visible hover and focus state and a 14 px hit area. Widths and the user's collapse choice are stored in
+`localStorage` under `codesign-layout:v1`. Collapsing the sidebar yourself is remembered. Automatic collapsing is not.
