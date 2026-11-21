@@ -240,6 +240,25 @@ def test_locked_course_sources_are_view_only_not_chat_selected(tmp_path, monkeyp
     selected_only = list_visible_sources(store, thread_id, selected_only=True)
     assert [item["id"] for item in selected_only] == [personal["id"]]
 
+def test_private_library_never_lists_locked_course_sources(tmp_path, monkeypatch):
+    """Add from Library can only offer student uploads, so locked course material is never addable twice."""
+    from backend import source_library
+    from backend.sources.library import private_library_sources
+
+    store, thread_id, _files_dir = make_notebook(tmp_path, monkeypatch)
+    notes_folder = tmp_path / "lecture_notes" / "lectureNotes"
+    notes_folder.mkdir(parents=True)
+    (notes_folder / "week-01.txt").write_text("Locked lecture", encoding="utf-8")
+    monkeypatch.setattr(source_library.settings, "lecture_notes_dir", tmp_path / "lecture_notes")
+    monkeypatch.setattr(source_library.settings, "max_lecture_notes", 50)
+    monkeypatch.setattr(source_library.settings, "max_course_material_size_mb", 1)
+    sync_lecture_notes_folder(store, thread_id)
+    personal = add_file_sources(store, thread_id, [("mine.txt", b"Personal upload", "text/plain")])[0]
+
+    assert any(is_locked for is_locked in (item["metadata"].get("locked_source") for item in store.list_sources(thread_id)))
+    assert [item["id"] for item in private_library_sources(store)] == [personal["id"]]
+
+
 def test_lecture_notes_sync_skips_upload_compression(tmp_path, monkeypatch):
     from backend import source_library
 
