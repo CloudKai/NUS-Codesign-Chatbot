@@ -92,7 +92,8 @@ class StoredUpload:
 
 
 def _safe_name(name: str) -> str:
-    safe = Path(name).name.replace("\x00", "").strip()
+    # Browsers on Windows may send a drive path; treat both separators alike.
+    safe = Path(name.replace("\\", "/")).name.replace("\x00", "").strip()
     return safe[:180] or "upload"
 
 
