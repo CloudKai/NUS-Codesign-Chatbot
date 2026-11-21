@@ -1069,6 +1069,30 @@ def test_bounded_retrieval_skips_near_duplicate_chunks_from_the_same_source():
     assert result.context.count(duplicate) == 1
 
 
+def test_bounded_retrieval_keeps_pages_that_share_a_long_banner_prefix():
+    """Two pages that open with the same 500-character banner are different excerpts."""
+    banner = "Creative Commons banner text repeated at the top of every poster page. " * 8
+    assert len(banner) > 400
+    chunks = [
+        RetrievedChunk(
+            source_id="src-1",
+            label="S1",
+            title="Personas reading",
+            chunk_id=f"S1-C{index}",
+            text=f"{banner}{tail}",
+            score=1.0 - index / 10,
+            source_index=1,
+            chunk_index=index,
+        )
+        for index, tail in enumerate(
+            ("Step 8 disseminate knowledge with posters.", "Step 1 collect data."), start=1
+        )
+    ]
+    result = bounded_retrieval_result(chunks)
+    assert [chunk.chunk_id for chunk in result.chunks] == ["S1-C1", "S1-C2"]
+    assert "disseminate knowledge" in result.context and "collect data" in result.context
+
+
 def test_forged_citation_is_not_persisted(tmp_path):
     store = StudentStore(tmp_path / "forged-citation.sqlite3")
     notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")

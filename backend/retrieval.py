@@ -1153,9 +1153,14 @@ def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
     return _clip_excerpt(cleaned, start=best_start, limit=limit)
 
 
-def _normalized_excerpt(text: str, *, limit: int = 400) -> str:
-    """Return a comparable excerpt prefix used for near-duplicate suppression."""
-    return " ".join(str(text or "").split()).casefold()[:limit]
+def _normalized_excerpt(text: str) -> str:
+    """Return the whitespace- and case-normalized excerpt used for duplicate suppression.
+
+    The whole excerpt is compared. A prefix is not enough: slide and poster pages
+    often open with the same banner, and a prefix match would drop a different
+    page that holds the answer.
+    """
+    return " ".join(str(text or "").split()).casefold()
 
 
 def bounded_retrieval_result(
