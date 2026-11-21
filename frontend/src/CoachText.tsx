@@ -20,7 +20,9 @@ function withoutMarks(text: string) {
 export const CoachText = memo(function CoachText({ text }: { text: string }) {
   return <div className="message-content coach-text">
     <Suspense fallback={<div className="message-content coach-text-loading">{withoutMarks(text)}</div>}><Markdown skipHtml disallowedElements={['img']} components={{
-      a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
+      // react-markdown blanks javascript:, data: and similar addresses. Show that text instead of an empty link that opens a blank tab.
+      a: ({ href, children }) => href && /^(https?:\/\/|mailto:)/i.test(href)
+        ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <>{children}</>,
     }}>{text}</Markdown></Suspense>
   </div>;
 });

@@ -52,6 +52,9 @@ Student → React or protected Streamlit → FastAPI
   `nosniff`. The owner-scoped source content route serves only PDF, PNG,
   JPEG, WEBP, GIF and `text/plain` inline; HTML, XML, script and any other
   type download as attachments.
+- Coach Markdown renders with `skipHtml` and no images. A link survives only
+  with an `http`, `https` or `mailto` address, opens in a new tab with
+  `noopener noreferrer`, and any other link shows as plain text.
 - Upload names are reduced to a base name on both `/` and `\`, so a Windows
   path cannot leave the title or the storage key.
 
