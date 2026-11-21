@@ -344,6 +344,31 @@ def create_app(
         return owner
 
     @app.middleware("http")
+    async def reject_cross_site_writes(request: Request, call_next):
+        """Refuse browser-originated cross-origin writes on the owner-scoped API.
+
+        Reader and guest/auth routes enforce their own same-origin checks. The
+        remaining ``/api/v1`` writes are called by Streamlit's server-side
+        client, which sends neither ``Origin`` nor fetch metadata, so a request
+        that carries either must be same-origin or it is a browser CSRF attempt.
+        """
+        path = request.url.path
+        if (
+            request.method in {"POST", "PUT", "PATCH", "DELETE"}
+            and path.startswith("/api/v1/")
+            and not path.startswith(("/api/v1/reader/", "/api/v1/auth/"))
+        ):
+            site = str(request.headers.get("sec-fetch-site") or "").strip().lower()
+            origin = str(request.headers.get("origin") or "").strip()
+            if (site and site not in {"same-origin", "none"}) or (
+                origin and origin.rstrip("/") != settings.public_api_base_url.rstrip("/")
+            ):
+                return JSONResponse(
+                    status_code=403, content={"detail": "Same-origin request required"}
+                )
+        return await call_next(request)
+
+    @app.middleware("http")
     async def attach_request_id(request: Request, call_next):
         """Stamp responses and emit privacy-safe latency/status telemetry."""
         request_id = _request_id_from_header(request.headers.get("x-request-id"))

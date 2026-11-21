@@ -330,3 +330,142 @@ def test_source_titles_and_listings_never_expose_storage_paths(world: World, ali
         for forbidden in ("object_key", "users/", "/threads/", str(settings.files_dir)):
             assert forbidden not in body, forbidden
     assert PRIVATE not in alice.get(path + "/sources").text
+
+
+def _reader_routes(app: Any) -> list[APIRoute]:
+    """Every public reader route registered on the application."""
+    return [
+        route for route in app.routes
+        if isinstance(route, APIRoute) and route.path.startswith("/api/v1/reader/")
+    ]
+
+
+def _concrete(path: str) -> str:
+    """Fill every path parameter with a placeholder id."""
+    import re
+
+    return re.sub(r"\{[^}]+\}", "x", path)
+
+
+def test_reader_route_inventory_is_large_enough_to_trust_the_origin_sweep(world: World) -> None:
+    """The sweep below must see the real inventory, not an empty or shrunken list."""
+    routes = _reader_routes(world.app)
+    assert len([route for route in routes if "POST" in route.methods]) >= 18
+    assert len([route for route in routes if "GET" in route.methods]) >= 10
+
+
+def test_every_state_changing_reader_route_requires_same_origin(world: World) -> None:
+    """A signed-in browser still gets 403 without Origin, with a foreign Origin or cross-site fetch metadata."""
+    client = world.registered("alice")
+    hostile = [
+        {},
+        {"Origin": "https://evil.test"},
+        {"Origin": "null"},
+        {"Origin": "https://testserver.evil.test"},
+        {"Origin": "https://evil.test/https://testserver"},
+        {"Origin": "http://testserver"},
+        {"Origin": "https://testserver:8443"},
+        {"Origin": "https://testserver", "Sec-Fetch-Site": "cross-site"},
+    ]
+    for route in _reader_routes(world.app):
+        if not route.methods & {"POST", "PUT", "PATCH", "DELETE"}:
+            continue
+        for headers in hostile:
+            response = client.post(_concrete(route.path), headers=headers)
+            assert response.status_code == 403, (route.path, headers, response.status_code, response.text[:120])
+    assert client.post("/api/v1/reader/preferences", json={"appearance": "Dark"}, headers=ORIGIN).status_code == 200
+
+
+def test_every_reader_route_requires_credentials_and_rejects_cross_site_reads(world: World) -> None:
+    """Anonymous callers get 401; cross-site and foreign-origin reads get 403 even when signed in."""
+    anonymous = TestClient(world.app, base_url=BASE)
+    signed_in = world.registered("alice")
+    for route in _reader_routes(world.app):
+        url = _concrete(route.path)
+        for method in sorted(route.methods & {"GET", "POST"}):
+            response = anonymous.request(method, url, headers=ORIGIN)
+            assert response.status_code == 401, (method, route.path, response.status_code)
+            assert signed_in.request(method, url, headers={**ORIGIN, "Sec-Fetch-Site": "cross-site"}).status_code == 403, (method, route.path)
+            assert signed_in.request(method, url, headers={"Origin": "https://evil.test"}).status_code == 403, (method, route.path)
+
+
+def test_legacy_state_changing_routes_reject_foreign_browser_origins(world: World, alice_data: dict[str, Any]) -> None:
+    """A cookie-bearing browser POST from another origin or site cannot mutate through the owner-scoped API."""
+    alice, thread = alice_data["client"], alice_data["thread"]
+    for headers in ({"Origin": "https://evil.test"}, {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}):
+        assert alice.patch(f"/api/v1/threads/{thread}", json={"name": "csrf"}, headers=headers).status_code == 403, headers
+        assert alice.delete(f"/api/v1/threads/{thread}", headers=headers).status_code == 403, headers
+        assert alice.post("/api/v1/threads", json={"name": "csrf", "model_id": "mock", "support_mode": "critical-thinking"}, headers=headers).status_code == 403, headers
+        assert alice.post("/api/v1/coach/turn", json={"thread_id": thread, "student_message": "csrf", "current_stage": "problem_identification",
+                                                       "response_detail": "short", "idempotency_key": "csrf-1"}, headers=headers).status_code == 403, headers
+    assert alice.get(f"/api/v1/threads/{thread}").json()["name"] != "csrf"
+    # Server-side callers (Streamlit) and same-origin browsers carry no or matching Origin.
+    assert alice.patch(f"/api/v1/threads/{thread}", json={"name": "ok"}).status_code == 200
+    assert alice.patch(f"/api/v1/threads/{thread}", json={"name": "ok2"}, headers=ORIGIN).status_code == 200
+
+
+def test_guest_and_registered_boundaries(world: World, monkeypatch: MonkeyPatch) -> None:
+    """Guests stay in their own workspace, never reach lecturer routes, and cannot start while the flag is off."""
+    guest, other_guest, registered = world.guest(), world.guest(), world.registered("alice")
+    assert guest.get("/api/v1/reader/session").json()["kind"] == "guest"
+    assert registered.get("/api/v1/reader/session").json()["kind"] == "registered"
+    assert guest.get("/api/v1/reader/session").json()["owner_id"] != other_guest.get("/api/v1/reader/session").json()["owner_id"]
+    for client in (guest, registered):
+        for url in ("/api/v1/professor/overview", "/api/v1/professor/students", "/api/v1/professor/learning-funnel", "/api/v1/professor/research/export.csv"):
+            assert client.get(url).status_code in {401, 403}, url
+    assert guest.get("/api/v1/auth/me").status_code == 401
+    mine = guest.post("/api/v1/reader/threads", json={"kind": "chat"}, headers=ORIGIN).json()["notebook"]["id"]
+    assert other_guest.get(f"/api/v1/reader/threads/{mine}/messages/page").status_code == 404
+    assert registered.get(f"/api/v1/reader/threads/{mine}/messages/page").status_code == 404
+    monkeypatch.setattr(settings, "guest_access_enabled", False)
+    assert guest.get("/api/v1/reader/session").status_code == 401
+    assert TestClient(world.app, base_url=BASE).post("/api/v1/auth/guest/start", headers=ORIGIN).status_code == 404
+
+
+def test_lecturer_and_admin_roles_cannot_use_the_student_reader(world: World) -> None:
+    """Staff accounts are sent to the lecturer workspace instead of reading student reader routes."""
+    _seed_user(world.root, "prof", "lecturer")
+    client = world.registered("prof")
+    assert client.get("/api/v1/reader/session").status_code == 403
+    assert client.get("/api/v1/reader/threads").status_code == 403
+
+
+def test_invalid_or_revoked_guest_secrets_fail_closed(world: World) -> None:
+    """Forged, truncated, digest-as-secret and revoked guest cookies never open a workspace."""
+    guest = world.guest()
+    secret = guest.cookies.get(settings.guest_session_cookie_name)
+    assert secret
+    for value in ("forged", secret[:-1], secret + "x", guest_secret_digest(secret), "", "' OR 1=1 --"):
+        probe = TestClient(world.app, base_url=BASE)
+        probe.cookies.set(settings.guest_session_cookie_name, value)
+        assert probe.get("/api/v1/reader/session").status_code == 401, value
+    bad = TestClient(world.app, base_url=BASE)
+    bad.cookies.set(settings.cognito_id_token_cookie_name, "not-a-token")
+    bad.cookies.set(settings.guest_session_cookie_name, secret)
+    assert bad.get("/api/v1/reader/session").status_code == 401
+    assert world.root.revoke_guest_session(secret)
+    assert guest.get("/api/v1/reader/session").status_code == 401
+
+
+def test_guest_claim_needs_a_cognito_account_origin_and_the_matching_operation(world: World) -> None:
+    """A guest cookie alone cannot claim itself, and another account cannot finish A's pending claim."""
+    guest = world.guest()
+    secret = guest.cookies.get(settings.guest_session_cookie_name)
+    for url in ("preview", "confirm", "cancel"):
+        assert guest.post(f"/api/v1/auth/guest/claim/{url}", json={"confirmed": True, "operation_id": "0" * 32}).status_code == 403
+        assert guest.post(f"/api/v1/auth/guest/claim/{url}", json={"confirmed": True, "operation_id": "0" * 32}, headers=ORIGIN).status_code == 401
+    chat = guest.post("/api/v1/reader/threads", json={"kind": "chat"}, headers=ORIGIN).json()["notebook"]["id"]
+    alice, bob = world.registered("alice"), world.registered("bob")
+    for browser in (alice, bob):
+        browser.cookies.set(settings.guest_session_cookie_name, secret)
+    preview = alice.post("/api/v1/auth/guest/claim/preview", headers=ORIGIN)
+    assert preview.status_code == 200, preview.text
+    operation = preview.json()["operation_id"]
+    assert alice.post("/api/v1/auth/guest/claim/confirm", json={"confirmed": False, "operation_id": operation}, headers=ORIGIN).status_code == 400
+    stolen = bob.post("/api/v1/auth/guest/claim/confirm", json={"confirmed": True, "operation_id": operation}, headers=ORIGIN)
+    assert stolen.status_code in {401, 409}, stolen.text
+    assert bob.get(f"/api/v1/reader/threads/{chat}/messages/page").status_code == 404
+    assert alice.post("/api/v1/auth/guest/claim/confirm", json={"confirmed": True, "operation_id": operation}, headers=ORIGIN).status_code == 200
+    assert alice.get(f"/api/v1/reader/threads/{chat}/messages/page").status_code == 200
+    assert bob.get(f"/api/v1/reader/threads/{chat}/messages/page").status_code == 404
+    assert guest.get("/api/v1/reader/session").status_code == 401
