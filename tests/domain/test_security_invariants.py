@@ -120,3 +120,43 @@ def test_normal_assess_never_invokes_router_or_review_phase() -> None:
     assert "review" not in phases
     assert "qa" not in phases
     assert "coaching" not in phases
+
+
+def test_production_backend_sends_only_fast_chat_and_review_phases() -> None:
+    """Records why the runtime's phase dispatch cannot yet be narrowed to fast_chat and deep review.
+
+    The stage-checkpoint job sends ``phase=review`` with ``review_mode=incremental``
+    in production, so a runtime allowlist limited to ``fast_chat`` plus deep
+    review would break it. No backend module calls the router, Q&A or Coaching
+    specialist helpers, so those phases are reachable only by an IAM caller.
+    """
+    import ast
+
+    client = FakeAgentCoreRuntime(payload=_output())
+    provider = AgentCoreCoachProvider(_RUNTIME_ARN, client=client)
+    request = CoachRequest(
+        thread_id="thread-demo",
+        student_message="A quiet residential street",
+        current_stage="problem_identification",
+        response_detail="short",
+    )
+    provider.assess(request)
+    try:
+        provider.assess_stage_checkpoint(request)
+    except Exception:  # noqa: BLE001 - the fake review payload shape is irrelevant here
+        pass
+    sent = [json.loads(call["payload"].decode("utf-8")) for call in client.calls]
+    assert {str(item.get("phase")) for item in sent} == {"fast_chat", "review"}
+    review = next(item for item in sent if item.get("phase") == "review")
+    assert review.get("review_mode") == "incremental"
+
+    for path in Path("backend").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "attr", None) or getattr(node.func, "id", None)
+                assert name not in {"_resolve_specialist", "_invoke_specialist"}, (
+                    f"{path} calls retired specialist helper {name}"
+                )
+                if path.name != "agentcore_provider.py":
+                    assert name != "_router_payload", f"{path} builds a router payload"

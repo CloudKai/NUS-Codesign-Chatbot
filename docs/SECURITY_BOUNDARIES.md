@@ -35,6 +35,26 @@ Student → React or protected Streamlit → FastAPI
   owner, notebook, stage, history, sources, and eligibility from server
   state and stamps `specialist=review` only after that sanitization.
 
+## Browser request and download boundaries
+
+- Every `/api/v1/reader/*` route requires a verified credential and a
+  same-origin request. A write needs an `Origin` equal to
+  `PUBLIC_API_BASE_URL`, and `Sec-Fetch-Site: cross-site` is refused on every
+  method. `tests/http/test_security_readiness.py` posts to every registered
+  reader route with no, foreign, look-alike and cross-site origins.
+- The owner-scoped `/api/v1` write routes used by Streamlit (threads, sources,
+  coach turn, Deep Review, lecturer research) refuse a write that carries a
+  foreign `Origin` or fetch metadata other than `same-origin` or `none`.
+  Streamlit's server-side client sends neither header, so it is unaffected.
+  Caddy still does not publish these routes.
+- Uploaded files never render on the application origin. Reader citation and
+  source downloads are `application/octet-stream` attachments with
+  `nosniff`. The owner-scoped source content route serves only PDF, PNG,
+  JPEG, WEBP, GIF and `text/plain` inline; HTML, XML, script and any other
+  type download as attachments.
+- Upload names are reduced to a base name on both `/` and `\`, so a Windows
+  path cannot leave the title or the storage key.
+
 ## Guest workspaces
 
 FastAPI resolves a verified Cognito account before considering a guest session.
@@ -104,6 +124,16 @@ Until one of those is published, treat `InvokeAgentRuntime` as a privileged
 generation backdoor, equivalent to holding the model invocation keys for
 this runtime.
 
+**Why the allowlist is not added yet.** The backend does send two phases in
+production: `fast_chat` for every normal turn, and `phase=review` with
+`review_mode=incremental` for the background stage checkpoint
+(`assess_stage_checkpoint`). A runtime allowlist limited to `fast_chat` and
+deep review would break that job. Nothing in `backend/` calls the router, Q&A
+or Coaching helpers, and
+`tests/domain/test_security_invariants.py::test_production_backend_sends_only_fast_chat_and_review_phases`
+fails if that changes. Adding the allowlist later needs `review/incremental`
+to stay permitted, or the checkpoint to move to its own runtime.
+
 ## Retrieval authorization
 
 - Retrieval runs only after selected sources are loaded for the authenticated
@@ -146,6 +176,15 @@ runtime as system instruction. FastAPI runtime rules travel on
 jailbreak examples; those n-grams may appear only inside delimited retrieved
 or student content.
 
+The composer rewrites any of its own section tag names (for example
+`</retrieved_course_context>` or `<runtime_instructions>`) inside untrusted
+bodies to `&lt;...`, so student text, uploads, excerpts, memory and history
+cannot close a section or open a look-alike one. Two student-writable values
+used to reach the trusted runtime rules and no longer do: attachment filenames
+are reduced to one inert token (letters, digits, `.`, `-`, `_`), and the
+response-language setting must be one of English, 中文, Bahasa Melayu or தமிழ்
+(anything else becomes English, and the settings routes return 422).
+
 Runtime guardrail intervention (`guardrail_intervened` or `action=BLOCKED`)
 fails closed as category `safety_blocked`. Refusal text, prompt text, and AWS
 trace bodies are never returned to the student UI or persisted.
@@ -178,6 +217,21 @@ guardrail configuration fails production startup and the runtime loader.
 - Conversation revision keeps the active branch authoritative. Superseded
   branches do not feed current coach history or active research analytics.
 - Idempotent retries do not duplicate student/coach pairs or transitions.
+
+## Rate limits and admission
+
+- Guest admission is one global bucket, so `X-Forwarded-For` and similar
+  headers cannot buy extra guest workspaces. A new guest does not receive new
+  generation allowance: the monthly ledger is shared across every owner.
+- The login-start limiter keys on the first `X-Forwarded-For` hop. Behind
+  Caddy that value is Caddy's own view of its peer, which a client cannot set.
+  If the app is ever exposed without Caddy, a client can rotate the header to
+  defeat only the per-client bucket; the global bucket still caps login starts.
+- Coach concurrency (one per notebook, two per user, a global ceiling) is
+  process-local. It holds under a 16-thread race. The durable coach lease is
+  the cross-process lock if workers are ever added.
+- A funded classroom release needs an evidenced `GENERATION_ADMISSION_POLICY`.
+  Without one, only the process-local limits above bound provider spend.
 
 ## Logging and secrets
 

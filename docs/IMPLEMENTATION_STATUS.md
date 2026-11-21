@@ -2,6 +2,30 @@
 
 ## Current status
 
+### Security readiness pass (branch `improvement/combined-testing1`)
+
+Mock tests only; no AWS, Bedrock or AgentCore call ran. Fixes and the tests that
+lock them are in `tests/http/test_security_readiness.py`,
+`tests/domain/test_student_chunk_security.py` and
+`tests/domain/test_security_invariants.py`. Boundary changes are described in
+[Security boundaries](SECURITY_BOUNDARIES.md).
+
+| Finding | Fix |
+| --- | --- |
+| Owner-scoped source content route rendered uploaded HTML, XML and script inline | Only PDF, images and `text/plain` stay inline; the rest download as `nosniff` attachments |
+| Owner-scoped write routes accepted a foreign `Origin` or cross-site fetch metadata | Middleware returns 403; Streamlit's server-side client is unaffected |
+| Untrusted text could forge the composer's section delimiters | Composer tag names are rewritten inside untrusted bodies |
+| Attachment filenames and the language setting reached the trusted runtime rules as free text | Filenames become one inert token; language is limited to the four supported values |
+| Backslash paths kept their separators in upload names | `_safe_name` splits on both separators |
+
+- **Left as is.** The AgentCore runtime phase dispatch (`fast_chat`, and
+  `review` with `review_mode=incremental` for the stage checkpoint, are both
+  sent in production), the process-local limiters, the first-hop
+  `X-Forwarded-For` login key (safe behind Caddy) and the missing production
+  requirement for `GENERATION_ADMISSION_POLICY`.
+- **Rollback.** No schema or data change. Revert the commits for the five
+  rows above independently.
+
 ### Head-to-head routing comparison: Laya vs KB-score routing (built, not run; branch `improvement/backend`)
 
 No production routing change and no setting default changed (all stay off). Nothing
