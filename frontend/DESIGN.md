@@ -164,8 +164,10 @@ stage markers express actual ordered stages, never invented scores or rewards.
   features, prototyping plan, test questions and the story arc. Each shows the lecture week.
   In an opened Review stage the list stays folded behind a "Tools from the course" button.
   Review has three tabs in this order: Progression (stages, next action, tools), Summary
-  (strengths, areas to improve, Facione) and My work (the student's own messages grouped by
-  stage, current stage first, three per stage until opened). Each opened stage links to My work.
+  (strengths, areas to improve, Facione) and My work (the whole journey, stage by stage in order: every
+  entry the student shared with its full text, the coach summary, and what is going well or to work on).
+  Each stage folds and shows a status badge (Done, Current, Started, Not started) and its entry count. The current
+  stage opens first, "Expand all" opens the rest, and the "Your work" link on a stage in Progression opens that stage here.
   One-word commands such as "move" and an unedited "I want to practise …" starter are not listed
   as work (`isStudentWork` in `coachingContent.ts`), so the lists stay short as the chat grows.
   Do not add frameworks that are not in the notes. The empathy map is included at the owner's

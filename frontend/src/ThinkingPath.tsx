@@ -18,6 +18,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
   const [activeTab, setActiveTab] = useState<ReviewTab>(initialTab ?? 'Progression');
   const tabButtons = useRef<Array<HTMLButtonElement | null>>([]);
   const [opened, setOpened] = useState('');
+  const [workFocus, setWorkFocus] = useState<{ id: string; n: number }>();
   const [heroOpen, setHeroOpen] = useState(false);
   const [saved, setSaved] = useState('');
   const savedTimer = useRef(0);
@@ -111,7 +112,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
                 <Icon name={expanded ? 'chevronDown' : 'chevronRight'}/>
               </button>
               <section hidden={!expanded} id={`stage-work-${stage.id}`} className="stage-work" aria-label={`${stage.label} saved work`}>
-                {expanded ? <StageDetail stage={stage} isCurrent={isCurrent} disabled={disabled} onUseTool={text => insertScaffold(text, 'project')} onSeeWork={() => { setActiveTab('My work'); document.querySelector('dialog')?.scrollTo({ top: 0 }); }}
+                {expanded ? <StageDetail stage={stage} isCurrent={isCurrent} disabled={disabled} onUseTool={text => insertScaffold(text, 'project')} onSeeWork={() => { setActiveTab('My work'); setWorkFocus(value => ({ id: stage.id, n: (value?.n ?? 0) + 1 })); }}
                   onSelect={() => void decide('select-stage', { stage_id: stage.id })}/> : null}
               </section>
             </li>;
@@ -181,7 +182,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
     </section>
     <section id="review-panel-my-work" role="tabpanel" aria-labelledby="review-tab-my-work"
       hidden={activeTab !== 'My work'} tabIndex={0}>
-      <MyWork project={project}/>
+      <MyWork project={project} focus={workFocus}/>
     </section>
   </section>;
 }
@@ -217,41 +218,101 @@ function StageDetail({ stage, isCurrent, disabled, onSelect, onUseTool, onSeeWor
   </div>;
 }
 
-/** One saved message from the student, cut to a few lines until opened. */
-function WorkQuote({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const long = text.length > 150 || text.split('\n').length > 3;
-  return <li className="work-quote" data-open={open || undefined}>
-    <span>{text}</span>
-    {long ? <button className="card-link work-more" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? 'Show less' : 'Show more'}</button> : null}
+/** Where a stage stands, in the words a student would use. */
+function stageStatus(stage: Stage, currentId: string, shared: number): { label: string; tone: 'current' | 'done' | 'started' | 'idle' } {
+  if (stage.id === currentId) return { label: 'Current', tone: 'current' };
+  if (stage.completed) return { label: 'Done', tone: 'done' };
+  return shared ? { label: 'Started', tone: 'started' } : { label: 'Not started', tone: 'idle' };
+}
+
+/** One stage of the journey: what the student shared, what the coach summarised, and what is going well or next. */
+function JourneyStage({ stage, index, status, open, onToggle, shared, strengths, improvements }: {
+  stage: Stage; index: number; status: ReturnType<typeof stageStatus>; open: boolean; onToggle: () => void;
+  shared: { message_id: string; text: string }[]; strengths: string[]; improvements: string[];
+}) {
+  const bodyId = `journey-${stage.id}`;
+  const empty = !shared.length && !stage.coach_summary && !strengths.length && !improvements.length;
+  return <li id={`journey-stage-${stage.id}`} className="journey-stage" data-status={status.tone}>
+    <button className="journey-head" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
+      <span className={`stage-number ${stage.completed ? 'completed' : ''}`} aria-hidden="true">{stage.completed ? <Icon name="check"/> : index + 1}</span>
+      <span className="journey-title">
+        <strong>{stage.label}</strong>
+        <small>{stage.artifact_label}</small>
+      </span>
+      <span className="journey-side">
+        <span className="journey-badge" data-tone={status.tone}>{status.label}</span>
+        {shared.length ? <small>{shared.length} {shared.length === 1 ? 'entry' : 'entries'}</small> : null}
+      </span>
+      <Icon name={open ? 'chevronDown' : 'chevronRight'}/>
+    </button>
+    <div id={bodyId} className="journey-body" hidden={!open}>
+      {empty ? <p className="supporting">Nothing shared in this stage yet.</p> : null}
+      {shared.length ? <section aria-label={`What you shared in ${stage.label}`}>
+        <h4 className="journey-label">What you shared</h4>
+        <ol className="journey-entries">{shared.map((item, position) => <li key={item.message_id} className="journey-entry">
+          <span className="journey-step" aria-hidden="true">{position + 1}</span>
+          <p>{item.text.trim()}</p>
+        </li>)}</ol>
+      </section> : null}
+      {stage.coach_summary ? <section aria-label={`Coach summary for ${stage.label}`}>
+        <h4 className="journey-label">Coach summary</h4>
+        <div className="journey-summary"><CoachText text={stage.coach_summary}/></div>
+      </section> : null}
+      {strengths.length ? <section aria-label={`Going well in ${stage.label}`}>
+        <h4 className="journey-label tone-strength">Going well</h4>
+        <ul className="journey-points tone-strength">{strengths.map(item => <li key={item}><Icon name="check"/><span>{item}</span></li>)}</ul>
+      </section> : null}
+      {improvements.length ? <section aria-label={`To work on in ${stage.label}`}>
+        <h4 className="journey-label tone-improve">To work on</h4>
+        <ul className="journey-points tone-improve">{improvements.map(item => <li key={item}><Icon name="arrow"/><span>{item}</span></li>)}</ul>
+      </section> : null}
+    </div>
   </li>;
 }
 
-const STAGE_WORK_PREVIEW = 3;
-
-/** The student's own saved messages, grouped by stage with the current stage first. */
-function MyWork({ project }: { project: Project }) {
-  const [all, setAll] = useState<Record<string, boolean>>({});
-  const groups = project.stages
-    .map(stage => ({ stage, items: stage.student_work.filter(item => isStudentWork(item.text)).reverse() }))
-    .filter(group => group.items.length)
-    .sort((a, b) => Number(b.stage.id === project.current_stage) - Number(a.stage.id === project.current_stage));
-  return <section className="review-card" aria-labelledby="my-work-title">
+/**
+ * The student's whole journey, stage by stage, in order. Each stage folds so a long project stays easy to scan:
+ * the current stage opens first, and "Expand all" opens everything.
+ */
+function MyWork({ project, focus }: { project: Project; focus?: { id: string; n: number } }) {
+  const review = project.review;
+  const rows = project.stages.map((stage, index) => {
+    const shared = stage.student_work.filter(item => isStudentWork(item.text));
+    return {
+      stage, index, shared,
+      status: stageStatus(stage, project.current_stage, shared.length),
+      strengths: review?.strengths.find(group => group.stage_id === stage.id)?.items ?? [],
+      improvements: review?.improvements.find(group => group.stage_id === stage.id)?.items ?? [],
+    };
+  });
+  const [open, setOpen] = useState<Record<string, boolean>>(() => ({ [project.current_stage]: true }));
+  const total = rows.reduce((sum, row) => sum + row.shared.length, 0);
+  const done = rows.filter(row => row.stage.completed).length;
+  const allOpen = rows.every(row => open[row.stage.id]);
+  const handled = useRef(0);
+  // "Your work" on a stage in Progression opens that stage here and brings it into view.
+  useEffect(() => {
+    if (!focus || focus.n === handled.current) return;
+    handled.current = focus.n;
+    setOpen(value => ({ ...value, [focus.id]: true }));
+    window.requestAnimationFrame(() => document.getElementById(`journey-stage-${focus.id}`)?.scrollIntoView({ block: 'start' }));
+  }, [focus]);
+  return <section className="review-card journey" aria-labelledby="my-work-title">
     <header className="card-head">
       <span className="card-icon" aria-hidden="true"><Icon name="chat"/></span>
       <h3 id="my-work-title">My work</h3>
+      <button className="card-link card-head-action" aria-pressed={allOpen}
+        onClick={() => setOpen(allOpen ? { [project.current_stage]: true } : Object.fromEntries(rows.map(row => [row.stage.id, true])))}>
+        {allOpen ? 'Collapse all' : 'Expand all'}</button>
     </header>
-    <p className="supporting">Your own words from Design coaching, newest first.</p>
-    {groups.length ? groups.map(({ stage, items }) => {
-      const open = !!all[stage.id];
-      const shown = open ? items : items.slice(0, STAGE_WORK_PREVIEW);
-      return <div key={stage.id} className="work-group">
-        <h4>{stage.label}{stage.id === project.current_stage ? <small>Current</small> : null}</h4>
-        <ul className="work-list">{shown.map(item => <WorkQuote key={item.message_id} text={item.text}/>)}</ul>
-        {items.length > STAGE_WORK_PREVIEW ? <button className="card-link" aria-expanded={open} onClick={() => setAll(value => ({ ...value, [stage.id]: !open }))}>
-          {open ? 'Show fewer' : `Show all ${items.length}`}</button> : null}
-      </div>;
-    }) : <p className="supporting fb-empty">Work you share in Design coaching will appear here.</p>}
+    <p className="supporting">Your progress, stage by stage. {done} of {rows.length} stages done · {total} {total === 1 ? 'entry' : 'entries'} shared.</p>
+    <div className="hero-steps" aria-hidden="true">
+      {rows.map(row => <span key={row.stage.id} data-state={row.status.tone === 'current' ? 'current' : row.stage.completed ? 'done' : undefined}/>)}
+    </div>
+    <ol className="journey-list" aria-label="Stages">
+      {rows.map(row => <JourneyStage key={row.stage.id} {...row} open={!!open[row.stage.id]}
+        onToggle={() => setOpen(value => ({ ...value, [row.stage.id]: !value[row.stage.id] }))}/>)}
+    </ol>
   </section>;
 }
 
