@@ -1,0 +1,3 @@
+# Example Key=Value overrides for infra/aws/edge-monitoring.yaml (deploy in us-east-1).
+DistributionId=REPLACE_ME
+AlertEmail=REPLACE_ME

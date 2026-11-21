@@ -1,0 +1,20 @@
+# Example Key=Value overrides for infra/aws/app-tier.yaml, one per line.
+# Copy to a private file outside Git, replace every REPLACE_ME, and pass it with
+# --app-params. Never put access keys here. Secret values live in Secrets Manager.
+VpcId=REPLACE_ME
+SubnetIds=REPLACE_ME,REPLACE_ME
+CloudFrontOriginPrefixListId=REPLACE_ME
+AppImageUri=REPLACE_ME
+EcrRepositoryArn=REPLACE_ME
+PublicOrigin=REPLACE_ME
+ConfigBundleBucketName=REPLACE_ME
+ConfigBundleObject=REPLACE_ME
+EnvSecretArn=REPLACE_ME
+ComposeSha256=REPLACE_ME
+DsqlClusterArn=REPLACE_ME
+UploadsBucketName=REPLACE_ME
+CourseBucketName=REPLACE_ME
+KnowledgeBaseArn=REPLACE_ME
+AgentCoreRuntimeArn=REPLACE_ME
+AlertEmail=REPLACE_ME
+MonthlyBudgetUsd=REPLACE_ME

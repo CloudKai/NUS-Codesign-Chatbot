@@ -1,0 +1,496 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CDE2300 Co-design companion app tier. One self-healing stateless EC2 instance
+  (Auto Scaling group min=max=1) running the existing ARM64 image and
+  compose.prod.yaml flow, with least-privilege IAM, CloudWatch alarms, an
+  optional out-of-class-hours schedule and an AWS Budgets alarm. It creates no
+  database, bucket, Knowledge Base, AgentCore runtime or CloudFront
+  distribution; those already exist and are passed in as parameters.
+  Do not raise MaxSize above 1: the rate limiter and generation admission
+  ledger are process-local (see docs/deploy/AWS_ARCHITECTURE_PROPOSAL.md).
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC for the instance.
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Public subnets (the instance needs outbound internet for ECR, DSQL, S3 and Bedrock).
+  CloudFrontOriginPrefixListId:
+    Type: String
+    AllowedPattern: "^pl-[0-9a-f]+$"
+    Description: ID of the AWS-managed CloudFront origin-facing prefix list in this region.
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    AllowedValues: [t4g.small, t4g.medium, t4g.large]
+  AmiSsmParameterName:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: Public SSM parameter naming the Amazon Linux 2023 ARM64 AMI.
+  AppImageUri:
+    Type: String
+    AllowedPattern: "^[^\\s:@]+(:[^\\s@]+)?(@sha256:[0-9a-f]{64})?$"
+    Description: Full ECR image URI with an immutable tag, as used for APP_IMAGE.
+  EcrRepositoryArn:
+    Type: String
+    Description: ARN of the ECR repository holding the app image.
+  PublicOrigin:
+    Type: String
+    AllowedPattern: "^https://[^/\\s]+$"
+    Description: Public HTTPS origin served by CloudFront (PUBLIC_ORIGIN).
+  ConfigBundleBucketName:
+    Type: String
+    Description: Bucket holding the deployment bundle (compose.prod.yaml, Caddyfile, scripts/deploy_ecr.sh).
+  ConfigBundleObject:
+    Type: String
+    Description: Object name of the .tar.gz deployment bundle in that bucket.
+  EnvSecretArn:
+    Type: String
+    Description: >-
+      Secrets Manager secret (JSON) with string fields env_file and
+      streamlit_secrets. The host writes them to .env and .streamlit/secrets.toml.
+  ComposeSha256:
+    Type: String
+    AllowedPattern: "^[0-9a-f]{64}$"
+    Description: SHA-256 of the docker-compose linux-aarch64 binary named by ComposeVersion.
+  ComposeVersion:
+    Type: String
+    Default: v2.29.7
+  DsqlClusterArn:
+    Type: String
+    Description: ARN of the Aurora DSQL cluster used by the runtime role co_design_app.
+  UploadsBucketName:
+    Type: String
+    Description: Student uploads bucket (read/write only under users/).
+  CourseBucketName:
+    Type: String
+    Description: Course content bucket (read only under course/).
+  KnowledgeBaseArn:
+    Type: String
+    Description: ARN of the Bedrock Knowledge Base used with Retrieve only.
+  AgentCoreRuntimeArn:
+    Type: String
+    Description: ARN of the published AgentCore runtime.
+  AlertEmail:
+    Type: String
+    AllowedPattern: "^[^@\\s]+@[^@\\s]+$"
+    Description: Address that receives alarm and budget notifications.
+  MonthlyBudgetUsd:
+    Type: Number
+    MinValue: 1
+    Description: Monthly cost budget in USD for this account.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90]
+  ScheduleEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Scale the group to 0 outside class hours and back to 1 before class.
+  ScheduleStopCron:
+    Type: String
+    Default: "0 15 * * *"
+    Description: UTC cron expression for scale to 0.
+  ScheduleStartCron:
+    Type: String
+    Default: "0 22 * * *"
+    Description: UTC cron expression for scale to 1.
+
+Conditions:
+  UseSchedule: !Equals [!Ref ScheduleEnabled, "true"]
+
+Resources:
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/co-design/${AWS::StackName}/app"
+      RetentionInDays: !Ref LogRetentionDays
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  OriginAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTP from CloudFront origin-facing addresses only. No SSH; use SSM Session Manager.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !Ref CloudFrontOriginPrefixListId
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: app-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcrLogin
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: EcrPull
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource: !Ref EcrRepositoryArn
+              - Sid: DsqlRuntimeConnect
+                Effect: Allow
+                Action: dsql:DbConnect
+                Resource: !Ref DsqlClusterArn
+              - Sid: UploadsList
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${UploadsBucketName}"
+              - Sid: UploadsUsersReadWriteDelete
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${UploadsBucketName}/users/*"
+              - Sid: CourseList
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${CourseBucketName}"
+                Condition:
+                  StringLike:
+                    "s3:prefix": ["course/*"]
+              - Sid: CourseReadOnly
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${CourseBucketName}/course/*"
+              - Sid: BundleRead
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${ConfigBundleBucketName}/${ConfigBundleObject}"
+              - Sid: KnowledgeBaseRetrieveOnly
+                Effect: Allow
+                Action: bedrock:Retrieve
+                Resource: !Ref KnowledgeBaseArn
+              - Sid: AgentCoreInvoke
+                Effect: Allow
+                Action: bedrock-agentcore:InvokeAgentRuntime
+                Resource:
+                  - !Ref AgentCoreRuntimeArn
+                  - !Sub "${AgentCoreRuntimeArn}/runtime-endpoint/*"
+              - Sid: HostEnvSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref EnvSecretArn
+              - Sid: AppLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !GetAtt AppLogGroup.Arn
+              - Sid: ReadyMetric
+                Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "cloudwatch:namespace": CoDesign
+              - Sid: KeepOriginAddress
+                Effect: Allow
+                Action: ec2:AssociateAddress
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/${OriginAddress.AllocationId}"
+                  - !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+              - Sid: SelfHeal
+                Effect: Allow
+                Action: autoscaling:SetInstanceHealth
+                Resource: !Sub "arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AWS::StackName}-asg"
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref AmiSsmParameterName
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !GetAtt InstanceProfile.Arn
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 2
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            Groups: [!Ref InstanceSecurityGroup]
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 20
+              VolumeType: gp3
+              Encrypted: true
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/sh
+            set -eu
+            export AWS_DEFAULT_REGION=${AWS::Region}
+            TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 120')
+            IID=$(curl -fsS -H "X-aws-ec2-metadata-token: ${!TOKEN}" http://169.254.169.254/latest/meta-data/instance-id)
+            aws ec2 associate-address --allocation-id ${OriginAddress.AllocationId} --instance-id "${!IID}" --allow-reassociation
+
+            dnf install -y docker jq amazon-cloudwatch-agent
+            systemctl enable --now docker
+            mkdir -p /usr/local/lib/docker/cli-plugins
+            curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+              https://github.com/docker/compose/releases/download/${ComposeVersion}/docker-compose-linux-aarch64
+            echo "${ComposeSha256}  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum -c -
+            chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose
+
+            mkdir -p /opt/co-design/.streamlit
+            cd /opt/co-design
+            aws s3 cp s3://${ConfigBundleBucketName}/${ConfigBundleObject} bundle.tar.gz
+            tar -xzf bundle.tar.gz
+            rm -f bundle.tar.gz
+            umask 077
+            aws secretsmanager get-secret-value --secret-id ${EnvSecretArn} --query SecretString --output text > secret.json
+            jq -r .env_file secret.json > .env
+            jq -r .streamlit_secrets secret.json > .streamlit/secrets.toml
+            rm -f secret.json
+            printf 'APP_IMAGE=%s\nPUBLIC_ORIGIN=%s\n' '${AppImageUri}' '${PublicOrigin}' >> .env
+            chown -R 1000:1000 /opt/co-design/.streamlit
+            chmod 0644 .streamlit/secrets.toml
+
+            cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'EOF'
+            {"logs":{"logs_collected":{"files":{"collect_list":[{"file_path":"/var/lib/docker/containers/*/*-json.log","log_group_name":"${AppLogGroup}","log_stream_name":"{instance_id}","timezone":"UTC"}]}}}}
+            EOF
+            /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+
+            cat > /usr/local/bin/co-design-ready.sh <<'EOF'
+            #!/bin/sh
+            # Publish CoDesign/ReadyOk each minute; mark the instance unhealthy after
+            # five straight failures (past a 15 minute boot grace) so the group replaces it.
+            export AWS_DEFAULT_REGION=${AWS::Region}
+            FAILS=/run/co-design-ready.fails
+            TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60') || exit 0
+            IID=$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id) || exit 0
+            if curl -fsS -m 3 -o /dev/null http://127.0.0.1:8000/api/v1/ready 2>/dev/null; then
+              rm -f "$FAILS"; VALUE=1
+            else
+              VALUE=0
+              N=$(( $(cat "$FAILS" 2>/dev/null || echo 0) + 1 ))
+              echo "$N" > "$FAILS"
+              UP=$(cut -d. -f1 /proc/uptime)
+              if [ "$N" -ge 5 ] && [ "$UP" -gt 900 ]; then
+                aws autoscaling set-instance-health --instance-id "$IID" --health-status Unhealthy || true
+              fi
+            fi
+            aws cloudwatch put-metric-data --namespace CoDesign --metric-name ReadyOk --value "$VALUE" || true
+            EOF
+            chmod 0755 /usr/local/bin/co-design-ready.sh
+            echo '* * * * * root /usr/local/bin/co-design-ready.sh' > /etc/cron.d/co-design-ready
+
+            sh scripts/deploy_ecr.sh
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 0
+        MaxBatchSize: 1
+        PauseTime: PT10M
+    Properties:
+      AutoScalingGroupName: !Sub "${AWS::StackName}-asg"
+      MinSize: "1"
+      MaxSize: "1"
+      DesiredCapacity: "1"
+      VPCZoneIdentifier: !Ref SubnetIds
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 600
+      MetricsCollection:
+        - Granularity: 1Minute
+          Metrics: [GroupInServiceInstances]
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-app"
+          PropagateAtLaunch: true
+
+  StopOutsideClass:
+    Type: AWS::AutoScaling::ScheduledAction
+    Condition: UseSchedule
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      MinSize: 0
+      MaxSize: 0
+      DesiredCapacity: 0
+      Recurrence: !Ref ScheduleStopCron
+
+  StartBeforeClass:
+    Type: AWS::AutoScaling::ScheduledAction
+    Condition: UseSchedule
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      MinSize: 1
+      MaxSize: 1
+      DesiredCapacity: 1
+      Recurrence: !Ref ScheduleStartCron
+
+  CoachTurnPerfFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AppLogGroup
+      FilterPattern: '"coach_turn_perf"'
+      MetricTransformations:
+        - MetricNamespace: CoDesign
+          MetricName: CoachTurnPerfEvents
+          MetricValue: "1"
+          DefaultValue: 0
+
+  RateLimitedFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AppLogGroup
+      FilterPattern: '?"coach_rate_limited" ?"rate_limited request_id"'
+      MetricTransformations:
+        - MetricNamespace: CoDesign
+          MetricName: RateLimitedTurns
+          MetricValue: "1"
+          DefaultValue: 0
+
+  AppErrorFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref AppLogGroup
+      FilterPattern: '?ERROR ?Traceback'
+      MetricTransformations:
+        - MetricNamespace: CoDesign
+          MetricName: AppErrorLines
+          MetricValue: "1"
+          DefaultValue: 0
+
+  ReadyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The app readiness probe failed for 3 of the last 3 minutes (or stopped reporting).
+      Namespace: CoDesign
+      MetricName: ReadyOk
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [!Ref AlertTopic]
+
+  InServiceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: No in-service instance in the group.
+      Namespace: AWS/AutoScaling
+      MetricName: GroupInServiceInstances
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref AutoScalingGroup
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 5
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [!Ref AlertTopic]
+
+  RateLimitedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Many coach turns were answered with 429 in 5 minutes. Students are waiting or being refused.
+      Namespace: CoDesign
+      MetricName: RateLimitedTurns
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 30
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  AppErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A burst of ERROR or Traceback lines in the app logs.
+      Namespace: CoDesign
+      MetricName: AppErrorLines
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 20
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+
+Outputs:
+  OriginDomainName:
+    Description: Stable origin host name for the CloudFront origin (elastic IP public DNS).
+    Value: !Sub
+      - "ec2-${Dashed}.${AWS::Region}.compute.amazonaws.com"
+      - Dashed: !Join ["-", !Split [".", !Ref OriginAddress]]
+  AlertTopicArn:
+    Value: !Ref AlertTopic
+  AppLogGroupName:
+    Value: !Ref AppLogGroup

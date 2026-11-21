@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CDE2300 Co-design companion edge policies and monitoring. Deploy in
+  us-east-1 (CloudFront metrics live there). It creates a long-lived cache
+  policy and a Cache-Control response headers policy for the hashed
+  /pilot/assets/* files, a CloudFront 5xx alarm, and one dashboard. It
+  does not create or modify the CloudFront distribution: attach the two
+  policies to a /pilot/assets/* behavior by hand (see docs/deploy/AWS_ARCHITECTURE_PROPOSAL.md).
+
+Parameters:
+  DistributionId:
+    Type: String
+    AllowedPattern: "^[A-Z0-9]+$"
+    Description: ID of the existing CloudFront distribution.
+  AppRegion:
+    Type: String
+    Default: us-west-2
+    Description: Region of the app-tier stack (for dashboard widgets).
+  AlertEmail:
+    Type: String
+    AllowedPattern: "^[^@\\s]+@[^@\\s]+$"
+    Description: Address that receives CloudFront alarm notifications.
+  ErrorRateThresholdPercent:
+    Type: Number
+    Default: 5
+    MinValue: 0.1
+    MaxValue: 100
+
+Resources:
+  EdgeAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  HashedAssetsCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub "${AWS::StackName}-hashed-assets"
+        Comment: Vite output under /pilot/assets/ is content-hashed, so it can be cached for a year even though the origin sends no-store.
+        MinTTL: 31536000
+        DefaultTTL: 31536000
+        MaxTTL: 31536000
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  HashedAssetsHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-hashed-assets-cache-control"
+        Comment: Lets browsers keep hashed assets; the origin value stays no-store for everything else.
+        CustomHeadersConfig:
+          Items:
+            - Header: Cache-Control
+              Value: public, max-age=31536000, immutable
+              Override: true
+
+  ServerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: CloudFront 5xx error rate is above the threshold.
+      Namespace: AWS/CloudFront
+      MetricName: 5xxErrorRate
+      Dimensions:
+        - Name: DistributionId
+          Value: !Ref DistributionId
+        - Name: Region
+          Value: Global
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: !Ref ErrorRateThresholdPercent
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref EdgeAlertTopic]
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-codesign"
+      DashboardBody: !Sub |
+        {"widgets":[
+          {"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"CloudFront error rates (%)","region":"us-east-1","stat":"Average","period":300,"metrics":[["AWS/CloudFront","5xxErrorRate","DistributionId","${DistributionId}","Region","Global"],[".","4xxErrorRate",".",".",".","."]]}},
+          {"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"CloudFront requests","region":"us-east-1","stat":"Sum","period":300,"metrics":[["AWS/CloudFront","Requests","DistributionId","${DistributionId}","Region","Global"]]}},
+          {"type":"metric","x":0,"y":6,"width":8,"height":6,"properties":{"title":"Readiness probe (1 = ready)","region":"${AppRegion}","stat":"Minimum","period":60,"metrics":[["CoDesign","ReadyOk"]]}},
+          {"type":"metric","x":8,"y":6,"width":8,"height":6,"properties":{"title":"Coach turns logged (coach_turn_perf) and rate limited (429)","region":"${AppRegion}","stat":"Sum","period":300,"metrics":[["CoDesign","CoachTurnPerfEvents"],[".","RateLimitedTurns"]]}},
+          {"type":"metric","x":16,"y":6,"width":8,"height":6,"properties":{"title":"App error lines","region":"${AppRegion}","stat":"Sum","period":300,"metrics":[["CoDesign","AppErrorLines"]]}}
+        ]}
+
+Outputs:
+  CachePolicyId:
+    Description: Attach to the /pilot/assets/* behavior.
+    Value: !Ref HashedAssetsCachePolicy
+  ResponseHeadersPolicyId:
+    Description: Attach to the /pilot/assets/* behavior.
+    Value: !Ref HashedAssetsHeadersPolicy
+  EdgeAlertTopicArn:
+    Value: !Ref EdgeAlertTopic
