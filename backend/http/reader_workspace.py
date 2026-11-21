@@ -5,9 +5,9 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from backend.domain import CoachTurn
+from backend.domain import CoachTurn, require_supported_response_language
 from backend.learning_signals import LearningSignal, LearningSignalSaved
 from backend.models import DEFAULT_CHAT_MODEL_ID, MODEL_REGISTRY, get_model, validate_reasoning
 from backend.learning.journey import normalize_journey
@@ -33,6 +33,7 @@ class ReaderSettingsPatch(BaseModel):
     response_detail: Literal["short", "long"] | None = None
     pinned: bool | None = Field(default=None, strict=True)
     response_language: str | None = Field(default=None, min_length=1, max_length=50)
+    _supported_language = field_validator("response_language")(require_supported_response_language)
     selected_model: str | None = Field(default=None, min_length=1, max_length=120)
     reasoning_effort: str | None = Field(default=None, min_length=1, max_length=30)
     assignment: dict[Annotated[str, Field(max_length=80)], Annotated[str, Field(max_length=4000)]] | None = Field(default=None, max_length=20)

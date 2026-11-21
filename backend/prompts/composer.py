@@ -25,6 +25,7 @@ retrieved_course_context holds KNOWLEDGE for the turn.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -427,11 +428,35 @@ def _runtime_instructions(context: PromptContext) -> str:
     return _clip("\n".join(parts), MAX_RUNTIME_CHARS)
 
 
-def _section(tag: str, body: str, *, attrs: str = "") -> str:
+_SECTION_TAGS = (
+    "shared_coaching", "stage_instructions", "student_project_context",
+    "retrieved_course_context", "deep_review_checkpoint_context",
+    "conversation_summary", "conversation_memory", "recent_messages",
+    "student_message", "runtime_instructions",
+)
+_SECTION_TAG_PATTERN = re.compile(
+    r"<(\s*/?\s*)(" + "|".join(_SECTION_TAGS) + r")\b", re.IGNORECASE
+)
+
+
+def _neutralize_delimiters(body: str) -> str:
+    """Stop untrusted text from closing a section or opening another one.
+
+    Student messages, uploads, retrieved excerpts, memory and history are
+    untrusted. A literal ``</retrieved_course_context>`` or
+    ``<runtime_instructions>`` inside them would otherwise be
+    indistinguishable from the composer's own delimiters. Only text that
+    names one of the composer's section tags is changed.
+    """
+    return _SECTION_TAG_PATTERN.sub(lambda match: f"&lt;{match.group(1)}{match.group(2)}", str(body or ""))
+
+
+def _section(tag: str, body: str, *, attrs: str = "", untrusted: bool = False) -> str:
     """Wrap a body in an explicit delimiter block for model context boundaries."""
     open_tag = f"<{tag}{attrs}>"
     close_tag = f"</{tag}>"
-    return f"{open_tag}\n{body.strip()}\n{close_tag}"
+    content = _neutralize_delimiters(body) if untrusted else body
+    return f"{open_tag}\n{content.strip()}\n{close_tag}"
 
 
 def _join_trusted(
@@ -468,19 +493,19 @@ def _join_untrusted(
 ) -> str:
     """Assemble student, evidence, and memory content for the untrusted channel."""
     parts = [
-        _section("student_project_context", project or _EMPTY_PROJECT),
-        _section("retrieved_course_context", retrieved),
+        _section("student_project_context", project or _EMPTY_PROJECT, untrusted=True),
+        _section("retrieved_course_context", retrieved, untrusted=True),
     ]
     compact = str(deep_review_compact_context or "").strip()
     if compact:
-        parts.append(_section("deep_review_checkpoint_context", compact))
+        parts.append(_section("deep_review_checkpoint_context", compact, untrusted=True))
     if not omit_summary:
-        parts.append(_section("conversation_summary", summary or _EMPTY_SUMMARY))
+        parts.append(_section("conversation_summary", summary or _EMPTY_SUMMARY, untrusted=True))
     parts.extend(
         [
-            _section("conversation_memory", memory or _EMPTY_MEMORY),
-            _section("recent_messages", recent or _EMPTY_RECENT),
-            _section("student_message", student or _EMPTY_STUDENT),
+            _section("conversation_memory", memory or _EMPTY_MEMORY, untrusted=True),
+            _section("recent_messages", recent or _EMPTY_RECENT, untrusted=True),
+            _section("student_message", student or _EMPTY_STUDENT, untrusted=True),
         ]
     )
     return "\n\n".join(parts)
@@ -509,19 +534,19 @@ def _join_sections(
             stage,
             attrs=f' stage="{stage_id}"',
         ),
-        _section("student_project_context", project or _EMPTY_PROJECT),
-        _section("retrieved_course_context", retrieved),
+        _section("student_project_context", project or _EMPTY_PROJECT, untrusted=True),
+        _section("retrieved_course_context", retrieved, untrusted=True),
     ]
     compact = str(deep_review_compact_context or "").strip()
     if compact:
-        parts.append(_section("deep_review_checkpoint_context", compact))
+        parts.append(_section("deep_review_checkpoint_context", compact, untrusted=True))
     if not omit_summary:
-        parts.append(_section("conversation_summary", summary or _EMPTY_SUMMARY))
+        parts.append(_section("conversation_summary", summary or _EMPTY_SUMMARY, untrusted=True))
     parts.extend(
         [
-            _section("conversation_memory", memory or _EMPTY_MEMORY),
-            _section("recent_messages", recent or _EMPTY_RECENT),
-            _section("student_message", student or _EMPTY_STUDENT),
+            _section("conversation_memory", memory or _EMPTY_MEMORY, untrusted=True),
+            _section("recent_messages", recent or _EMPTY_RECENT, untrusted=True),
+            _section("student_message", student or _EMPTY_STUDENT, untrusted=True),
             _section("runtime_instructions", runtime),
         ]
     )
@@ -744,6 +769,20 @@ def _conversation_memory_text(value: dict[str, Any] | None) -> str:
         return ""
 
 
+_FILENAME_UNSAFE = re.compile(r"[^\w.\-]+")
+
+
+def _filename_token(title: str, *, limit: int = 60) -> str:
+    """Reduce a student-chosen filename to one inert token for trusted rules.
+
+    The attachment note travels with application-owned runtime rules, so a
+    filename may not carry whitespace, markup or a sentence. Letters, digits,
+    dots, hyphens and underscores survive; anything else becomes ``_``.
+    """
+    token = _FILENAME_UNSAFE.sub("_", str(title or "").strip()).strip("_")
+    return re.sub(r"_{2,}", "_", token)[:limit]
+
+
 def prompt_context_from_request(
     request: CoachRequest,
     *,
@@ -784,9 +823,9 @@ def prompt_context_from_request(
     ]
     if attachment_ids:
         titles = [
-            " ".join(str(title or "").split()).strip()
-            for title in (request.attachment_titles or [])
-            if " ".join(str(title or "").split()).strip()
+            token
+            for token in (_filename_token(title) for title in (request.attachment_titles or []))
+            if token
         ]
         if len(titles) < len(attachment_ids):
             # Fall back to stable ids so presence is never silent.

@@ -24,6 +24,23 @@ from pydantic import (
 
 RESEARCH_CODING_VERSION = "clear-facione-ethics-v1"
 
+# The language setting is free text on the wire but is interpolated into the
+# application-owned runtime rules, so only these values may reach a prompt.
+SUPPORTED_RESPONSE_LANGUAGES = ("English", "中文", "Bahasa Melayu", "தமிழ்")
+
+
+def normalize_response_language(value: object) -> str:
+    """Return a supported response language, or English for anything else."""
+    cleaned = " ".join(str(value or "").split())
+    return cleaned if cleaned in SUPPORTED_RESPONSE_LANGUAGES else "English"
+
+
+def require_supported_response_language(value: str | None) -> str | None:
+    """Reject an unsupported language at a student-writable settings boundary."""
+    if value is not None and " ".join(value.split()) not in SUPPORTED_RESPONSE_LANGUAGES:
+        raise ValueError("Language unavailable")
+    return None if value is None else " ".join(value.split())
+
 
 class StageDecision(StrEnum):
     """A model recommendation for the student's current learning stage."""
@@ -453,6 +470,12 @@ class CoachRequest(BaseModel):
     allow_model_knowledge: bool = False
     response_language: str = Field(default="English", min_length=1, max_length=50)
     history: list[dict[str, Any]] = Field(default_factory=list)
+
+    @field_validator("response_language")
+    @classmethod
+    def response_language_must_be_supported(cls, value: str) -> str:
+        """Keep free text out of the trusted runtime rules."""
+        return normalize_response_language(value)
     model_id: str | None = None
     reasoning_effort: str | None = None
     # Server-filled notebook CAS token; clients must not treat this as authoritative.
@@ -765,6 +788,7 @@ class NotebookMetadataPatch(BaseModel):
     response_language: str | None = Field(default=None, min_length=1, max_length=50)
     selected_model: str | None = Field(default=None, min_length=1, max_length=120)
     reasoning_effort: str | None = Field(default=None, min_length=1, max_length=30)
+    _supported_language = field_validator("response_language")(require_supported_response_language)
     support_mode: str | None = Field(default=None, min_length=1, max_length=120)
     assignment: dict[str, str] | None = None
     allow_model_knowledge: bool | None = None
