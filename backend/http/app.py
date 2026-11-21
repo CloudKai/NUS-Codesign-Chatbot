@@ -125,6 +125,9 @@ def _provider_unavailable_detail(error: ProviderUnavailableError) -> dict[str, s
 # Streamlit OIDC cookie names (and numeric chunks) cleared by the logout callback.
 # Profile Logout / ui.auth_gate.app_logout_url() navigates here; not Cognito /logout.
 _STREAMLIT_AUTH_COOKIES = ("_streamlit_user", "_streamlit_user_tokens")
+_INLINE_SAFE_MIME_TYPES = frozenset({
+    "application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain",
+})
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
@@ -1892,13 +1895,23 @@ def create_app(
             content = owner.workspace.read_source_content(thread_id, source_id)
         except ValueError as error:
             raise _value_error(error) from error
+        # Uploads are student-controlled. Only passive types may render inline;
+        # anything else (HTML, XML, script, SVG) downloads so it cannot run on
+        # the application origin.
+        mime = str(content.mime or "").split(";")[0].strip().lower()
+        passive = mime in _INLINE_SAFE_MIME_TYPES
         disposition = (
-            "inline; filename*=UTF-8''" + quote(content.filename)
+            ("inline" if passive else "attachment")
+            + "; filename*=UTF-8''"
+            + quote(content.filename, safe="")
         )
         return Response(
             content=content.data,
-            media_type=content.mime,
-            headers={"Content-Disposition": disposition},
+            media_type=content.mime if passive else "application/octet-stream",
+            headers={
+                "Content-Disposition": disposition,
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
     @app.post("/api/v1/threads/{thread_id}/sources/backfill-legacy")
