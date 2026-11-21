@@ -6,7 +6,7 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, Response
 
 from backend.auth_profiles import has_streamlit_access
@@ -18,7 +18,7 @@ from backend.http.reader_workspace import (
     register_reader_workspace,
 )
 from backend.learning_signals import learning_receipts
-from backend.domain import CitationReference, CoachRequest, CoachTurn
+from backend.domain import CitationReference, CoachRequest, CoachTurn, require_visible_text
 from backend.learning.journey import (
     FACIONE_DIMENSIONS,
     learning_review,
@@ -90,6 +90,7 @@ class LectureRequest(BaseModel):
     student_message: str = Field(min_length=1, max_length=12_000)
     idempotency_key: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
     attachment_source_ids: list[str] = Field(default_factory=list, max_length=5)
+    _visible_message = field_validator("student_message")(require_visible_text)
 
 
 class ReaderStage(StageResume):

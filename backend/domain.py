@@ -400,6 +400,23 @@ VALID_STAGE_IDS = frozenset(
 )
 
 
+def require_visible_text(value: str) -> str:
+    """Reject whitespace-only student text so no empty turn is ever generated.
+
+    Args:
+        value: Raw student-authored text.
+
+    Returns:
+        The unchanged text when it contains a visible character.
+
+    Raises:
+        ValueError: When the text is empty after trimming whitespace.
+    """
+    if not value.strip():
+        raise ValueError("Enter a message")
+    return value
+
+
 class CoachRequest(BaseModel):
     """Input required to run one local critical-thinking workflow turn.
 
@@ -412,6 +429,7 @@ class CoachRequest(BaseModel):
 
     thread_id: str
     student_message: str = Field(min_length=1, max_length=12_000)
+    _visible_message = field_validator("student_message")(require_visible_text)
     # Public interaction choice, distinct from server-owned specialist routing.
     # None preserves inferred routing for existing clients.
     interaction_intent: Literal["lecture_help", "project_coaching"] | None = None

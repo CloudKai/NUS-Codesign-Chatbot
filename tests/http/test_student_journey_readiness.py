@@ -229,3 +229,26 @@ def test_edit_and_retry_replace_the_answer_and_keep_one_branch(tmp_path: Path, m
     _done(client.post(path + "/lecture/stream", json={"student_message": "Explain it again.", "idempotency_key": "q2"}, headers=ORIGIN))
     assert client.get(path + "/messages/page").json()["total_count"] == 4
 
+
+def test_blank_messages_are_rejected_before_any_turn_is_saved(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Whitespace-only text is rejected on every send and edit route, never as a streamed internal error."""
+    client = _guest_client(StudentStore(tmp_path / "blank.sqlite3"), monkeypatch, auto_advance_stages=False)
+    thread = client.post("/api/v1/reader/threads", json={"kind": "chat"}, headers=ORIGIN).json()["notebook"]["id"]
+    path = f"/api/v1/reader/threads/{thread}"
+    for route in ("lecture", "project"):
+        response = client.post(path + f"/{route}/stream", json={"student_message": "  \n\t ", "idempotency_key": f"blank-{route}"}, headers=ORIGIN)
+        assert response.status_code == 422, route
+    _done(client.post(path + "/lecture/stream", json={"student_message": "What is analogy?", "idempotency_key": "real"}, headers=ORIGIN))
+    user = client.get(path + "/messages/page").json()["messages"][-2]
+    revise = client.post(path + f"/messages/{user['id']}/revise", json={"content": "   ", "idempotency_key": "blank-edit"}, headers=ORIGIN)
+    assert revise.status_code == 400  # Existing contract: the shared revise handler rejects blank edits.
+    assert "validation" not in revise.text.lower()
+    legacy = client.post("/api/v1/coach/turn", json={
+        "thread_id": thread, "student_message": " ", "current_stage": "problem_identification",
+        "response_detail": "short", "idempotency_key": "blank-legacy",
+    })
+    assert legacy.status_code == 422
+    assert "pydantic" not in legacy.text.lower()
+    page = client.get(path + "/messages/page").json()
+    assert page["total_count"] == 2
+    assert page["messages"][-2]["content"] == "What is analogy?"
