@@ -746,4 +746,11 @@ html[data-reduce-motion] .typing-dots i { opacity: .7; }
   .mode-switch { padding: 0; }
   .mode-switch span { min-height: 44px; }
   .mode-switch span > span { min-height: 0; }
+  .stage-starters .stage-chips button { min-height: 44px; }
+  .brand .wordmark { display: inline-flex; align-items: center; min-height: 44px; }
+  .notebook-heading .icon-button, .refresh-workspace { min-width: 44px; min-height: 44px; }
+  .nav-section-title, .workspace-tools > button { min-height: 44px; }
+  .workspace-tools { grid-template-columns: minmax(0, 1fr) 44px; }
+  .profile a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: 6px; }
+  .settings-assignment :is(input, textarea) { min-height: 44px; }
 }

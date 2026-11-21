@@ -1,5 +1,5 @@
 /** Canonical saved-work view; eligibility and next actions come only from the API. */
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Project, ReviewFeedback, Stage } from './api';
 import { CoachText } from './CoachText';
 import { Icon } from './Icon';
@@ -20,6 +20,9 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
   const [opened, setOpened] = useState('');
   const [heroOpen, setHeroOpen] = useState(false);
   const [saved, setSaved] = useState('');
+  const savedTimer = useRef(0);
+  // A newer project status, or a new action starting, replaces the short-lived download note.
+  useEffect(() => { window.clearTimeout(savedTimer.current); setSaved(''); }, [status, disabled]);
   const [showTips, setShowTips] = useState(false);
   const current = project.stages.find(stage => stage.id === project.current_stage)!;
   const done = project.stages.filter(stage => stage.completed).length;
@@ -47,7 +50,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
         <h2 id="review-heading" tabIndex={-1}>Review</h2>
         <div className="review-header-actions">
           <button className="icon-button" aria-label="Download project summary" title="Download project summary"
-            onClick={() => { downloadProject(project, title); setSaved('Project summary downloaded.'); window.setTimeout(() => setSaved(''), 4000); }}><Icon name="download"/></button>
+            onClick={() => { downloadProject(project, title); setSaved('Project summary downloaded.'); window.clearTimeout(savedTimer.current); savedTimer.current = window.setTimeout(() => setSaved(''), 4000); }}><Icon name="download"/></button>
           <button className="icon-button" aria-label="Close Review" title="Close Review" onClick={onClose}><Icon name="close"/></button>
         </div>
       </header>

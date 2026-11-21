@@ -11,6 +11,7 @@ import { StageRecommendation, MilestoneBanner, type Milestone } from './StageRec
 import { StageStarters } from './StageStarters';
 import { CoachCheckIn } from './CoachCheckIn';
 import { chooseCheckIn, hintScaffold, lectureToProjectScaffold, reflectionScaffold, type CheckIn } from './coachingContent';
+import { newRequestKey } from './requestKey';
 import { REPLY_DELTAS_HEADER, citationText, isTurn, readStream, type Citation, type Event } from './stream';
 
 type Intent = 'lecture' | 'project';
@@ -227,7 +228,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     if (retry && checkedKey !== pendingRef.current?.key) return;
     lock.current = true;
     stickToLatest.current = true;
-    const receipt = retry ? pendingRef.current! : revision || { key: crypto.randomUUID(), text: textRef.current, intent: intentRef.current, attachments };
+    const receipt = retry ? pendingRef.current! : revision || { key: newRequestKey(), text: textRef.current, intent: intentRef.current, attachments };
     if (!receipt) { lock.current = false; return; }
     remember(textRef.current, receipt);
     setWatching(true);
@@ -419,7 +420,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     setDismissedRules(next);
     try { sessionStorage.setItem(checkInKey, JSON.stringify(next)); } catch { /* Optional tab preference. */ }
   }
-  const showChips = intent === 'project' && showStarters && !isEmpty && !checkIn && !text.trim() && !turnBusy;
+  const showChips = intent === 'project' && showStarters && !isEmpty && !checkIn && !milestone && !text.trim() && !turnBusy;
   // The composer dock changes height when a check-in or the suggestions appear. Keep the latest message in view.
   useEffect(() => {
     if (stickToLatest.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
@@ -514,7 +515,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         </div> : null}
       </div>
       {edit?.id === message.id ? <form className="message-edit" onSubmit={event => {
-        event.preventDefault(); const receipt = { key: crypto.randomUUID(), text: edit.text, message: edit.id }; setEdit(null); void send(false, receipt);
+        event.preventDefault(); const receipt = { key: newRequestKey(), text: edit.text, message: edit.id }; setEdit(null); void send(false, receipt);
       }}>
         <label htmlFor={`edit-${message.id}`}>Revise your message</label>
         <textarea autoFocus id={`edit-${message.id}`} value={edit.text} maxLength={12000} onChange={event => setEdit({ ...edit, text: event.target.value })}/>

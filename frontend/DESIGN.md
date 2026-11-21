@@ -152,7 +152,10 @@ stage markers express actual ordered stages, never invented scores or rewards.
   Retry and Discard unlock only after a check finds no saved reply, so nothing is sent twice. Discard
   puts the text back in the composer under a new key, which frees a question the server rejects for good.
   Start my design project and Ask a lecture question on Home also set the mode of an empty chat that is
-  already open. Transcript recovery, edit and citation buttons and the mode switch keep 44px targets below 768px.
+  already open. Transcript recovery, edit and citation buttons, the mode switch, suggestion chips, the wordmark and
+  the drawer's section, Settings, Refresh and Sign out controls keep 44px targets below 768px. Request keys use
+  `crypto.randomUUID` when it exists and a `getRandomValues` UUID on plain-HTTP origins, so sending never throws.
+  A newer Review status replaces the short "Project summary downloaded." note.
 
 - **Course tools:** stage chips above the composer and the "Tools from the course" list in
   each opened Review stage insert fill-in templates taken from the CDE2300 lecture notes:
