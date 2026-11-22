@@ -2,6 +2,32 @@
 
 ## Current status
 
+### Visible word groups and system motion preference (2026-11-23 SGT)
+
+React paces provider reply fragments so a single network burst can produce
+several visible word updates. Normal and edited sends share the same preview.
+Validation and durable saves remain server-owned. Final-only replies show
+without a typing effect. Settings no longer includes Reduce motion. The
+browser's system motion preference controls animation and scrolling.
+
+Frontend build and disposable browser checks passed. Normal and edited mock
+replies visibly grew on delayed and fully batched delivery, including at
+390 px with system reduced motion. Light and Dark, draft retention, saved
+reply recovery and the console passed. Available locally on port 8081.
+No schema, runtime, or production deployment change. Rollback restores the
+previous frontend. Next action is review in the local preview.
+
+### Compact Summary header live (2026-11-23 SGT)
+
+Review puts **Summarise chat** at the top right of the brief, beside the title,
+as a tinted button with a sparkle icon, full label and a 44px touch target.
+The tooltip stays aligned to the button. Build, mock image and browser checks
+passed at 1440, 390 and 320 px in Light and Dark. CloudFront serves
+`summary-polish-12b7e4ce0167` and public health passed. Restore the previous app
+and Caddy configuration from `releases/before-summary-polish-12b7e4ce0167`
+for rollback. No stored data, schema or runtime changes are required.
+Next action is student review of the Summary header on the public app.
+
 ### Lecture Help greeting and mode guidance (2026-11-23 SGT)
 
 Lecture Help now answers a bare greeting without attachments with a short course

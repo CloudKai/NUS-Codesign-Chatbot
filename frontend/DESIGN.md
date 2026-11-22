@@ -150,7 +150,9 @@ stage markers express actual ordered stages, never invented scores or rewards.
   primary full-width brief with five short labeled passages: Who and why, Problem,
   Current idea, What matters, Still to explore. Its title has no extra top margin;
   14px top padding, restrained accent labels and thin separators establish hierarchy
-  without nested cards or decoration. Unknowns use subdued explicit wording.
+  without nested cards or decoration. The compact Summarise chat action uses
+  a tinted button beside the title and retains a 44px target and focus tooltip.
+  Unknowns use subdued explicit wording.
   The brief synthesises the entire active saved chat, not just loaded/recent turns.
   Lecture materials guide the structure; no lecture-connections block is added.
   **Stage feedback** is one flat accordion group in canonical order. Rows start

@@ -27,10 +27,10 @@ async page => {
   for (const appearance of ['Light', 'Dark']) {
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 960 });
-      await page.evaluate(async ({ appearance, reduce_motion }) => {
-        const response = await fetch('/api/v1/reader/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appearance, reduce_motion }) });
+      await page.evaluate(async appearance => {
+        const response = await fetch('/api/v1/reader/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appearance }) });
         if (!response.ok) throw Error('Preference update failed');
-      }, { appearance, reduce_motion: width === 390 });
+      }, appearance);
       await page.emulateMedia({ reducedMotion: width === 390 ? 'reduce' : 'no-preference' });
       await page.reload();
       const draft = page.getByRole('textbox', { name: 'Your project contribution', exact: true });
@@ -52,5 +52,5 @@ async page => {
   }
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   assert(errors.length === 0, `Unexpected browser errors: ${errors.join('; ')}`);
-  return 'PASS: normal/edit incremental previews, Light/Dark desktop/390, app and OS reduced motion, no replay, no provisional save actions, retained draft and clean console';
+  return 'PASS: normal/edit incremental previews, Light/Dark desktop/390, OS reduced motion, no replay, no provisional save actions, retained draft and clean console';
 }

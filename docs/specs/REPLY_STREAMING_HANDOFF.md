@@ -32,7 +32,12 @@ call is added to simulate typing. The deterministic provider remains a mock.
 - The runtime still performs one structured `invoke_async`, with its existing
   tool choice, repair limits, guardrails, provenance and usage. Each stream owns
   a queue/task. Deep Review and legacy non-fast-chat contracts are unchanged.
-- Reduced motion disables animation, not reply visibility. The composer Stop control requests cancellation by the exact owner, chat and
+- The browser paints small word groups from received fragments so several
+  deltas in a single network read still produce distinct visible updates.
+  A short queue drains before the saved reply replaces the preview. Final-only
+  responses display without a typing effect. The system reduced-motion
+  preference controls animation and scroll, and replies still stream. The
+  composer Stop control requests cancellation by the exact owner, chat and
   request key. A disconnected viewer still reconciles through reads and never
   automatically replays a write. Separate
   composer drafts survive streamed edits.

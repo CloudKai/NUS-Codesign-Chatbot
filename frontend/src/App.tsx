@@ -286,7 +286,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           displayTitle={reader.page.notebook.kind === 'notebook' ? 'Original chat' : undefined}
           parent={parentFolder ? { name: parentFolder.name, open: () => openFolder(parentFolder.id), disabled: workspaceLocked } : undefined}
           onHelp={() => setHelpOpen(true)} preferredIntent={preferences?.default_mode ?? 'lecture'}
-          showStarters={preferences?.starter_prompts ?? true} reduceMotion={preferences?.reduce_motion ?? false}
+          showStarters={preferences?.starter_prompts ?? true}
           summary={reader.chatSummaries[reader.page.notebook.id]} startIntent={startIntents.current[reader.page.notebook.id]}
           intentRequest={intentRequest} busy={reader.busy} externalBlocked={workspaceBlocked} activity={setActivity} refresh={async () => { if (!await reader.open(reader.page!.notebook.id, false, true)) throw new Error('Refresh failed'); }} expired={() => void reader.reload()}
           locateMessage={id => reader.open(reader.page!.notebook.id, false, true, id).then(result => !!result)}

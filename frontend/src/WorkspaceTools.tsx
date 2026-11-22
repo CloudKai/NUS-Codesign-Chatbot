@@ -86,7 +86,6 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
     onPreferences(prefs);
     setDisplayName(prefs.display_name);
     document.documentElement.dataset.appearance = prefs.appearance;
-    document.documentElement.toggleAttribute('data-reduce-motion', prefs.reduce_motion);
     setSettings(detail);
     setName(detail?.notebook.name || '');
   }
@@ -95,7 +94,6 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
     return () => {
       active.current = false; epoch.current++; control.current.abort();
       delete document.documentElement.dataset.appearance;
-      delete document.documentElement.dataset.reduceMotion;
     };
   }, []);
   useEffect(() => {
@@ -208,10 +206,6 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
           <Segmented<Preferences['appearance']> label="Theme" value={appearance} disabled={locked || !prefs}
             options={[{ value: 'Dark', label: 'Dark' }, { value: 'Light', label: 'Light' }, { value: 'System', label: 'System' }]}
             change={value => void updatePreferences({ appearance: value })}/>
-        </SettingsRow>
-        <SettingsRow label="Reduce motion" htmlFor="workspace-reduce-motion" description="Limit motion and show coach replies after they have saved.">
-          <input className="settings-switch" id="workspace-reduce-motion" type="checkbox" role="switch" checked={prefs?.reduce_motion ?? false}
-            disabled={locked || !prefs} onChange={event => void updatePreferences({ reduce_motion: event.target.checked })}/>
         </SettingsRow>
       </section>
       <section className="settings-group">

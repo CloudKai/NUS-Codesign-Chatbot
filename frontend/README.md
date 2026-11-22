@@ -17,7 +17,7 @@ same-origin Caddy stack. See [DESIGN.md](DESIGN.md) for layout and styles.
 - **Turn recovery.** Lecture help, Project coaching and edits share the NDJSON
   lifecycle and exact-key recovery. A preview is provisional until save
   completes. Both normal and edited sends request reply deltas and render growing
-  provisional text, including under reduced motion. A discarded attempt clears
+  provisional text in small word groups, including with the system reduced-motion preference. A discarded attempt clears
   its preview; only done/reconciliation establishes saved content. Edits use
   `/messages/{id}/revise/stream`; the legacy JSON route remains available to other
   clients. The composer cross requests cancellation before saving.
@@ -30,7 +30,7 @@ same-origin Caddy stack. See [DESIGN.md](DESIGN.md) for layout and styles.
   including earlier pages and lecture questions, rather than displaying recent
   prompts or stage-progress prose. Unknown facts stay explicitly unestablished;
   tentative ideas remain tentative. The course materials guide the categories.
-  The **Summarise chat** button requests a missing whole-chat brief. Unchanged results are
+  The compact **Summarise chat** button in the card header requests a missing whole-chat brief. Unchanged results are
   reused from owner-scoped server metadata; edits/new turns invalidate the brief.
   Failures are retained and require explicit retry. Mock mode honestly states
   that a whole-chat summary is unavailable, instead of inventing demo facts.

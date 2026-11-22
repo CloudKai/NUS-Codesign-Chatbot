@@ -51,26 +51,28 @@ export function ProjectBriefCard({ project, disabled, onSaved }: { project: Proj
     : view?.status === 'empty' ? 'Your brief will take shape as you discuss your project.'
     : current ? '' : 'A summary of your users, problem and developing idea.';
   return <section className="review-card project-brief-card" aria-labelledby="project-brief-title" aria-busy={working}>
-    <h3 id="project-brief-title">Your project so far</h3>
+    <header className="brief-header">
+      <h3 id="project-brief-title">Your project so far</h3>
+      {working || error || view?.status === 'missing' || view?.status === 'failed' ? (
+        <div className="brief-action" data-tooltip-dismissed={dismissHint || undefined}
+          onPointerEnter={() => setDismissHint(false)}>
+          <button className="primary brief-submit" type="button" disabled={working || disabled}
+            aria-describedby={hintId} onFocus={() => setDismissHint(false)}
+            onKeyDown={event => {
+              if (event.key === 'Escape' && !dismissHint) {
+                event.preventDefault();
+                event.stopPropagation();
+                setDismissHint(true);
+              }
+            }} onClick={() => void summarise(Boolean(error || view?.status === 'failed'))}>
+            <Icon name="spark"/>{working ? 'Summarising…' : 'Summarise chat'}
+          </button>
+          <span id={hintId} className="brief-action-hint" role="tooltip">Summarises your whole chat.</span>
+        </div>
+      ) : null}
+    </header>
     {note ? <p className="brief-note supporting" role="status">{note}</p> : null}
     {error || view?.status === 'failed' ? <p className="brief-error" role="alert">{error || 'The last summary could not be completed. You can try again.'}</p> : null}
-    {working || error || view?.status === 'missing' || view?.status === 'failed' ? (
-      <div className="brief-action" data-tooltip-dismissed={dismissHint || undefined}
-        onPointerEnter={() => setDismissHint(false)}>
-        <button className="primary brief-submit" type="button" disabled={working || disabled}
-          aria-describedby={hintId} onFocus={() => setDismissHint(false)}
-          onKeyDown={event => {
-            if (event.key === 'Escape' && !dismissHint) {
-              event.preventDefault();
-              event.stopPropagation();
-              setDismissHint(true);
-            }
-          }} onClick={() => void summarise(Boolean(error || view?.status === 'failed'))}>
-          <Icon name="spark"/>{working ? 'Summarising…' : 'Summarise chat'}
-        </button>
-        <span id={hintId} className="brief-action-hint" role="tooltip">Summarises your whole chat.</span>
-      </div>
-    ) : null}
     <dl className="project-brief-fields">{fields.map(([key, label]) => {
       const text = current ? current[key].text : null;
       return <div key={key} data-missing={!text || undefined}>

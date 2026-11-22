@@ -509,11 +509,12 @@ For rendered QA, use the **disposable mock delayed-NDJSON fixture** described in
 "$PWCLI" -s=streaming open http://127.0.0.1:8096 --headed
 "$PWCLI" -s=streaming run-code --filename tests/browser/real_reply_streaming.js
 "$PWCLI" -s=streaming run-code --filename tests/browser/reply_streaming_qa.js
+"$PWCLI" -s=streaming run-code --filename tests/browser/batched_reply_streaming.js
 ```
 
 The relay slows delivery of real mock-server events for observation; this proves
 browser rendering, not live LLM latency. Check growing normal/edited text,
-provisional labels/no saved-message actions, 1440/390 Light/Dark, app/OS reduced
+provisional labels/no saved-message actions, 1440/390 Light/Dark, OS reduced
 motion, retained drafts, no replay and the console. Wait for authoritative refresh
 before selecting the edited message by its stable id. Captures are under ignored
 `output/playwright/reply-streaming/`. Existing edit/recovery/bookmark/Summary

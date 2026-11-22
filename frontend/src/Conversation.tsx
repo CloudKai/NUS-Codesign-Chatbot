@@ -12,6 +12,7 @@ import { StageRecommendation, MilestoneBanner, type Milestone } from './StageRec
 import { StageStarters } from './StageStarters';
 import { CoachCheckIn } from './CoachCheckIn';
 import { chooseCheckIn, hintScaffold, lectureToProjectScaffold, reflectionScaffold, type CheckIn } from './coachingContent';
+import { createReplyPreview } from './replyPreview';
 import { newRequestKey } from './requestKey';
 import { REPLY_DELTAS_HEADER, citationText, isTurn, readStream, type Citation, type Event } from './stream';
 
@@ -57,9 +58,9 @@ function savedIntent(page: Page, project: Project): Intent {
 }
 
 /** Keep draft, focus and loaded transcript stable during progress and evidence inspection. */
-export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, locateMessage, externalBlocked, activity, onHelp, preferredIntent, showStarters, reduceMotion, intentRequest, summary, startIntent, displayTitle = page.notebook.name, parent }: {
+export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, locateMessage, externalBlocked, activity, onHelp, preferredIntent, showStarters, intentRequest, summary, startIntent, displayTitle = page.notebook.name, parent }: {
   page: Page; project: Project; owner: string; refresh: () => Promise<void>; expired: () => void;
-  onHelp: () => void; preferredIntent: Intent; showStarters: boolean; reduceMotion: boolean;
+  onHelp: () => void; preferredIntent: Intent; showStarters: boolean;
   intentRequest?: { id: string; intent: Intent; n: number };
   externalBlocked: boolean; activity: (value: boolean) => void;
   locateMessage: (id: string) => Promise<boolean>;
@@ -311,7 +312,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     setStatus('Reading your message…');
     controller.current.abort();
     controller.current = new AbortController();
+    const paint = createReplyPreview(value => { if (active.current) setPreview(value); }, controller.current.signal);
     let terminalError: Event & { event: 'error' } | null = null;
+    const completion = { text: '' };
     try {
       await verify();
       const response = await fetch(receipt.message ? `${path}/messages/${encodeURIComponent(receipt.message)}/revise/stream` : `${path}/${receipt.intent || 'lecture'}/stream`, {
@@ -327,14 +330,17 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         if (event.event === 'status' && event.phase === 'saving') setCanStop(false);
         if (event.event === 'status') setStatus(({ queued: 'Thinking…', retrieving: 'Looking through your sources…', thinking: 'Thinking…', saving: 'Saving…' })[event.phase]);
         // Deltas are unvalidated and unsaved: they only ever feed the preview, never saved messages.
-        if (event.event === 'reply_delta') { setPreview(current => current + event.text); setStatus('Writing your reply…'); }
-        if (event.event === 'reply_discard') setPreview('');
-        if (event.event === 'reply_ready') { setPreview(event.text); setStatus('Saving…'); }
-        if (event.event === 'error') { terminalError = event; setPreview(''); }
+        if (event.event === 'reply_delta') { paint.append(event.text); setStatus('Writing your reply…'); }
+        if (event.event === 'reply_discard') paint.discard();
+        if (event.event === 'reply_ready') { setCanStop(false); setStatus('Saving…'); }
+        if (event.event === 'done') { setCanStop(false); completion.text = event.turn.response_text; }
+        if (event.event === 'error') { terminalError = event; paint.discard(); }
       });
+      if (completion.text) await paint.finish(completion.text);
     } catch (error) {
       if (active.current && error instanceof ApiError && [401, 403].includes(error.status)) { expired(); return; }
     } finally {
+      paint.dispose();
       if (active.current) {
         setPreview('');
         setWatching(false);
@@ -737,7 +743,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         onClick={() => {
           const panel = transcript.current;
           if (!panel) return;
-          const animate = !reduceMotion && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          const animate = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
             && panel.scrollHeight - panel.scrollTop - panel.clientHeight > 4;
           scrollingToLatest.current = animate;
           stickToLatest.current = !animate;
