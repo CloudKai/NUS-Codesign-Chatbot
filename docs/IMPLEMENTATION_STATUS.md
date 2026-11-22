@@ -13,9 +13,13 @@ browser's system motion preference controls animation and scrolling.
 Frontend build and disposable browser checks passed. Normal and edited mock
 replies visibly grew on delayed and fully batched delivery, including at
 390 px with system reduced motion. Light and Dark, draft retention, saved
-reply recovery and the console passed. Available locally on port 8081.
-No schema, runtime, or production deployment change. Rollback restores the
-previous frontend. Next action is review in the local preview.
+reply recovery and the console passed. EC2 and CloudFront now serve
+`release-dc83707dccc6`, built from commit `dc83707` on
+`improvement/combined-testing1`. The exact image passed a mock smoke;
+host readiness, public health, the new React bundle and Stop authentication
+passed after cutover. No schema or runtime change. Rollback uses
+`releases/before-release-dc83707dccc6` on EC2. Next action is student review
+on the public app.
 
 ### Compact Summary header live (2026-11-23 SGT)
 
