@@ -10,8 +10,15 @@ explicit course Q&A instructions so prior design coaching does not steer the
 reply. The existing evidence scope and student-confirmed progression rules
 still apply to substantive turns. Authenticated reader, evidence scope and
 provider contract checks cover the change. No schema or runtime build change.
-Rollback restores the previous app build. Next action is local preview review
-before any production rollout.
+The app was deployed to the existing CloudFront site as
+`release-e2fa69cae6d7`, built from the pushed commit `e2fa69c` on
+`improvement/combined-testing1`. Host readiness and public health passed.
+CloudFront serves `index-DwOZdiXQ.js` with the updated Summary action, and the
+Stop endpoint remains authenticated. The exact release image passed a
+network-free smoke including the Lecture Help greeting. No paid prompt,
+schema migration, or runtime update was needed. The previous app and Caddy
+configuration are available at `releases/before-release-e2fa69cae6d7`.
+Next action: student review on the live app.
 
 ### Click-to-summarise and simpler student settings (2026-11-23 SGT)
 
@@ -31,8 +38,8 @@ Focused HTTP, frontend build and disposable browser checks passed, including
 click-to-generate, hover/keyboard, cached and failed states, download and
 Light/Dark layouts down to 390 px. The full mock suite passed 3,182 tests with
 one optional skip. Local preview is refreshed at port 8081.
-No schema or runtime change is needed. Rollback restores the previous app build.
-Next action is user review before any production deployment.
+No schema or runtime change was needed. These settings shipped in the same
+app release recorded above.
 
 ### Legacy chats, composer Stop and session continuity (2026-11-23 SGT)
 
