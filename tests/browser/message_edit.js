@@ -1,0 +1,48 @@
+/** Run after chat_latest_control.js: edit the disposable long message through the UI. */
+async page => {
+  page.setDefaultTimeout(10000);
+  const assert = (value, message) => { if (!value) throw new Error(message); };
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await page.reload();
+  await page.getByRole('radio', { name: 'Lecture help', exact: true }).check();
+  const draft = page.getByRole('textbox', { name: 'Your lecture question', exact: true });
+  await draft.fill('Keep my next question in the composer.');
+  const original = page.locator('.message.student').first();
+  const text = await original.locator('.message-content').innerText();
+  await original.getByRole('button', { name: 'Edit message', exact: true }).click();
+  const field = original.getByRole('textbox', { name: 'Revise your message', exact: true });
+  await field.waitFor();
+  assert(await field.inputValue() === text, 'Edit the exact saved text in its original message');
+  assert(await original.locator('.message-content').count() === 0, 'Replace the original text with the editor instead of duplicating it');
+  const box = await field.boundingBox();
+  assert(box.height >= 160 && box.width > 400, 'Provide a generous reading/editing area');
+  const cancel = original.getByRole('button', { name: 'Cancel edit', exact: true });
+  const send = original.getByRole('button', { name: 'Confirm edit & ask again', exact: true });
+  assert(await cancel.innerText() === '' && await send.innerText() === '', 'Use only cross and up-arrow symbols with accessible labels');
+  const a = await cancel.boundingBox(); const b = await send.boundingBox();
+  const editor = await original.locator('.message-edit-box').boundingBox();
+  assert(editor && a.y >= editor.y && b.y + b.height <= editor.y + editor.height && b.x + b.width <= editor.x + editor.width, 'Keep both icon buttons inside the edit textbox border');
+  assert(Math.abs(a.y - b.y) < 2 && b.x > a.x && a.y >= box.y + box.height, 'Keep the buttons bottom right with a separate text area above them');
+  const panel = await page.locator('.transcript').boundingBox();
+  assert(box.y >= panel.y && b.y + b.height <= panel.y + panel.height, 'Keep the expanded editor and its actions visible together when opening it');
+  const inset = editor.x + editor.width - b.x - b.width;
+  assert(inset >= 8 && inset <= 10, 'Inset the icon actions neatly inside the textbox right edge');
+  for (const action of [cancel, send]) assert(await action.evaluate(el => parseFloat(getComputedStyle(el).borderTopWidth)) >= 1, 'Border both icon controls');
+  await field.fill('A temporary change');
+  const compact = await field.boundingBox();
+  const column = await page.locator('.transcript > .chat-column').boundingBox();
+  assert(compact.width < column.width * 0.65, 'Keep short edit textboxes narrower than the chat column');
+  assert(compact.height <= 80, 'Shrink the editor for a short message');
+  assert(await field.evaluate(el => getComputedStyle(el).resize) === 'none', 'Grow automatically without exposing a manual resize handle');
+  await field.fill(Array.from({ length: 12 }, (_, i) => `More detail on line ${i}.`).join('\n'));
+  const expanded = await field.boundingBox();
+  assert(expanded.height > compact.height + 100, 'Expand automatically as the edited text grows');
+  await field.fill('A temporary change');
+  assert((await field.boundingBox()).height <= 80, 'Shrink again when long text is removed');
+  await cancel.click();
+  assert(await original.locator('.message-content').innerText() === text, 'Cancel restores the unchanged original text');
+  assert(await draft.inputValue() === 'Keep my next question in the composer.', 'Editing preserves the composer draft');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Edit message');
+  assert(await original.getByRole('button', { name: 'Edit message', exact: true }).evaluate(el => document.activeElement === el), 'Cancel returns focus to Edit');
+  return 'PASS: in-place exact text, spacious editor, bordered icon actions, cancel/focus and draft preservation';
+}

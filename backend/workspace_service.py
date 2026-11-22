@@ -211,6 +211,7 @@ class WorkspaceService:
         assignment: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
         quick_chat: bool = False,
+        reader_notebook: bool = False,
         parent_notebook_id: str | None = None,
     ) -> dict[str, Any]:
         """Create an owned notebook or quick chat and optionally merge initial metadata."""
@@ -220,6 +221,7 @@ class WorkspaceService:
             support_mode=support_mode,
             assignment=assignment,
             quick_chat=quick_chat,
+            reader_notebook=reader_notebook,
             parent_notebook_id=parent_notebook_id,
         )
         if metadata:
@@ -271,6 +273,14 @@ class WorkspaceService:
         if not self._store.get_thread(thread_id):
             raise ValueError("Notebook not found")
         return self._store.get_messages(thread_id)
+
+    def get_message_bookmarks(self, thread_id: str) -> tuple[int, list[dict[str, Any]]]:
+        """Return active owned bookmarks and revision independently of transcript paging."""
+        return self._store.get_message_bookmarks(thread_id)
+
+    def set_message_star(self, thread_id: str, message_id: str, starred: bool) -> bool:
+        """Persist the owner's desired star state on an active saved message."""
+        return self._store.set_message_star(thread_id, message_id, starred)
 
     def record_learning_signal(self, thread_id: str, message_id: str, kind: str) -> LearningReceipts:
         """Persist one validated explicit rating or UI receipt on an owned answer."""

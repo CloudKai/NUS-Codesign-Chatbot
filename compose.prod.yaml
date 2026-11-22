@@ -41,12 +41,13 @@ services:
       MODEL_PROVIDER: "agentcore"
       MOCK_OPENAI: "false"
       AGENTCORE_QUALIFIER: "DEFAULT"
+      COACH_STREAM_REPLY_DELTAS_ENABLED: "true"
       # Compute affinity is safe because production owner ids are unique
       # Cognito subjects. DSQL remains the canonical transcript/state store.
       AGENTCORE_SESSION_AFFINITY_ENABLED: "true"
       # Bump when publishing a new AgentCore version or changing lifecycle
       # settings so new requests cannot reuse older warm microVM sessions.
-      AGENTCORE_SESSION_GENERATION: "11"
+      AGENTCORE_SESSION_GENERATION: "20261122-streaming"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
       AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"

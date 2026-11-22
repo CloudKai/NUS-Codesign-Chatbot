@@ -1,6 +1,6 @@
 /** CDE2300 lecture and project companion over the shared coaching policy. */
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { useReader } from './useReader';
+import { SIGN_OUT_SIGNAL, useReader } from './useReader';
 import { Conversation } from './Conversation';
 import { ChatNavigation } from './ChatNavigation';
 import { Sources } from './Sources';
@@ -20,7 +20,7 @@ export default function App() {
     if (reader.phase !== 'signed-out' && !(reader.phase === 'error' && reader.error === 'This account cannot access the student workspace.')) return;
     try {
       for (const key of Object.keys(sessionStorage)) {
-        if (key.startsWith('codesign-lecture:') || key.startsWith('codesign-selected:') || key.startsWith('codesign-checkin:') || key.startsWith('codesign-starters:')) sessionStorage.removeItem(key);
+        if (key.startsWith('codesign-lecture:') || key.startsWith('codesign-selected:') || key.startsWith('codesign-checkin:') || key.startsWith('codesign-starters:') || key.startsWith('codesign-review:')) sessionStorage.removeItem(key);
       }
     } catch { /* No persistent draft exists when tab storage is blocked. */ }
   }, [reader.phase, reader.error]);
@@ -223,7 +223,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           open={openChat} openFolder={openFolder} move={reader.moveChat}
           commands={{ rename: reader.renameChat, pin: reader.pinChat, remove: reader.deleteChat, share: reader.shareChat }}/>
         <WorkspaceTools ref={workspaceActions} themeHost={themeHost} settingsHost={settingsHost}
-          session={session} project={folderSettings ? null : reader.project} onPreferences={setPreferences}
+          session={session} onPreferences={setPreferences}
           openSettings={() => { if (view !== 'settings') setSettingsReturn(view); setView('settings'); closeMobileList(); }}
           closeSettings={() => { setView(settingsReturn === 'notebook' && !folder ? 'chat' : settingsReturn); document.getElementById('main')?.focus(); }}
           thread={folderSettings ? folder?.id : selectedChat?.id} disabled={activity || reader.busy}
@@ -257,7 +257,12 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
         <div className="profile">
           <span className="profile-avatar" aria-hidden="true"><Icon name="user"/></span>
           <strong>{preferences?.display_name || session.display_name}</strong>
-          <a ref={accountLink} href={session.kind === 'registered' ? '/api/v1/auth/logout' : '/api/v1/auth/login'}>{session.kind === 'registered' ? 'Sign out' : 'Sign in'}</a>
+          <a ref={accountLink} href={session.kind === 'registered' ? '/api/v1/auth/logout' : '/api/v1/auth/login'}
+            onClick={() => {
+              if (session.kind !== 'registered') return;
+              try { localStorage.setItem(SIGN_OUT_SIGNAL, String(Date.now())); }
+              catch { /* Same-tab logout still uses the server flow. */ }
+            }}>{session.kind === 'registered' ? 'Sign out' : 'Sign in'}</a>
         </div>
       </aside>
       <main id="main" tabIndex={-1} className="reading">
@@ -284,6 +289,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           showStarters={preferences?.starter_prompts ?? true} reduceMotion={preferences?.reduce_motion ?? false}
           summary={reader.chatSummaries[reader.page.notebook.id]} startIntent={startIntents.current[reader.page.notebook.id]}
           intentRequest={intentRequest} busy={reader.busy} externalBlocked={workspaceBlocked} activity={setActivity} refresh={async () => { if (!await reader.open(reader.page!.notebook.id, false, true)) throw new Error('Refresh failed'); }} expired={() => void reader.reload()}
+          locateMessage={id => reader.open(reader.page!.notebook.id, false, true, id).then(result => !!result)}
           loadEarlier={() => reader.open(reader.page!.notebook.id, true).then(() => {})}/> : null}
         </div>
       </main>

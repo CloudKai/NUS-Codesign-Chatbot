@@ -40,17 +40,29 @@ export function ChatActions({ chat, anchor, locked, canMove, commands, onClose, 
       anchor.setAttribute('aria-expanded', 'true');
       const position = () => {
         const row = anchor.getBoundingClientRect();
-        const width = panel.offsetWidth;
-        const height = panel.offsetHeight;
-        panel.style.left = `${Math.max(8, Math.min(row.right - width, window.innerWidth - width - 8))}px`;
-        panel.style.top = `${Math.max(8, Math.min(row.bottom + 4, window.innerHeight - height - 8))}px`;
+        const viewport = window.visualViewport;
+        const left = (viewport?.offsetLeft ?? 0) + 8;
+        const top = (viewport?.offsetTop ?? 0) + 8;
+        const right = left + (viewport?.width ?? window.innerWidth) - 16;
+        const bottom = top + (viewport?.height ?? window.innerHeight) - 16;
+        panel.style.maxWidth = `${Math.max(0, right - left)}px`;
+        panel.style.maxHeight = `${Math.max(0, bottom - top)}px`;
+        panel.style.left = `${Math.max(left, Math.min(row.right - panel.offsetWidth, right - panel.offsetWidth))}px`;
+        panel.style.top = `${Math.max(top, Math.min(row.top - panel.offsetHeight - 4, bottom - panel.offsetHeight))}px`;
       };
       position();
       panel.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true });
+      const observer = new ResizeObserver(position);
+      observer.observe(panel);
+      window.visualViewport?.addEventListener('resize', position);
+      window.visualViewport?.addEventListener('scroll', position);
       window.addEventListener('resize', position);
       window.addEventListener('scroll', position, true);
       return () => {
         anchor.setAttribute('aria-expanded', 'false');
+        observer.disconnect();
+        window.visualViewport?.removeEventListener('resize', position);
+        window.visualViewport?.removeEventListener('scroll', position);
         window.removeEventListener('resize', position);
         window.removeEventListener('scroll', position, true);
       };

@@ -3,6 +3,7 @@ name: Co-design React workspace
 description: A familiar chat workspace with a visible learning path.
 colors:
   accent: "#4d5fb8"
+  star: "#a86900"
   ink: "#171b24"
   surface: "#ffffff"
   rail: "#eceef2"
@@ -11,6 +12,7 @@ colors:
   line: "#e0e3e9"
   selected: "#dfe3f3"
   night-accent: "#a3b8ff"
+  night-star: "#f4c65b"
   night-surface: "#292f3c"
   night-rail: "#17191e"
   night-panel: "#222b3b"
@@ -95,7 +97,24 @@ stage markers express actual ordered stages, never invented scores or rewards.
   shared Sources. The sidebar shows its three most recent chats and a
   link to the full list when there are more.
 - **Composer:** one fixed-height, internally scrollable chat field with a two-option
-  segmented mode switch (native radios, arrow keys). In Design coaching it names the
+  segmented mode switch (native radios, arrow keys). A compact 32px outlined circle inside a 44px tap target
+  is centered above coach check-ins and the suggestions area (expanded or collapsed),
+  directly above the textbox when those are absent. Float it over the transcript
+  with an 8px visible gap to the content below; reserve no blank row. The area
+  outside the button stays transparent and passes pointer interactions through.
+  Only the 32px circle is opaque: three subtle animated dots while
+  watching/checking, wherever the student is reading. When idle the down arrow
+  appears only away from the bottom and hides upon reaching it. Transcript and
+  content resizing update visibility; following stays pinned until the student
+  scrolls away (with a 4px tolerance for fractional layout). It is hidden for an untouched empty
+  chat. Both states scroll smoothly to the latest content and re-enable following,
+  pursuing new output after the first animation ends. Transcript wheel/pointer/key
+  interaction stops that pursuit. App/OS reduced motion uses an instant move. Neither
+  sends, aborts or retries work. The old moving transcript dots are replaced, while
+  textual status/Stop watching/recovery remain. Preserve focus while working; the
+  idle button leaves the focus order when hidden. Respect reduced motion and
+  retain a meaningful accessible name in both states.
+  In Design coaching it names the
   current stage. Preserve explicit intent because only project coaching can recommend
   stage progression. The explicit Start in chat action selects Design coaching.
 - **Home:** shown when no chat is open and from the Home navigation item. Greets the
@@ -127,14 +146,31 @@ stage markers express actual ordered stages, never invented scores or rewards.
   Use in my project, check-in actions) insert editable text through one helper and never send.
 - **Reasoning starters:** short labeled buttons append editable scaffolds while
   preserving existing text. Mobile shows two starters and expands the rest on request.
-- **Review:** Summary shows the saved discussion summary, strengths and areas to improve
-  (each item has Build on this / Work on this), and "How your idea scores": Facione
-  scores as feedback, not a grade, with strongest skill, skill to grow and Practice.
-  Progression contains the Thinking Path, next step, stage decisions, and per-stage
-  saved work with real contribution counts. Feedback items name their stage only when it is
-  not the current one. Strongest skill is one compact line; Grow next is a full-width row.
-  Review opens on Summary unless a stage decision is pending. Coach Markdown
-  renders without raw HTML or inline images.
+- **Review:** Summary has three levels of detail. **Your project so far** is the
+  primary full-width brief with five short labeled passages: Who and why, Problem,
+  Current idea, What matters, Still to explore. Its title has no extra top margin;
+  14px top padding, restrained accent labels and thin separators establish hierarchy
+  without nested cards or decoration. Unknowns use subdued explicit wording.
+  The brief synthesises the entire active saved chat, not just loaded/recent turns.
+  Lecture materials guide the structure; no lecture-connections block is added.
+  **Stage feedback** is one flat accordion group in canonical order. Rows start
+  collapsed and show actual Going well / To work on counts, or No saved feedback
+  yet. Outer count phrases use the same green/yellow semantic tones as their
+  expanded groups; the separator and unassessed caption remain neutral. Expanding retains independent group toggles and exact saved feedback.
+  No stage progress is duplicated here. **How your idea scores** retains compact
+  strongest/grow-next feedback and Practice; All six skill scores reveals the
+  detailed rows and tips on demand. Scores remain feedback, not a grade.
+  Missing brief generation has a live loading note; failures have an explicit
+  retry. No partial, stale or unsupported summary substitutes for a complete one.
+  Server-cached summaries are bound to every active message; failed attempts do
+  not automatically replay on remount. Preview mode never fabricates summaries.
+  Review first opens on Progression, then remembers view and open/closed choice
+  per verified owner/chat in this browser tab. Visibility changes still clear
+  private content and verify the owner before restoring it. Display preferences
+  contain no transcript or feedback; sign-out clears them. Close/header toggle,
+  Escape and drawer backdrop dismiss Review. Jump returns to the original chat
+  message. Mobile Practice/scaffold insertion keeps Review open with a draft status.
+  Coach Markdown remains safe, without raw HTML or inline images.
 - **Settings:** a centered page uses the Figma groups Profile, Appearance,
   Learning, and Your data. Rows align on desktop and stack at narrow widths.
   Theme, appearance switches, and default mode use owner-scoped preferences. Per-chat
@@ -146,6 +182,20 @@ stage markers express actual ordered stages, never invented scores or rewards.
   File rows open previews and disclose secondary actions on demand. The
   drawer title is 24px, section headings are 17px, and compact controls use
   13–14px text with 44px touch targets.
+- **In-place edit:** replace the original student text and action row with a text-sized
+  editor in that same bubble; never duplicate the saved text below it. Measure
+  the longest edited line with the field font: short bubbles start at 260px,
+  longer lines widen up to the available chat width, aligned to the right. Keep the
+  exact original value, a compact 52–360px automatically growing field constrained to the viewport,
+  with automatic shrinking and no manual resize/expand control,
+  and bottom-right bordered 44px cross/up-arrow controls inside its shared textbox
+  border. Reserve a footer beneath the editable text to prevent overlap; the short
+  consequence note stays below the box. Keep an accessible
+  label and the short replacement/draft consequence note. Enter is a newline,
+  Escape/cross cancels with focus returned to Edit, and the up arrow submits
+  through the existing revision operation. Theme hover colours distinguish chat
+  icons and edit actions; saved stars stay gold. Preserve the separate composer
+  draft, stable edit request keys and read-first failed-save recovery.
 - **Recovery:** preserve actionable errors, pending-write checks, disabled states
   and unsaved streaming labels even when simplifying ordinary status copy.
   A pending question or edit offers Check saved answer, Retry same question and Discard and edit.
@@ -164,12 +214,16 @@ stage markers express actual ordered stages, never invented scores or rewards.
   features, prototyping plan, test questions and the story arc. Each shows the lecture week.
   In an opened Review stage the list stays folded behind a "Tools from the course" button.
   Review has three tabs in this order: Progression (stages, next action, tools), Summary
-  (strengths, areas to improve, Facione) and My work (the whole journey, stage by stage in order: every
-  entry the student shared with its full text, the coach summary, and what is going well or to work on).
-  Each stage folds and shows a status badge (Done, Current, Started, Not started) and its entry count. The current
-  stage opens first, "Expand all" opens the rest, and the "Your work" link on a stage in Progression opens that stage here.
-  One-word commands such as "move" and an unedited "I want to practise …" starter are not listed
-  as work (`isStudentWork` in `coachingContent.ts`), so the lists stay short as the chat grows.
+  (wide project summary, stage-by-stage feedback, Facione) and My work (only messages
+  the owner explicitly starred). Bookmarks keep the original saved stage and author;
+  only Lecture Help has a mode tag. The five stage groups stay in canonical order,
+  with counts and guidance for empty groups. The current group opens first. A
+  populated No stage group follows them and starts collapsed. Stage links in
+  Progression open that stage's starred messages. Each preview offers Jump to message
+  and Remove star; jumps load older history if needed, close Review, focus the exact
+  original and highlight it for six seconds. These controls keep 44px phone targets.
+  Save failures appear inside My work as well as the Chat status. Feedback remains
+  in Summary; My work does not automatically collect transcript or feedback.
   Do not add frameworks that are not in the notes. The empathy map is included at the owner's
   request. The Week 3 slides are not in `lecture_notes/`, so it uses the standard Says, Thinks,
   Does, Feels quadrants (see `COURSE_CONTENT.md`).
@@ -187,6 +241,27 @@ stage markers express actual ordered stages, never invented scores or rewards.
 - **Project summary:** the Review header has a download button that saves a Markdown
   copy of the summary, strengths, areas to improve, scores and each stage's work.
   It is built in the browser from the project view; nothing is invented.
+
+## Saved-message presentation
+
+Saved stars use the semantic gold token (`--star`) with a solid fill in Chat and
+My work, plus a subtle gold tint behind selected Chat actions. Outline vs solid,
+pressed state, accessible names and colour work together. The saved-star selector
+must outrank the shared pressed-action style; changing the icon fill alone leaves
+it indigo. Useful-answer feedback retains its existing accent styling.
+
+My work has one containing surface. Each stage is an accent-coloured disclosure
+with a saved-count badge; expanded content is inset below it along a subtle 1px
+guide. Flat message entries use author → content → actions hierarchy and fine
+separators, with a larger gap before the next stage. Jump is a quiet text action;
+the gold star removes that saved item. Previews are server-limited to 320 characters
+and visually limited to six lines, with a height bound for nested Markdown. A
+newline-heavy entry must not turn into a wall of text. Full originals remain
+available through Jump. Preview links render as text so clipping cannot leave
+invisible keyboard links; original chat links stay active. There are no nested
+message cards or new
+stage-colour legends. Named stage regions/lists and count descriptions convey
+parentage without relying on colour. All stage/action controls are at least 44px.
 
 ## Do's and Don'ts
 - Do use icons for familiar actions and text for ambiguous learning choices.

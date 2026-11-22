@@ -2,6 +2,598 @@
 
 ## Current status
 
+### Lecture Help greeting and mode guidance (2026-11-23 SGT)
+
+Lecture Help now answers a bare greeting without attachments with a short course
+question prompt, without retrieval or a model call. Other lecture turns include
+explicit course Q&A instructions so prior design coaching does not steer the
+reply. The existing evidence scope and student-confirmed progression rules
+still apply to substantive turns. Authenticated reader, evidence scope and
+provider contract checks cover the change. No schema or runtime build change.
+Rollback restores the previous app build. Next action is local preview review
+before any production rollout.
+
+### Click-to-summarise and simpler student settings (2026-11-23 SGT)
+
+The filled **Summarise chat** button sits above the project brief fields and
+explains on hover and keyboard focus that it summarises the whole chat. Opening
+Summary reads saved state without starting generation. The settings page drops
+the duplicate export area and reasoning effort field. Review still downloads
+the project, and chat actions still share or download the transcript. Chat
+name, assignment context, and deletion remain in the current chat/notebook
+section. The student response defaults are read-only English and the configured
+model. Production chat is configured for Claude Haiku 4.5, and the mock preview
+labels its mock coach accurately. Normal sends and both edit paths request
+English for React without rewriting older preferences or changing the legacy
+Streamlit path.
+
+Focused HTTP, frontend build and disposable browser checks passed, including
+click-to-generate, hover/keyboard, cached and failed states, download and
+Light/Dark layouts down to 390 px. The full mock suite passed 3,182 tests with
+one optional skip. Local preview is refreshed at port 8081.
+No schema or runtime change is needed. Rollback restores the previous app build.
+Next action is user review before any production deployment.
+
+### Legacy chats, composer Stop and session continuity (2026-11-23 SGT)
+
+- The React sidebar projects all unmarked old conversations as standalone
+  chats without rewriting their saved IDs, history or sources. New React
+  notebooks carry an explicit settings marker. Older folders created before
+  that marker also appear as chats. Existing saved parent source scope stays
+  available. No database schema migration or data rewrite.
+- The composer shows bouncing dots and an icon button that requests cancellation
+  of the exact authenticated stream. Before save, the unfinished reply is
+  discarded and the prompt remains available. A turn already saving can finish.
+  Provider-stream closure is best effort. A previously recorded edit revision
+  remains retryable with its original key.
+- The chat actions menu opens upward and clamps to the visible viewport after
+  its settings load. Quick tab switches keep the open chat and Review in memory.
+  Quiet session checks are throttled to one minute. Explicit sign-out signals
+  other tabs without storing any private data.
+- The disposable browser passed Stop, prompt retention, menu bounds at 1440 px
+  and 390 px in Light and Dark, keyboard open/close, and zero session requests
+  during a quick tab switch with Review open. Final console was clear. Focused
+  HTTP covered owner-scoped cancellation, preservation during the save race,
+  retry and restored folder/chat identities. Build, compile, and Caddy checks
+  passed. Local preview refreshed on port 8081.
+- Deployed to the existing CloudFront app as `workspace-20261123-73468aa6ca11`.
+  Host readiness and public health passed. CloudFront serves React bundle
+  `index-B73H7hra.js`; the new Stop route returns 401 without credentials, and
+  internal readiness remains private. The exact image passed a network-free
+  mock smoke. The full mock run passed 3,181 tests with one optional skip.
+  AgentCore DEFAULT remains ready on v36. No live generation or migration ran.
+- Rollback: restore the previous app image and Caddy configuration from
+  `releases/before-workspace-20261123-73468aa6ca11` on EC2. Existing settings and
+  database rows need no rollback. Next action: student review on the live app.
+
+### React and AgentCore streaming live on the existing app (2026-11-23 SGT)
+
+The production student workspace serves the approved React/Review update.
+AgentCore DEFAULT v36 is ready, and the app is healthy with session generation
+`20261122-streaming-v36`. All five paid prompts streamed and saved. PDF grounding,
+confirmed progression, edited-message image retention and notebook source reuse
+were verified. Two image answers guessed the meaning of a visible marker. No
+schema migration or IAM changes. The previous app and v35 are retained for
+rollback. The [production validation report](specs/PRODUCTION_STREAMING_VALIDATION.md)
+records exact artifacts, timings, answer quality, persistence and follow-up.
+
+
+### Normal, edited and AgentCore LLM reply streaming implemented locally (2026-11-22)
+
+Regular sends and edits now share the NDJSON partial-reply lifecycle. Deltas are
+on by default for capable clients; legacy JSON edits and clients without the
+header keep their contracts. Direct Bedrock and optional OpenAI forward actual
+provider fragments. AgentCore Fast Chat requests the updated runtime's SSE
+protocol, forwards Strands tool-input fragments while generation is running,
+and extracts only top-level response_text in FastAPI. Only validated final
+output is persisted. Failed/repaired attempts withdraw their earlier previews.
+No extra model call simulates typing. Edited-message revision, attachments/intent,
+usage/provenance, exact-key recovery and separate composer drafts are preserved.
+Reduced motion keeps reply text visible. Caddy flushes stream responses promptly.
+
+- **Files:** settings/example configuration, Caddy files, AgentCore provider plus
+  `backend/agentcore_stream.py`, optional OpenAI provider, runtime main/README,
+  shared streaming/revision service, canonical/reader HTTP routes, Conversation,
+  HTTP/provider/runtime/route tests and browser fixtures/regressions. Guides and
+  detailed rollout: [streaming handoff](specs/REPLY_STREAMING_HANDOFF.md).
+- **Validation:** red/green cycles covered default enablement, provider fragments,
+  runtime delivery before completion, streamed edits, and discard before retry.
+  **236 focused**, **3,180 full mock tests passed** (one existing optional-SDK
+  module skipped in the application venv). A separate temporary environment with
+  exact runtime pins passed **16 SDK tests**, including real Strands callbacks
+  through the public runtime entrypoint before the fake model finished; dependency
+  diagnostics reported no AWS/paid calls. An older optional recovery test now uses
+  an invalid recommendation rather than null, matching the existing default-to-stay
+  change while retaining the two-turn repair check. Dependency warnings remain.
+- **Browser/startup evidence:** real mock-server chunks visibly grew for normal
+  and edited replies at 1440/390 Light/Dark with app/OS reduced motion, no replay,
+  no provisional saved actions and clean console. Scroll, edit/failure recovery,
+  bookmark and Summary regressions passed. Public messages/project/bookmarks
+  remained identical across a disposable backend restart. Production-style Caddy
+  delivered the first mock delta at 0.456s and done at 1.220s (delivery fixture
+  timings, not LLM performance). Production build/typecheck, compileall, Caddy
+  validation, documentation links and whitespace checks pass. Evidence lives in
+  `/private/tmp/llm-streaming-qa/`; screenshots are ignored under
+  `output/playwright/reply-streaming/`.
+- **Compatibility/rollback:** no migration or data rewrite. Existing user work
+  and startup script preserved. The user preview on 8081 was rebuilt/restarted in
+  mock mode; health/Streamlit respond, and the new proxy route reaches credential
+  checks (401 without credentials). Set `COACH_STREAM_REPLY_DELTAS_ENABLED=false`
+  and restart for backend rollback; legacy JSON routes remain. Runtime rollback
+  uses the previous READY qualifier on the existing ARN. No staging, commit,
+  deployment, IAM edit or paid LLM request occurred.
+- **Risks/remaining rollout:** code is locally implemented and mock/SDK verified,
+  but the existing AWS runtime/app have **not** been republished. They need the
+  compatible app parser then updated runtime on the existing ARN before live
+  AgentCore fragments appear. No live-LLM performance or production rollout claim
+  is made. Mobile QA uses browser emulation, not a native software keyboard.
+- **Next exact action:** review the streaming handoff and approve publication to
+  the existing application/runtime if wanted. Any paid live smoke check also
+  needs an explicit request/token/cost cap. Local mock review remains on 8081.
+
+### Text-sized edit width and reply-streaming audit (2026-11-22)
+
+Short edit bubbles now start at 260px, aligned with the student's original
+right-hand bubble. The longest edited line is measured in the field font;
+longer text widens the editor up to the chat column, and height remains automatic.
+The icons stay inside the bottom-right footer without covering text. Removing
+text shrinks the editor; there is no manual resize control.
+
+The separate streaming check confirms regular sends use FastAPI
+`StreamingResponse` with NDJSON, and React reads its body incrementally. Actual
+provider reply fragments require the default-off `COACH_STREAM_REPLY_DELTAS_ENABLED`
+flag plus the client header (already sent by React). Direct Bedrock supports
+`converse_stream`; AgentCore reads/assembles its result and emits no incremental
+reply fragments. Revised-message sends use a regular JSON response. The local
+preview forces mock providers, so this audit makes no live-LLM claim.
+
+- **Files:** Conversation sizing, edit-width CSS, both message-edit browser
+  regressions, React README/design, testing guide and this status entry. Streaming
+  code/configuration is inspected only and unchanged.
+- **Validation:** rendered red/green caught the full-width short editor, followed
+  by Light/Dark desktop/390 short/long widths, automatic height, icon containment,
+  hover/keyboard, save/reload, draft and failed-edit recovery checks. Smooth-scroll
+  and saved-preview regression remains passing. Production build/typecheck,
+  documentation links and whitespace checks pass. All **110 streaming/provider
+  mock tests passed**. A disposable HTTP request confirmed NDJSON and five received
+  chunks with progress/final-preview/save events under default-off configuration.
+  Evidence: `/private/tmp/codesign-latest-control/width-*.log`,
+  `streaming-audit-tests.log` and `streaming-http-check.log`.
+- **Compatibility/rollback:** no API, schema, data or provider changes; undo only
+  the width measurement and edit-width CSS, then rebuild, to restore full width.
+  Existing user work remains intact; no paid call, staging, commit or deployment.
+- **Risks:** HTTP streaming is not equivalent to token-by-token model output;
+  AgentCore and revision responses need separate work for that behavior. Mobile
+  width checks are emulated rather than native software-keyboard QA.
+- **Next exact action:** refresh port 8081 and edit short/long messages. A future
+  token-streaming phase should begin at the provider/transport boundary, especially
+  AgentCore and revision handling; no streaming setting was enabled here.
+
+### Compact automatic edit sizing without resize controls (2026-11-22)
+
+Short edited messages use a compact one-line field (52px minimum), grow with text
+up to 360px/the viewport cap, and shrink again as text is removed. The manual
+resize handle is removed. Cross/up-arrow icons retain their inset bottom-right
+footer, borders, hover colours, 44px targets and separate text space.
+
+- **Files:** edit textarea CSS, both message-edit browser scripts, React
+  README/design, testing guide and this status entry. Existing one-row/52px sizing
+  in Conversation is preserved and validated.
+- **Validation:** rendered red/green caught the remaining resize handle. Checks
+  cover short-to-long-to-short sizing, Light/Dark desktop/390 compact/long states,
+  icon containment/hover, keyboard, save/reload, draft preservation and failed-edit
+  recovery; the smooth-scroll/saved-preview regression remains passing. Production
+  build/typecheck, local documentation links and whitespace checks pass. Evidence:
+  `/private/tmp/codesign-latest-control/autoheight-*.log`; compact screenshots use
+  ignored `output/playwright/latest-control/edit-compact-*.png`.
+- **Compatibility/rollback:** presentation only; no API, schema or data change.
+  Restore `resize: vertical` to undo handle removal, then rebuild. Existing user
+  work is preserved; no paid call or Git publication. Python is unchanged, with
+  the preceding 3,168 passed / one skipped full mock baseline.
+- **Risks:** no known blocker; mobile widths are emulated rather than native
+  software-keyboard QA. Very long edits scroll inside the automatic height cap.
+- **Next exact action:** refresh port 8081, edit a short message, add/remove lines
+  and inspect automatic sizing with the two icons still inside the box.
+
+### Edit icons inside the textbox (2026-11-22)
+
+The edit cross/up arrow now sit at bottom right inside the textbox's shared
+border, matching the composer's structure. A reserved footer keeps both icons
+clear of long scrolling text. Borders, hover colours, 44px targets, accessible
+names, keyboard actions and the short replacement/draft note are retained.
+
+- **Files:** Conversation, styles, both message-edit browser scripts, React
+  README/design, testing guide and this status entry.
+- **Validation:** rendered red/green checks cover containment and inset placement,
+  reserved text space, Light/Dark desktop/390, hover, keyboard, cancel/focus,
+  successful revision/reload and failed-edit recovery without write replay.
+  Production build/typecheck, documentation links and whitespace checks pass.
+  Evidence: `/private/tmp/codesign-latest-control/inside-*.log`; screenshots under
+  ignored `output/playwright/latest-control/edit-*.png`. Python code is unchanged;
+  preceding full mock baseline is 3,168 passed / one skipped.
+- **Compatibility/rollback:** presentation only; no API, schema or data change.
+  Restore this phase's edit-box wrapper/footer CSS and rebuild to undo. Existing
+  user work/startup script preserved; no paid calls or Git publication.
+- **Risks:** no known blocker; mobile QA uses browser width emulation rather than
+  a native software keyboard.
+- **Next exact action:** refresh port 8081, open Edit on a message and check the
+  inset cross/up arrow and their hover colours.
+
+### Smooth latest scrolling and in-place message editor (2026-11-22)
+
+The floating circle scrolls smoothly through the chat, then resumes following.
+If a reply moves the destination during the animation, scrolling continues to
+the new bottom. Transcript wheel/pointer/key interaction stops automatic pursuit.
+App/OS reduced-motion preferences use an instant move. Existing dots, idle
+visibility, transparent surround, compact size and 8px hints gap remain.
+
+Edit now replaces the original student text/actions in that same message bubble
+with a wider, auto-growing field (160–360px with a viewport cap), without showing
+the saved text twice. Bordered 44px cross and up-arrow icons sit at bottom right,
+with accessible names/tooltips, theme hover colours and a short consequence note.
+Enter adds a newline; Escape/cross cancels and restores Edit focus. Chat symbols
+also gain hover colours while saved stars retain gold. Existing revision requests,
+read-first recovery and the separate composer draft remain intact. Failed-edit
+discard restores both the draft and attempted edit together.
+
+- **Files:** Conversation and styles; existing latest-control browser scripts;
+  new `tests/browser/message_edit.js` and `message_edit_qa.js`; React README/design,
+  testing guide and this status entry.
+- **Validation:** separate red/green cycles reproduced instant movement and the
+  duplicated/cramped editor. Browser checks cover intermediate smooth motion,
+  output arriving during animation, reduced motion, desktop/900/390 Light/Dark,
+  floating-control placement, keyboard, hover, exact original text, bounded large
+  editor, empty-value prevention, one successful revision/reload and failed-edit
+  recovery without write replay. Existing bookmark and Summary regressions pass.
+  All **19 focused** and **3,168 full mock tests passed** (one existing skip;
+  dependency warnings retained). Production build/typecheck, compileall, local
+  documentation links and whitespace checks pass. The design detector reports
+  existing style conventions, with no new blocking finding. Test evidence
+  is under `/private/tmp/codesign-latest-control/` (`smooth-*`, `edit-*`, `final-*`);
+  screenshots remain under ignored `output/playwright/latest-control/`.
+- **Compatibility/rollback:** presentation only; no API, schema, provider or data
+  change. Undo only this phase's frontend hunks and rebuild; no DB restore. Existing
+  user work/startup script preserved. No paid calls, staging, commit or deployment.
+- **Risks:** no known runtime blocker; phone widths/reduced motion are browser
+  emulation, not native software-keyboard/device QA. Existing dependency warnings
+  and process-local tests-package binding remain.
+- **Next exact action:** refresh port 8081, scroll up and click the circle; then
+  edit a message to review the larger in-place field and bottom-right icons.
+
+### Latest circle floats transparently with an 8px gap (2026-11-22)
+
+The compact control now overlays the transcript, centered 8px above coach hints,
+expanded suggestions, Show suggestions or the composer when those are absent.
+It reserves no blank horizontal band. Only its circle is opaque; surrounding
+text remains visible and pointer interactions pass through outside the button.
+The 44px tap target, working dots and scroll-aware idle visibility are retained.
+
+- **Files:** frontend styles, `tests/browser/latest_above_hints.js`, React
+  README/design, testing guide and this status entry.
+- **Validation:** the rendered test measured the previous 13px visible gap, then
+  passed at 8px with transcript overlap and pointer hit-testing around the circle.
+  Light/Dark desktop/390 expanded/collapsed/check-in states, keyboard and console
+  checks passed. Working/idle regressions also cover 1440/900/390, reduced motion,
+  no request replay and unchanged saved previews/full originals. Production
+  build/typecheck passed. Evidence: `/private/tmp/codesign-latest-control/floating-*.log`.
+- **Compatibility/rollback:** CSS presentation only; no data, API or schema
+  change. Restore the previous row positioning and rebuild to undo. Existing
+  uncommitted work remains intact; no paid call or Git publication.
+- **Risks:** the circle intentionally covers a small area of text while floating;
+  its surroundings remain readable/selectable. Widths are browser-emulated.
+  Backend code is unchanged and retains the preceding full mock-suite baseline.
+- **Next exact action:** refresh port 8081, scroll up, and expand/hide suggestions
+  to review the transparent floating circle and tighter gap.
+
+### Compact latest control above hints (2026-11-22)
+
+The working/latest circle is now visually 32px with a 16px arrow and smaller dots,
+while retaining a 44px invisible tap/keyboard target. Its entire row sits above
+coach check-ins, expanded suggestions and the collapsed Show suggestions control;
+when these are absent it sits above the textbox. Existing generation and
+scroll-aware visibility behavior is preserved.
+
+- **Files:** Conversation, styles, latest-control browser test plus the new
+  `tests/browser/latest_above_hints.js`, React README/design, testing guide and
+  this status entry.
+- **Validation:** separate red/green cycles reproduced the oversized circle and
+  below-hints position. Production build/typecheck passed; rendered checks cover
+  check-in, expanded/collapsed suggestions, Light/Dark desktop/390, keyboard,
+  clean console, working/idle scroll behavior and saved-preview preservation.
+  Evidence is under `/private/tmp/codesign-latest-control/sizing-*.log` and
+  `placement-*.log`; screenshots remain under ignored `output/playwright/latest-control/`.
+- **Compatibility/rollback:** presentation only; no data, API or schema change.
+  Restore this phase's CSS and row order, then rebuild, to undo. Existing user
+  work and local server remain intact; no paid calls or Git publication.
+- **Risks:** no known blocker; mobile widths are browser-emulated. Backend code
+  is unchanged and retains the preceding mock-suite baseline.
+- **Next exact action:** refresh port 8081 and scroll up in Design coaching;
+  expand/hide suggestions to inspect the compact circle above either state.
+
+### Latest arrow follows scroll position (2026-11-22)
+
+The idle down arrow appears only when the student is away from the bottom and
+hides upon reaching the latest message, by button, keyboard or manual scroll.
+Working dots remain visible during generation regardless of scroll position.
+The control row also disappears when idle at the bottom, reclaiming its space.
+Transcript/content resizing updates the state, with a 4px rounding tolerance;
+a student who scrolls away keeps their place while new output arrives.
+
+- **Files:** `frontend/src/Conversation.tsx`, the two latest-control browser
+  scripts, React README/design, testing guide and this status entry.
+- **Validation:** the rendered regression failed against the previous always-on
+  arrow, then passed. Light/Dark 1440/900/390 checks cover working dots at the
+  bottom, idle visibility, small/manual scrolling, Enter/Space, reduced motion,
+  no extra requests, unchanged preview bounds and intact originals. Production
+  build/typecheck and bookmark/Summary regression results recorded with browser
+  logs in `/private/tmp/codesign-latest-control/visibility-*.log`.
+- **Compatibility/rollback:** presentation only; no API, storage, data or schema
+  change. Revert this scroll-visibility change and rebuild to restore the previous
+  always-visible arrow. Existing uncommitted work and user server preserved.
+- **Risks:** no known blocker; responsive QA uses browser emulation. Python code
+  is unchanged; the preceding full mock suite is the backend baseline.
+- **Next exact action:** refresh port 8081, scroll up to reveal the arrow, then
+  return to the latest message to see it hide; send a mock question for dots.
+
+### Working/latest circle and bounded My work previews verified (2026-11-22)
+
+Chat now has a centered 44px circle directly above the textbox: three dots while
+watching/checking a reply, then a down arrow when idle. Either state scrolls to
+the bottom and resumes following. It never sends, aborts or retries a request;
+textual status, Stop watching, recovery, draft and intentional scroll behavior
+remain. Dot motion respects preferences; clean empty chats hide the control.
+
+My work already had a **320-character API preview limit**. A newline-heavy
+320-character sample still occupied eleven lines, so previews now have a **six-line
+visual cap**. Full originals remain intact through Jump. Clamped coach Markdown
+keeps formatting with display-only links to prevent invisible clipped focus targets;
+full original links stay active.
+
+- **Files:** Conversation, Icon, CoachText, ThinkingPath and styles; two rendered
+  browser regressions; React README/design, testing guide and this status entry.
+- **Validation:** red/green tests caught the missing working control and the
+  newline-heavy overflow. New desktop/900/390 Light/Dark checks verify state
+  changes, 44px placement, keyboard scroll, reduced motion, no request replay,
+  intact saved replies/originals and preview bounds. All 25 focused and **3,168
+  full mock Python tests passed** (existing namespace binding). Build, compileall,
+  whitespace, links and existing bookmark/Summary regressions passed. Visual
+  inspection confirmed the circle and capped previews; the design detector found
+  existing style conventions, with no new blocking issue.
+- **Compatibility/rollback:** frontend-only; no API, persistence, schema, provider
+  or data changes. Revert only this phase's frontend changes and rebuild; no DB
+  restore. Existing user work/startup script preserved. No paid call, staging,
+  commit or deployment. User server remains available with the rebuilt frontend.
+- **Risks:** no known runtime blocker; existing dependency warnings/import
+  workaround remain. Preview content is deliberately abbreviated; Jump opens
+  the full original. Browser motion/widths are emulated, not native OS-device QA.
+- **Next exact action:** refresh port 8081 and send a mock message; inspect the
+  circle while working/finished and a long saved preview in My work.
+
+### Outer feedback count colours matched (2026-11-22)
+
+Summary stage rows now show the Going well phrase/count in the same green as
+its expanded feedback, and To work on in the same yellow/amber. The separator,
+stage heading and No saved feedback yet caption remain neutral. Labels, exact
+counts, screen-reader descriptions and collapse controls are unchanged.
+
+- **Files:** `frontend/src/ThinkingPath.tsx`, `styles.css`, React README/design
+  and this status entry. No backend/API/data/provider or migration change.
+- **Validation:** frontend build, existing saved/empty Summary browser checks
+  and direct expanded/outer colour comparisons at desktop/390px in Light/Dark.
+  Wrapping/disclosures, whitespace and affected documentation links checked.
+  Python was not rerun for this isolated JSX/CSS change; the unchanged backend's
+  latest full mock run remains 3,168 passing tests.
+- **Compatibility/rollback:** revert only the count spans/colour rule and rebuild;
+  no data restore. Previous work and user server preserved. No paid call,
+  staging, commit or deployment. No known blocker.
+- **Next exact action:** refresh port 8081 and inspect the collapsed stage counts.
+
+### Saved-star visibility and My work hierarchy verified (2026-11-22)
+
+Saved stars now render as solid gold in Chat and My work; unstar restores an
+outline. The repro confirmed correct saved/pressed state, but a more-specific
+shared action rule forced indigo and the original fill was almost transparent.
+The fix corrects that CSS override without changing persistence.
+
+My work now has accent stage headers, actual saved-count badges, named parent
+regions, inset entries with a subtle guide, clear separators and quieter Jump
+controls. Canonical grouping, previews/labels, removal, exact jumps, independent
+collapse, keyboard access and 44px controls are preserved in both themes.
+
+- **Files:** ThinkingPath JSX/styles, one new rendered regression and affected
+  React/testing guides. Detailed diagnosis, file list and evidence are in the
+  [bookmark handoff](specs/STARRED_MESSAGES_HANDOFF.md#star-visibility-and-my-work-refinement-2026-11-22).
+- **Validation:** 25 focused and **3,168 full mock Python tests passed**, no
+  failures/skips. New Light/Dark 1440/900/390 browser checks, the existing main
+  bookmark regression and both Summary regressions passed. Build, compileall,
+  whitespace and local links passed; desktop/phone captures inspected.
+- **Compatibility/rollback:** no API/schema/data/provider change or migration.
+  Previous #30/#31/brief work and user startup script preserved. Revert only this
+  refinement's JSX/CSS and rebuild; no DB restore. No paid call, commit or deployment.
+- **Risks:** no runtime blocker; existing dependency warnings/import workaround
+  remain. User server stays available with the rebuilt frontend.
+- **Next exact action:** refresh port 8081 and inspect Chat stars / My work.
+  No further implementation phase is pending.
+
+### Whole-chat project brief and clean Summary implemented (2026-11-22)
+
+Summary now leads with **Your project so far**, synthesising the complete active
+chat into Who and why, Problem, Current idea, What matters and Still to explore.
+It replaces recent prompts/recap, retains uncertainty and explicit unknowns, checks
+exact student evidence, caches by whole-chat identity/content and rejects stale or
+partial output. Provider failures require explicit retry. The lecture materials
+shape the categories rather than becoming a lecture-connections block.
+
+The Impeccable refinement makes the brief primary with a tighter title gap,
+consolidates stage feedback into one compact group with real saved counts and
+independent disclosures, and puts six detailed skill scores/tips on demand while
+retaining strongest/grow/Practice. Download immediately includes a new brief.
+Review persistence, privacy and all saved feedback remain.
+
+- **Files:** focused brief service/types/prompts, provider transport, metadata key,
+  reader projection/POST, usage and proxy allowlists; React brief/Review/export and
+  styles; HTTP/browser tests and guides. See the full file list and evidence in the
+  [project brief handoff](specs/PROJECT_BRIEF_HANDOFF.md).
+- **Validation:** 160 focused and **3,168 full mock Python tests passed**, no
+  failures/skips. Red/green HTTP/browser cycles, full-history/unknown/evidence/cache/
+  retry/ownership checks, build/compile/proxy/whitespace/link checks and rendered
+  Light/Dark desktop/390px QA are recorded in the handoff. Existing Summary,
+  Review persistence and starred-message journeys are preserved.
+- **Compatibility:** additive optional settings-text cache, no schema migration,
+  personal-data edit or Streamlit source change. Existing #30/#31 and the user's
+  startup script are preserved. Roll back this phase's app/UI/proxy changes and
+  rebuild; old apps ignore optional caches. No DB restore, paid call, staging,
+  commit or deployment.
+- **Known limits:** the local app uses mock replies and honestly shows an
+  unavailable summary preview. Populated QA uses a scripted model boundary.
+  Real summaries need a configured model and matching AgentCore Review runtime;
+  no live semantic-quality validation or deployment is claimed. Context budgets,
+  per-owner local cache locking and existing dependency warnings remain.
+- **Next exact action:** refresh the local app at 8081 and inspect Summary. No
+  further implementation phase is pending. Any live test needs an approved cap;
+  staging/commit/deployment require separate authorization.
+
+### Review refinements verified locally (2026-11-22)
+
+Summary now provides independent stage/Going well/To work on disclosures and a
+Chat overview quoting recent saved student prompts with the unchanged, explicitly
+partial saved coach recap. Redundant stage progress is removed from Summary.
+Review restores its open/closed choice and selected view per verified owner/chat
+through visibility resets, navigation and reload. Private content still clears
+and is fetched again. Mobile Practice keeps Review open with a draft confirmation;
+explicit close actions and #31's original-message navigation remain intentional.
+
+- **Files/evidence:** React ThinkingPath, Conversation, App and styles; five new
+  rendered-browser scripts and two adapted Summary fixtures; React/docs guides.
+  Details, root cause, interaction choices and commands are in the
+  [Review handoff](specs/REVIEW_REFINEMENTS_HANDOFF.md).
+- **Validation:** four red/green behavioral slices, all 32 focused Python tests
+  and all **3,163 mock Python tests passed**, no failures/skips. Existing test-namespace
+  workaround retained. New browser checks, both Summary regressions and the main
+  starred-message regression passed. Real API restart preserved identical public
+  project/transcript/bookmarks and restored open Summary. Final frontend build,
+  compileall, whitespace and local-link checks passed.
+- **Browser:** rendered Light/Dark at 1440/900/390; keyboard, 44px targets, wrapping,
+  no Review writes, clean unexpected-error checks, chat/owner isolation and explicit
+  closes passed. Screenshots inspected. Native hidden-tab signaling is suppressed
+  by the test browser; visibility events were supplied explicitly, with real
+  navigation away/back and reload tested separately. See handoff for this limit.
+- **Compatibility/rollback:** frontend-only change, no API/schema/data migration,
+  paid call or personal-data edit. Only display choices enter tab-session storage.
+  Roll back this phase's frontend changes/rebuild; no DB restore. Existing #30/#31
+  work and user startup-script edits preserved. No staging/commit/deployment.
+- **Risks:** blocked tab storage prevents remount restoration; overview excerpts
+  deliberately cover only recent prompts, and the saved recap may be stage-scoped.
+  Existing dependency warnings remain. No runtime blocker. User API/Streamlit
+  health passed; final rebuilt app remains available at port 8081.
+- **Next exact action:** refresh the local app and inspect Review → Summary.
+  No further implementation phase is pending; any staging/commit/deployment
+  requires separate authorization.
+
+### Starred messages #31 verified; both approved tickets complete locally (2026-11-22)
+
+Chat now saves stars for either author. My work contains only those bookmarks,
+grouped by saved stage with bounded previews, author/lecture labels, Remove star
+and exact original-message jumps, including messages outside the loaded page.
+No stage is collapsed and present only when populated. Keyboard/mobile controls,
+visible failure feedback and GET reconciliation are included. Summary #30 remains
+intact; Progression's saved-work links now point to that stage's stars.
+
+Implementation spans the reader API, workspace service, existing message metadata,
+DSQL write inventory and React workspace; five new authenticated HTTP tests and
+three rendered-browser regressions cover acceptance. Full file list, red/green
+history, evidence and repeatable commands are in the
+[bookmark handoff](specs/STARRED_MESSAGES_HANDOFF.md).
+
+- **Validation:** all 44 focused tests and all **3,163 mock Python tests passed**,
+  no failures/skips. Full suite uses the documented process-local test namespace
+  binding for this machine's installed `tests` package collision. Final React build,
+  Python compilation, diff whitespace and affected local doc links passed.
+- **Browser/startup:** real 1440/390 Light/Dark checks passed for star/unstar,
+  bookmark-only My work, failure retention, mode tags, old-page jumps, focus and
+  highlighting, reload, keyboard, 44px targets and clean unexpected-error checks.
+  Imported No stage/removal/empty states passed. Both #30 Summary regressions passed.
+  Actual API restart preserved identical public bookmark/transcript/project JSON
+  and reloaded rendered stars. FastAPI and Streamlit startup health returned 200.
+  Disposable services/browser were stopped after validation.
+- **Compatibility/rollback:** no schema migration or personal data changes. Strict
+  booleans merge into existing message metadata; active ownership/revision checks
+  exclude superseded messages and edits do not inherit stars. Roll back application
+  changes/rebuild; the old app safely ignores stored booleans. User startup-script
+  changes are untouched. No staging, commit, deployment or paid API call.
+- **Risks:** dependency warnings and the existing test-import workaround remain.
+  Bookmark reads scan active history; no index/schema was added for this local
+  prototype. No runtime blocker remains. Evidence is under
+  `/private/tmp/codesign-stars-31/` and ignored `output/playwright/stars-31/`.
+- **Next exact action:** review both approved tickets' local changes, starting with
+  `frontend/src/ThinkingPath.tsx` and the handoff. No further implementation ticket
+  is pending; staging/commit/deployment require separate authorization.
+
+### Summary #30 verified; bookmarks #31 next (2026-11-22)
+
+Summary now renders its saved project summary at full panel width, each Thinking
+Path stage's saved Going well and To work on feedback in canonical order, then
+the existing Facione scores, tips and Practice action. Missing feedback is
+explicitly unassessed; phone feedback groups have readable separation. My work
+still has its existing journey until #31 replaces it with bookmarks.
+
+Changed implementation: `frontend/src/ThinkingPath.tsx` and
+`frontend/src/styles.css`; added two rendered-browser regressions under
+`tests/browser/`. Updated React README/design and the testing guide. Detailed
+evidence, file list, commands and #31 entry point are in the
+[Summary handoff](specs/STAGE_REVIEW_SUMMARY_HANDOFF.md).
+
+- **TDD and browser evidence:** missing ordered stage feedback and missing group
+  spacing each failed before their implementation. Both browser regressions pass.
+  Real 1440 px and 390 px Light/Dark QA verified exact saved wording, stage order,
+  full-width summary, empty states, wrapping/spacing, unchanged score values,
+  tips/Practice, keyboard tabs, reload, no Review POSTs and a clean console.
+  API restart preserved the entire project response and rendered Summary.
+- **Focused/full validation:** all 11 focused student-journey/notebook-reader HTTP
+  tests passed. TypeScript/Vite build and Python compilation passed. All **3,158
+  mock tests passed**, no failures or skips. The standard build's pytest collection
+  encounters an installed `tests` package shadowing this repository; the full run
+  explicitly bound the local test namespace without changing files or excluding
+  tests. Exact command is in the handoff. Dependency deprecation warnings remain.
+  FastAPI and Streamlit health/startup passed on disposable data; both test services
+  and the test browser were stopped afterward.
+- **Compatibility/rollback:** no API, schema, stored data, provider, prompt or
+  configuration changes. Existing saved assessments and summary fallback are
+  reused. Roll back only the frontend changes and rebuild. The user's startup
+  script edits are untouched. No staging, commit, deployment or paid call occurred.
+- **Risks:** normal full-suite collection needs the documented environment
+  workaround on this machine. Existing design-detector warnings concern unchanged
+  styles. No #30 runtime blocker remains.
+- **Next exact action:** start #31 in a fresh `gpt-6.1-sol` Codex chat, read
+  [Starred messages](specs/STARRED_MESSAGES.md) and the handoff, then write one failing
+  authenticated reader HTTP test for explicit desired star state. HTTP and browser
+  seams are already approved; no repeat confirmation is needed. Keep one writer.
+
+### Starred messages and Summary specs published (2026-11-22)
+
+The user approved both specs and the public test interfaces. Published
+[Summary #30](https://github.com/CloudKai/NUS-Codesign-Chatbot/issues/30) and
+[bookmarks #31](https://github.com/CloudKai/NUS-Codesign-Chatbot/issues/31) carry
+ready-for-agent. Bookmarks depends on Summary. Local specifications are
+[Summary](specs/STAGE_REVIEW_SUMMARY.md) and [bookmarks](specs/STARRED_MESSAGES.md).
+
+Approved seams are the authenticated reader HTTP API for persistence, ownership
+and edits, plus the rendered React workspace for starring, jumping and Summary.
+Implement in vertical TDD cycles with deterministic mock providers and disposable
+data. Summary runs first in a fresh ticket context. Its implementation session
+must finish validation and a written handoff before starting bookmarks in another
+fresh context. The user's repeated approval authorizes these sequential sessions.
+
+Publication and label readback succeeded. Documentation diff checks passed.
+Implementation and runtime validation remain pending. No schema or persisted data
+changed during specification. The local startup-script modification belongs to
+the user. No staging, commits or deployment are authorized.
+
+Next exact action is to implement #30 from its local spec, starting with a failing
+browser test of Summary's ordered project summary, per-stage feedback and Facione
+sections. After validated completion, record evidence here and start #31 in a fresh
+session using its local spec and the HTTP/browser seams already approved.
+
 ### Readiness audit and hardening (branch `improvement/combined-testing1`, five features)
 
 Mock and offline only. No AWS, Bedrock or AgentCore call ran, and no script ran

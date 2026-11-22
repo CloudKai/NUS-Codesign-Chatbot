@@ -29,6 +29,7 @@ from ..file_processing import (
     extract_text,
     save_uploads,
 )
+from ..persistence.store.contracts import is_reader_notebook
 from ..retrieval import course_material_id_from_object_key
 from ..settings import settings
 from ..student_store import StudentStore
@@ -565,10 +566,12 @@ def conversation_sources(store: StudentStore, thread: Mapping[str, Any], *, sele
     current = list_visible_sources(store, str(thread["id"]), selected_only=selected_only,
                                    include_extracted_text=include_extracted_text, thread_metadata=properties)
     parent_id = properties.get("reader_parent_notebook_id")
-    if not properties.get("quick_chat") or not isinstance(parent_id, str):
+    if is_reader_notebook(properties) or not isinstance(parent_id, str):
         return current
     parent = store.get_thread(parent_id)
     metadata = (parent or {}).get("metadata") or {}
+    # Existing child chats retain their saved source scope even if a legacy
+    # parent is now presented as a chat in the sidebar.
     if not parent or metadata.get("quick_chat") or metadata.get("reader_library"):
         return current
     inherited = list_visible_sources(store, parent_id, selected_only=True,

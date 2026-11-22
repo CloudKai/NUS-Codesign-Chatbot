@@ -1,6 +1,6 @@
 /** Lecture composer, exact-request reconciliation and saved citation inspection. */
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { ApiError, currentSession, get, type ChatSummary, type Page, type Project } from './api';
+import { ApiError, currentSession, get, type Bookmarks, type ChatSummary, type Page, type Project } from './api';
 import { ThinkingPath, type ReviewTab } from './ThinkingPath';
 import { REVIEW_LIMITS, ResizeHandle, useWorkspaceLayoutContext } from './workspaceLayout';
 import { Icon } from './Icon';
@@ -33,6 +33,15 @@ function restore(key: string): Draft {
   } catch { return empty; }
 }
 
+/** Restore display choices only; private Review content must be fetched after owner verification. */
+function restoreReview(key: string): { open: boolean; tab?: ReviewTab } {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) || 'null');
+    return { open: value?.open === true,
+      tab: ['Progression', 'Summary', 'My work'].includes(value?.tab) ? value.tab : undefined };
+  } catch { return { open: false }; }
+}
+
 /** Mode a saved chat reopens in: the student's latest turn when saved project data shows it, else the chat's kind of work. */
 function savedIntent(page: Page, project: Project): Intent {
   const work = hasProjectWork(project);
@@ -48,11 +57,12 @@ function savedIntent(page: Page, project: Project): Intent {
 }
 
 /** Keep draft, focus and loaded transcript stable during progress and evidence inspection. */
-export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, externalBlocked, activity, onHelp, preferredIntent, showStarters, reduceMotion, intentRequest, summary, startIntent, displayTitle = page.notebook.name, parent }: {
+export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, locateMessage, externalBlocked, activity, onHelp, preferredIntent, showStarters, reduceMotion, intentRequest, summary, startIntent, displayTitle = page.notebook.name, parent }: {
   page: Page; project: Project; owner: string; refresh: () => Promise<void>; expired: () => void;
   onHelp: () => void; preferredIntent: Intent; showStarters: boolean; reduceMotion: boolean;
   intentRequest?: { id: string; intent: Intent; n: number };
   externalBlocked: boolean; activity: (value: boolean) => void;
+  locateMessage: (id: string) => Promise<boolean>;
   busy: boolean; loadEarlier: () => Promise<void>;
   summary?: ChatSummary; startIntent?: Intent;
   displayTitle?: string;
@@ -62,8 +72,14 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const initial = useRef(restore(storageKey));
   const [mode, setIntent] = useState<Intent | undefined>(initial.current.intent ?? (page.total_count ? savedIntent(page, project) : startIntent));
   const intent = mode ?? preferredIntent;
-  const [pathOpen, setPathOpen] = useState(false);
-  const [pathTab, setPathTab] = useState<{ tab?: ReviewTab; n: number }>({ n: 0 });
+  const reviewKey = `codesign-review:${owner}:${page.notebook.id}`;
+  const initialReview = useRef(restoreReview(reviewKey));
+  const [pathOpen, setPathOpen] = useState(initialReview.current.open);
+  const [pathTab, setPathTab] = useState<{ tab?: ReviewTab; n: number }>({ tab: initialReview.current.tab, n: 0 });
+  useEffect(() => {
+    try { sessionStorage.setItem(reviewKey, JSON.stringify({ open: pathOpen, tab: pathTab.tab })); }
+    catch { /* Review still works in memory when optional tab storage is unavailable. */ }
+  }, [reviewKey, pathOpen, pathTab.tab]);
   const [milestone, setMilestone] = useState<Milestone | null>(null);
   const [transition, setTransition] = useState<{ from: string; to: string } | null>(null);
   const allDone = useRef(project.stages.every(stage => stage.completed));
@@ -91,6 +107,19 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   }
   const transcript = useRef<HTMLDivElement>(null);
   const stickToLatest = useRef(true);
+  const scrollingToLatest = useRef(false);
+  const [atLatest, setAtLatest] = useState(true);
+  useEffect(() => {
+    const panel = transcript.current;
+    if (!panel) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToLatest.current) panel.scrollTop = panel.scrollHeight;
+      setAtLatest(panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 4);
+    });
+    observer.observe(panel);
+    if (panel.firstElementChild) observer.observe(panel.firstElementChild);
+    return () => observer.disconnect();
+  }, []);
   const pathToggle = useRef<HTMLButtonElement>(null);
   const reviewPanel = useRef<HTMLDialogElement>(null);
   useLayoutEffect(() => {
@@ -114,13 +143,40 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const pendingRef = useRef(pending);
   const textRef = useRef(text);
   const [watching, setWatching] = useState(false);
+  const [canStop, setCanStop] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [checking, setChecking] = useState(false);
   const [checkedKey, setCheckedKey] = useState('');
   const [status, setStatus] = useState('');
   const [reviewStatus, setReviewStatus] = useState('');
   const [preview, setPreview] = useState('');
   const [edit, setEdit] = useState<{ id: string; text: string } | null>(null);
+  const editField = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const field = editField.current;
+    if (!field) return;
+    const measure = document.createElement('canvas').getContext('2d');
+    if (measure) {
+      const style = getComputedStyle(field);
+      measure.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const textWidth = field.value.split('\n').reduce((width, line) => Math.max(width, measure.measureText(line).width), 0);
+      // Include the textbox padding and message border; CSS caps it to the chat width.
+      field.closest<HTMLElement>('.message')?.style.setProperty('--edit-width', `${Math.max(260, Math.ceil(textWidth) + 58)}px`);
+    }
+    field.style.height = 'auto';
+    field.style.height = `${Math.min(Math.max(field.scrollHeight, 52), 360)}px`;
+  }, [edit?.id, edit?.text]);
+  function cancelEdit(messageId: string) {
+    setEdit(null);
+    window.requestAnimationFrame(() => document.getElementById(`edit-trigger-${messageId}`)?.focus({ preventScroll: true }));
+  }
   const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [bookmarks, setBookmarks] = useState<Bookmarks | null>(null);
+  const [bookmarkError, setBookmarkError] = useState('');
+  const [highlighted, setHighlighted] = useState('');
+  const bookmarkRead = useRef(0);
+  const currentRevision = useRef(page.conversation_revision);
+  currentRevision.current = page.conversation_revision;
   const [storageError, setStorageError] = useState(false);
   const [evidence, setEvidence] = useState<{ citation: Citation; message: string } | null>(null);
   const [downloadError, setDownloadError] = useState('');
@@ -217,6 +273,29 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     } finally { if (active.current) setChecking(false); }
   }
 
+  async function stopGeneration() {
+    const receipt = pendingRef.current;
+    if (!receipt || !canStop || stopping) return;
+    setStopping(true);
+    try {
+      const response = await fetch(`${path}/coach-turn/stop`, {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        signal: controller.current.signal, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idempotency_key: receipt.key }),
+      });
+      if (!active.current || pendingRef.current?.key !== receipt.key) return;
+      if ([401, 403].includes(response.status)) { expired(); return; }
+      if (!response.ok) throw new ApiError(response.status);
+      const result: { status: 'stopping' | 'saving' | 'finished' } = await response.json();
+      if (active.current && pendingRef.current?.key === receipt.key && result.status === 'stopping') setStatus('Stopping generation…');
+    } catch {
+      if (active.current && pendingRef.current?.key === receipt.key) {
+        setStatus('Could not stop generation. Try again.');
+        setStopping(false);
+      }
+    }
+  }
+
   async function send(retry = false, revision?: Receipt) {
     if (lock.current || busy || moving || externalBlocked || feedbackBusy || projectUncertain || (!retry && (pendingRef.current || (!revision && !textRef.current.trim())))) return;
     if (retry && checkedKey !== pendingRef.current?.key) return;
@@ -225,6 +304,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     const receipt = retry ? pendingRef.current! : revision || { key: newRequestKey(), text: textRef.current, intent: intentRef.current, attachments };
     if (!receipt) { lock.current = false; return; }
     remember(textRef.current, receipt);
+    setCanStop(false);
+    setStopping(false);
     setWatching(true);
     setPreview('');
     setStatus('Reading your message…');
@@ -233,18 +314,17 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     let terminalError: Event & { event: 'error' } | null = null;
     try {
       await verify();
-      const response = await fetch(receipt.message ? `${path}/messages/${encodeURIComponent(receipt.message)}/revise` : `${path}/${receipt.intent || 'lecture'}/stream`, {
+      const response = await fetch(receipt.message ? `${path}/messages/${encodeURIComponent(receipt.message)}/revise/stream` : `${path}/${receipt.intent || 'lecture'}/stream`, {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
-        headers: receipt.message ? { 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json', ...REPLY_DELTAS_HEADER },
+        headers: { 'Content-Type': 'application/json', ...REPLY_DELTAS_HEADER },
         body: JSON.stringify(receipt.message ? { content: receipt.text, idempotency_key: receipt.key }
           : { student_message: receipt.text, idempotency_key: receipt.key, attachment_source_ids: receipt.attachments?.map(file => file.id) ?? [] }),
       });
       if (!response.ok) throw new ApiError(response.status);
-      if (receipt.message) {
-        if (!isTurn(await response.json())) throw new Error('Malformed saved edit');
-      } else await readStream(response, page.notebook.id, receipt.key, event => {
+      await readStream(response, page.notebook.id, receipt.key, event => {
         if (!active.current) return;
-        if (event.event === 'started') setStatus('Reading your message…');
+        if (event.event === 'started') { setCanStop(true); setStatus('Reading your message…'); }
+        if (event.event === 'status' && event.phase === 'saving') setCanStop(false);
         if (event.event === 'status') setStatus(({ queued: 'Thinking…', retrieving: 'Looking through your sources…', thinking: 'Thinking…', saving: 'Saving…' })[event.phase]);
         // Deltas are unvalidated and unsaved: they only ever feed the preview, never saved messages.
         if (event.event === 'reply_delta') { setPreview(current => current + event.text); setStatus('Writing your reply…'); }
@@ -258,11 +338,23 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       if (active.current) {
         setPreview('');
         setWatching(false);
-        // Cancellation, malformed records and EOF are ambiguous: only GET reconciliation follows.
+        setCanStop(false);
+        setStopping(false);
+        // A terminal cancellation was confirmed by the worker. Other outcomes use read-only recovery.
         controller.current = new AbortController();
-        await reconcile(receipt);
-        if (active.current && terminalError && pendingRef.current) {
-          const failure = terminalError as Event & { event: 'error' };
+        const failure = terminalError as (Event & { event: 'error' }) | null;
+        if (failure?.category === 'cancelled') {
+          if (receipt.message || textRef.current !== receipt.text) {
+            setCheckedKey(receipt.key);
+            if (receipt.message) await refresh();
+          } else {
+            remember(receipt.text, null);
+          }
+          setStatus('Generation stopped. Your prompt is kept.');
+        } else {
+          await reconcile(receipt);
+        }
+        if (active.current && failure && failure.category !== 'cancelled' && pendingRef.current) {
           setStatus(failure.status === 429
             ? failure.category === 'generation_budget'
               ? 'This month’s coach allowance is used up. You can still read your work and sources. It resets next month.'
@@ -332,6 +424,73 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     }
   }
 
+  /** Bring an exact bookmarked original into the transcript and hand keyboard focus to it. */
+  async function jumpToMessage(id: string) {
+    if (lock.current || busy || externalBlocked) return;
+    lock.current = true; setFeedbackBusy(true); stickToLatest.current = false;
+    try {
+      if (!await locateMessage(id)) throw new Error('Original unavailable');
+      if (!active.current) return;
+      setPathOpen(false); setHighlighted(id); setStatus('Original message highlighted.');
+    } catch { if (active.current) setStatus('Could not open the original message. Refresh this chat and try again.'); }
+    finally { lock.current = false; if (active.current) setFeedbackBusy(false); }
+  }
+  useEffect(() => {
+    if (!highlighted || pathOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(`message-${highlighted}`);
+      target?.scrollIntoView({ block: 'start', behavior: 'instant' });
+      target?.focus({ preventScroll: true });
+    });
+    const timer = window.setTimeout(() => setHighlighted(''), 6000);
+    return () => { window.cancelAnimationFrame(frame); window.clearTimeout(timer); };
+  }, [highlighted, page.messages, pathOpen]);
+
+  /** Read all saved stars and fence late responses to this owner and active revision. */
+  async function readBookmarks() {
+    const read = ++bookmarkRead.current;
+    const saved = await get<Bookmarks>(`${path}/bookmarks`, controller.current.signal);
+    await verify();
+    if (saved.owner_id !== owner || saved.thread_id !== page.notebook.id || saved.conversation_revision !== currentRevision.current) {
+      throw new Error('History changed. Reopen this chat.');
+    }
+    if (read === bookmarkRead.current) { setBookmarks(saved); setBookmarkError(''); }
+    return saved;
+  }
+  useEffect(() => {
+    let cancelled = false;
+    void readBookmarks().catch(() => {
+      if (!cancelled && active.current) setBookmarkError('Could not load bookmarks. Refresh bookmarks to try again.');
+    });
+    return () => { cancelled = true; };
+  }, [page]);
+  const visibleBookmarks = bookmarks?.conversation_revision === page.conversation_revision ? bookmarks : null;
+  const isStarred = (id: string, fallback: boolean) => visibleBookmarks ? visibleBookmarks.messages.some(item => item.id === id) : fallback;
+
+  /** Save an explicit state, then reconcile by reading rather than replaying a lost write. */
+  async function star(message: string, starred: boolean) {
+    if (lock.current || feedbackBusy || externalBlocked) return;
+    lock.current = true; setFeedbackBusy(true);
+    try {
+      await verify();
+      try {
+        await fetch(`${path}/messages/${encodeURIComponent(message)}/star`, {
+          method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ starred }),
+        });
+      } catch { /* A lost response can still have saved the state. Read before reporting success. */ }
+      const saved = await readBookmarks();
+      const actual = saved.messages.some(item => item.id === message);
+      const notice = actual === starred ? (starred ? 'Message starred.' : 'Star removed.') : 'Star was not saved. Try again.';
+      setStatus(notice);
+      if (actual !== starred) setBookmarkError(notice);
+    } catch { if (active.current) {
+      const notice = 'Could not verify the star. Check your connection and refresh bookmarks before trying again.';
+      setStatus(notice); setBookmarkError(notice);
+    } }
+    finally { lock.current = false; if (active.current) setFeedbackBusy(false); }
+  }
+
   async function rate(message: string, kind: 'useful' | 'not_useful') {
     if (lock.current || feedbackBusy || externalBlocked) return;
     lock.current = true; setFeedbackBusy(true);
@@ -392,7 +551,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     const next = !current.trim() || current === lastScaffold.current ? prompt : `${current}\n\n${prompt}`;
     lastScaffold.current = next;
     remember(next, pendingRef.current);
-    if (pathOpen && !reviewDocked) setPathOpen(false);
+    if (pathOpen && !reviewDocked) {
+      setReviewStatus('Prompt added to your draft. Close Review to edit it.');
+      return;
+    }
     window.requestAnimationFrame(() => {
       const field = composer.current;
       if (!field) return;
@@ -419,7 +581,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   useEffect(() => {
     if (stickToLatest.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
   }, [checkIn?.rule, showChips, startersCollapsed]);
-  const openReview = (tab?: ReviewTab) => { setPathTab(value => ({ tab, n: value.n + 1 })); setPathOpen(true); };
+  const openReview = (tab?: ReviewTab) => { setPathTab(value => ({ tab: tab ?? value.tab, n: value.n + 1 })); setPathOpen(true); };
   async function decideInline(route: string, body: object) {
     await stageAction(route, body);
     window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
@@ -478,9 +640,18 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       </button>
     </header>
     <div className="conversation-chat">
-    <div className={`transcript ${isEmpty ? 'transcript-empty' : ''}`} ref={transcript} onScroll={event => {
+    <div id="chat-transcript" className={`transcript ${isEmpty ? 'transcript-empty' : ''}`} ref={transcript} onScroll={event => {
       const panel = event.currentTarget;
-      stickToLatest.current = panel.scrollHeight - panel.scrollTop - panel.clientHeight < 80;
+      const latest = panel.scrollHeight - panel.scrollTop - panel.clientHeight <= 4;
+      stickToLatest.current = latest;
+      setAtLatest(latest);
+    }} onWheel={() => { scrollingToLatest.current = false; }} onPointerDown={() => { scrollingToLatest.current = false; }} onKeyDown={() => { scrollingToLatest.current = false; }} onScrollEnd={event => {
+      if (!scrollingToLatest.current) return;
+      const panel = event.currentTarget;
+      if (panel.scrollHeight - panel.scrollTop - panel.clientHeight > 4) {
+        // New output may move the destination during the first smooth scroll.
+        panel.scrollTo({ top: panel.scrollHeight, behavior: 'smooth' });
+      } else { scrollingToLatest.current = false; stickToLatest.current = true; }
     }}>
     <div className="chat-column">
     {projectUncertain && !pathOpen ? <p role="alert">Check saved project before another action. <button disabled={moving || busy} onClick={() => void refreshProject()}>Refresh saved project</button></p> : null}
@@ -497,27 +668,39 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       <h1>Make room for a better question.</h1><p>Bring a half-formed thought. We’ll work through it together.</p>
       {showStarters ? <ReasoningPrompts disabled={checking || moving || externalBlocked} onChoose={choosePrompt}/> : null}
     </div> : null}
-    {visibleMessages.map(message => <article className={`message ${message.role === 'user' ? 'student' : 'coach'}`} key={message.id}>
+    {visibleMessages.map(message => <article id={`message-${message.id}`} data-message-id={message.id} data-highlighted={highlighted === message.id || undefined} tabIndex={-1} className={`message ${message.role === 'user' ? 'student' : 'coach'}${edit?.id === message.id ? ' editing' : ''}`} key={message.id}>
       <h3>{message.role === 'user' ? 'You' : 'Coach'}</h3>
+      {edit?.id === message.id ? <form className="message-edit" aria-label="Edit your message" onKeyDown={event => {
+        if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelEdit(message.id); }
+      }} onSubmit={event => {
+        event.preventDefault(); const receipt = { key: newRequestKey(), text: edit.text, message: edit.id }; setEdit(null); void send(false, receipt);
+      }}>
+        <label className="sr-only" htmlFor={`edit-${message.id}`}>Revise your message</label>
+        <div className="message-edit-box">
+          <textarea ref={editField} autoFocus rows={1} id={`edit-${message.id}`} aria-describedby={`edit-note-${message.id}`} value={edit.text} maxLength={12000} onChange={event => setEdit({ ...edit, text: event.target.value })}/>
+          <div className="message-edit-actions">
+            <button type="button" aria-label="Cancel edit" title="Cancel edit" onClick={() => cancelEdit(message.id)}><Icon name="close"/></button>
+            <button className="edit-submit" aria-label="Confirm edit & ask again" title="Confirm edit & ask again" disabled={!edit.text.trim() || watching || checking || busy || moving || feedbackBusy || !!pending || externalBlocked || projectUncertain}><Icon name="arrow"/></button>
+          </div>
+        </div>
+        <p className="supporting" id={`edit-note-${message.id}`}>Sending replaces this message and later replies. Your composer draft is kept.</p>
+      </form> : <>
       {message.role === 'user' ? <div className="message-content">{message.content}</div> : <CoachText text={message.content}/>}
       <div className="message-actions">
+        <button aria-label={isStarred(message.id, message.starred) ? 'Unstar message' : 'Star message'}
+          title={isStarred(message.id, message.starred) ? 'Unstar message' : 'Star message'}
+          aria-pressed={isStarred(message.id, message.starred)} className="message-star"
+          disabled={feedbackBusy || watching || checking || moving || !!pending || externalBlocked}
+          onClick={() => void star(message.id, !isStarred(message.id, message.starred))}><Icon name="star"/></button>
         <button aria-label={message.role === 'user' ? 'Copy your message' : 'Copy answer'} title="Copy" onClick={() => { void navigator.clipboard.writeText(message.content).then(() => setStatus('Message copied.')).catch(() => setStatus('Could not copy. Select the message text to copy it.')); }}><Icon name="copy"/></button>
-        {message.role === 'user' ? <button aria-label="Edit message" title="Edit message" disabled={watching || checking || moving || !!pending || externalBlocked || projectUncertain} id={`edit-trigger-${message.id}`} onClick={() => setEdit({ id: message.id, text: message.content })}><Icon name="edit"/></button> : null}
+        {message.role === 'user' ? <button aria-label="Edit message" title="Edit message" disabled={watching || checking || moving || !!pending || externalBlocked || projectUncertain} id={`edit-trigger-${message.id}`} onClick={() => { stickToLatest.current = false; setEdit({ id: message.id, text: message.content }); }}><Icon name="edit"/></button> : null}
         {message.role !== 'user' ? <button className="use-in-project" disabled={watching || checking || moving || !!pending || externalBlocked}
           onClick={() => insertScaffold(lectureToProjectScaffold(message.content), 'project')}><Icon name="path"/> Use in my project</button> : null}
         {message.feedback_available ? <div role="group" aria-label="Was this answer useful?">
           {(['useful', 'not_useful'] as const).map(kind => <button key={kind} aria-label={kind === 'useful' ? 'Useful' : 'Not useful'} title={kind === 'useful' ? 'Useful' : 'Not useful'} aria-pressed={message.rating === kind} disabled={feedbackBusy || watching || checking || !!pending || externalBlocked} onClick={() => void rate(message.id, kind)}><Icon name={kind === 'useful' ? 'up' : 'down'}/></button>)}
         </div> : null}
       </div>
-      {edit?.id === message.id ? <form className="message-edit" onSubmit={event => {
-        event.preventDefault(); const receipt = { key: newRequestKey(), text: edit.text, message: edit.id }; setEdit(null); void send(false, receipt);
-      }}>
-        <label htmlFor={`edit-${message.id}`}>Revise your message</label>
-        <textarea autoFocus id={`edit-${message.id}`} value={edit.text} maxLength={12000} onChange={event => setEdit({ ...edit, text: event.target.value })}/>
-        <p>Saving replaces this message and the replies after it in your active transcript, then asks the coach again. Your composer draft is kept.</p>
-        <button type="button" onClick={() => { setEdit(null); document.getElementById(`edit-trigger-${message.id}`)?.focus({ preventScroll: true }); }}>Cancel edit</button>
-        <button disabled={!edit.text.trim() || watching || checking || busy || moving || feedbackBusy || !!pending || externalBlocked || projectUncertain}>Confirm edit & ask again</button>
-      </form> : null}
+      </>}
       {message.citations.length ? <div className="citations" aria-label="Supporting evidence">{message.citations.map(citation =>
         <button key={`${citation.label}:${citation.source_id}`} onClick={event => {
           returnScroll.current = transcript.current?.scrollTop || 0; citationButton.current = event.currentTarget;
@@ -527,7 +710,6 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     {milestone ? <MilestoneBanner milestone={milestone} onDismiss={() => setMilestone(null)} onReview={() => { setMilestone(null); openReview('Summary'); }}
       onReflect={from => { setMilestone(null); insertScaffold(reflectionScaffold(from), 'project'); }}/> : null}
     <StageRecommendation project={project} disabled={reviewDisabled} act={decideInline}/>
-    {watching ? <div className="typing" aria-hidden="true"><span className="typing-dots"><i/><i/><i/></span><span>{status}</span></div> : null}
     {evidence ? <aside className="evidence" aria-label="Cited evidence">
       <div className="evidence-heading"><h3 ref={evidenceHeading} tabIndex={-1}>{citationText(evidence.citation)}</h3>
         <button onClick={() => {
@@ -538,8 +720,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       <button onClick={() => void download()}>Download original source</button>
       {downloadError ? <p role="alert">{downloadError}</p> : null}
     </aside> : null}
-    {preview && !reduceMotion ? <article className="message preview"><h3>Coach · unsaved preview</h3><CoachText text={preview}/></article> : null}
-    {watching ? <button onClick={() => { controller.current.abort(); }}>Stop watching</button> : null}
+    {preview ? <article className="message preview"><h3>Coach · unsaved preview</h3><CoachText text={preview}/></article> : null}
     {pending && !watching ? <div className="recovery-actions">
       <p className="supporting">{pending.message ? 'Pending edit' : 'Pending question'}: {pending.text}</p>
       <button disabled={checking || busy} onClick={() => void reconcile(pending)}>Check saved answer</button>
@@ -548,6 +729,23 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     </div> : null}
     </div></div>
     <div className="composer-dock"><div className="chat-column">
+
+    {!isEmpty && (watching || checking || !atLatest) ? <div className="latest-control-row">
+      <button type="button" className="latest-control" aria-controls="chat-transcript"
+        aria-label={watching || checking ? 'Jump to latest message, coach is working' : 'Jump to latest message'}
+        aria-busy={watching || checking} title={watching || checking ? 'Coach is working · Jump to latest message' : 'Jump to latest message'}
+        onClick={() => {
+          const panel = transcript.current;
+          if (!panel) return;
+          const animate = !reduceMotion && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            && panel.scrollHeight - panel.scrollTop - panel.clientHeight > 4;
+          scrollingToLatest.current = animate;
+          stickToLatest.current = !animate;
+          panel.scrollTo({ top: panel.scrollHeight, behavior: animate ? 'smooth' : 'instant' });
+        }}>
+        {watching || checking ? <span className="typing-dots" aria-hidden="true"><i/><i/><i/></span> : <Icon name="arrowDown"/>}
+      </button>
+    </div> : null}
     {checkIn ? <CoachCheckIn checkIn={checkIn} onAct={item => insertScaffold(item.scaffold, 'project')} onDismiss={dismissCheckIn}/> : null}
     {showChips ? <StageStarters stageId={project.current_stage} disabled={externalBlocked} collapsed={startersCollapsed} setCollapsed={setStartersCollapsed} onChoose={choosePrompt}/> : null}
     <form className="composer" onSubmit={event => { event.preventDefault(); void send(); }}>
@@ -578,7 +776,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         {intent === 'project' ? <button className="hint-button" type="button" title="Ask the coach for a question that helps you think, not the answer" disabled={externalBlocked || watching || checking || moving || !!pending}
           onClick={() => insertScaffold(hintScaffold(stageLabel), 'project')}>
           <Icon name="spark"/><span>Hint</span></button> : null}
-        <button className="primary send-button" aria-label="Send message" title="Send message" type="submit" disabled={watching || checking || busy || moving || projectUncertain || externalBlocked || uploading || feedbackBusy || !!pending || !text.trim()}><Icon name="arrow"/></button></div>
+        {watching ? <button className="primary send-button" type="button" aria-label="Stop generating"
+          title={stopping ? 'Stopping…' : 'Stop generating'} disabled={!canStop || stopping}
+          onClick={() => void stopGeneration()}><Icon name="close"/></button> :
+        <button className="primary send-button" aria-label="Send message" title="Send message" type="submit" disabled={watching || checking || busy || moving || projectUncertain || externalBlocked || uploading || feedbackBusy || !!pending || !text.trim()}><Icon name="arrow"/></button>}</div>
     </form>
     {storageError ? <p role="alert">Tab storage is unavailable. Keep a copy of your draft before reloading.</p> : null}
     <div className="turn-status" role="status" aria-live="polite">{status}</div>
@@ -599,7 +800,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           closePath();
         }
       }}>
-      <ThinkingPath key={pathTab.n} project={project} title={displayTitle} initialTab={pathTab.tab} insertScaffold={insertScaffold}
+      <ThinkingPath bookmarks={visibleBookmarks?.messages ?? []} bookmarkError={bookmarkError} bookmarksReady={!!visibleBookmarks}
+        refreshBookmarks={() => { void readBookmarks().catch(() => setBookmarkError('Could not load bookmarks. Try again.')); }}
+        jumpToMessage={id => void jumpToMessage(id)} removeStar={id => void star(id, false)} key={pathTab.n} project={project} title={displayTitle} initialTab={pathTab.tab} onTabChange={tab => setPathTab(value => ({ ...value, tab }))} insertScaffold={insertScaffold}
         disabled={reviewDisabled}
         act={stageAction} startInChat={startDesignChat} onClose={closePath} status={reviewStatus}>
         {projectUncertain && !moving ? <p className="review-recovery" role="alert">Check saved project before another action. <button disabled={busy} onClick={() => void refreshProject()}>Refresh saved project</button></p> : null}

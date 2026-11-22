@@ -828,3 +828,33 @@ def test_configured_coach_provider_rejects_ollama(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(settings, "model_provider", "ollama")
     with pytest.raises(ProviderUnavailableError, match="Unsupported MODEL_PROVIDER"):
         configured_coach_provider()
+
+
+def test_optional_openai_streams_only_reply_text_before_completion(monkeypatch):
+    """The optional Responses adapter streams structured text without extra calls."""
+    from backend.coaching.progress import coach_progress
+    observed = []
+    request = CoachRequest(thread_id='demo', student_message='My design idea', current_stage='problem_identification', response_detail='short')
+    baseline = DeterministicCoachProvider().assess(request)
+    final = ProviderCoachOutput(response_text='Hello world', assessment=baseline.assessment)
+    closed = []
+    class Stream:
+        def __iter__(self):
+            yield SimpleNamespace(type='response.output_text.delta', delta='{"response_text":"Hello ')
+            assert observed == ['Hello ']
+            yield SimpleNamespace(type='response.output_text.delta', delta='world"}')
+            yield SimpleNamespace(type='response.completed', response=SimpleNamespace(output_text=final.model_dump_json(), usage=None))
+        def close(self):
+            closed.append(True)
+    class Responses:
+        def create(self, **kwargs):
+            assert kwargs['stream'] is True
+            return Stream()
+    class Client:
+        def __init__(self, **kwargs):
+            self.responses = Responses()
+    monkeypatch.setattr('backend.providers.OpenAI', Client)
+    with coach_progress(None, reply_delta=observed.append):
+        result = OpenAICoachProvider('not-a-real-key', 'gpt-test').assess(request)
+    assert result.response_text == 'Hello world'
+    assert observed == ['Hello ', 'world'] and closed == [True]

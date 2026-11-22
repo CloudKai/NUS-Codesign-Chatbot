@@ -1,6 +1,8 @@
 /** Small consistent outline icons; surrounding controls supply accessible names. */
-export function Icon({ name }: { name: 'attach' | 'document' | 'image' | 'download' | 'help' | 'grid' | 'close' | 'panel' | 'plus' | 'chat' | 'spark' | 'arrow' | 'path' | 'check' | 'book' | 'sun' | 'moon' | 'copy' | 'edit' | 'up' | 'down' | 'search' | 'folder' | 'grip' | 'more' | 'pin' | 'share' | 'trash' | 'chevronDown' | 'chevronRight' | 'settings' | 'refresh' | 'user' | 'home' | 'flag' | 'coach' }) {
+export function Icon({ name }: { name: 'arrowDown' | 'star' | 'attach' | 'document' | 'image' | 'download' | 'help' | 'grid' | 'close' | 'panel' | 'plus' | 'chat' | 'spark' | 'arrow' | 'path' | 'check' | 'book' | 'sun' | 'moon' | 'copy' | 'edit' | 'up' | 'down' | 'search' | 'folder' | 'grip' | 'more' | 'pin' | 'share' | 'trash' | 'chevronDown' | 'chevronRight' | 'settings' | 'refresh' | 'user' | 'home' | 'flag' | 'coach' }) {
   const paths = {
+    arrowDown: 'M12 4v16m-6-6 6 6 6-6',
+    star: 'm12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z',
     home: 'M3 11 12 3l9 8 M5 10v11h5v-6h4v6h5V10',
     flag: 'M5 21V4 M5 4h13l-2 4 2 4H5',
     coach: 'M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 3V6a2 2 0 0 1 2-2z M12 7.5c0 2.5-1.5 3.5-3.5 3.5 2 0 3.5 1 3.5 3.5 0-2.5 1.5-3.5 3.5-3.5-2 0-3.5-1-3.5-3.5z',

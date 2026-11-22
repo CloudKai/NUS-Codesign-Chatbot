@@ -47,6 +47,13 @@ def test_reader_lecture_is_grounded_saved_and_exactly_recoverable(tmp_path: Path
     page = client.get(f"{path}/messages/page").json()
     assert page["total_count"] == 2
     assert page["messages"][-1]["citations"][0]["source_id"] == source["id"]
+    greeting = client.post(f"{path}/lecture/stream", json={
+        "student_message": "hi", "idempotency_key": "reader-lecture-greeting",
+    }, headers={"Origin": "https://testserver"})
+    greeted = [json.loads(line) for line in greeting.text.splitlines()][-1]["turn"]
+    assert greeted["response_text"] == "Hi! What CDE2300 lecture, reading, or course concept would you like help with?"
+    assert greeted["assessment"]["response_mode"] == "qa"
+    assert greeted["pending_transition"] is None
     restarted = TestClient(create_app(StudentStore(root.path), oidc_client=oidc), base_url="https://testserver")
     restarted.cookies.update(client.cookies)
     assert restarted.get(f"{path}/coach-turn?idempotency_key=reader-lecture").json() == turn
@@ -158,3 +165,144 @@ def test_reader_evidence_respects_superseded_messages_and_owner(tmp_path: Path, 
     revised = client.post(f"/api/v1/threads/{thread}/messages/{messages[0]['id']}/revise", json={"content": "Explain analogy again.", "idempotency_key": "revised-answer"})
     assert revised.status_code == 200
     assert client.get(url).status_code == 404
+
+
+def test_reader_revision_streams_reply_then_saves_and_replays_once(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """An owned streamed edit retains append-only revision and exact-key recovery."""
+    monkeypatch.setattr(settings, 'public_api_base_url', 'https://testserver')
+    from backend.workflow import CoachWorkflow
+
+    observed_languages: list[str] = []
+    original_run = CoachWorkflow.run
+
+    def observe_language(workflow, request):
+        observed_languages.append(request.response_language)
+        return original_run(workflow, request)
+
+    monkeypatch.setattr(CoachWorkflow, 'run', observe_language)
+    root = StudentStore(tmp_path / 'stream-edit.sqlite3')
+    _seed_user(root, 'student', 'student')
+    student = StudentStore(root.path, identifier='cognito:student')
+    thread = student.create_thread(model_id='mock', support_mode='critical-thinking')
+    student.update_thread(thread, metadata={"response_language": "Bahasa Melayu"})
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc), base_url='https://testserver')
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))
+    base = f'/api/v1/reader/threads/{thread}'
+    headers = {'Origin': 'https://testserver', 'X-Coach-Reply-Deltas': '1'}
+    seed = client.post(base + '/project/stream', json={'student_message': 'Residents need safer crossings.', 'idempotency_key': 'seed'}, headers=headers)
+    assert seed.status_code == 200
+    messages = client.get(base + '/messages/page').json()['messages']
+    path = base + f"/messages/{messages[0]['id']}/revise/stream"
+    payload = {'content': 'Older residents need longer crossing times near the market.', 'idempotency_key': 'edit-stream'}
+    response = client.post(path, json=payload, headers=headers)
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('application/x-ndjson')
+    events = [json.loads(line) for line in response.text.splitlines()]
+    kinds = [item['event'] for item in events]
+    assert kinds[0] == 'started' and kinds[-1] == 'done'
+    assert kinds.index('reply_delta') < kinds.index('reply_ready') < kinds.index('done')
+    saved = client.get(base + '/messages/page').json()
+    assert len(saved['messages']) == 2
+    assert saved['messages'][0]['content'] == payload['content']
+    assert client.get(base + '/coach-turn?idempotency_key=edit-stream').json() == events[-1]['turn']
+    replay = client.post(path, json=payload, headers=headers)
+    replay_events = [json.loads(line) for line in replay.text.splitlines()]
+    assert replay_events[-1] == events[-1]
+    assert not any(item['event'] == 'reply_delta' for item in replay_events)
+    assert client.get(base + '/messages/page').json() == saved
+
+    assert observed_languages == ['English', 'English']
+    assert student.get_thread(thread)['metadata']['response_language'] == 'Bahasa Melayu'
+
+
+def test_reader_stop_is_owner_scoped_and_prevents_saving(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Stop an in-flight turn, leave the transcript intact, and allow an explicit retry."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from backend.coaching.progress import emit_coach_reply_delta
+    from backend.workflow import CoachWorkflow
+
+    monkeypatch.setattr(settings, "public_api_base_url", "https://testserver")
+    monkeypatch.setattr(settings, "coach_stream_reply_deltas_enabled", True)
+    root = StudentStore(tmp_path / "cancel.sqlite3")
+    for subject in ("student", "other"):
+        _seed_user(root, subject, "student")
+    student = StudentStore(root.path, identifier="cognito:student")
+    thread = student.create_thread(model_id="mock", support_mode="critical-thinking")
+    oidc = FakeOIDC(root)
+    app = create_app(root, oidc_client=oidc)
+    client = TestClient(app, base_url="https://testserver")
+    foreign = TestClient(app, base_url="https://testserver")
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add("student"))
+    foreign.cookies.set(settings.cognito_id_token_cookie_name, oidc.add("other"))
+    path = f"/api/v1/reader/threads/{thread}"
+    origin = {"Origin": "https://testserver", "X-Coach-Reply-Deltas": "1"}
+    request = {"student_message": "Older residents need safer crossings near the market.", "idempotency_key": "stop-test"}
+    key = {"idempotency_key": request["idempotency_key"]}
+    running, release = Event(), Event()
+    original_run = CoachWorkflow.run
+
+    def paused_run(workflow, model_request):
+        if not release.is_set():
+            emit_coach_reply_delta("Unfinished preview")
+            running.set()
+            assert release.wait(10)
+        return original_run(workflow, model_request)
+
+    monkeypatch.setattr(CoachWorkflow, "run", paused_run)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = executor.submit(client.post, f"{path}/project/stream", json=request, headers=origin)
+        try:
+            assert running.wait(10)
+            assert foreign.post(f"{path}/coach-turn/stop", json=key, headers=origin).status_code == 404
+            assert client.post(f"{path}/coach-turn/stop", json=key, headers=origin).json() == {"status": "stopping"}
+        finally:
+            release.set()
+        response = result.result(timeout=10)
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert events[-2]["event"] == "reply_discard"
+    assert events[-1]["category"] == "cancelled"
+    assert client.get(f"{path}/messages/page").json()["total_count"] == 0
+    assert client.get(f"{path}/coach-turn", params=key).json() is None
+    assert '"event": "done"' in client.post(f"{path}/project/stream", json=request, headers=origin).text
+    assert client.post(f"{path}/coach-turn/stop", json=key, headers=origin).json() == {"status": "finished"}
+    assert client.get(f"{path}/messages/page").json()["total_count"] == 2
+
+
+def test_reader_stop_keeps_reply_when_saving_already_started(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Stop cannot withdraw a reply that has won the save race."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    monkeypatch.setattr(settings, "public_api_base_url", "https://testserver")
+    root = StudentStore(tmp_path / "stop-saving.sqlite3")
+    _seed_user(root, "student", "student")
+    student = StudentStore(root.path, identifier="cognito:student")
+    thread = student.create_thread(model_id="mock", support_mode="critical-thinking")
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc), base_url="https://testserver")
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add("student"))
+    path = f"/api/v1/reader/threads/{thread}"
+    origin = {"Origin": "https://testserver"}
+    request = {"student_message": "Older residents need safer crossings.", "idempotency_key": "stop-saving"}
+    saving, release = Event(), Event()
+    persist = StudentStore.persist_coach_turn
+
+    def paused_save(store, *args, **kwargs):
+        saving.set()
+        assert release.wait(10)
+        return persist(store, *args, **kwargs)
+
+    monkeypatch.setattr(StudentStore, "persist_coach_turn", paused_save)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        result = executor.submit(client.post, f"{path}/project/stream", json=request, headers=origin)
+        try:
+            assert saving.wait(10)
+            response = client.post(f"{path}/coach-turn/stop", json={"idempotency_key": "stop-saving"}, headers=origin)
+            assert response.json() == {"status": "saving"}
+        finally:
+            release.set()
+        assert '"event": "done"' in result.result(timeout=10).text
+    assert client.get(f"{path}/messages/page").json()["total_count"] == 2

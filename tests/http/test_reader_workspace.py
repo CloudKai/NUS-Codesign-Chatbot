@@ -161,7 +161,7 @@ def test_reader_workspace_guards_and_existing_data(tmp_path: Path, monkeypatch: 
 
 
 def test_reader_quick_chats_are_separate_from_named_notebooks(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-    """Classify new quick chats durably and keep pre-existing conversations accessible as notebooks."""
+    """Classify new quick chats durably and show pre-existing conversations as chats."""
     monkeypatch.setattr(settings, "public_api_base_url", "https://testserver")
     root = StudentStore(tmp_path / "quick-chats.sqlite3")
     _seed_user(root, "student", "student")
@@ -202,7 +202,7 @@ def test_reader_quick_chats_are_separate_from_named_notebooks(tmp_path: Path, mo
     assert page["notebook"]["pinned"] is True
     assert page["messages"][0]["content"] == "What is analogy?"
     entries = {item["id"]: item for item in restarted.get(endpoint).json()["notebooks"]}
-    assert entries[old_id]["kind"] == "notebook"
+    assert entries[old_id]["kind"] == "chat"
     assert entries[quick["id"]] == page["notebook"]
     assert restarted.post(f"{path}/settings", json={"pinned": False}, headers=origin).json()["notebook"]["pinned"] is False
 
@@ -221,9 +221,9 @@ def test_reader_moves_chat_without_changing_its_saved_work(tmp_path: Path, monke
     other = StudentStore(root.path, identifier="cognito:other")
     defaults = {"model_id": "mock", "support_mode": "critical-thinking"}
     chat = student.create_thread(quick_chat=True, **defaults)
-    first = student.create_thread(name="First notebook", **defaults)
-    second = student.create_thread(name="Second notebook", **defaults)
-    foreign = other.create_thread(name="Private notebook", **defaults)
+    first = student.create_thread(name="First notebook", reader_notebook=True, **defaults)
+    second = student.create_thread(name="Second notebook", reader_notebook=True, **defaults)
+    foreign = other.create_thread(name="Private notebook", reader_notebook=True, **defaults)
     student.add_message(chat, "user", "Why are quiet study rooms hard to find?")
     oidc = FakeOIDC(root)
     client = TestClient(create_app(root, oidc_client=oidc), base_url="https://testserver")
@@ -265,7 +265,7 @@ def test_reader_folder_chats_use_existing_history_and_owner_scoped_summaries(
     for subject in ("student", "other"):
         _seed_user(root, subject, "student")
     other = StudentStore(root.path, identifier="cognito:other")
-    foreign = other.create_thread(name="Other folder", model_id="mock", support_mode="critical-thinking")
+    foreign = other.create_thread(name="Other folder", model_id="mock", support_mode="critical-thinking", reader_notebook=True)
     oidc = FakeOIDC(root)
     client = TestClient(create_app(root, oidc_client=oidc), base_url="https://testserver")
     client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add("student"))

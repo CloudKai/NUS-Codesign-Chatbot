@@ -10,6 +10,11 @@ from typing import Any, ContextManager, Protocol
 
 COACH_IDEMPOTENCY_MARKER = "coach_idempotency"
 
+
+def is_reader_notebook(metadata: Any) -> bool:
+    """Recognize a folder explicitly created by the React notebook action."""
+    return bool(metadata.get("reader_notebook") is True and metadata.get("quick_chat") is not True)
+
 # Progress blob keys never include current_stage; that is a notebook column.
 PROGRESS_KEYS = frozenset(
     {
@@ -30,6 +35,7 @@ SETTINGS_KEYS = frozenset(
         "reasoning_effort",
         "support_mode",
         "quick_chat",
+        "reader_notebook",
         "reader_parent_notebook_id",
         "reader_pinned",
         "reader_library",
@@ -42,6 +48,7 @@ SETTINGS_KEYS = frozenset(
         "tags",
         "revoked_coach_idempotency_keys",
         "conversation_memory",
+        "project_brief_v1",
         "coaching_turns_since_deep_review",
         "deep_review_snapshot",
         "deep_review_job",

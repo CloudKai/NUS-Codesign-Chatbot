@@ -190,6 +190,36 @@ failures. Mirror client changes in `backend/api_client.py` and contract tests.
 Do not place educational decisions, SQL, object-store calls, or provider prompt
 construction in route functions.
 
+### Whole-chat project brief
+
+`POST /api/v1/reader/threads/{thread_id}/project/brief` accepts only optional strict
+boolean retry intent; ownership, the complete active conversation and instructions
+come from the server. `CoachApplicationService.project_brief` composes a focused
+`ProjectBriefService` through narrow repository/model ports and the shared generation
+allowance. It reuses the configured review-capable provider without running stage
+progression, adding transcript rows or modifying saved assessments. Provider/API
+boundaries use five typed brief points with text/null and exact student evidence.
+Unsupported evidence fails closed. Lecture materials guide the structure, not
+project facts. Summary generation does not retrieve course sources or invent gaps.
+
+The service reads all active visible messages independent of browser pagination.
+A content/identity/order fingerprint binds `project_brief_v1` to that exact chat;
+normal turns, revisions and removal invalidate old output. This is an additive
+settings-text key using the existing transactional metadata merge and DSQL OCC
+wrapper, not a schema migration. Successful briefs and failed-attempt receipts
+survive restart; failures require an explicit retry. A per-owner instance lock
+deduplicates overlapping local requests. Multi-worker exactly-once generation is
+not claimed. Context limits fail before invocation rather than silently summarising
+a recent window (including legacy messages over 12,000 characters and the adapters'
+full-history budgets). The operation uses shared rate/admission/usage accounting.
+
+GET project only reads cached state. React requests a missing brief when Summary
+becomes active, verifies owner before displaying it, and never stores it in browser
+storage. Mock mode returns an honest unavailable-preview state without a model
+call. AgentCore needs the matching updated Review output schema/runtime for real
+briefs; an older runtime that omits the field fails safely. No deployment or paid
+provider validation is implied by local scripted-model tests.
+
 ### Application and domain logic
 
 Use `CoachApplicationService` for coaching-turn orchestration,
@@ -254,6 +284,12 @@ Origin. Caddy exposes exact methods/paths only, with private no-store responses.
 The lecture adapter constructs the existing CoachRequest from saved stage/detail
 and fixed lecture intent, delegates to the same coach stream, and recovers through
 the existing completed-turn service. It never invents a second lifecycle/backend.
+Normal and revised messages share that NDJSON lifecycle; revisions add
+`/messages/{id}/revise/stream` while retaining the JSON revision endpoint.
+Provider deltas are enabled by default for capable clients: direct Bedrock,
+updated AgentCore Fast Chat and optional OpenAI. AgentCore SSE frames carry actual
+structured tool-input fragments to FastAPI, which extracts only response_text;
+validation/usage/save still require the terminal result.
 Preview is ephemeral; malformed/EOF/canceled streams only trigger read reconciliation.
 Explicit retry retains the original identity. Citation download checks an exact
 active owner/notebook/message and its saved source mapping before serving attachment
@@ -447,7 +483,15 @@ completion summaries and historical replies as coach-generated feedback, and
 supplies one deterministic action for each stage (including pending decisions
 and completed-stage refinement). Untagged legacy text remains in Chat; no
 stage or authorship is guessed and no model/review job starts from this read.
-Thinking Path exposes this saved work in the active stage and opened previews.
+The reader's Progression view retains saved contribution counts and stage
+context. My work now contains only owner-selected message bookmarks (#31);
+Summary retains per-stage feedback (#30). Bookmarks store a boolean in existing
+message metadata, use the original thinking_stage and interaction_intent, and
+read all active stars independently from transcript pagination. Writes acquire
+transaction authority before merging metadata and use the existing DSQL OCC
+wrapper. Reads bind ownership, active revision and visible rows to one snapshot.
+Append-only replacements discard the inherited star; old branch bookmarks cannot
+be read or changed through the reader routes. No schema migration is required.
 Unsent composer text is scoped by owner/notebook in browser-tab sessionStorage;
 reload and stage revisits restore it, and a text send clears it. File payloads
 are not copied into browser storage. Stage selection keeps the composer mounted.

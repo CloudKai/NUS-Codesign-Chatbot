@@ -2,17 +2,19 @@ http://127.0.0.1:8080 {
 	bind 127.0.0.1
 	@reader {
 		method GET
-		path_regexp reader ^/api/v1/reader/(session|preferences|threads|threads/[^/]+/(settings|transcript\.txt|messages/page|coach-turn|project|uploads|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content))$
+		path_regexp reader ^/api/v1/reader/(session|preferences|threads|threads/[^/]+/(settings|transcript\.txt|messages/page|coach-turn|project|bookmarks|uploads|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content))$
 	}
 	handle @reader {
 		reverse_proxy 127.0.0.1:8000
 	}
 	@lecture {
 		method POST
-		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|move|attachments|messages/[^/]+/(revise|learning-signal)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove|link)|lecture/stream|project/(stream|select-stage|resolve/[^/]+)))$
+		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|move|attachments|coach-turn/stop|messages/[^/]+/(revise(/stream)?|learning-signal|star)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove|link)|lecture/stream|project/(brief|stream|select-stage|resolve/[^/]+)))$
 	}
 	handle @lecture {
-		reverse_proxy 127.0.0.1:8000
+		reverse_proxy 127.0.0.1:8000 {
+			flush_interval -1
+		}
 	}
 	handle /pilot {
 		redir /pilot/ 308

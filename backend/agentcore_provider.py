@@ -35,6 +35,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from backend.agentcore_stream import read_runtime_reply_stream
+from backend.coaching.progress import emit_coach_reply_delta, emit_coach_reply_discard, reply_delta_sink_bound
+
 from agentcore_runtime.model import HAIKU_4_5_MODEL_ID, SONNET_4_6_MODEL_ID
 from agentcore_runtime.models import (
     DeepReviewTurnOutput,
@@ -1415,6 +1418,9 @@ def _overlay_review_fields(
             result.assessment.readiness_candidate or review.readiness_candidate
         ),
     }
+    if review.project_brief is not None:
+        from backend.domain import ProjectBrief
+        update["project_brief"] = ProjectBrief.model_validate(review.project_brief.model_dump(mode="json"))
     stage_feedback = []
     raw_reviews = getattr(review, "stage_reviews", None) or []
     for item in raw_reviews:
@@ -1877,6 +1883,9 @@ class AgentCoreCoachProvider:
             "agentcore_configured_timeout_seconds",
             round(float(configured_timeout), 1),
         )
+        stream_reply = role == "fast_chat" and reply_delta_sink_bound()
+        if stream_reply:
+            payload = {**payload, "stream_reply": True}
         encoded = json.dumps(payload).encode("utf-8")
         runtime_session_id = (
             _stateless_session_id()
@@ -1889,7 +1898,7 @@ class AgentCoreCoachProvider:
             runtimeSessionId=runtime_session_id,
             payload=encoded,
             contentType="application/json",
-            accept="application/json",
+            accept="text/event-stream" if stream_reply else "application/json",
         )
         perf = current_perf()
         if perf is not None:
@@ -1897,7 +1906,14 @@ class AgentCoreCoachProvider:
             perf.set("agentcore_call_count", current + 1)
         if not isinstance(response, Mapping):
             raise _malformed_error()
-        parsed = _payload_from_runtime_response(response, meter)
+        if stream_reply and "text/event-stream" in str(response.get("contentType") or response.get("content_type") or ""):
+            try:
+                final = read_runtime_reply_stream(response.get("response") or response.get("body"), emit_coach_reply_delta)
+            except (ValueError, TypeError, AttributeError) as error:
+                raise _malformed_error() from error
+            parsed = _payload_from_runtime_response({"response": json.dumps(final)}, meter)
+        else:
+            parsed = _payload_from_runtime_response(response, meter)
         _record_runtime_model_provenance(parsed)
         # Recorded here so Deep Review reports cycle/cache telemetry too; the
         # Fast Chat validator repeats it with the same payload, which is a
@@ -2131,6 +2147,7 @@ class AgentCoreCoachProvider:
                         "outcome=skipped reason=turn_invoke_budget_exhausted"
                     )
                     raise
+                emit_coach_reply_discard()
                 recovery_attempted = True
                 record_field("agentcore_structured_output_retry_attempted", True)
                 logger.warning(

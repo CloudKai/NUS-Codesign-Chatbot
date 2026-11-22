@@ -6,7 +6,8 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
-from typing import Any
+from threading import Lock
+from typing import Any, Literal
 from urllib.parse import quote, urlparse
 from uuid import uuid4
 
@@ -18,7 +19,7 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from backend.auth_oidc import CognitoOIDCClient, CognitoOIDCError
 from backend.auth_profiles import PROTECTED_ROLES
@@ -55,6 +56,7 @@ from backend.providers import (
     provider_error_category,
     provider_unavailable_outcome,
 )
+from backend.coaching.cancellation import TurnCancellation, TurnCancelled
 from backend.coaching.streaming import coach_events, stream_error
 from backend.coaching.stream_events import GraphEvent, GraphSummary
 from backend.generation_admission import GenerationAdmission
@@ -158,6 +160,7 @@ class MessageReviseRequest(BaseModel):
         max_length=128,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
     )
+    _reader_english: bool = PrivateAttr(default=False)
     model_id: str | None = None
     reasoning_effort: str | None = None
     response_detail: str | None = Field(default=None, pattern="^(short|long)$")
@@ -2044,6 +2047,7 @@ def create_app(
                 reasoning_effort=request.reasoning_effort,
                 response_detail=request.response_detail,
                 response_language=request.response_language,
+                reader_english=request._reader_english,
             )
         except RateLimitExceeded as error:
             _record_coach_rate_limit(
@@ -2327,6 +2331,26 @@ def create_app(
         do not send the header get the original event set.
         """
 
+        return _stream_coach_turn(request, http_request, owner)
+
+    active_turns: dict[tuple[str, str, str], TurnCancellation] = {}
+    active_turns_lock = Lock()
+
+    def cancel_stream_turn(
+        owner: OwnerServices, thread_id: str, key: str,
+    ) -> Literal["stopping", "saving", "finished"]:
+        """Stop only a stream matching this authenticated owner and exact turn."""
+        with active_turns_lock:
+            active = active_turns.get((owner.user_id, thread_id, key))
+        if active is None:
+            return "finished"
+        return "stopping" if active.stop() else "saving"
+
+    def _stream_coach_turn(
+        request: CoachRequest, http_request: Request, owner: OwnerServices,
+        revision_message_id: str | None = None,
+    ) -> StreamingResponse:
+        """Share dispatch, partial text, validation, metrics and save events for sends/edits."""
         request = _with_idempotency_header(request, http_request)
         if not owner.store.get_thread(request.thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
@@ -2370,6 +2394,24 @@ def create_app(
             )
 
         def events():
+            key = (owner.user_id, request.thread_id, request.idempotency_key) if request.idempotency_key else None
+            cancellation = TurnCancellation() if key else None
+            if key and cancellation is not None:
+                with active_turns_lock:
+                    if key in active_turns:
+                        yield_error = True
+                    else:
+                        active_turns[key] = cancellation
+                        yield_error = False
+                if yield_error:
+                    yield json.dumps(stream_error(CoachRequestInProgressError("This turn is already processing."))) + "\n"
+                    return
+
+            def unregister() -> None:
+                if key:
+                    with active_turns_lock:
+                        active_turns.pop(key, None)
+
             def initialize() -> None:
                 begin_coach_turn_perf()
                 record_field("request_id", stream_request_id)
@@ -2379,6 +2421,7 @@ def create_app(
 
             for item in coach_events(
                 owner.coach, request, before_submit=initialize, reply_deltas=reply_deltas,
+                revision_message_id=revision_message_id, cancellation=cancellation, on_finish=unregister,
             ):
                 if isinstance(item, BaseException):
                     if isinstance(item, RateLimitExceeded):
@@ -2386,6 +2429,8 @@ def create_app(
                             item, selected_source_count=selected_source_count,
                             request_id=stream_request_id,
                         )
+                    elif isinstance(item, TurnCancelled):
+                        _emit_coach_metric(outcome="cancelled", selected_source_count=selected_source_count)
                     else:
                         _log_stream_failure("failed", item)
                         outcome = (
@@ -2410,6 +2455,25 @@ def create_app(
                 yield json.dumps(item) + "\n"
 
         return StreamingResponse(events(), media_type="application/x-ndjson")
+    @app.post("/api/v1/threads/{thread_id}/messages/{message_id}/revise/stream")
+    def revise_user_message_stream(
+        thread_id: str, message_id: str, request: MessageReviseRequest, http_request: Request,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> StreamingResponse:
+        """Stream an append-only edit without changing the legacy JSON endpoint."""
+        thread = owner.store.get_thread(thread_id)
+        if thread is None:
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        journey = normalize_journey((thread.get("metadata") or {}).get("learning_journey"))
+        turn_request = CoachRequest(
+            thread_id=thread_id, student_message=request.content, current_stage=journey["current_stage"],
+            idempotency_key=request.idempotency_key, model_id=request.model_id,
+            reasoning_effort=request.reasoning_effort, response_detail=request.response_detail or journey["response_detail"],
+            response_language=request.response_language or str((thread.get("metadata") or {}).get("response_language") or "English"),
+        )
+        turn_request._reader_english = request._reader_english
+        return _stream_coach_turn(turn_request, http_request, owner, revision_message_id=message_id)
+
     @app.get("/api/v1/threads/{thread_id}/coach-turn", response_model=CoachTurn | None)
     def completed_coach_turn(
         thread_id: str,
@@ -2461,9 +2525,19 @@ def create_app(
         thread_id: str, message_id: str, content: str, key: str, request: Request, owner: OwnerServices,
     ) -> CoachTurn:
         """Bind the existing edit endpoint to the credential-guarded student browser adapter."""
-        return revise_user_message(thread_id, message_id, MessageReviseRequest(content=content, idempotency_key=key), request, owner)
+        payload = MessageReviseRequest(content=content, idempotency_key=key)
+        payload._reader_english = True
+        return revise_user_message(thread_id, message_id, payload, request, owner)
 
-    register_notebook_reader(app, current_owner, coach_turn_stream, reader_revise)
+    def reader_revise_stream(
+        thread_id: str, message_id: str, content: str, key: str, request: Request, owner: OwnerServices,
+    ) -> StreamingResponse:
+        """Bind credential-guarded browser revisions to the shared streamed lifecycle."""
+        payload = MessageReviseRequest(content=content, idempotency_key=key)
+        payload._reader_english = True
+        return revise_user_message_stream(thread_id, message_id, payload, request, owner)
+
+    register_notebook_reader(app, current_owner, coach_turn_stream, reader_revise, reader_revise_stream, cancel_stream_turn)
     return app
 
 

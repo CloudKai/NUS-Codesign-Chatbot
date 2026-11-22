@@ -5,6 +5,7 @@ import queue
 import threading
 from typing import Any
 
+from backend.coaching.cancellation import TurnCancellation, TurnCancelled, bind_turn_cancellation, check_turn_cancelled
 from backend.coaching.execution import CoachApplicationService
 from backend.coaching.progress import PROGRESS_LABELS
 from backend.coaching.stream_events import COACH_EVENT_ADAPTER
@@ -21,6 +22,8 @@ from backend.student_store import (
 
 def _stream_error_payload(error: BaseException) -> dict[str, Any]:
     """Map worker failures to terminal events without leaking storage details."""
+    if isinstance(error, TurnCancelled):
+        return {"event": "error", "detail": "Generation stopped.", "status": 409, "category": "cancelled"}
     if isinstance(error, RateLimitExceeded):
         return {"event": "error", "detail": error.detail, "status": 429,
                 "category": error.category, "retry_after": max(1, int(error.retry_after_seconds))}
@@ -49,6 +52,9 @@ def coach_events(
     *,
     before_submit: Callable[[], None] | None = None,
     reply_deltas: bool = False,
+    revision_message_id: str | None = None,
+    cancellation: TurnCancellation | None = None,
+    on_finish: Callable[[], None] | None = None,
 ) -> Iterator[dict[str, Any] | BaseException]:
     """Dispatch once before acknowledging; finish saving even if a reader leaves.
 
@@ -65,6 +71,7 @@ def coach_events(
     bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = queue.SimpleQueue()
 
     def progress(phase: str) -> None:
+        check_turn_cancelled()
         bus.put({"event": "status", "phase": phase, "label": PROGRESS_LABELS.get(phase, "")})
 
     def reply(text: str) -> None:
@@ -74,6 +81,7 @@ def coach_events(
 
     def reply_delta(text: str | None) -> None:
         nonlocal previewed
+        check_turn_cancelled()
         if text is None:
             if previewed:
                 previewed = False
@@ -82,23 +90,41 @@ def coach_events(
         previewed = True
         bus.put({"event": "reply_delta", "text": text})
 
-    def worker() -> None:
+    def execute() -> None:
         try:
+            check_turn_cancelled()
             if before_submit is not None:
                 before_submit()
-            turn = coach.submit(
-                request,
-                progress=progress,
-                reply=reply,
-                **({"reply_delta": reply_delta} if reply_deltas else {}),
-            )
+            callbacks = {"progress": progress, "reply": reply}
+            if reply_deltas:
+                callbacks["reply_delta"] = reply_delta
+            if revision_message_id is None:
+                turn = coach.submit(request, **callbacks)
+            else:
+                turn = coach.revise_and_resubmit(
+                    request.thread_id, revision_message_id, request.student_message,
+                    idempotency_key=request.idempotency_key, model_id=request.model_id,
+                    reasoning_effort=request.reasoning_effort, response_detail=request.response_detail,
+                    response_language=None if request._reader_english else request.response_language,
+                    reader_english=request._reader_english, **callbacks,
+                )
             bus.put({"event": "done", "turn": turn.model_dump(mode="json")})
         except BaseException as error:
+            try:
+                check_turn_cancelled()
+            except TurnCancelled as cancelled:
+                error = cancelled
             if reply_deltas and previewed:
                 bus.put({"event": "reply_discard"})
             bus.put(error)
         finally:
+            if on_finish is not None:
+                on_finish()
             bus.put(None)
+
+    def worker() -> None:
+        with bind_turn_cancellation(cancellation):
+            execute()
 
     threading.Thread(target=worker, name="coach-turn-stream", daemon=True).start()
     yield COACH_EVENT_ADAPTER.validate_python({

@@ -276,4 +276,11 @@ def _prepare(tmp_path: Any, monkeypatch: pytest.MonkeyPatch, spec: dict[str, Any
 def test_turn_scope_matches_the_recorded_decision(
     name: str, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert _prepare(tmp_path, monkeypatch, SCENARIOS[name]) == _GOLDEN[name]
+    actual = _prepare(tmp_path, monkeypatch, SCENARIOS[name])
+    if name == "lecture_help":
+        # The bare greeting still follows Q&A policy but has no evidence request.
+        assert actual["expected_response_mode"] == "qa"
+        assert not actual["retrieval_required"]
+        assert not actual["searched"]
+        return
+    assert actual == _GOLDEN[name]

@@ -1511,3 +1511,123 @@ def test_same_agentcore_provider_accepts_two_notebooks_concurrently():
     assert turn_a.response_text
     assert turn_b.response_text
     assert not hasattr(provider, "_last_plan")
+
+
+def test_runtime_reply_fragments_arrive_before_final_result() -> None:
+    """The public provider emits only response_text as SDK body chunks arrive."""
+    from backend.coaching.progress import coach_progress
+
+    observed: list[str | None] = []
+    final = _output(response_text="Hello world")
+    prefix = '{"response_text":"Hello '
+    suffix = 'world","assessment":{"private":"hidden"}}'
+
+    class StreamBody:
+        def iter_chunks(self, chunk_size: int = 1024):
+            yield ('data: ' + json.dumps({"event": "model_delta", "tool_id": "one", "input": prefix}) + '\n\n').encode()
+            assert observed == ["Hello "], "Do not buffer until the final runtime object"
+            yield ('data: ' + json.dumps({"event": "model_delta", "tool_id": "one", "input": suffix}) + '\n\n').encode()
+            assert ''.join(item or '' for item in observed) == 'Hello world'
+            yield ('data: ' + json.dumps({"event": "result", "payload": final}) + '\n\n').encode()
+
+        def close(self) -> None:
+            pass
+
+    class Client:
+        def invoke_agent_runtime(self, **kwargs):
+            assert json.loads(kwargs['payload'])['stream_reply'] is True
+            return {"contentType": "text/event-stream", "response": StreamBody()}
+
+    with coach_progress(None, reply_delta=observed.append):
+        result = _provider(Client()).assess(_request())
+    assert result.response_text == final['response_text']
+    assert ''.join(item or '' for item in observed) == 'Hello world'
+
+
+def test_streamed_runtime_retry_withdraws_the_failed_attempt() -> None:
+    """The existing one-retry policy must not concatenate two model replies."""
+    from backend.coaching.progress import coach_progress
+    observed: list[str | None] = []
+
+    class Body:
+        def __init__(self, text: str, payload: dict[str, Any]) -> None:
+            self.frames = [
+                {'event': 'model_delta', 'tool_id': 'one', 'input': json.dumps({'response_text': text})},
+                {'event': 'result', 'payload': payload},
+            ]
+        def iter_chunks(self, chunk_size: int = 1):
+            for frame in self.frames:
+                yield ('data: ' + json.dumps(frame) + '\n\n').encode()
+        def close(self) -> None:
+            pass
+
+    class Client:
+        calls = 0
+        def invoke_agent_runtime(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                body = Body('Wrong attempt', {'ok': False, 'error': True, 'category': 'structured_output_failure'})
+            else:
+                body = Body('Correct reply', _output(response_text='Correct reply'))
+            return {'contentType': 'text/event-stream', 'response': body}
+
+    client = Client()
+    with coach_progress(None, reply_delta=observed.append):
+        result = _provider(client).assess(_request())
+    assert observed == ['Wrong attempt', None, 'Correct reply']
+    assert result.response_text == 'Correct reply'
+    assert client.calls == 2
+
+
+@pytest.mark.parametrize('ending', ['missing', 'invalid-json', 'after-result', 'invalid-result', 'invalid-utf8', 'oversized'])
+def test_malformed_runtime_stream_is_rejected_and_closed(ending: str) -> None:
+    """Never accept an incomplete/invalid model stream as a saved reply."""
+    from backend.coaching.progress import coach_progress
+    closed: list[bool] = []
+    prefix = 'data: ' + json.dumps({'event': 'model_delta', 'tool_id': 'one', 'input': '{"response_text":"Preview'}) + '\n\n'
+    final = 'data: ' + json.dumps({'event': 'result', 'payload': _output(response_text='Preview')}) + '\n\n'
+    endings = {
+        'missing': b'',
+        'oversized': b' ' * 2_000_001,
+        'invalid-json': b'data: not-json\n\n',
+        'after-result': (final + prefix).encode(),
+        'invalid-result': b'data: {"event":"result","payload":{}}\n\n',
+        'invalid-utf8': b'\xff',
+    }
+    class Body:
+        def iter_chunks(self, chunk_size: int = 1):
+            yield prefix.encode()
+            yield endings[ending]
+        def close(self) -> None:
+            closed.append(True)
+    class Client:
+        def invoke_agent_runtime(self, **kwargs):
+            return {'contentType': 'text/event-stream', 'response': Body()}
+    with coach_progress(None, reply_delta=lambda text: None):
+        with pytest.raises(ProviderUnavailableError):
+            _provider(Client()).assess(_request())
+    assert closed == [True]
+
+
+def test_streamed_runtime_unicode_survives_arbitrary_byte_boundaries() -> None:
+    """SDK chunks may split UTF-8 inside the structured reply text."""
+    from backend.coaching.progress import coach_progress
+    text = '你好🙂'
+    frames = [
+        {'event': 'model_delta', 'tool_id': 'one', 'input': json.dumps({'response_text': text}, ensure_ascii=False)},
+        {'event': 'result', 'payload': _output(response_text=text)},
+    ]
+    raw = ''.join('data: ' + json.dumps(frame, ensure_ascii=False) + '\n\n' for frame in frames).encode()
+    class Body:
+        def iter_chunks(self, chunk_size: int = 1):
+            for byte in raw:
+                yield bytes([byte])
+        def close(self) -> None:
+            pass
+    class Client:
+        def invoke_agent_runtime(self, **kwargs):
+            return {'contentType': 'text/event-stream', 'response': Body()}
+    observed = []
+    with coach_progress(None, reply_delta=observed.append):
+        result = _provider(Client()).assess(_request())
+    assert result.response_text == text and ''.join(observed) == text

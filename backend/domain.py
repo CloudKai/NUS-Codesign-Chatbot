@@ -230,6 +230,33 @@ def _stage_assessment_as_text(value: Any) -> Any:
     return " ".join(parts).strip()
 
 
+class ProjectBriefPoint(BaseModel):
+    """One concise project claim with exact supporting student quotations, or an explicit unknown."""
+
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = Field(default=None, max_length=400)
+    evidence: list[str] = Field(default_factory=list, max_length=3)
+
+
+class ProjectBrief(BaseModel):
+    """Lecture-informed whole-chat brief; absent facts must remain null."""
+
+    model_config = ConfigDict(extra="forbid")
+    who_and_why: ProjectBriefPoint = Field(default_factory=ProjectBriefPoint)
+    problem: ProjectBriefPoint = Field(default_factory=ProjectBriefPoint)
+    current_idea: ProjectBriefPoint = Field(default_factory=ProjectBriefPoint)
+    what_matters: ProjectBriefPoint = Field(default_factory=ProjectBriefPoint)
+    still_to_explore: ProjectBriefPoint = Field(default_factory=ProjectBriefPoint)
+
+
+class ProjectBriefResult(BaseModel):
+    """Owner-authorized summary state; only current results contain generated claims."""
+
+    status: Literal["current", "missing", "empty", "preview", "failed"]
+    version: str = ""
+    brief: ProjectBrief | None = None
+
+
 class EducationalAssessment(BaseModel):
     """Validated coaching assessment produced for one student contribution.
 
@@ -239,6 +266,7 @@ class EducationalAssessment(BaseModel):
     both parse.
     """
 
+    project_brief: ProjectBrief | None = None
     current_stage: str
     contribution_summary: str = Field(default="", max_length=2_000)
     stage_assessment: str = Field(default="", max_length=4_000)
@@ -468,6 +496,8 @@ class CoachRequest(BaseModel):
     retrieved_chunks: list[RetrievalChunkReference] = Field(default_factory=list)
     image_inputs: list[CoachImageInput] = Field(default_factory=list, max_length=5)
     allow_model_knowledge: bool = False
+    # Set only by the student reader adapter. Legacy clients use saved language.
+    _reader_english: bool = PrivateAttr(default=False)
     response_language: str = Field(default="English", min_length=1, max_length=50)
     history: list[dict[str, Any]] = Field(default_factory=list)
 

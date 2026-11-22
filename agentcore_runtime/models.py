@@ -661,6 +661,25 @@ class FastChatTurnOutput(BaseModel):
         )
 
 
+class ProjectBriefPointOutput(BaseModel):
+    """One concise project statement with exact student evidence, or an unknown."""
+
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = Field(default=None, max_length=400)
+    evidence: list[str] = Field(default_factory=list, max_length=3)
+
+
+class ProjectBriefOutput(BaseModel):
+    """Whole-conversation design brief; never infer missing student facts."""
+
+    model_config = ConfigDict(extra="forbid")
+    who_and_why: ProjectBriefPointOutput = Field(default_factory=ProjectBriefPointOutput)
+    problem: ProjectBriefPointOutput = Field(default_factory=ProjectBriefPointOutput)
+    current_idea: ProjectBriefPointOutput = Field(default_factory=ProjectBriefPointOutput)
+    what_matters: ProjectBriefPointOutput = Field(default_factory=ProjectBriefPointOutput)
+    still_to_explore: ProjectBriefPointOutput = Field(default_factory=ProjectBriefPointOutput)
+
+
 class ReviewTurnOutput(BaseModel):
     """Formative Review result for incremental Haiku or deep Sonnet.
 
@@ -671,6 +690,7 @@ class ReviewTurnOutput(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    project_brief: ProjectBriefOutput | None = None
     response_text: str = Field(min_length=1)
     strengths: list[str] = Field(default_factory=list, max_length=4)
     areas_to_develop: list[str] = Field(default_factory=list, max_length=4)

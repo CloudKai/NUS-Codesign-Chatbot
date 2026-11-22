@@ -28,6 +28,7 @@ from backend.coaching.evidence_scope import (
     ScopeInputs,
     ScopeSource,
     decide_first_pass_scope,
+    is_bare_lecture_greeting,
     is_chit_chat as is_chit_chat,
     is_image_source,
     is_searchable_student_upload,
@@ -49,6 +50,7 @@ from backend.coaching.workflow_navigation import (
     is_compound_status_guidance_request,
     progression_effect_for,
 )
+from backend.coaching.cancellation import check_turn_cancelled
 from backend.coaching.progress import (
     PROGRESS_RETRIEVING,
     PROGRESS_SAVING,
@@ -154,6 +156,7 @@ from backend.student_store import (
     StudentStore,
 )
 from backend.title_service import NotebookTitleService
+from backend.coaching.project_brief import ProjectBriefService
 from backend.generation_admission import GenerationAdmission, configured_generation_admission
 from backend.usage import assessed, mark_replayed, usage_operation
 from backend.turn_perf import (
@@ -654,6 +657,7 @@ class CoachApplicationService:
         self._retriever = retriever or LocalChunkRetriever()
         self._generation_admission = generation_admission or configured_generation_admission()
         self._course_intent_classifier = course_intent_classifier
+        self.project_brief = ProjectBriefService(store, workflow.provider, self._generation_admission)
 
     def _rate_limit_user_key(self) -> str:
         """Return the authenticated store owner key for coach rate limiting.
@@ -971,6 +975,7 @@ class CoachApplicationService:
                 fingerprint = _coach_request_fingerprint(request, surface=surface)
                 deadline = time.monotonic() + 125.0
                 while True:
+                    check_turn_cancelled()
                     claim_started = time.perf_counter()
                     reservation = self._store.claim_coach_request(
                         request.thread_id,
@@ -1870,7 +1875,20 @@ class CoachApplicationService:
                 == prepared_request.current_stage
             ):
                 existing_pending = candidate_pending
-        if manual_stage_target is not None:
+        if (
+            not owned_review
+            and prepared_request.interaction_intent == "lecture_help"
+            and is_bare_lecture_greeting(
+                prepared_request.student_message, attachment_count=len(prepared_request.attachment_source_ids)
+            )
+        ):
+            record_field("agentcore_call_count", 0)
+            record_field("agent_ms", 0)
+            turn = CoachTurn(
+                response_text="Hi! What CDE2300 lecture, reading, or course concept would you like help with?",
+                assessment=EducationalAssessment(current_stage=prepared_request.current_stage, response_mode="qa"),
+            )
+        elif manual_stage_target is not None:
             record_field("agentcore_call_count", 0)
             record_field("agent_ms", 0)
             should_generate_title = False
@@ -2179,6 +2197,7 @@ class CoachApplicationService:
             ):
                 # Reflection ADVANCE is complete-in-place (no next-stage pending).
                 validated_completion_stage = prepared_request.current_stage
+        check_turn_cancelled(saving=True)
         persist_started = time.perf_counter()
         emit_coach_reply_ready(turn.response_text)
         emit_coach_progress(PROGRESS_SAVING)
@@ -3213,7 +3232,7 @@ class CoachApplicationService:
                 "image_inputs": image_inputs,
                 "model_id": selected_model.id,
                 "reasoning_effort": selected_effort,
-                "response_language": response_language or "English",
+                "response_language": "English" if request._reader_english else response_language or "English",
                 "response_detail": journey["response_detail"],
                 "allow_model_knowledge": allow_model_knowledge,
                 "conversation_revision": conversation_revision,
@@ -3268,6 +3287,10 @@ class CoachApplicationService:
         reasoning_effort: str | None = None,
         response_detail: str | None = None,
         response_language: str | None = None,
+        reader_english: bool = False,
+        progress: CoachProgressCallback | None = None,
+        reply: CoachReplyCallback | None = None,
+        reply_delta: CoachReplyDeltaCallback | None = None,
     ) -> CoachTurn:
         """Append-only revise a user turn, then generate a replacement coach reply.
 
@@ -3317,6 +3340,7 @@ class CoachApplicationService:
             )
             if detail not in {"short", "long"}:
                 detail = DEFAULT_RESPONSE_DETAIL
+            check_turn_cancelled()
             resumed = None
             resume_fn = getattr(self._store, "try_resume_revision_result", None)
             if callable(resume_fn):
@@ -3364,7 +3388,8 @@ class CoachApplicationService:
                     replacement_metadata.get("attachment_source_ids") or []
                 ),
             )
-            return self.submit(request, execution_lease_held=True)
+            request._reader_english = reader_english
+            return self.submit(request, execution_lease_held=True, progress=progress, reply=reply, reply_delta=reply_delta)
 
     def _selected_citation_catalog(
         self,

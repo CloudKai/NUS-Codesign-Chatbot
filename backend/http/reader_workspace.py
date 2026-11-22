@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.domain import CoachTurn, require_supported_response_language
@@ -12,6 +12,8 @@ from backend.learning_signals import LearningSignal, LearningSignalSaved
 from backend.models import DEFAULT_CHAT_MODEL_ID, MODEL_REGISTRY, get_model, validate_reasoning
 from backend.learning.journey import normalize_journey
 from backend.owner_context import OwnerServices
+from backend.settings import settings
+from backend.persistence.store.contracts import is_reader_notebook
 
 _PARENT_NOTEBOOK_KEY = "reader_parent_notebook_id"
 
@@ -94,9 +96,9 @@ class ReaderNotebook(BaseModel):
 
 
 def reader_notebook(row: dict[str, Any]) -> ReaderNotebook:
-    """Read the stored chat marker, treating legacy records as notebooks."""
+    """Treat unmarked legacy conversations as chats without rewriting their stored data."""
     metadata = row.get("metadata") or {}
-    quick_chat = metadata.get("quick_chat") is True
+    quick_chat = not is_reader_notebook(metadata)
     parent = metadata.get(_PARENT_NOTEBOOK_KEY)
     name = row["name"]
     if quick_chat and name == "New assignment chat":
@@ -129,6 +131,7 @@ class ReaderNotebookSettings(BaseModel):
     reasoning_effort: str | None
     assignment: dict[str, str]
     models: list[ReaderModel]
+    chat_model_label: str
 
 
 class ReaderRevision(BaseModel):
@@ -139,9 +142,23 @@ class ReaderRevision(BaseModel):
     idempotency_key: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 
 
+def reader_chat_model_label(saved_model_label: str) -> str:
+    """Label the actual coaching runtime rather than its legacy chat preference."""
+    if settings.model_provider == "mock":
+        return "Mock coach"
+    if settings.model_provider == "openai":
+        return saved_model_label
+    model_id = (settings.coaching_model_id or settings.agentcore_model_id
+                if settings.model_provider == "agentcore" else settings.bedrock_model_id)
+    if "claude-haiku-4-5" in model_id:
+        return "Claude Haiku 4.5"
+    return "Course coach"
+
+
 def register_reader_workspace(
     app: FastAPI, reader_owner: Callable[[Request], OwnerServices],
     revise: Callable[[str, str, str, str, Request, OwnerServices], CoachTurn],
+    revise_stream: Callable[[str, str, str, str, Request, OwnerServices], StreamingResponse],
 ) -> None:
     """Register authenticated CRUD/export adapters, preserving the shared service behavior."""
 
@@ -157,6 +174,7 @@ def register_reader_workspace(
             response_language=str(meta.get('response_language') or 'English'),
             selected_model=model.id, reasoning_effort=validate_reasoning(model, meta.get('reasoning_effort')),
             assignment=meta.get('assignment') or {},
+            chat_model_label=reader_chat_model_label(model.label),
             models=[ReaderModel(id=item.id, label=item.label, reasoning_efforts=list(item.reasoning_efforts)) for item in MODEL_REGISTRY],
         )
 
@@ -180,6 +198,7 @@ def register_reader_workspace(
             model_id=DEFAULT_CHAT_MODEL_ID,
             support_mode="critical-thinking",
             quick_chat=quick_chat,
+            reader_notebook=not quick_chat,
             parent_notebook_id=payload.parent_notebook_id,
         )
         return notebook(row['id'], owner)
@@ -283,6 +302,14 @@ def register_reader_workspace(
     ) -> CoachTurn:
         """Delegate append-only editing and all recovery/error semantics to the shared route."""
         return revise(thread_id, message_id, payload.content, payload.idempotency_key, request, owner)
+
+    @app.post('/api/v1/reader/threads/{thread_id}/messages/{message_id}/revise/stream')
+    def reader_revise_stream(
+        thread_id: str, message_id: str, payload: ReaderRevision, request: Request,
+        owner: OwnerServices = Depends(reader_owner),
+    ) -> StreamingResponse:
+        """Stream a credential-guarded revision through the canonical lifecycle."""
+        return revise_stream(thread_id, message_id, payload.content, payload.idempotency_key, request, owner)
 
     @app.post('/api/v1/reader/threads/{thread_id}/messages/{message_id}/learning-signal', response_model=LearningSignalSaved)
     def reader_signal(

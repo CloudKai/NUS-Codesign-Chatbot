@@ -8,6 +8,8 @@ interface ReaderState {
   page: Page | null; project: Project | null; busy: boolean; error: string;
   chatSummaries: NotebookList['chat_summaries'];
 }
+export const SIGN_OUT_SIGNAL = "codesign-signed-out";
+
 const blank: ReaderState = { phase: 'checking', session: null, notebooks: [], chatSummaries: {}, page: null, project: null, busy: false, error: '' };
 
 /** Own the session lifecycle and owner/revision-fenced list and page requests. */
@@ -59,7 +61,7 @@ export function useReader() {
     } catch (error) { fail(error, epoch); }
   }
 
-  async function open(notebookId: string, older = false, refresh = false) {
+  async function open(notebookId: string, older = false, refresh = false, target?: string) {
     const snapshot = current.current;
     if (!snapshot.session || snapshot.busy) return;
     const epoch = ++generation.current;
@@ -72,13 +74,20 @@ export function useReader() {
       const query = new URLSearchParams({ limit: '20' });
       if (cursor) query.set('cursor', cursor);
       const base = `/api/v1/reader/threads/${encodeURIComponent(notebookId)}`;
-      const [page, project, list] = await Promise.all([
+      let [page, project, list] = await Promise.all([
         get<Page>(`${base}/messages/page?${query}`, signal), get<Project>(`${base}/project`, signal),
         refresh ? get<NotebookList>('/api/v1/reader/threads', signal).catch(error => {
           if (error instanceof ApiError && [401, 403].includes(error.status)) throw error;
           return null;
         }) : Promise.resolve(null),
       ]);
+      // Follow revision-bound pages so an old bookmark opens its original with surrounding context.
+      while (target && !page.messages.some(message => message.id === target) && page.next_cursor) {
+        const earlier = await get<Page>(`${base}/messages/page?${new URLSearchParams({ limit: '100', cursor: page.next_cursor })}`, signal);
+        if (earlier.owner_id !== page.owner_id || earlier.notebook.id !== notebookId || earlier.conversation_revision !== page.conversation_revision) throw new ApiError(409);
+        page = { ...page, messages: [...earlier.messages, ...page.messages], next_cursor: earlier.next_cursor };
+      }
+      if (target && !page.messages.some(message => message.id === target)) throw new ApiError(404);
       const verified = await currentSession(signal);
       if (epoch !== generation.current) return;
       if (page.owner_id !== snapshot.session.owner_id || project.owner_id !== page.owner_id || project.thread_id !== notebookId || verified.owner_id !== page.owner_id || (list && list.owner_id !== page.owner_id)) { void reload(); return; }
@@ -199,30 +208,42 @@ export function useReader() {
 
   useEffect(() => {
     void reload();
-    const hide = () => { if (document.hidden) reset(); else void reload(); };
+    let lastCheck = Date.now();
+    let checking = false;
+    const visibility = () => { if (!document.hidden) void check(); };
     const pageHide = () => reset();
     const pageShow = (event: PageTransitionEvent) => { if (event.persisted) void reload(); };
     const check = async () => {
       const epoch = generation.current;
       const owner = current.current.session?.owner_id;
-      if (!owner || document.hidden) return;
+      if (!owner || document.hidden || checking || Date.now() - lastCheck < 60_000) return;
+      checking = true;
+      lastCheck = Date.now();
       try {
         const session = await currentSession(controller.current.signal);
         if (epoch === generation.current && owner !== session.owner_id) void reload();
       } catch (error) { fail(error, epoch); }
+      finally { checking = false; }
     };
-    document.addEventListener('visibilitychange', hide);
+    document.addEventListener('visibilitychange', visibility);
     window.addEventListener('focus', check);
     window.addEventListener('pagehide', pageHide);
     window.addEventListener('pageshow', pageShow);
-    const interval = window.setInterval(check, 15000);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== SIGN_OUT_SIGNAL || !event.newValue) return;
+      reset();
+      setState({ ...blank, phase: 'signed-out' });
+    };
+    window.addEventListener('storage', onStorage);
+    const interval = window.setInterval(check, 60_000);
     return () => {
       controller.current.abort();
       generation.current += 1;
-      document.removeEventListener('visibilitychange', hide);
+      document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('focus', check);
       window.removeEventListener('pagehide', pageHide);
       window.removeEventListener('pageshow', pageShow);
+      window.removeEventListener('storage', onStorage);
       window.clearInterval(interval);
     };
   }, []);

@@ -92,3 +92,12 @@ working_conclusion, and optional facione_profile. Set review_depth to deep.
 Keep top-level strengths and areas_to_develop as a brief holistic list;
 stage_reviews is authoritative for per-stage Review-tab projection. Each
 stage_reviews item must include supporting_message_refs as an array.
+
+Project brief requests:
+When the trusted runtime instructions request project_brief, follow their
+five-field design brief structure. Return project_brief with who_and_why,
+problem, current_idea, what_matters, still_to_explore. Each point contains
+text (one or two short sentences, or null) and evidence (exact student
+quotations, or []). Use null/[] for missing facts. Preserve tentative ideas
+and later corrections; do not adopt coach suggestions on the student's behalf.
+Do not substitute stage progress or general strengths for project content.

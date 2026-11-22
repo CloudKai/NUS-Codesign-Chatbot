@@ -54,3 +54,23 @@ contains the named tool, except the two rows already flagged: the empathy map (W
 - The Week 3 slides (Empathy Map, Fieldwork, Persona) are not in `lecture_notes/`. The empathy map uses the
   standard Says, Thinks, Does, Feels quadrants until they are added.
 - "Rule of threes" (Week 10, p14) is a title slide with no readable text, so it is not included.
+
+## Your project so far
+
+The five-part project brief is an app design based on the lecture materials, not
+a literal lecture template and not a section explaining links to course concepts:
+
+| Brief section | Design basis |
+|---|---|
+| Who and why | Week 2 PDF p66–67, p86: functional/emotional/social needs and context/barrier/action/outcome; Week 4 p20: persona goals and frustrations |
+| Problem | Week 2 p86: the barrier and desired outcome; Week 8 p40: design problem/challenge |
+| Current idea | Week 7 p56: concept selection criteria; Week 8 p40: proposed solution |
+| What matters | Week 4 p30–37: user goals → product values → features; Week 7 p56: selection criteria |
+| Still to explore | Week 8 p39–40: riskiest assumption and prototyping plan; Week 9 p31–34: tests and feedback |
+
+Only the student's actual discussion supplies project facts. The model is asked to
+read the complete active chat, respect later corrections and uncertainty, exclude
+unadopted coach suggestions, and return null when information is not established.
+Each populated section requires exact supporting student quotations checked by
+the server. These guards do not replace evaluation of live summarisation quality.
+No retrieval/model call is made to invent requirements or fill a missing section.

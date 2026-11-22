@@ -1,12 +1,14 @@
 """Authenticated browser projection over existing owner-scoped workspace services."""
 
+import logging
+
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse, Response
 
 from backend.auth_profiles import has_streamlit_access
@@ -18,7 +20,7 @@ from backend.http.reader_workspace import (
     register_reader_workspace,
 )
 from backend.learning_signals import learning_receipts
-from backend.domain import CitationReference, CoachRequest, CoachTurn, require_visible_text
+from backend.domain import CitationReference, CoachRequest, CoachTurn, ProjectBriefResult, require_visible_text
 from backend.learning.journey import (
     FACIONE_DIMENSIONS,
     learning_review,
@@ -68,8 +70,35 @@ class ReaderMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     citations: list[CitationReference] = Field(default_factory=list)
+    starred: bool = False
     feedback_available: bool = False
     rating: Literal["useful", "not_useful"] | None = None
+
+
+class ReaderStar(BaseModel):
+    """Explicit desired bookmark state; no transcript or stage authority."""
+
+    model_config = ConfigDict(extra="forbid")
+    starred: bool = Field(strict=True)
+
+
+class ReaderBookmark(BaseModel):
+    """Bounded preview with authoritative saved stage and mode for one bookmark."""
+
+    id: str
+    role: Literal["user", "assistant"]
+    preview: str
+    stage_id: str | None
+    interaction_intent: Literal["lecture_help", "project_coaching"] | None
+
+
+class ReaderBookmarks(BaseModel):
+    """All active bookmarks, independent of the currently loaded transcript page."""
+
+    owner_id: str
+    thread_id: str
+    conversation_revision: int
+    messages: list[ReaderBookmark]
 
 
 class ReaderPage(BaseModel):
@@ -124,9 +153,17 @@ class ReaderFacioneScore(BaseModel):
     score: int | None = Field(ge=1, le=4)
 
 
+class ReaderBriefRequest(BaseModel):
+    """Only explicit retry intent is accepted; all summary inputs are server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+    retry: StrictBool = False
+
+
 class ReaderReview(BaseModel):
     """Student-facing review projected from saved conversation assessments."""
 
+    project_brief: ProjectBriefResult
     summary: str
     strengths: list[ReaderReviewFeedback]
     improvements: list[ReaderReviewFeedback]
@@ -173,14 +210,24 @@ def _message(row: dict[str, Any]) -> ReaderMessage:
     return ReaderMessage(
         id=row["id"], role=row["role"], content=row["content"], citations=citations,
         feedback_available=row['role'] == 'assistant' and meta.get('interaction_intent') == 'lecture_help' and not row.get('is_error'),
+        starred=meta.get("starred") is True,
         rating=(learning_receipts(meta.get('learning_signals')).get('rating') or {}).get('kind'),
     )
+
+
+class ReaderStopTurn(BaseModel):
+    """Identify the exact streamed turn to stop in an owned chat."""
+
+    model_config = ConfigDict(extra="forbid")
+    idempotency_key: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 
 
 def register_notebook_reader(
     app: FastAPI, resolve_owner: Callable[[Request], OwnerServices],
     stream_turn: Callable[[CoachRequest, Request, OwnerServices], StreamingResponse],
     revise: Callable[[str, str, str, str, Request, OwnerServices], CoachTurn],
+    revise_stream: Callable[[str, str, str, str, Request, OwnerServices], StreamingResponse],
+    stop_turn: Callable[[OwnerServices, str, str], str],
 ) -> None:
     """Register bounded student conversation routes; never use the anonymous local demo owner."""
 
@@ -204,7 +251,16 @@ def register_notebook_reader(
         return owner
 
     register_reader_sources(app, reader_owner)
-    register_reader_workspace(app, reader_owner, revise)
+    register_reader_workspace(app, reader_owner, revise, revise_stream)
+
+    @app.post("/api/v1/reader/threads/{thread_id}/coach-turn/stop")
+    def stop_coach_turn(
+        thread_id: str, request: ReaderStopTurn, owner: OwnerServices = Depends(reader_owner),
+    ) -> dict[str, str]:
+        """Request cancellation without creating or replaying a coach turn."""
+        if owner.workspace.get_thread(thread_id) is None:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        return {"status": stop_turn(owner, thread_id, request.idempotency_key)}
 
     @app.get("/api/v1/reader/session", response_model=ReaderSession)
     def session(owner: OwnerServices = Depends(reader_owner)) -> ReaderSession:
@@ -258,6 +314,65 @@ def register_notebook_reader(
             conversation_revision=page["conversation_revision"],
         )
 
+    @app.get("/api/v1/reader/threads/{thread_id}/bookmarks", response_model=ReaderBookmarks)
+    def bookmarks(thread_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderBookmarks:
+        """Project only owned active stars; never infer context from the live stage."""
+        try:
+            revision, rows = owner.workspace.get_message_bookmarks(thread_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail="Notebook not found") from error
+        entries = []
+        stage_ids = {stage.id for stage in THINKING_STAGES}
+        for row in rows:
+            meta = row.get("metadata") or {}
+            if meta.get("starred") is not True or meta.get("kind") or meta.get("_internal_type"):
+                continue
+            stage = meta.get("thinking_stage")
+            intent = meta.get("interaction_intent")
+            entries.append(ReaderBookmark(
+                id=row["id"], role=row["role"], preview=row["content"][:320],
+                stage_id=stage if isinstance(stage, str) and stage in stage_ids else None,
+                interaction_intent=intent if isinstance(intent, str) and intent in {"lecture_help", "project_coaching"} else None,
+            ))
+        return ReaderBookmarks(
+            owner_id=owner.user_id, thread_id=thread_id,
+            conversation_revision=revision, messages=entries,
+        )
+
+    @app.post("/api/v1/reader/threads/{thread_id}/messages/{message_id}/star", response_model=ReaderStar)
+    def star_message(
+        thread_id: str, message_id: str, payload: ReaderStar,
+        owner: OwnerServices = Depends(reader_owner),
+    ) -> ReaderStar:
+        """Set an owned active message's star without starting a coaching turn."""
+        try:
+            starred = owner.workspace.set_message_star(thread_id, message_id, payload.starred)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail="Message not found") from error
+        return ReaderStar(starred=starred)
+
+    @app.post("/api/v1/reader/threads/{thread_id}/project/brief", response_model=ProjectBriefResult)
+    def project_brief(thread_id: str, payload: ReaderBriefRequest, http_request: Request, owner: OwnerServices = Depends(reader_owner)) -> ProjectBriefResult:
+        """Generate or reuse a whole-chat brief; accept no browser-supplied history or instructions."""
+        from backend.providers import ProviderUnavailableError
+        from backend.rate_limit import RateLimitExceeded
+        if owner.workspace.get_thread(thread_id) is None:
+            raise HTTPException(status_code=404, detail="Chat not found")
+        logging.getLogger("backend.api").info(
+            "project_brief request_id=%s thread_id=%s",
+            getattr(http_request.state, "request_id", "unknown"), thread_id,
+        )
+        try:
+            return owner.coach.project_brief.generate(thread_id, retry=payload.retry)
+        except ValueError as error:
+            raise HTTPException(status_code=503, detail="The whole-chat summary could not be generated.") from error
+        except RuntimeError as error:
+            if isinstance(error, ProviderUnavailableError):
+                raise HTTPException(status_code=503, detail="Project summary unavailable. Try again.") from error
+            raise HTTPException(status_code=409, detail="Chat changed. Refresh before trying again.") from error
+        except RateLimitExceeded as error:
+            raise HTTPException(status_code=429, detail="Please wait before updating your summary.") from error
+
     @app.get("/api/v1/reader/threads/{thread_id}/project", response_model=ReaderProject)
     def project(thread_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderProject:
         """Read canonical artifacts and navigation without invoking a provider or writing data."""
@@ -288,6 +403,7 @@ def register_notebook_reader(
                 rationale=pending.assessment.recommendation_rationale,
             ) if pending else None,
             review=ReaderReview(
+                project_brief=owner.coach.project_brief.read(thread_id),
                 summary=review["saved_summary"] or str(metadata.get("learning_summary") or "").strip(),
                 strengths=merge_checkpoint_items_into_sections(
                     review["strength_sections"], checkpoints, field="strengths",
@@ -364,6 +480,7 @@ def register_notebook_reader(
             current_stage=journey["current_stage"], response_detail=journey["response_detail"],
             attachment_source_ids=payload.attachment_source_ids,
         )
+        coach_request._reader_english = True
         return stream_turn(coach_request, request, owner)
 
     @app.get("/api/v1/reader/threads/{thread_id}/coach-turn", response_model=CoachTurn | None)

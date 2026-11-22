@@ -535,12 +535,12 @@ def test_fast_chat_turn_output_agent_keeps_first_cycle_force() -> None:
     assert cycles == 1
 
 
-def test_coaching_null_recovers_within_turns_two() -> None:
-    """Bounded recovery still runs when cycle 1 coaching recommendation is null."""
+def test_invalid_recommendation_recovers_within_turns_two() -> None:
+    """Bounded recovery still runs when cycle 1 recommendation is invalid."""
     from agentcore_runtime.models import FastChatTurnOutput
 
     class RecoveringFastChatModel(RecordingModel):
-        """Cycle 1 emits coaching+null; cycle 2 emits stay."""
+        """Cycle 1 emits an invalid recommendation; cycle 2 emits stay."""
 
         async def stream(
             self,
@@ -567,7 +567,7 @@ def test_coaching_null_recovers_within_turns_two() -> None:
                     {
                         "mode": "coaching",
                         "response_text": "Which constraint is actually binding?",
-                        "recommendation": None,
+                        "recommendation": "not-a-stage-decision",
                     }
                 )
             else:
@@ -819,3 +819,58 @@ def test_malformed_citation_item_remains_invalid_and_recovers() -> None:
     output = getattr(result, "structured_output", None)
     assert isinstance(output, FastChatTurnOutput)
     assert output.citations == []
+
+
+def test_runtime_entrypoint_streams_real_strands_callbacks_before_result(monkeypatch) -> None:
+    """Pinned Strands drives the actual runtime entrypoint with a fake model only."""
+    import strands.models
+    import agentcore_runtime.main as runtime
+    from agentcore_runtime.model import ROLE_ENV_KEYS, HAIKU_4_5_MODEL_ID, SONNET_4_6_MODEL_ID, clear_role_model_cache
+
+    if runtime.app is None:
+        pytest.skip('bedrock-agentcore runtime SDK is not installed')
+    for provider_key, model_key in ROLE_ENV_KEYS.values():
+        monkeypatch.delenv(provider_key, raising=False)
+        monkeypatch.delenv(model_key, raising=False)
+    for key, value in {
+        'COACHING_MODEL_PROVIDER': 'bedrock', 'COACHING_MODEL_ID': HAIKU_4_5_MODEL_ID,
+        'REVIEW_DEEP_MODEL_PROVIDER': 'bedrock', 'REVIEW_DEEP_MODEL_ID': SONNET_4_6_MODEL_ID,
+        'AGENTCORE_MODEL_REGION': 'us-west-2', 'GUARDRAIL_ID': 'test', 'GUARDRAIL_VERSION': '1',
+    }.items():
+        monkeypatch.setenv(key, value)
+    clear_role_model_cache()
+
+    async def check() -> None:
+        release = asyncio.Event()
+        class StreamingModel(RecordingModel):
+            async def stream(self, messages, tool_specs=None, system_prompt=None, *, tool_choice=None, **kwargs):
+                for event in _tool_use_events(tool_specs):
+                    if 'contentBlockDelta' in event:
+                        raw = event['contentBlockDelta']['delta']['toolUse']['input']
+                        cut = raw.index('Which') + 5
+                        yield {'contentBlockDelta': {'delta': {'toolUse': {'input': raw[:cut]}}}}
+                        await release.wait()
+                        yield {'contentBlockDelta': {'delta': {'toolUse': {'input': raw[cut:]}}}}
+                    else:
+                        yield event
+        model = StreamingModel()
+        monkeypatch.setattr(strands.models, 'BedrockModel', lambda **kwargs: model)
+        payload = {'phase': 'fast_chat', 'output_contract': 'fast_chat_turn', 'stream_reply': True,
+                   'messages': [{'role': 'user', 'content': [{'text': 'Help with my design.'}]}]}
+        stream = await runtime.invoke(payload, None)
+        try:
+            first = await asyncio.wait_for(anext(stream), timeout=5)
+            assert first['event'] == 'model_delta'
+            assert first['tool_id'] == 'tu-1'
+            assert 'Which' in first['input']
+            release.set()
+            rest = [item async for item in stream]
+            assert rest[-1]['event'] == 'result'
+            assert rest[-1]['payload']['response_text'] == _VALID_OUTPUT['response_text']
+        finally:
+            release.set()
+            await stream.aclose()
+    try:
+        asyncio.run(check())
+    finally:
+        clear_role_model_cache()

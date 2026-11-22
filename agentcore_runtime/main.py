@@ -16,10 +16,12 @@ loaded per role from explicit environment configuration.
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 import logging
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from typing import Any, Callable
 
 try:
@@ -507,6 +509,7 @@ async def _structured_role_invoke(
     output_text: Callable[[Any], str],
     include_history: bool,
     prior_messages: list[dict[str, Any]] | None = None,
+    model_delta: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run one tools-free structured invoke for a named model role.
 
@@ -599,11 +602,20 @@ async def _structured_role_invoke(
         return harness_error_payload("unavailable")
     fast_chat = str(role).strip().lower() == MODEL_ROLE_FAST_CHAT
     first_text_callback, first_text_timings = _first_text_timing_callback(started)
+    def capture_model(**event: Any) -> None:
+        first_text_callback(**event)
+        tool = event.get("delta", {}).get("toolUse") if isinstance(event.get("delta"), Mapping) else None
+        fragment = tool.get("input") if isinstance(tool, Mapping) else None
+        if model_delta is not None and isinstance(fragment, str) and fragment:
+            current = event.get("current_tool_use")
+            tool_id = str(current.get("toolUseId") or "") if isinstance(current, Mapping) else ""
+            model_delta({"event": "model_delta", "tool_id": tool_id[:200], "input": fragment})
+
     agent_kwargs: dict[str, Any] = {
         "model": model,
         "system_prompt": system_prompt,
         "tools": [],
-        "callback_handler": first_text_callback if fast_chat else None,
+        "callback_handler": capture_model if fast_chat else None,
         "retry_strategy": _retry_strategy_for_role(role),
     }
     if include_history:
@@ -759,7 +771,9 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
     )
 
 
-async def fast_chat_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
+async def fast_chat_invoke(
+    payload: Mapping[str, Any] | None, *, model_delta: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
     """Invoke one Haiku fast-chat generation for Coaching or Q&A.
 
     The runtime must not call another AgentCore phase internally. Application
@@ -780,7 +794,42 @@ async def fast_chat_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
         output_text=lambda output: str(getattr(output, "response_text", "") or ""),
         include_history=True,
         prior_messages=prior,
+        model_delta=model_delta,
     )
+
+
+async def fast_chat_stream(payload: Mapping[str, Any] | None) -> AsyncIterator[dict[str, Any]]:
+    """Yield live SDK tool-input fragments and one validated terminal result.
+
+    The companion decodes only response_text from fragments. No new model call
+    is introduced; existing structured validation, repair limits and guardrails
+    run before the terminal payload. Each invoke owns its queue and task.
+    """
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+
+    def publish(frame: dict[str, Any]) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, frame)
+
+    async def generate() -> None:
+        try:
+            result = await fast_chat_invoke(payload, model_delta=publish)
+        except Exception:
+            result = harness_error_payload("unavailable")
+        publish({"event": "result", "payload": result})
+
+    task = asyncio.create_task(generate())
+    try:
+        while True:
+            frame = await queue.get()
+            yield frame
+            if frame["event"] == "result":
+                break
+    finally:
+        if not task.done():
+            task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 async def router_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -817,9 +866,11 @@ if app is not None:
 
     @app.entrypoint
     async def invoke(payload: Any, context: Any) -> Any:
-        """Route companion structured specialists to JSON return; never ``yield``."""
+        """Keep JSON invokes compatible; opt-in Fast Chat returns an SSE generator."""
         kind = invoke_kind(payload if isinstance(payload, dict) else None)
         if kind == PHASE_FAST_CHAT:
+            if payload.get("stream_reply") is True:
+                return fast_chat_stream(payload)
             return await fast_chat_invoke(payload)
         if kind == PHASE_ROUTER:
             return await router_invoke(payload)

@@ -14,6 +14,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from .coaching.cancellation import check_turn_cancelled, register_stream_closer
 from .domain import (
     CoachRequest,
     ProviderAssessmentResult,
@@ -22,6 +23,8 @@ from .domain import (
     openai_strict_schema,
 )
 from .mock_provider import DeterministicCoachProvider
+from .coaching.progress import emit_coach_reply_delta, reply_delta_sink_bound
+from .coaching.reply_text import ReplyTextExtractor
 from .prompts import compose_coach_prompt
 from .settings import settings
 from .usage import GenerationUsage, copy_usage, generation_call
@@ -153,7 +156,30 @@ class OpenAICoachProvider:
             )
             if effort:
                 create_kwargs["reasoning"] = {"effort": effort}
-            response = self._client.responses.create(**create_kwargs)
+            if reply_delta_sink_bound():
+                extractor = ReplyTextExtractor()
+                stream = self._client.responses.create(**create_kwargs, stream=True)
+                response = None
+                try:
+                    register_stream_closer(stream.close)
+                    for event in stream:
+                        check_turn_cancelled()
+                        kind = getattr(event, "type", "")
+                        if kind == "response.output_text.delta":
+                            text = extractor.feed(event.delta)
+                            if text:
+                                emit_coach_reply_delta(text)
+                        elif kind == "response.completed":
+                            response = event.response
+                        elif kind in {"response.failed", "response.incomplete", "error"}:
+                            raise ValueError("OpenAI stream failed")
+                finally:
+                    register_stream_closer(None)
+                    stream.close()
+                if response is None:
+                    raise ValueError("Incomplete OpenAI stream")
+            else:
+                response = self._client.responses.create(**create_kwargs)
             usage = getattr(response, "usage", None)
             if usage is not None:
                 values = usage.model_dump() if hasattr(usage, "model_dump") else vars(usage)

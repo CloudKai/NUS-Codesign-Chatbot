@@ -106,6 +106,27 @@ agentcore_runtime/
   contracts/{coach_turn,qa_turn,review_turn,router_turn}.py
 ```
 
+## Fast Chat reply streaming
+
+An application Fast Chat invoke with `stream_reply: true` returns an async
+SSE generator. Legacy invokes omit that field and still return structured JSON;
+Deep Review/router/legacy phases keep their current contracts. Strands still uses
+one `invoke_async` with structured output, guardrails and the same repair limits.
+Its callback forwards actual tool-input fragments as
+`{event: "model_delta", tool_id, input}` while generation runs, followed by one
+`{event: "result", payload}` after validation. No reasoning/prose callback text is
+forwarded. FastAPI extracts only the top-level `response_text`; other structured
+fields never become browser deltas. A replacement tool id withdraws the previous
+preview. Final usage/provenance remains in the result payload. Each stream owns
+its task/queue and cancels the task if its caller disconnects.
+
+The SDK's generator-return SSE behavior is documented in the
+[pinned 1.21.0 implementation](https://github.com/aws/bedrock-agentcore-sdk-python/blob/v1.21.0/src/bedrock_agentcore/runtime/app.py).
+Publish the compatible FastAPI parser first, then this runtime on the existing
+ARN. Until the new runtime is published, its JSON response remains accepted but
+AgentCore reply fragments cannot appear. See
+[streaming handoff](../docs/specs/REPLY_STREAMING_HANDOFF.md) for validation and rollback.
+
 ## Deploy
 
 Do **not** change `AGENTCORE_RUNTIME_ARN`. Publish a zip with `main.py` at the

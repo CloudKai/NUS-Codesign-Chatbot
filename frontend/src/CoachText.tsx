@@ -17,11 +17,12 @@ function withoutMarks(text: string) {
     .replace(/(^|[\s(])[*_]([^*_\n]+)[*_](?=[\s).,;:!?]|$)/g, '$1$2');
 }
 
-export const CoachText = memo(function CoachText({ text }: { text: string }) {
+/** Set links=false for display-only clamped previews; full messages retain safe external links. */
+export const CoachText = memo(function CoachText({ text, links = true }: { text: string; links?: boolean }) {
   return <div className="message-content coach-text">
     <Suspense fallback={<div className="message-content coach-text-loading">{withoutMarks(text)}</div>}><Markdown skipHtml disallowedElements={['img']} components={{
       // react-markdown blanks javascript:, data: and similar addresses. Show that text instead of an empty link that opens a blank tab.
-      a: ({ href, children }) => href && /^(https?:\/\/|mailto:)/i.test(href)
+      a: ({ href, children }) => links && href && /^(https?:\/\/|mailto:)/i.test(href)
         ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <>{children}</>,
     }}>{text}</Markdown></Suspense>
   </div>;

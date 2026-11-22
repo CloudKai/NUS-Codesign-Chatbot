@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.coaching.cancellation import check_turn_cancelled
 from backend.domain import CoachRequest, EducationalAssessment, ProviderAssessmentResult
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ class GenerationUsage(BaseModel):
     event_id: str = Field(default_factory=lambda: str(uuid4()))
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     operation_id: str
-    kind: Literal["chat", "deep_review", "stage_checkpoint"]
+    kind: Literal["chat", "deep_review", "stage_checkpoint", "project_brief"]
     provider: Literal["mock", "openai", "bedrock", "agentcore", "unknown"]
     model: str = "unknown"
     role: str = "unknown"
@@ -65,7 +66,7 @@ class GenerationUsage(BaseModel):
 class UsageOperation:
     """Request-local counters; retains no content or raw notebook identifier."""
 
-    kind: Literal["chat", "deep_review", "stage_checkpoint"]
+    kind: Literal["chat", "deep_review", "stage_checkpoint", "project_brief"]
     session_key: str
     admission: GenerationAdmission | None = None
     operation_id: str = field(default_factory=lambda: str(uuid4()))
@@ -110,7 +111,7 @@ def _emit(payload: dict[str, Any]) -> None:
 
 
 def usage_operation(
-    kind: Literal["chat", "deep_review", "stage_checkpoint"], thread_id: str,
+    kind: Literal["chat", "deep_review", "stage_checkpoint", "project_brief"], thread_id: str,
     *, admission: GenerationAdmission | None = None,
 ) -> UsageOperation:
     """Count one operation and restore its caller context, including on failure.
@@ -172,6 +173,7 @@ class _GenerationScope:
 
     def __enter__(self) -> GenerationUsage:
         """Count the application attempt and expose its nullable numeric meters."""
+        check_turn_cancelled()
         if self.operation is not None:
             if self.operation.admission is not None:
                 self.reservation = self.operation.admission.acquire()

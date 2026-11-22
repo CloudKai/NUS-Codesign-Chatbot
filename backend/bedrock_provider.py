@@ -20,6 +20,7 @@ import re
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any
 
+from .coaching.cancellation import check_turn_cancelled, register_stream_closer
 from .coaching.progress import emit_coach_reply_delta, reply_delta_sink_bound
 from .coaching.reply_text import ReplyTextExtractor
 from .usage import GenerationUsage, copy_usage, generation_call
@@ -325,10 +326,19 @@ def _iter_stream_events(stream_response: Any) -> Iterator[Any]:
         stream = stream_response.get("stream")
     if stream is None:
         raise ProviderUnavailableError(_MALFORMED_FAILURE)
+    close = getattr(stream, "close", None)
     try:
-        yield from stream
+        if callable(close):
+            register_stream_closer(close)
+        for event in stream:
+            check_turn_cancelled()
+            yield event
     except Exception as error:
         raise _translate_bedrock_error(error) from error
+    finally:
+        register_stream_closer(None)
+        if callable(close):
+            close()
 
 
 def _payload_from_stream(

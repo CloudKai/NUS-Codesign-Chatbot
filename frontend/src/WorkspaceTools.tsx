@@ -2,7 +2,7 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
-import { ApiError, currentSession, get, type NotebookSettings, type Preferences, type Project, type Session } from './api';
+import { ApiError, currentSession, get, type NotebookSettings, type Preferences, type Session } from './api';
 
 export interface WorkspaceActions {
   promptNotebook: () => void;
@@ -37,10 +37,10 @@ function Segmented<T extends string>({ label, value, options, disabled, change }
 }
 
 /** Keep tools local to the verified owner; reconcile writes without replaying them. */
-export function WorkspaceTools({ session, thread, project, disabled, changed, expired, blocked, themeHost, settingsHost, ref,
+export function WorkspaceTools({ session, thread, disabled, changed, expired, blocked, themeHost, settingsHost, ref,
   openSettings, closeSettings, onPreferences }: {
   themeHost: HTMLDivElement | null; settingsHost: HTMLDivElement | null; ref: Ref<WorkspaceActions>;
-  session: Session; thread?: string; project: Project | null; disabled: boolean;
+  session: Session; thread?: string; disabled: boolean;
   changed: (created?: string) => Promise<void>; expired: () => void; blocked: (value: boolean) => void;
   openSettings: () => void; closeSettings: () => void; onPreferences: (value: Preferences) => void;
 }) {
@@ -140,38 +140,8 @@ export function WorkspaceTools({ session, thread, project, disabled, changed, ex
     } catch { if (active.current) setError('Could not verify the change. Refresh workspace before continuing. A new chat or notebook may already exist. Check the sidebar before trying again.'); }
     finally { lock.current = false; if (active.current) setBusy(false); }
   }
-  async function download() {
-    if (!thread) return;
-    try {
-      await verify();
-      const response = await fetch(`${base}/transcript.txt`, { credentials: 'same-origin', cache: 'no-store', signal: control.current.signal });
-      if (!response.ok) throw new ApiError(response.status);
-      const blob = await response.blob(); await verify();
-      const url = URL.createObjectURL(blob); const link = document.createElement('a');
-      link.href = url; link.download = `${settings?.notebook.name || 'Notebook'}-transcript.txt`; link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch { if (active.current) setError('Transcript unavailable. Refresh the workspace and try again.'); }
-  }
   function updatePreferences(patch: Partial<Omit<Preferences, 'owner_id'>>) {
     return write('/api/v1/reader/preferences', patch);
-  }
-
-  function exportProject() {
-    if (!settings || project?.owner_id !== owner || project.thread_id !== settings.notebook.id) return;
-    const title = settings.notebook.name.replace(/\s+/g, ' ');
-    const sections = project.stages.map(stage => [
-      `## ${stage.label}`,
-      stage.completed ? 'Completed' : '',
-      stage.student_work.length ? ['### Your work', ...stage.student_work.map(work => work.text)].join('\n\n') : '',
-      stage.coach_summary ? `### Coach summary\n\n${stage.coach_summary}` : '',
-      stage.feedback.length ? ['### Coach feedback', ...stage.feedback.map(work => work.text)].join('\n\n') : '',
-    ].filter(Boolean).join('\n\n'));
-    const url = URL.createObjectURL(new Blob([[`# ${title}`, ...sections].join('\n\n')], { type: 'text/markdown;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${title}-project.md`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   const locked = disabled || busy || uncertain;
@@ -255,31 +225,13 @@ export function WorkspaceTools({ session, thread, project, disabled, changed, ex
           <input className="settings-switch" id="workspace-starters" type="checkbox" role="switch" checked={prefs?.starter_prompts ?? true}
             disabled={locked || !prefs} onChange={event => void updatePreferences({ starter_prompts: event.target.checked })}/>
         </SettingsRow>
-        {settings ? <details className="settings-advanced">
-          <summary>Advanced response settings</summary>
-          <SettingsRow label="Response language" htmlFor="response-language">
-            <select id="response-language" value={settings.response_language} disabled={locked} onChange={event => void write(`${base}/settings`, { response_language: event.target.value })}>
-              {Array.from(new Set(['English', '中文', 'Bahasa Melayu', 'தமிழ்', settings.response_language])).map(value => <option key={value}>{value}</option>)}
-            </select>
-          </SettingsRow>
-          <SettingsRow label="Model" htmlFor="model">
-            <select id="model" disabled={locked} value={settings.selected_model} onChange={event => void write(`${base}/settings`, { selected_model: event.target.value })}>
-              {settings.models.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
-            </select>
-          </SettingsRow>
-          <SettingsRow label="Reasoning effort" htmlFor="reasoning">
-            <select id="reasoning" disabled={locked} value={settings.reasoning_effort || ''} onChange={event => void write(`${base}/settings`, { reasoning_effort: event.target.value })}>
-              {settings.models.find(model => model.id === settings.selected_model)?.reasoning_efforts.map(value => <option key={value}>{value}</option>)}
-            </select>
-          </SettingsRow>
-        </details> : null}
-      </section>
-      <section className="settings-group">
-        <h2>Your data</h2>
         {settings ? <>
-          <SettingsRow label="Export current project" description="Download saved stage work and coach feedback as Markdown.">
-            <div className="settings-inline"><button disabled={locked || !project} onClick={exportProject}>Export project</button><button disabled={locked} onClick={() => void download()}>Download transcript</button></div>
-          </SettingsRow>
+          <SettingsRow label="Response language"><span>English</span></SettingsRow>
+          <SettingsRow label="Model"><span>{settings.chat_model_label || 'Course coach'}</span></SettingsRow>
+        </> : null}
+      </section>
+      {settings ? <section className="settings-group">
+        <h2>{entryName === 'chat' ? 'Current chat' : 'Current notebook'}</h2>
           <form onSubmit={event => { event.preventDefault(); void write(`${base}/settings`, { name: name.trim() }); }}>
             <SettingsRow label={entryName === 'chat' ? 'Chat name' : 'Notebook name'} htmlFor="rename-notebook">
               <div className="settings-inline">
@@ -305,8 +257,7 @@ export function WorkspaceTools({ session, thread, project, disabled, changed, ex
             {entryName === 'notebook' ? <p>Any chats organized here will return to Chats.</p> : null}
             <button disabled={locked} onClick={() => void write(`${base}/remove`, { confirmed: true })}>Confirm delete {entryName}</button>
           </div> : null}
-        </> : <p className="settings-row supporting">Open a chat to manage its settings and exports.</p>}
-      </section>
+      </section> : null}
     </div>, settingsHost) : null}
     <button className="refresh-workspace icon-button" aria-label="Refresh workspace" title="Refresh workspace" disabled={busy} onClick={() => void refresh()}><Icon name="refresh"/></button>
     {busy && !settingsHost ? <p role="status">Checking saved workspace…</p> : null}

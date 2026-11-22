@@ -278,6 +278,14 @@ def wants_source_need_check(
     return bool(enabled) and not searched and not evidence_scoped
 
 
+def is_bare_lecture_greeting(message: str, *, attachment_count: int) -> bool:
+    """Identify a greeting with no question, contribution, or attached file."""
+    return not attachment_count and " ".join(message.casefold().split()).rstrip("!.") in {
+        "hi", "hello", "hey", "hi there", "hello there", "hey there",
+        "good morning", "good afternoon", "good evening",
+    }
+
+
 def is_chit_chat(student_message: str) -> bool:
     """Return whether the turn is a bare greeting or acknowledgement.
 
@@ -394,7 +402,7 @@ def decide_first_pass_scope(
         policy = ModePolicy(
             intent="high_confidence_source",
             expected_mode="qa",
-            retrieve=True,
+            retrieve=not is_bare_lecture_greeting(message, attachment_count=inputs.attachment_count),
             retrieval_intent=policy.retrieval_intent,
         )
     elif inputs.interaction_intent == "project_coaching":

@@ -10,7 +10,13 @@ function unique(groups: ReviewFeedback[]) {
 export function projectMarkdown(project: Project, title: string, now = new Date()) {
   const review = project.review;
   const lines: string[] = [`# ${title || 'My project'}`, '', `Saved ${now.toLocaleDateString(undefined, { dateStyle: 'long' })}. Your work here is not graded.`, ''];
-  if (review?.summary) lines.push('## Summary', '', review.summary.trim(), '');
+  const brief = review?.project_brief?.status === 'current' ? review.project_brief.brief : null;
+  if (brief) {
+    lines.push('## Your project so far', '');
+    for (const [key, label] of [['who_and_why', 'Who and why'], ['problem', 'Problem'], ['current_idea', 'Current idea'], ['what_matters', 'What matters'], ['still_to_explore', 'Still to explore']] as const) {
+      lines.push(`### ${label}`, '', brief[key].text || 'Not yet established', '');
+    }
+  } else if (review?.summary) lines.push('## Saved coach assessment', '', review.summary.trim(), '');
   const strengths = unique(review?.strengths ?? []);
   if (strengths.length) lines.push('## Strengths', '', ...strengths.map(item => `- ${item}`), '');
   const improvements = unique(review?.improvements ?? []);

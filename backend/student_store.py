@@ -1344,6 +1344,7 @@ class StudentStore:
         support_mode: str,
         assignment: dict[str, str] | None = None,
         quick_chat: bool = False,
+        reader_notebook: bool = False,
         parent_notebook_id: str | None = None,
     ) -> str:
         """Create a notebook and return its id (``thread_id`` compatibility).
@@ -1360,6 +1361,8 @@ class StudentStore:
             "support_mode": support_mode,
             "assignment": assignment or {},
         }
+        if reader_notebook:
+            settings_blob["reader_notebook"] = True
         if quick_chat:
             settings_blob["quick_chat"] = True
             if parent_notebook_id is not None:
@@ -4489,6 +4492,68 @@ class StudentStore:
         marker = self.get_system_metadata(RESEARCH_WORKFLOW_CONTRACT_KEY) or {}
         return workflow_contract_is_ready(marker)
 
+    def get_message_bookmarks(self, thread_id: str) -> tuple[int, list[dict[str, Any]]]:
+        """Read owned active stars and their revision from one database snapshot.
+
+        Return chronological visible messages; missing ownership raises ValueError.
+        Metadata is returned only to the application, which allowlists public fields.
+        """
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN")
+            notebook = connection.execute(
+                "SELECT conversation_revision FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not notebook:
+                raise ValueError("Notebook not found")
+            revision = int(notebook["conversation_revision"] or 0)
+            rows = connection.execute(
+                f"SELECT * FROM messages WHERE notebook_id=? AND {self._active_at_revision_sql()} ORDER BY created_at, id",
+                (thread_id, revision, revision),
+            ).fetchall()
+            messages = []
+            for row in rows:
+                if not self._message_is_visible(row) or row["role"] not in {"user", "assistant"}:
+                    continue
+                message = self._public_message_dict(row)
+                metadata = message["metadata"]
+                if metadata.get("starred") is True and not metadata.get("kind") and not metadata.get("_internal_type"):
+                    messages.append(message)
+        return revision, messages
+
+    def set_message_star(self, thread_id: str, message_id: str, starred: bool) -> bool:
+        """Merge a desired bookmark state into an owned active visible message.
+
+        Acquire write authority before reading so concurrent receipts, appends and
+        revisions cannot be lost. Missing or replaced messages raise ValueError.
+        """
+        with self._lock, self._connect() as connection:
+            if isinstance(connection, sqlite3.Connection):
+                connection.execute("BEGIN IMMEDIATE")
+            notebook = connection.execute(
+                "SELECT conversation_revision FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            row = connection.execute(
+                "SELECT * FROM messages WHERE id=? AND notebook_id=?",
+                (message_id, thread_id),
+            ).fetchone()
+            if (not notebook or not row or not self._message_is_visible(row)
+                    or row["role"] not in {"user", "assistant"}
+                    or not self._is_active_at_revision(row, int(notebook["conversation_revision"] or 0))):
+                raise ValueError("Message not found")
+            metadata = _load(row["metadata_text"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            if metadata.get("kind") or metadata.get("_internal_type"):
+                raise ValueError("Message not found")
+            metadata["starred"] = starred
+            connection.execute(
+                "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                (_dump(metadata), message_id, thread_id),
+            )
+        return starred
+
     def record_learning_signal(self, thread_id: str, message_id: str, kind: str) -> dict[str, Any]:
         """Save an idempotent, bounded receipt on an owned active assistant answer.
 
@@ -4885,6 +4950,8 @@ class StudentStore:
                 **(metadata or {}),
                 "thinking_stage": restored_stage,
             }
+            # A revision is a new text selection and must earn its own bookmark.
+            next_metadata.pop("starred", None)
             if model_id:
                 next_metadata["model"] = model_id
             connection.execute(

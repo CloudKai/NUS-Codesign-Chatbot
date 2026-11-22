@@ -1,25 +1,26 @@
 /** Canonical saved-work view; eligibility and next actions come only from the API. */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { Project, ReviewFeedback, Stage } from './api';
+import type { Bookmark, Project, ProjectBriefResult, Stage } from './api';
+import { ProjectBriefCard } from './ProjectBrief';
 import { CoachText } from './CoachText';
 import { Icon } from './Icon';
 import { downloadProject } from './projectExport';
-import { buildScaffold, improveScaffold, isStudentWork, practiceScaffold, courseTools, skillExplanation, skillLevel, skillSummary, skillTip } from './coachingContent';
+import { isStudentWork, practiceScaffold, courseTools, skillExplanation, skillLevel, skillSummary, skillTip } from './coachingContent';
 
 const reviewTabs = ['Progression', 'Summary', 'My work'] as const;
 export type ReviewTab = (typeof reviewTabs)[number];
 const tabSlug = (tab: ReviewTab) => tab.toLowerCase().replace(/\s+/g, '-');
 
 /** Show saved feedback and the explicit Thinking Path actions for this chat. */
-export function ThinkingPath({ project, title, disabled, act, startInChat, onClose, status, children, insertScaffold, initialTab }: {
-  project: Project; title: string; disabled: boolean; insertScaffold: (text: string, switchTo?: 'project') => void; initialTab?: ReviewTab; act: (route: string, body: object) => Promise<void>;
+export function ThinkingPath({ project, title, disabled, act, startInChat, onClose, status, children, insertScaffold, initialTab, onTabChange, bookmarks, bookmarkError, bookmarksReady, refreshBookmarks, removeStar, jumpToMessage }: {
+  jumpToMessage: (id: string) => void; bookmarks: Bookmark[]; bookmarkError: string; bookmarksReady: boolean; refreshBookmarks: () => void; removeStar: (id: string) => void;
+  project: Project; title: string; disabled: boolean; insertScaffold: (text: string, switchTo?: 'project') => void; initialTab?: ReviewTab; onTabChange: (tab: ReviewTab) => void; act: (route: string, body: object) => Promise<void>;
   startInChat: () => void; onClose: () => void; status: string; children: ReactNode;
 }) {
   const [activeTab, setActiveTab] = useState<ReviewTab>(initialTab ?? 'Progression');
   const tabButtons = useRef<Array<HTMLButtonElement | null>>([]);
   const [opened, setOpened] = useState('');
   const [workFocus, setWorkFocus] = useState<{ id: string; n: number }>();
-  const [heroOpen, setHeroOpen] = useState(false);
   const [saved, setSaved] = useState('');
   const savedTimer = useRef(0);
   // A newer project status, or a new action starting, replaces the short-lived download note.
@@ -29,11 +30,11 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
   const done = project.stages.filter(stage => stage.completed).length;
   const pending = project.pending;
   const review = project.review;
+  const [generatedBrief, setGeneratedBrief] = useState<ProjectBriefResult | null>(null);
+  const downloadView = generatedBrief && review && generatedBrief.version === review.project_brief?.version
+    ? { ...project, review: { ...review, project_brief: generatedBrief } } : project;
   const scores = review?.facione_scores ?? [];
   const skills = skillSummary(scores);
-  const stageIndex = project.stages.findIndex(stage => stage.id === current.id);
-  const summaryText = review?.summary || current.coach_summary || '';
-  const longSummary = summaryText.length > 260;
   async function decide(route: string, body: object) {
     await act(route, body);
     document.getElementById('review-heading')?.focus({ preventScroll: true });
@@ -41,6 +42,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
   function selectTab(tab: ReviewTab, button: HTMLButtonElement) {
     if (tab === activeTab) return;
     setActiveTab(tab);
+    onTabChange(tab);
     button.closest('dialog')?.scrollTo({ top: 0 });
     button.focus({ preventScroll: true });
   }
@@ -51,7 +53,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
         <h2 id="review-heading" tabIndex={-1}>Review</h2>
         <div className="review-header-actions">
           <button className="icon-button" aria-label="Download project summary" title="Download project summary"
-            onClick={() => { downloadProject(project, title); setSaved('Project summary downloaded.'); window.clearTimeout(savedTimer.current); savedTimer.current = window.setTimeout(() => setSaved(''), 4000); }}><Icon name="download"/></button>
+            onClick={() => { downloadProject(downloadView, title); setSaved('Project summary downloaded.'); window.clearTimeout(savedTimer.current); savedTimer.current = window.setTimeout(() => setSaved(''), 4000); }}><Icon name="download"/></button>
           <button className="icon-button" aria-label="Close Review" title="Close Review" onClick={onClose}><Icon name="close"/></button>
         </div>
       </header>
@@ -112,7 +114,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
                 <Icon name={expanded ? 'chevronDown' : 'chevronRight'}/>
               </button>
               <section hidden={!expanded} id={`stage-work-${stage.id}`} className="stage-work" aria-label={`${stage.label} saved work`}>
-                {expanded ? <StageDetail stage={stage} isCurrent={isCurrent} disabled={disabled} onUseTool={text => insertScaffold(text, 'project')} onSeeWork={() => { setActiveTab('My work'); setWorkFocus(value => ({ id: stage.id, n: (value?.n ?? 0) + 1 })); }}
+                {expanded ? <StageDetail bookmarkCount={bookmarks.filter(item => item.stage_id === stage.id).length} stage={stage} isCurrent={isCurrent} disabled={disabled} onUseTool={text => insertScaffold(text, 'project')} onSeeWork={() => { setActiveTab('My work'); onTabChange('My work'); setWorkFocus(value => ({ id: stage.id, n: (value?.n ?? 0) + 1 })); }}
                   onSelect={() => void decide('select-stage', { stage_id: stage.id })}/> : null}
               </section>
             </li>;
@@ -122,27 +124,15 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
     </section>
     <section id="review-panel-summary" role="tabpanel" aria-labelledby="review-tab-summary"
       hidden={activeTab !== 'Summary'} tabIndex={0}>
-      <section className="review-card review-hero" aria-labelledby="review-summary">
-        <p className="hero-eyebrow">Stage {stageIndex + 1} of {project.stages.length}</p>
-        <div className="hero-steps" aria-hidden="true">
-          {project.stages.map(stage => <span key={stage.id} data-state={stage.id === current.id ? 'current' : stage.completed ? 'done' : undefined}/>)}
-        </div>
-        <h3 id="review-summary" className="hero-title">{current.label}</h3>
-        {summaryText
-          ? <div id="hero-summary" className="hero-summary" data-clamped={(longSummary && !heroOpen) || undefined}><CoachText text={summaryText}/></div>
-          : <p className="supporting">A summary will appear after the coach has reviewed your design reasoning.</p>}
-        {longSummary ? <button className="card-link" aria-expanded={heroOpen} aria-controls="hero-summary" onClick={() => setHeroOpen(open => !open)}>
-          {heroOpen ? 'Show less' : 'Read more'}</button> : null}
+      <ProjectBriefCard project={project} disabled={disabled} onSaved={setGeneratedBrief}/>
+      <section className="review-card summary-feedback-list" aria-labelledby="summary-feedback-title">
+        <h3 id="summary-feedback-title">Stage feedback</h3>
+        {project.stages.map(stage => <StageFeedback key={stage.id} stage={stage} review={review}/>)}
       </section>
-      <FeedbackCard tone="strength" title="Strengths" icon="check" groups={review?.strengths ?? []} stages={project.stages} currentStage={current.id}
-        action="Build on this" empty="Strengths will show up after the coach reviews your work." onAct={item => insertScaffold(buildScaffold(item), 'project')}/>
-      <FeedbackCard tone="improve" title="Areas to improve" icon="arrow" groups={review?.improvements ?? []} stages={project.stages} currentStage={current.id}
-        action="Work on this" empty="Ideas to work on will show up after the coach reviews your work." onAct={item => insertScaffold(improveScaffold(item), 'project')}/>
       <section className="review-card" aria-labelledby="review-facione">
         <header className="card-head">
           <span className="card-icon" aria-hidden="true"><Icon name="spark"/></span>
           <h3 id="review-facione">How your idea scores</h3>
-          {skills ? <button className="card-link card-head-action" aria-pressed={showTips} onClick={() => setShowTips(show => !show)}>{showTips ? 'Hide tips' : 'Show tips'}</button> : null}
         </header>
         <p className="supporting">Feedback on your critical thinking, not a grade.{skills ? ' Tips are a general guide for each score.' : ''}</p>
         {skills ? <div className="skill-highlights">
@@ -161,7 +151,10 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
             <button disabled={disabled} onClick={() => insertScaffold(practiceScaffold(skills.grow), 'project')}>Practice this</button>
           </div>
         </div> : <p className="skill-empty">Your skill scores will appear here as you share your thinking with the coach.</p>}
-        {scores.length ? skills ? <ul className="skill-list">
+        {scores.length ? skills ? <details className="review-disclosure skill-detail-disclosure">
+          <summary>All six skill scores</summary>
+          <button className="card-link" aria-pressed={showTips} onClick={() => setShowTips(show => !show)}>{showTips ? 'Hide tips' : 'Show tips'}</button>
+          <ul className="skill-list">
           {scores.map(item => <li key={item.dimension} className="skill-row" data-unassessed={item.score === null || undefined}>
             <div className="skill-head">
               <strong>{item.dimension}</strong>
@@ -172,7 +165,7 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
             {showTips ? <p className="skill-note" title={skillExplanation(item.dimension) || undefined}>
               {item.score !== null ? skillTip(item.dimension, item.score) : skillExplanation(item.dimension)}</p> : null}
           </li>)}
-        </ul> : <details className="review-disclosure">
+        </ul></details> : <details className="review-disclosure">
           <summary>The six skills</summary>
           <ul className="skill-glossary">
             {scores.map(item => <li key={item.dimension}><strong>{item.dimension}</strong>{skillExplanation(item.dimension) ? <span>{skillExplanation(item.dimension)}</span> : null}</li>)}
@@ -182,16 +175,53 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
     </section>
     <section id="review-panel-my-work" role="tabpanel" aria-labelledby="review-tab-my-work"
       hidden={activeTab !== 'My work'} tabIndex={0}>
-      <MyWork project={project} focus={workFocus}/>
+      <MyWork project={project} focus={workFocus} bookmarks={bookmarks} disabled={disabled} error={bookmarkError} ready={bookmarksReady} refresh={refreshBookmarks} removeStar={removeStar} jumpToMessage={jumpToMessage}/>
     </section>
   </section>;
 }
 
+/** Independently disclose saved stage feedback without changing its wording or assessment. */
+function StageFeedback({ stage, review }: { stage: Stage; review: Project['review'] }) {
+  const [open, setOpen] = useState(false);
+  const [groups, setGroups] = useState({ strengths: true, improvements: true });
+  const feedback = {
+    strengths: review?.strengths.find(group => group.stage_id === stage.id)?.items ?? [],
+    improvements: review?.improvements.find(group => group.stage_id === stage.id)?.items ?? [],
+  };
+  const caption = feedback.strengths.length || feedback.improvements.length
+    ? <><span className="feedback-count tone-strength">{feedback.strengths.length} going well</span>{' · '}<span className="feedback-count tone-improve">{feedback.improvements.length} to work on</span></>
+    : 'No saved feedback yet';
+  return <section className="stage-feedback" aria-labelledby={`summary-stage-${stage.id}`}>
+    <h4><button id={`summary-stage-${stage.id}`} className="feedback-toggle" aria-label={stage.label} aria-describedby={`summary-feedback-count-${stage.id}`} aria-expanded={open}
+      aria-controls={`summary-feedback-${stage.id}`} onClick={() => setOpen(value => !value)}>
+      <span className="feedback-stage-label"><span>{stage.label}</span><small id={`summary-feedback-count-${stage.id}`}>{caption}</small></span><Icon name={open ? 'chevronDown' : 'chevronRight'}/>
+    </button></h4>
+    <div id={`summary-feedback-${stage.id}`} hidden={!open}>
+      {(['strengths', 'improvements'] as const).map(field => {
+        const label = field === 'strengths' ? 'Going well' : 'To work on';
+        const tone = field === 'strengths' ? 'strength' : 'improve';
+        const items = feedback[field];
+        const id = `summary-${field}-${stage.id}`;
+        return <div className="feedback-group" key={field}>
+          <h5><button className={`feedback-toggle journey-label tone-${tone}`} aria-expanded={groups[field]}
+            aria-controls={id} onClick={() => setGroups(value => ({ ...value, [field]: !value[field] }))}>
+            <span>{label}</span><Icon name={groups[field] ? 'chevronDown' : 'chevronRight'}/>
+          </button></h5>
+          <section id={id} hidden={!groups[field]} aria-label={`${label} in ${stage.label}`}>
+            {items.length ? <ul className={`journey-points tone-${tone}`}>{items.map(item => <li key={item}>
+              <Icon name={field === 'strengths' ? 'check' : 'arrow'}/><span>{item}</span>
+            </li>)}</ul> : <p className="supporting">No saved {label} feedback for this stage yet.</p>}
+          </section>
+        </div>;
+      })}
+    </div>
+  </section>;
+}
+
 /** Compact stage detail: next action, a short coach summary, a link to the saved work, and course tools one tap away. */
-function StageDetail({ stage, isCurrent, disabled, onSelect, onUseTool, onSeeWork }: { stage: Stage; isCurrent: boolean; disabled: boolean; onSelect: () => void; onUseTool: (text: string) => void; onSeeWork: () => void }) {
+function StageDetail({ stage, bookmarkCount, isCurrent, disabled, onSelect, onUseTool, onSeeWork }: { stage: Stage; bookmarkCount: number; isCurrent: boolean; disabled: boolean; onSelect: () => void; onUseTool: (text: string) => void; onSeeWork: () => void }) {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const workCount = stage.student_work.filter(item => isStudentWork(item.text)).length;
   const longSummary = stage.coach_summary.length > 220;
   const actionLabel = stage.completed ? 'Revisit' : 'Continue';
   const showTools = isCurrent || stage.selectable;
@@ -207,7 +237,7 @@ function StageDetail({ stage, isCurrent, disabled, onSelect, onUseTool, onSeeWor
       {longSummary ? <button className="card-link" aria-expanded={summaryOpen} aria-controls={`stage-summary-${stage.id}`} onClick={() => setSummaryOpen(open => !open)}>
         {summaryOpen ? 'Show less' : 'Read more'}</button> : null}
     </div> : null}
-    {workCount ? <button className="card-link stage-work-link" onClick={onSeeWork}>Your work · {workCount}<Icon name="chevronRight"/></button> : null}
+    {bookmarkCount ? <button className="card-link stage-work-link" onClick={onSeeWork}>Starred messages · {bookmarkCount}<Icon name="chevronRight"/></button> : null}
     {tools.length ? <div className="stage-block">
       <button className="tool-toggle" aria-expanded={toolsOpen} aria-controls={`stage-tools-${stage.id}`} onClick={() => setToolsOpen(open => !open)}>
         <span>Tools from the course</span><small>{tools.length}</small><Icon name={toolsOpen ? 'chevronDown' : 'chevronRight'}/></button>
@@ -218,153 +248,40 @@ function StageDetail({ stage, isCurrent, disabled, onSelect, onUseTool, onSeeWor
   </div>;
 }
 
-/** Where a stage stands, in the words a student would use. */
-function stageStatus(stage: Stage, currentId: string, shared: number): { label: string; tone: 'current' | 'done' | 'started' | 'idle' } {
-  if (stage.id === currentId) return { label: 'Current', tone: 'current' };
-  if (stage.completed) return { label: 'Done', tone: 'done' };
-  return shared ? { label: 'Started', tone: 'started' } : { label: 'Not started', tone: 'idle' };
-}
-
-/** One stage of the journey: what the student shared, what the coach summarised, and what is going well or next. */
-function JourneyStage({ stage, index, status, open, onToggle, shared, strengths, improvements }: {
-  stage: Stage; index: number; status: ReturnType<typeof stageStatus>; open: boolean; onToggle: () => void;
-  shared: { message_id: string; text: string }[]; strengths: string[]; improvements: string[];
+/** Only explicitly bookmarked messages, grouped by saved stage in canonical order. */
+function MyWork({ project, focus, bookmarks, disabled, error, ready, refresh, removeStar, jumpToMessage }: {
+  project: Project; focus?: { id: string; n: number }; bookmarks: Bookmark[]; disabled: boolean;
+  jumpToMessage: (id: string) => void; error: string; ready: boolean; refresh: () => void; removeStar: (id: string) => void;
 }) {
-  const bodyId = `journey-${stage.id}`;
-  const empty = !shared.length && !stage.coach_summary && !strengths.length && !improvements.length;
-  return <li id={`journey-stage-${stage.id}`} className="journey-stage" data-status={status.tone}>
-    <button className="journey-head" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
-      <span className={`stage-number ${stage.completed ? 'completed' : ''}`} aria-hidden="true">{stage.completed ? <Icon name="check"/> : index + 1}</span>
-      <span className="journey-title">
-        <strong>{stage.label}</strong>
-        <small>{stage.artifact_label}</small>
-      </span>
-      <span className="journey-side">
-        <span className="journey-badge" data-tone={status.tone}>{status.label}</span>
-        {shared.length ? <small>{shared.length} {shared.length === 1 ? 'entry' : 'entries'}</small> : null}
-      </span>
-      <Icon name={open ? 'chevronDown' : 'chevronRight'}/>
-    </button>
-    <div id={bodyId} className="journey-body" hidden={!open}>
-      {empty ? <p className="supporting">Nothing shared in this stage yet.</p> : null}
-      {shared.length ? <section aria-label={`What you shared in ${stage.label}`}>
-        <h4 className="journey-label">What you shared</h4>
-        <ol className="journey-entries">{shared.map((item, position) => <li key={item.message_id} className="journey-entry">
-          <span className="journey-step" aria-hidden="true">{position + 1}</span>
-          <p>{item.text.trim()}</p>
-        </li>)}</ol>
-      </section> : null}
-      {stage.coach_summary ? <section aria-label={`Coach summary for ${stage.label}`}>
-        <h4 className="journey-label">Coach summary</h4>
-        <div className="journey-summary"><CoachText text={stage.coach_summary}/></div>
-      </section> : null}
-      {strengths.length ? <section aria-label={`Going well in ${stage.label}`}>
-        <h4 className="journey-label tone-strength">Going well</h4>
-        <ul className="journey-points tone-strength">{strengths.map(item => <li key={item}><Icon name="check"/><span>{item}</span></li>)}</ul>
-      </section> : null}
-      {improvements.length ? <section aria-label={`To work on in ${stage.label}`}>
-        <h4 className="journey-label tone-improve">To work on</h4>
-        <ul className="journey-points tone-improve">{improvements.map(item => <li key={item}><Icon name="arrow"/><span>{item}</span></li>)}</ul>
-      </section> : null}
-    </div>
-  </li>;
-}
-
-/**
- * The student's whole journey, stage by stage, in order. Each stage folds so a long project stays easy to scan:
- * the current stage opens first, and "Expand all" opens everything.
- */
-function MyWork({ project, focus }: { project: Project; focus?: { id: string; n: number } }) {
-  const review = project.review;
-  const rows = project.stages.map((stage, index) => {
-    const shared = stage.student_work.filter(item => isStudentWork(item.text));
-    return {
-      stage, index, shared,
-      status: stageStatus(stage, project.current_stage, shared.length),
-      strengths: review?.strengths.find(group => group.stage_id === stage.id)?.items ?? [],
-      improvements: review?.improvements.find(group => group.stage_id === stage.id)?.items ?? [],
-    };
-  });
-  const [open, setOpen] = useState<Record<string, boolean>>(() => ({ [project.current_stage]: true }));
-  const total = rows.reduce((sum, row) => sum + row.shared.length, 0);
-  const done = rows.filter(row => row.stage.completed).length;
-  const allOpen = rows.every(row => open[row.stage.id]);
-  const handled = useRef(0);
-  // "Your work" on a stage in Progression opens that stage here and brings it into view.
+  const [open, setOpen] = useState<Record<string, boolean>>({ [project.current_stage]: true });
   useEffect(() => {
-    if (!focus || focus.n === handled.current) return;
-    handled.current = focus.n;
+    if (!focus) return;
     setOpen(value => ({ ...value, [focus.id]: true }));
-    window.requestAnimationFrame(() => document.getElementById(`journey-stage-${focus.id}`)?.scrollIntoView({ block: 'start' }));
+    window.requestAnimationFrame(() => document.getElementById(`bookmarks-${focus.id}`)?.scrollIntoView({ block: 'nearest' }));
   }, [focus]);
-  return <section className="review-card journey" aria-labelledby="my-work-title">
-    <header className="card-head">
-      <span className="card-icon" aria-hidden="true"><Icon name="chat"/></span>
-      <h3 id="my-work-title">My work</h3>
-      <button className="card-link card-head-action" aria-pressed={allOpen}
-        onClick={() => setOpen(allOpen ? { [project.current_stage]: true } : Object.fromEntries(rows.map(row => [row.stage.id, true])))}>
-        {allOpen ? 'Collapse all' : 'Expand all'}</button>
-    </header>
-    <p className="supporting">Your progress, stage by stage. {done} of {rows.length} stages done · {total} {total === 1 ? 'entry' : 'entries'} shared.</p>
-    <div className="hero-steps" aria-hidden="true">
-      {rows.map(row => <span key={row.stage.id} data-state={row.status.tone === 'current' ? 'current' : row.stage.completed ? 'done' : undefined}/>)}
-    </div>
-    <ol className="journey-list" aria-label="Stages">
-      {rows.map(row => <JourneyStage key={row.stage.id} {...row} open={!!open[row.stage.id]}
-        onToggle={() => setOpen(value => ({ ...value, [row.stage.id]: !value[row.stage.id] }))}/>)}
-    </ol>
-  </section>;
-}
-
-interface FeedbackEntry { text: string; stageIds: string[] }
-
-/** Merge repeated sentences across stages, with the current stage first and then the latest stages. */
-function feedbackEntries(groups: ReviewFeedback[], currentStage: string): FeedbackEntry[] {
-  const populated = groups.filter(group => group.items.length);
-  const ordered = [...populated.filter(group => group.stage_id === currentStage),
-    ...populated.filter(group => group.stage_id !== currentStage).reverse()];
-  const merged = new Map<string, FeedbackEntry>();
-  for (const group of ordered) {
-    for (const raw of group.items) {
-      const text = raw.trim();
-      const entry = merged.get(text.toLowerCase());
-      if (!entry) merged.set(text.toLowerCase(), { text, stageIds: [group.stage_id] });
-      else if (!entry.stageIds.includes(group.stage_id)) entry.stageIds.push(group.stage_id);
-    }
-  }
-  return [...merged.values()];
-}
-
-const FEEDBACK_PREVIEW = 2;
-
-/** Show the top feedback in a card, with identical sentences merged and the rest one click away. */
-function FeedbackCard({ tone, title, icon, groups, stages, currentStage, action, empty, onAct }: {
-  tone: 'strength' | 'improve'; title: string; icon: 'check' | 'arrow'; groups: ReviewFeedback[]; stages: Stage[];
-  currentStage: string; action: string; empty: string; onAct: (item: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const entries = feedbackEntries(groups, currentStage);
-  const visible = expanded ? entries : entries.slice(0, FEEDBACK_PREVIEW);
-  const hidden = entries.length - FEEDBACK_PREVIEW;
-  const listId = `feedback-${tone}`;
-  const stageName = (id: string) => id === currentStage ? '' : stages.find(stage => stage.id === id)?.label ?? '';
-  const caption = (ids: string[]) => ids.length > 2 ? `${ids.length} stages` : ids.map(stageName).filter(Boolean).join(' · ');
-  return <section className={`review-card tone-${tone}`} aria-labelledby={`${listId}-title`}>
-    <header className="card-head">
-      <span className="card-icon" aria-hidden="true"><Icon name={icon}/></span>
-      <h3 id={`${listId}-title`}>{title}</h3>
-      {entries.length ? <span className="card-count" aria-label={`${entries.length} ${entries.length === 1 ? 'item' : 'items'}`}>{entries.length}</span> : null}
-    </header>
-    {entries.length ? <ul id={listId} className="fb-list" data-expanded={expanded || undefined} tabIndex={expanded ? 0 : undefined}>
-      {visible.map(entry => <li key={entry.text} className="fb-item">
-        <p className="fb-text">{entry.text}</p>
-        <div className="fb-meta">
-          {caption(entry.stageIds) ? <span className="fb-stage">{caption(entry.stageIds)}</span> : null}
-          <button className="scaffold-action fb-act" aria-label={`${action}: ${entry.text}`} onClick={() => onAct(entry.text)}>{action}<Icon name="chevronRight"/></button>
+  const groups = [...project.stages.map(stage => ({ id: stage.id, label: stage.label })),
+    ...(bookmarks.some(item => item.stage_id === null) ? [{ id: 'none', label: 'No stage' }] : [])];
+  return <section className="review-card bookmarks" aria-labelledby="my-work-title">
+    <header className="card-head"><h3 id="my-work-title">My work</h3></header>
+    <p className="supporting">Star messages in Chat to keep useful ideas and coach replies here.</p>
+    {error ? <p role="alert">{error} <button disabled={disabled} onClick={refresh}>Refresh bookmarks</button></p> : !ready ? <p role="status">Loading bookmarks…</p> : null}
+    {groups.map(group => {
+      const entries = bookmarks.filter(item => (item.stage_id ?? 'none') === group.id);
+      return <section className="bookmark-group" id={`bookmarks-${group.id}`} key={group.id} aria-labelledby={`bookmark-heading-${group.id}`}>
+        <h4><button id={`bookmark-heading-${group.id}`} className="bookmark-heading" aria-label={group.label} aria-describedby={`bookmark-count-${group.id}`} aria-expanded={!!open[group.id]} aria-controls={`bookmark-list-${group.id}`}
+          onClick={() => setOpen(value => ({ ...value, [group.id]: !value[group.id] }))}>
+          <span>{group.label}</span><small id={`bookmark-count-${group.id}`}>{entries.length} saved</small><Icon name={open[group.id] ? 'chevronDown' : 'chevronRight'}/>
+        </button></h4>
+        <div className="bookmark-content" id={`bookmark-list-${group.id}`} hidden={!open[group.id]}>
+          {ready && !entries.length ? <p className="supporting">No starred messages in this stage yet.</p> : null}
+          <ol className="bookmark-list" aria-label={`Starred messages in ${group.label}`}>{entries.map(item => <li key={item.id} className="bookmark-entry">
+            <p className="bookmark-author"><strong>{item.role === 'user' ? 'You' : 'Coach'}</strong>{item.interaction_intent === 'lecture_help' ? <span className="bookmark-mode">Lecture Help</span> : null}</p>
+            <div className="bookmark-preview">{item.role === 'assistant' ? <CoachText text={item.preview} links={false}/> : item.preview}</div>
+            <div className="bookmark-actions"><button className="bookmark-jump" disabled={disabled} onClick={() => jumpToMessage(item.id)}>Jump to message<Icon name="chevronRight"/></button>
+              <button className="bookmark-remove" disabled={disabled} aria-label="Remove star" title="Remove star" onClick={() => removeStar(item.id)}><Icon name="star"/></button></div>
+          </li>)}</ol>
         </div>
-      </li>)}
-    </ul> : <p className="supporting fb-empty">{empty}</p>}
-    {hidden > 0 ? <button className="card-link" aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded(open => !open)}>
-      {expanded ? 'Show less' : `Show ${hidden} more`}</button> : null}
+      </section>;
+    })}
   </section>;
 }

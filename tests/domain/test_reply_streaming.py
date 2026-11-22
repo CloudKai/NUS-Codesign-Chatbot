@@ -241,8 +241,8 @@ def _post(client: TestClient, thread_id: str, key: str, headers: dict[str, str] 
     return [json.loads(line) for line in response.text.splitlines() if line.strip()]
 
 
-def test_setting_defaults_off() -> None:
-    assert settings.coach_stream_reply_deltas_enabled is False
+def test_setting_defaults_on() -> None:
+    assert settings.coach_stream_reply_deltas_enabled is True
 
 
 @pytest.mark.parametrize(

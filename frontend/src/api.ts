@@ -3,7 +3,7 @@ import type { Citation } from './stream';
 /** Public reader contracts. Credentials stay in HttpOnly same-origin cookies. */
 export interface Session { owner_id: string; display_name: string; kind: 'guest' | 'registered' }
 export interface Notebook { id: string; name: string; kind: 'notebook' | 'chat'; parent_notebook_id: string | null; pinned: boolean }
-export interface Message { id: string; role: string; content: string; citations: Citation[]; feedback_available: boolean; rating: 'useful' | 'not_useful' | null }
+export interface Message { id: string; role: string; content: string; citations: Citation[]; starred: boolean; feedback_available: boolean; rating: 'useful' | 'not_useful' | null }
 export interface ChatSummary { preview: string; activity_at: string }
 export interface NotebookList { owner_id: string; notebooks: Notebook[]; chat_summaries: Record<string, ChatSummary> }
 export interface Page {
@@ -49,6 +49,7 @@ export interface Project {
   owner_id: string; thread_id: string; current_stage: string; stages: Stage[];
   pending: { id: string; from_stage: string; to_stage: string; rationale: string } | null;
   review?: {
+    project_brief?: ProjectBriefResult;
     summary: string;
     strengths: ReviewFeedback[];
     improvements: ReviewFeedback[];
@@ -60,6 +61,7 @@ export interface ReviewFeedback { stage_id: string; items: string[] }
 /** Allowlisted notebook controls; all educational state remains server-owned. */
 export interface NotebookSettings {
   owner_id: string; notebook: Notebook; response_detail: 'short' | 'long'; response_language: string;
+  chat_model_label?: string;
   selected_model: string; reasoning_effort: string | null; assignment: Record<string, string>;
   models: { id: string; label: string; reasoning_efforts: string[] }[];
 }
@@ -70,4 +72,15 @@ export interface Preferences {
   reduce_motion: boolean;
   default_mode: 'lecture' | 'project';
   starter_prompts: boolean;
+}
+
+/** Owner/revision-fenced bookmarks load independently from transcript pagination. */
+export interface Bookmark { id: string; role: 'user' | 'assistant'; preview: string; stage_id: string | null; interaction_intent: 'lecture_help' | 'project_coaching' | null }
+export interface Bookmarks { owner_id: string; thread_id: string; conversation_revision: number; messages: Bookmark[] }
+
+/** Whole-active-chat project synthesis, grounded in saved student statements. */
+export interface ProjectBriefPoint { text: string | null; evidence: string[] }
+export interface ProjectBriefResult {
+  status: 'current' | 'missing' | 'empty' | 'preview' | 'failed'; version: string;
+  brief: { who_and_why: ProjectBriefPoint; problem: ProjectBriefPoint; current_idea: ProjectBriefPoint; what_matters: ProjectBriefPoint; still_to_explore: ProjectBriefPoint } | null;
 }
