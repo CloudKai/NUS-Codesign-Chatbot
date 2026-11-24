@@ -40,9 +40,10 @@ class DelayedNDJSON:
         """Relay ASGI output unchanged except for delivery timing of reply deltas."""
         ndjson = False
         buffer = b''
+        first_delta = True
 
         async def relay(message: Message) -> None:
-            nonlocal ndjson, buffer
+            nonlocal ndjson, buffer, first_delta
             if message['type'] == 'http.response.start':
                 ndjson = any(key.lower() == b'content-type' and b'application/x-ndjson' in value for key, value in message['headers'])
             if message['type'] != 'http.response.body' or not ndjson:
@@ -52,7 +53,13 @@ class DelayedNDJSON:
             while b'\n' in buffer:
                 line, buffer = buffer.split(b'\n', 1)
                 if line:
-                    if json.loads(line).get('event') == 'reply_delta':
+                    event = json.loads(line).get('event')
+                    if event == 'reply_delta' and first_delta:
+                        first_delta = False
+                        await asyncio.sleep(float(os.environ.get('STREAM_FIXTURE_INITIAL_DELAY_SECONDS', '0')))
+                    if event == 'done':
+                        await asyncio.sleep(float(os.environ.get('STREAM_FIXTURE_SAVE_DELAY_SECONDS', '0')))
+                    if event == 'reply_delta':
                         await asyncio.sleep(.15)
                     await send({'type': 'http.response.body', 'body': line + b'\n', 'more_body': True})
             if not message.get('more_body', False):

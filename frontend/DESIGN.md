@@ -83,6 +83,15 @@ indicate temporary overlap. The composer uses a border and a soft shadow.
 stage markers express actual ordered stages, never invented scores or rewards.
 
 ## Components
+
+Chat waiting feedback uses a compact, theme-tinted block below the composer.
+The estimated percentage is decorative and uses 13px tabular numerals, with a
+12px label and conditional explanation. Its 5px track has 3px ends and uses the
+existing accent token. Screen readers receive indeterminate progress with the
+real stage, and receive a numerical completion value only after saving.
+The fill transitions over 450ms with ease-out and disables motion under the OS
+reduced-motion preference. It disappears 650ms after saved completion.
+
 - **Icon actions:** consistent 1.6px SVG strokes; title and accessible name are
   required. Copy, edit, feedback, sources, panel toggles, theme and send use icons.
 - **Navigation:** New Chat opens a standalone conversation. The plus button beside

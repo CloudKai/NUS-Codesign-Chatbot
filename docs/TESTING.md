@@ -503,7 +503,17 @@ optional pinned-SDK test module is `tests/domain/test_strands_first_cycle_middle
 run after installing `agentcore_runtime/requirements.txt` in a disposable venv.
 
 For rendered QA, use the **disposable mock delayed-NDJSON fixture** described in
-[the streaming handoff](specs/REPLY_STREAMING_HANDOFF.md), on port 8096:
+[the streaming handoff](specs/REPLY_STREAMING_HANDOFF.md), on port 8096.
+
+For the estimated-progress regression, additionally set
+`STREAM_FIXTURE_INITIAL_DELAY_SECONDS=7` and
+`STREAM_FIXTURE_SAVE_DELAY_SECONDS=1` before starting that fixture. Run
+`tests/browser/chat_progress.js` with Playwright CLI. It checks the waiting
+cap and delayed AWS explanation, writing/saving/completion states, saved reload,
+failure without replay, cancelled/discarded previews, new-owner isolation,
+reduced motion, and 1440/390 px light/dark layouts. Screenshots go to
+`/private/tmp/chat-progress-*.png`. The delay settings default to zero for
+existing tests. The fixture operates only on disposable mock workspaces.
 
 ```sh
 "$PWCLI" -s=streaming open http://127.0.0.1:8096 --headed

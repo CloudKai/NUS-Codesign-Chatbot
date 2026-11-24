@@ -1,0 +1,4 @@
+/* Utilities are layered below the existing app styles. Preserve its base styles. */
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);

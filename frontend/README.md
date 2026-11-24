@@ -5,6 +5,26 @@ workspace data, evidence, and saved conversations. Use the
 [local setup](../README.md#run-locally) to build with Node 22 and start the
 same-origin Caddy stack. See [DESIGN.md](DESIGN.md) for layout and styles.
 
+## Query and styling
+
+TanStack Query manages owner-scoped notebook-list requests through the existing
+session verification boundary. Queries are immediately stale and are removed
+when unused. Session reset, sign-out, owner change, and unmount clear the query
+client. Write reconciliation cancels older list requests before reading again.
+Focus/reconnect refetch and automatic retries are disabled. Generation,
+streaming, and saved-receipt recovery retain their explicit request lifecycle.
+
+Tailwind 4 runs through its Vite plugin. `src/tailwind.css` imports theme and
+utilities without Preflight, preserving existing app styles and Markdown.
+New progress layout uses utilities; colours and motion use existing CSS tokens.
+
+The chat bar labels its percentages as estimated. It approaches 65% while
+waiting, reaches 90% on reply deltas, 98% while saving, and 100% only on a
+validated saved `done` event or a recovered durable receipt. Discarded previews
+return to indeterminate feedback. After six seconds without reply text, a
+conditional explanation describes possible AWS startup. Timers clean up with
+the component, and reduced-motion settings disable animation.
+
 ## Keep the browser contract
 
 - **Authentication.** The proxy exposes specific reader and auth routes.

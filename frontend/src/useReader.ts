@@ -1,5 +1,6 @@
 /** Ephemeral reader state; owner changes and late responses cannot share a transcript. */
 import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ApiError, StreamlitAccess, currentSession, get, type Notebook, type NotebookList, type Page, type Project, type Session } from './api';
 
 interface ReaderState {
@@ -14,6 +15,7 @@ const blank: ReaderState = { phase: 'checking', session: null, notebooks: [], ch
 
 /** Own the session lifecycle and owner/revision-fenced list and page requests. */
 export function useReader() {
+  const queryClient = useQueryClient();
   const [state, setState] = useState<ReaderState>(blank);
   const generation = useRef(0);
   const controller = useRef(new AbortController());
@@ -21,6 +23,7 @@ export function useReader() {
   current.current = state;
 
   function reset() {
+    queryClient.clear();
     generation.current += 1;
     controller.current.abort();
     controller.current = new AbortController();
@@ -53,12 +56,25 @@ export function useReader() {
     const signal = controller.current.signal;
     try {
       const session = await currentSession(signal);
-      const list = await get<NotebookList>('/api/v1/reader/threads', signal);
+      const list = await readNotebooks(session.owner_id, signal);
       const verified = await currentSession(signal);
       if (epoch !== generation.current) return;
       if (session.owner_id !== list.owner_id || verified.owner_id !== session.owner_id) { void reload(); return; }
       setState({ ...blank, phase: 'ready', session: verified, notebooks: list.notebooks, chatSummaries: list.chat_summaries ?? {} });
     } catch (error) { fail(error, epoch); }
+  }
+
+  /** Deduplicate notebook reads in memory while revalidating ownership on every result. */
+  function readNotebooks(owner: string, signal: AbortSignal): Promise<NotebookList> {
+    return queryClient.fetchQuery({
+      queryKey: ['reader', owner, 'notebooks'],
+      queryFn: async ({ signal: querySignal }) => {
+        const requestSignal = AbortSignal.any([signal, querySignal]);
+        const list = await get<NotebookList>('/api/v1/reader/threads', requestSignal);
+        if (list.owner_id !== owner) throw new ApiError(401);
+        return list;
+      },
+    });
   }
 
   async function open(notebookId: string, older = false, refresh = false, target?: string) {
@@ -76,7 +92,7 @@ export function useReader() {
       const base = `/api/v1/reader/threads/${encodeURIComponent(notebookId)}`;
       let [page, project, list] = await Promise.all([
         get<Page>(`${base}/messages/page?${query}`, signal), get<Project>(`${base}/project`, signal),
-        refresh ? get<NotebookList>('/api/v1/reader/threads', signal).catch(error => {
+        refresh ? readNotebooks(snapshot.session.owner_id, signal).catch(error => {
           if (error instanceof ApiError && [401, 403].includes(error.status)) throw error;
           return null;
         }) : Promise.resolve(null),
@@ -111,7 +127,10 @@ export function useReader() {
     const epoch = generation.current;
     if (!snapshot.session) throw new Error('Session unavailable');
     const signal = controller.current.signal;
-    const list = await get<NotebookList>('/api/v1/reader/threads', signal);
+    // A write reconciliation must not reuse a read that started before the write.
+    await queryClient.cancelQueries({ queryKey: ['reader', snapshot.session.owner_id, 'notebooks'] });
+    if (epoch !== generation.current) throw new Error('View changed');
+    const list = await readNotebooks(snapshot.session.owner_id, signal);
     const verified = await currentSession(signal);
     if (epoch !== generation.current) throw new Error('View changed');
     if (list.owner_id !== snapshot.session.owner_id || verified.owner_id !== list.owner_id) { void reload(); throw new Error('Owner changed'); }
@@ -237,6 +256,7 @@ export function useReader() {
     window.addEventListener('storage', onStorage);
     const interval = window.setInterval(check, 60_000);
     return () => {
+      queryClient.clear();
       controller.current.abort();
       generation.current += 1;
       document.removeEventListener('visibilitychange', visibility);

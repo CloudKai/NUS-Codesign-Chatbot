@@ -2,6 +2,45 @@
 
 ## Current status
 
+### React Query, Tailwind, and estimated reply progress implemented locally (2026-11-24 SGT)
+
+The React frontend now provides TanStack Query 5 for owner-scoped notebook-list
+request management. Lists remain immediately stale, unused query data has zero
+retention, and the client is cleared at session reset and unmount. Older reads
+are cancelled before mutation reconciliation. Focus/reconnect refetch and
+automatic query/mutation retries are disabled. The existing authenticated
+read checks, streaming sends, and durable-receipt recovery still own the chat
+lifecycle.
+
+Tailwind 4 is integrated through Vite with theme/utilities imports and no
+Preflight reset. Existing CSS retains the application's appearance. A compact
+feedback component beneath the composer shows estimated progress, approaching
+65% while waiting, 90% on reply deltas, 98% while saving, and 100% on confirmed
+saved completion. A conditional AWS startup explanation appears after six
+seconds without reply text. Discards return to indeterminate feedback;
+failures/cancellation clear it. Reduced motion disables animation, and timers
+clean up when the request or component ends.
+
+Files include the frontend manifest/lock, Vite config, Query provider and reader
+hook, `ChatProgress.tsx`, Conversation integration, Tailwind/CSS, frontend
+guides, and the delayed mock/browser regression. TypeScript and Vite build
+passed; Vite reports ignored third-party `use client` directives in this static
+SPA bundle. The targeted ownership/reader/streaming suite passed 32 tests.
+The applicable backend, HTTP, persistence, architecture, and deployment suite
+passed 2,482 tests with one skipped. Mock browser checks passed for
+waiting/writing/saving/completion,
+saved reload, failure without replay, cancellation/discard, separate owners,
+desktop/mobile light/dark and reduced motion. The pre-existing streaming/edit
+regression also passed. Screenshots were inspected at 1440 and 390 px.
+
+No schema migration is required. The disposable mock workspace contains only
+synthetic chats. Production deployment is a separate phase.
+Roll back this frontend change by
+restoring the touched frontend source and dependencies without restoring any
+database. Next validate the built frontend in an authorized deployment, using
+the mock browser recipe in [testing](TESTING.md).
+
+
 ### Visible word groups and system motion preference (2026-11-23 SGT)
 
 React paces provider reply fragments so a single network burst can produce

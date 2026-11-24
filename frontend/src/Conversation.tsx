@@ -13,6 +13,7 @@ import { StageStarters } from './StageStarters';
 import { CoachCheckIn } from './CoachCheckIn';
 import { chooseCheckIn, hintScaffold, lectureToProjectScaffold, reflectionScaffold, type CheckIn } from './coachingContent';
 import { createReplyPreview } from './replyPreview';
+import { ChatProgress, useChatProgress } from './ChatProgress';
 import { newRequestKey } from './requestKey';
 import { REPLY_DELTAS_HEADER, citationText, isTurn, readStream, type Citation, type Event } from './stream';
 
@@ -190,6 +191,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const citationButton = useRef<HTMLButtonElement | null>(null);
   const returnScroll = useRef(0);
   const path = `/api/v1/reader/threads/${encodeURIComponent(page.notebook.id)}`;
+  const progress = useChatProgress();
   textRef.current = text;
   useLayoutEffect(() => {
     const field = composer.current;
@@ -259,16 +261,19 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       await verify();
       if (saved !== null && !isTurn(saved)) throw new Error('Malformed saved reply');
       if (saved) {
+        progress.saved();
         remember(!receipt.message && textRef.current === receipt.text ? '' : textRef.current, null, receipt.message ? attachments : []);
         setStatus('Your answer is ready.');
         await refresh();
         if (receipt.message) composer.current?.focus({ preventScroll: true });
       } else {
+        progress.clear();
         setCheckedKey(receipt.key);
         setStatus('We couldn’t confirm the reply was saved. Your question is safe. Check again before retrying.');
       }
     } catch (error) {
       if (!active.current) return;
+      progress.clear();
       if (error instanceof ApiError && [401, 403].includes(error.status)) expired();
       else setStatus('We couldn’t check for your reply. Your question is kept. Check again when you’re connected.');
     } finally { if (active.current) setChecking(false); }
@@ -305,6 +310,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     const receipt = retry ? pendingRef.current! : revision || { key: newRequestKey(), text: textRef.current, intent: intentRef.current, attachments };
     if (!receipt) { lock.current = false; return; }
     remember(textRef.current, receipt);
+    progress.start();
     setCanStop(false);
     setStopping(false);
     setWatching(true);
@@ -327,17 +333,18 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       await readStream(response, page.notebook.id, receipt.key, event => {
         if (!active.current) return;
         if (event.event === 'started') { setCanStop(true); setStatus('Reading your message…'); }
-        if (event.event === 'status' && event.phase === 'saving') setCanStop(false);
+        if (event.event === 'status' && event.phase === 'saving') { setCanStop(false); progress.saving(); }
         if (event.event === 'status') setStatus(({ queued: 'Thinking…', retrieving: 'Looking through your sources…', thinking: 'Thinking…', saving: 'Saving…' })[event.phase]);
         // Deltas are unvalidated and unsaved: they only ever feed the preview, never saved messages.
-        if (event.event === 'reply_delta') { paint.append(event.text); setStatus('Writing your reply…'); }
-        if (event.event === 'reply_discard') paint.discard();
-        if (event.event === 'reply_ready') { setCanStop(false); setStatus('Saving…'); }
-        if (event.event === 'done') { setCanStop(false); completion.text = event.turn.response_text; }
-        if (event.event === 'error') { terminalError = event; paint.discard(); }
+        if (event.event === 'reply_delta') { progress.writing(); paint.append(event.text); setStatus('Writing your reply…'); }
+        if (event.event === 'reply_discard') { progress.discard(); paint.discard(); }
+        if (event.event === 'reply_ready') { progress.saving(); setCanStop(false); setStatus('Saving…'); }
+        if (event.event === 'done') { progress.saved(); setCanStop(false); completion.text = event.turn.response_text; }
+        if (event.event === 'error') { progress.clear(); terminalError = event; paint.discard(); }
       });
       if (completion.text) await paint.finish(completion.text);
     } catch (error) {
+      progress.clear();
       if (active.current && error instanceof ApiError && [401, 403].includes(error.status)) { expired(); return; }
     } finally {
       paint.dispose();
@@ -350,6 +357,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         controller.current = new AbortController();
         const failure = terminalError as (Event & { event: 'error' }) | null;
         if (failure?.category === 'cancelled') {
+          progress.clear();
           if (receipt.message || textRef.current !== receipt.text) {
             setCheckedKey(receipt.key);
             if (receipt.message) await refresh();
@@ -787,6 +795,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           onClick={() => void stopGeneration()}><Icon name="close"/></button> :
         <button className="primary send-button" aria-label="Send message" title="Send message" type="submit" disabled={watching || checking || busy || moving || projectUncertain || externalBlocked || uploading || feedbackBusy || !!pending || !text.trim()}><Icon name="arrow"/></button>}</div>
     </form>
+    <ChatProgress value={progress.value} status={status}/>
     {storageError ? <p role="alert">Tab storage is unavailable. Keep a copy of your draft before reloading.</p> : null}
     <div className="turn-status" role="status" aria-live="polite">{status}</div>
     <p className="composer-note">Your coach can make mistakes. You decide what goes into your work.</p>
