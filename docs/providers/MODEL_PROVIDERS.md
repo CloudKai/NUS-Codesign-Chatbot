@@ -1,5 +1,12 @@
 # Model providers
 
+For Mantle/Gemma streaming, the runtime suppresses provisional text because
+its separate output guardrail runs after generation. Only the checked final
+result proceeds to the shared reply/save lifecycle. This adds no calls and
+preserves internal first-model-text timing, which is distinct from first visible
+reply latency. The [audit](../operations/ARCHITECTURE_IMPROVEMENTS.md#implemented-decisions-and-contracts)
+records the regression evidence and required authorized runtime rollout.
+
 Production uses AgentCore Runtime with Haiku 4.5 for Fast Chat and Sonnet
 4.6 for explicit Deep Review. Direct Bedrock Converse is an opt-in fallback
 selected through deployment configuration. Production selects one of AgentCore,

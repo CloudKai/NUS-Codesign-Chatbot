@@ -7,6 +7,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from backend.mock_provider import DeterministicCoachProvider
 
 _PROBE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "load_probe.py"
@@ -39,7 +41,13 @@ _REQUIRED_KEYS = (
     "capacity_exhausted",
     "failed",
     "p50_ms",
+    "p90_ms",
     "p95_ms",
+    "p99_ms",
+    "max_ms",
+    "percentile_method",
+    "error_rate",
+    "rejection_rate",
     "mean_ms",
     "requests_per_sec",
     "peak_threads",
@@ -48,6 +56,30 @@ _REQUIRED_KEYS = (
     "rss_peak_kb",
     "process_max_rss_kb",
 )
+
+
+@pytest.mark.parametrize(("values", "fraction", "expected"), [
+    ([], .95, 0.0), ([7], .99, 7), ([1, 2, 100], .95, 100),
+    ([1, 2, 100], .50, 2), (list(range(1, 101)), .90, 90),
+    (list(range(1, 101)), .99, 99),
+])
+def test_latency_percentiles_include_small_sample_tail(values, fraction, expected):
+    """A lone slow request must remain visible in reported tail latency."""
+    assert _PROBE._percentile(values, fraction) == expected
+
+
+def test_report_separates_failures_from_expected_admission_rejections():
+    """Summaries retain explicit outcomes instead of calling rejection a success."""
+    report = _PROBE._summarize(
+        scenario="test", users=4, latencies_ms=[1, 2, 3, 100],
+        accepted=1, rate_limited=1, failed=1, capacity_exhausted=1,
+        wall_seconds=2, requests=4,
+    ).as_dict()
+    assert report["error_rate"] == .25
+    assert report["rejection_rate"] == .5
+    assert report["max_ms"] == report["p99_ms"] == report["p95_ms"] == 100
+    assert report["requests_per_sec"] == 2
+    assert report["percentile_method"] == "nearest-rank"
 
 
 def _assert_privacy(payload: dict) -> None:

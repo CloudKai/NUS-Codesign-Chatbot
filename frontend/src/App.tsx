@@ -54,7 +54,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const [settingsReturn, setSettingsReturn] = useState<'chat' | 'home' | 'notebook' | 'library' | 'search'>('chat');
   const [folderId, setFolderId] = useState<string>();
   const [settingsHost, setSettingsHost] = useState<HTMLDivElement | null>(null);
-  const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const [preferences, setPreferences] = useState<Preferences | null>(reader.preferences);
   const [intentRequest, setIntentRequest] = useState<{ id: string; intent: 'project' | 'lecture'; n: number }>();
   const [search, setSearch] = useState('');
   const [activity, setActivity] = useState(false);
@@ -223,7 +223,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           open={openChat} openFolder={openFolder} move={reader.moveChat}
           commands={{ rename: reader.renameChat, pin: reader.pinChat, remove: reader.deleteChat, share: reader.shareChat }}/>
         <WorkspaceTools ref={workspaceActions} themeHost={themeHost} settingsHost={settingsHost}
-          session={session} onPreferences={setPreferences}
+          session={session} initialPreferences={reader.preferences} onPreferences={setPreferences}
           openSettings={() => { if (view !== 'settings') setSettingsReturn(view); setView('settings'); closeMobileList(); }}
           closeSettings={() => { setView(settingsReturn === 'notebook' && !folder ? 'chat' : settingsReturn); document.getElementById('main')?.focus(); }}
           thread={folderSettings ? folder?.id : selectedChat?.id} disabled={activity || reader.busy}

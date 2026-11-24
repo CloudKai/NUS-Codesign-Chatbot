@@ -5,6 +5,13 @@ fragments to the React chat while generation runs. Private assessment fields,
 reasoning and raw structured JSON never become browser deltas. No second model
 call is added to simulate typing. The deterministic provider remains a mock.
 
+Mantle/Gemma is an exception: its separate output guardrail runs after generation,
+so the updated runtime sends no provisional text for that provider. It returns
+the checked final result through the same lifecycle. Other provider streaming
+remains unchanged. See the [safety decision and local evidence](../operations/ARCHITECTURE_IMPROVEMENTS.md#implemented-decisions-and-contracts).
+The source fix needs an authorized runtime publication/session rollover before
+it protects an existing deployment.
+
 ## Contracts and compatibility
 
 - `COACH_STREAM_REPLY_DELTAS_ENABLED` defaults **true**. The browser opts in with

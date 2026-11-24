@@ -1,19 +1,18 @@
 import type { Citation } from './stream';
+import { ApiError } from './api/errors';
+import { readBootstrap, readSession } from './api/client';
+import type { ReaderSession, ReaderNotebook, ReaderChatSummary, ReaderNotebooks } from './api/generated/types.gen';
+export { ApiError } from './api/errors';
 
 /** Public reader contracts. Credentials stay in HttpOnly same-origin cookies. */
-export interface Session { owner_id: string; display_name: string; kind: 'guest' | 'registered' }
-export interface Notebook { id: string; name: string; kind: 'notebook' | 'chat'; parent_notebook_id: string | null; pinned: boolean }
+export type Session = ReaderSession;
+export type Notebook = Required<ReaderNotebook>;
 export interface Message { id: string; role: string; content: string; citations: Citation[]; starred: boolean; feedback_available: boolean; rating: 'useful' | 'not_useful' | null }
-export interface ChatSummary { preview: string; activity_at: string }
-export interface NotebookList { owner_id: string; notebooks: Notebook[]; chat_summaries: Record<string, ChatSummary> }
+export type ChatSummary = ReaderChatSummary;
+export type NotebookList = Omit<ReaderNotebooks, 'notebooks'> & { notebooks: Notebook[] };
 export interface Page {
   owner_id: string; notebook: Notebook; messages: Message[];
   next_cursor: string | null; total_count: number; conversation_revision: number;
-}
-
-/** HTTP status supports fixed recovery copy without echoing private server errors. */
-export class ApiError extends Error {
-  constructor(public status: number) { super('Reader request failed'); }
 }
 
 /** Signal that the signed-in account belongs in the protected workspace. */
@@ -28,14 +27,29 @@ export async function get<T>(path: string, signal: AbortSignal): Promise<T> {
 
 /** Probe the owner, refreshing registered cookies through the existing auth route if needed. */
 export async function currentSession(signal: AbortSignal): Promise<Session> {
-  try { return await get<Session>('/api/v1/reader/session', signal); }
+  try { return await readSession(signal); }
   catch (error) {
     if (!(error instanceof ApiError) || ![401, 403].includes(error.status)) throw error;
     const profile = await get<{ user: { streamlit_access: boolean } }>('/api/v1/auth/me', signal);
     if (profile.user.streamlit_access) throw new StreamlitAccess();
     if (error.status === 403) throw error;
-    return get<Session>('/api/v1/reader/session', signal);
+    return readSession(signal);
   }
+}
+
+/** Renew expired cookies if needed, then fence the whole bootstrap with a fresh owner probe. */
+export async function verifiedBootstrap(signal: AbortSignal): Promise<Awaited<ReturnType<typeof readBootstrap>>> {
+  let value;
+  try { value = await readBootstrap(signal); }
+  catch (error) {
+    if (!(error instanceof ApiError) || ![401, 403].includes(error.status)) throw error;
+    await currentSession(signal);
+    value = await readBootstrap(signal);
+  }
+  const verified = await currentSession(signal);
+  if (verified.owner_id !== value.session.owner_id || value.listing.owner_id !== verified.owner_id
+    || value.preferences.owner_id !== verified.owner_id) throw new ApiError(401);
+  return { ...value, session: verified };
 }
 
 /** Saved project artifacts and navigation are projected by the shared learning policy. */

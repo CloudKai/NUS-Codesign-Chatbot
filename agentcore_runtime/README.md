@@ -13,6 +13,16 @@ for validation, recovery costs and limits. Do not treat
 
 ## Contract
 
+Mantle/Gemma Fast Chat sends progress-only feedback during generation. Its
+`ApplyGuardrail(OUTPUT)` check runs after structured generation, so it must not
+forward model-input fragments before that check. A passing final result still
+uses the existing validated reply/save/recovery lifecycle. A blocked output
+emits no reply text. First-model-text telemetry remains recorded internally;
+it no longer represents visible-text latency for this path. No additional
+provider or guardrail calls are introduced. This source change requires an
+explicitly authorized runtime publication and a new session generation before
+it protects an existing deployment; no publication is implied by local tests.
+
 1. `tools=[]` on every specialist — no Knowledge Base, S3, MCP, shell, or files.
 2. Active normal chat sends `phase=fast_chat` and `output_contract=fast_chat_turn`.
    Legacy `phase` values (`router` | `qa` | `coaching` | `review`) remain for

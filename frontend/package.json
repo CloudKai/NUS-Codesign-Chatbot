@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && vite build --base=/pilot/"
+    "build": "tsc --noEmit && vite build --base=/pilot/",
+    "test": "vitest run",
+    "api:export": "../.venv/bin/python ../scripts/export_reader_openapi.py",
+    "api:generate": "openapi-ts",
+    "api:check": "node scripts/check-api.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "5.108.4",
@@ -13,11 +17,14 @@
     "react-markdown": "10.1.0"
   },
   "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0",
     "@tailwindcss/vite": "4.3.5",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "tailwindcss": "4.3.5",
     "typescript": "5.9.3",
-    "vite": "7.3.8"
-  }
+    "vite": "7.3.8",
+    "vitest": "5.1.1"
+  },
+  "overrides": { "js-yaml": "4.3.2" }
 }

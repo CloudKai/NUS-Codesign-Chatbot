@@ -17,6 +17,7 @@ Start with the [local setup](../README.md) to run the app offline.
 - [Whole-chat project brief and clean Summary](specs/PROJECT_BRIEF_HANDOFF.md)
 - [Normal/edited LLM reply streaming and AgentCore rollout](specs/REPLY_STREAMING_HANDOFF.md)
 - [Testing and mock load probes](TESTING.md); [Review refinement evidence](specs/REVIEW_REFINEMENTS_HANDOFF.md)
+- [Architecture audit, improvement milestones and baseline measurements](operations/ARCHITECTURE_IMPROVEMENTS.md)
 - [Retrieval evaluation](RETRIEVAL_EVAL.md)
 
 ## Deploy

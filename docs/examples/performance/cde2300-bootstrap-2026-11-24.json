@@ -1,0 +1,390 @@
+{
+  "course": "CDE2300",
+  "date": "2026-11-24",
+  "method": "Same corrected browser harness, three observations per scenario/delay and bundle. Pre-bootstrap reader/App/WorkspaceTools bundle was built temporarily with original loader behavior, then all updated sources restored and rebuilt. Both use the same backend and synthetic workspace. Baseline overlapped part of the full pytest run; after had no competing test suite. No CPU/network isolation. Injected delay is a per-reader-request harness input, not measured WAN RTT. SPA settledMs includes an explicit 800ms drain and must not be treated as completion latency. Visible time is an observation threshold, not TTI. Request counts are the primary evidence.",
+  "runs": {
+    "after": {
+      "rows": [
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/bootstrap",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 615,
+          "trial": 0,
+          "visibleMs": 102
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 842,
+          "trial": 0,
+          "visibleMs": 42
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/bootstrap",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 581,
+          "trial": 1,
+          "visibleMs": 72
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 853,
+          "trial": 1,
+          "visibleMs": 51
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/bootstrap",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 579,
+          "trial": 2,
+          "visibleMs": 74
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 851,
+          "trial": 2,
+          "visibleMs": 49
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/bootstrap",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 763,
+          "trial": 0,
+          "visibleMs": 324
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 1099,
+          "trial": 0,
+          "visibleMs": 298
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/bootstrap",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 852,
+          "trial": 1,
+          "visibleMs": 355
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 1109,
+          "trial": 1,
+          "visibleMs": 308
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/bootstrap",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 774,
+          "trial": 2,
+          "visibleMs": 338
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 1113,
+          "trial": 2,
+          "visibleMs": 311
+        }
+      ],
+      "scope": "local browser, synthetic guest/empty chat, no model call; injected delay is not measured network RTT"
+    },
+    "before": {
+      "rows": [
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 600,
+          "trial": 0,
+          "visibleMs": 130
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 856,
+          "trial": 0,
+          "visibleMs": 55
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 587,
+          "trial": 1,
+          "visibleMs": 67
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 844,
+          "trial": 1,
+          "visibleMs": 42
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 597,
+          "trial": 2,
+          "visibleMs": 77
+        },
+        {
+          "delayMs": 0,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 844,
+          "trial": 2,
+          "visibleMs": 42
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 1166,
+          "trial": 0,
+          "visibleMs": 819
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 1099,
+          "trial": 0,
+          "visibleMs": 298
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 1169,
+          "trial": 1,
+          "visibleMs": 825
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 1096,
+          "trial": 1,
+          "visibleMs": 295
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "startup",
+          "settledMs": 1170,
+          "trial": 2,
+          "visibleMs": 823
+        },
+        {
+          "delayMs": 100,
+          "requests": [
+            "/api/v1/reader/threads/{id}/project",
+            "/api/v1/reader/threads/{id}/messages/page",
+            "/api/v1/reader/session",
+            "/api/v1/reader/threads/{id}/bookmarks",
+            "/api/v1/reader/session",
+            "/api/v1/reader/session",
+            "/api/v1/reader/preferences",
+            "/api/v1/reader/threads/{id}/settings",
+            "/api/v1/reader/session"
+          ],
+          "scenario": "open-chat",
+          "settledMs": 1102,
+          "trial": 2,
+          "visibleMs": 301
+        }
+      ],
+      "scope": "local browser, synthetic guest/empty chat, no model call; injected delay is not measured network RTT"
+    }
+  },
+  "scope": "Local Chromium against disposable SQLite/mock FastAPI; synthetic Guest and empty chat; no model calls."
+}

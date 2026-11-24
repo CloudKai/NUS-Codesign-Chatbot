@@ -1,17 +1,20 @@
 /** Ephemeral reader state; owner changes and late responses cannot share a transcript. */
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ApiError, StreamlitAccess, currentSession, get, type Notebook, type NotebookList, type Page, type Project, type Session } from './api';
+import { ApiError, StreamlitAccess, currentSession, verifiedBootstrap, get, type Notebook, type NotebookList, type Page, type Project, type Session, type Preferences } from './api';
+import { readMessagePage, readNotebookList } from './api/client';
+import { queryKeys } from './api/queryKeys';
 
 interface ReaderState {
   phase: 'checking' | 'signed-out' | 'ready' | 'error';
   session: Session | null; notebooks: NotebookList['notebooks'];
   page: Page | null; project: Project | null; busy: boolean; error: string;
   chatSummaries: NotebookList['chat_summaries'];
+  preferences: Preferences | null;
 }
 export const SIGN_OUT_SIGNAL = "codesign-signed-out";
 
-const blank: ReaderState = { phase: 'checking', session: null, notebooks: [], chatSummaries: {}, page: null, project: null, busy: false, error: '' };
+const blank: ReaderState = { phase: 'checking', session: null, notebooks: [], chatSummaries: {}, page: null, project: null, preferences: null, busy: false, error: '' };
 
 /** Own the session lifecycle and owner/revision-fenced list and page requests. */
 export function useReader() {
@@ -55,22 +58,19 @@ export function useReader() {
     const epoch = generation.current;
     const signal = controller.current.signal;
     try {
-      const session = await currentSession(signal);
-      const list = await readNotebooks(session.owner_id, signal);
-      const verified = await currentSession(signal);
+      const { session, listing: list, preferences } = await verifiedBootstrap(signal);
       if (epoch !== generation.current) return;
-      if (session.owner_id !== list.owner_id || verified.owner_id !== session.owner_id) { void reload(); return; }
-      setState({ ...blank, phase: 'ready', session: verified, notebooks: list.notebooks, chatSummaries: list.chat_summaries ?? {} });
+      setState({ ...blank, phase: 'ready', session, preferences, notebooks: list.notebooks, chatSummaries: list.chat_summaries ?? {} });
     } catch (error) { fail(error, epoch); }
   }
 
   /** Deduplicate notebook reads in memory while revalidating ownership on every result. */
   function readNotebooks(owner: string, signal: AbortSignal): Promise<NotebookList> {
     return queryClient.fetchQuery({
-      queryKey: ['reader', owner, 'notebooks'],
+      queryKey: queryKeys.notebooks(owner),
       queryFn: async ({ signal: querySignal }) => {
         const requestSignal = AbortSignal.any([signal, querySignal]);
-        const list = await get<NotebookList>('/api/v1/reader/threads', requestSignal);
+        const list = await readNotebookList(requestSignal);
         if (list.owner_id !== owner) throw new ApiError(401);
         return list;
       },
@@ -87,11 +87,9 @@ export function useReader() {
     setState(value => ({ ...value, page: older || refresh ? value.page : null, project: older || refresh ? value.project : null, busy: true, error: '' }));
     try {
       const cursor = older ? snapshot.page?.next_cursor : null;
-      const query = new URLSearchParams({ limit: '20' });
-      if (cursor) query.set('cursor', cursor);
       const base = `/api/v1/reader/threads/${encodeURIComponent(notebookId)}`;
       let [page, project, list] = await Promise.all([
-        get<Page>(`${base}/messages/page?${query}`, signal), get<Project>(`${base}/project`, signal),
+        readMessagePage(notebookId, signal, cursor), get<Project>(`${base}/project`, signal),
         refresh ? readNotebooks(snapshot.session.owner_id, signal).catch(error => {
           if (error instanceof ApiError && [401, 403].includes(error.status)) throw error;
           return null;
@@ -99,7 +97,7 @@ export function useReader() {
       ]);
       // Follow revision-bound pages so an old bookmark opens its original with surrounding context.
       while (target && !page.messages.some(message => message.id === target) && page.next_cursor) {
-        const earlier = await get<Page>(`${base}/messages/page?${new URLSearchParams({ limit: '100', cursor: page.next_cursor })}`, signal);
+        const earlier = await readMessagePage(notebookId, signal, page.next_cursor, 100);
         if (earlier.owner_id !== page.owner_id || earlier.notebook.id !== notebookId || earlier.conversation_revision !== page.conversation_revision) throw new ApiError(409);
         page = { ...page, messages: [...earlier.messages, ...page.messages], next_cursor: earlier.next_cursor };
       }
@@ -128,7 +126,7 @@ export function useReader() {
     if (!snapshot.session) throw new Error('Session unavailable');
     const signal = controller.current.signal;
     // A write reconciliation must not reuse a read that started before the write.
-    await queryClient.cancelQueries({ queryKey: ['reader', snapshot.session.owner_id, 'notebooks'] });
+    await queryClient.cancelQueries({ queryKey: queryKeys.notebooks(snapshot.session.owner_id) });
     if (epoch !== generation.current) throw new Error('View changed');
     const list = await readNotebooks(snapshot.session.owner_id, signal);
     const verified = await currentSession(signal);

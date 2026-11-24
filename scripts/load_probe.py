@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import resource
 import statistics
@@ -174,6 +175,9 @@ class ProbeReport:
     p95_ms: float
     mean_ms: float
     requests_per_sec: float
+    p90_ms: float = 0.0
+    p99_ms: float = 0.0
+    max_ms: float = 0.0
     requests: int | None = None
     fake_provider_delay_ms: int | None = None
     fake_kb_delay_ms: int | None = None
@@ -217,7 +221,13 @@ class ProbeReport:
             "capacity_exhausted": self.capacity_exhausted,
             "failed": self.failed,
             "p50_ms": self.p50_ms,
+            "p90_ms": self.p90_ms,
             "p95_ms": self.p95_ms,
+            "p99_ms": self.p99_ms,
+            "max_ms": self.max_ms,
+            "percentile_method": "nearest-rank",
+            "error_rate": self.failed / requests if requests else 0.0,
+            "rejection_rate": (self.rate_limited + (self.capacity_exhausted or 0)) / requests if requests else 0.0,
             "mean_ms": self.mean_ms,
             "requests_per_sec": self.requests_per_sec,
             "peak_threads": self.peak_threads,
@@ -452,10 +462,10 @@ def _seed_owner(store: StudentStore, *, sub: str) -> dict[str, str]:
 
 
 def _percentile(ordered: list[float], fraction: float) -> float:
-    """Return a simple percentile from an already-sorted latency list."""
+    """Return the nearest-rank percentile, including the tail in small samples."""
     if not ordered:
         return 0.0
-    index = int(fraction * (len(ordered) - 1))
+    index = max(0, min(len(ordered) - 1, math.ceil(fraction * len(ordered)) - 1))
     return ordered[index]
 
 
@@ -494,7 +504,10 @@ def _summarize(
         rate_limited=rate_limited,
         failed=failed,
         p50_ms=round(_percentile(ordered, 0.50), 1),
+        p90_ms=round(_percentile(ordered, 0.90), 1),
         p95_ms=round(_percentile(ordered, 0.95), 1),
+        p99_ms=round(_percentile(ordered, 0.99), 1),
+        max_ms=round(ordered[-1], 1) if ordered else 0.0,
         mean_ms=round(statistics.fmean(latencies_ms), 1) if latencies_ms else 0.0,
         requests_per_sec=round(total / wall_seconds, 2) if wall_seconds and total else 0.0,
         requests=total,

@@ -36,6 +36,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
+      - name: Reviewed browser API contract and generated client
+        run: |
+          python scripts/export_reader_openapi.py --check
+          npm run api:check --prefix frontend
+
+      - name: Frontend unit regressions
+        run: npm test --prefix frontend
+
+      - name: Frontend dependency advisories
+        run: npm audit --audit-level=high --prefix frontend
+
       - name: Ruff
         run: ruff check .
 

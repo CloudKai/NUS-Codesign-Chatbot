@@ -277,6 +277,16 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
         assert needle in env_example
 
 
+def test_caddy_bootstrap_allowlist_is_exact():
+    """The new bootstrap read cannot open wildcard access to other API paths."""
+    caddyfile = (ROOT / "Caddyfile").read_text(encoding="utf-8")
+    pattern = re.search(r"path_regexp reader (\S+)", caddyfile).group(1)
+    assert re.fullmatch(pattern, "/api/v1/reader/bootstrap")
+    for path in ("/api/v1/reader/bootstrap/admin", "/api/v1/reader/bootstrap/",
+                 "/api/v1/professor/overview", "/api/v1/threads"):
+        assert re.fullmatch(pattern, path) is None
+
+
 def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     """Public Caddy must not forward arbitrary /api/* into FastAPI."""
     caddyfile = (ROOT / "Caddyfile").read_text(encoding="utf-8")

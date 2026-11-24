@@ -42,7 +42,9 @@ function decode(line: string): Event {
     (value.event === 'reply_ready' && text('text') && value.text.length > 0) ||
     (value.event === 'graph' && Array.isArray(value.steps) && value.steps.every((step: unknown) => typeof step === 'string') && (value.mode === null || text('mode'))) ||
     (value.event === 'done' && isTurn(value.turn)) ||
-    (value.event === 'error' && Number.isInteger(value.status) && value.status >= 400 && value.status <= 599 && text('detail'))
+    (value.event === 'error' && Number.isInteger(value.status) && value.status >= 400 && value.status <= 599 && text('detail')
+      && (value.category === undefined || value.category === null || text('category'))
+      && (value.retry_after === undefined || value.retry_after === null || (Number.isInteger(value.retry_after) && value.retry_after >= 1)))
   );
   if (!valid) throw new Error('Malformed coach event');
   return value as Event;

@@ -606,7 +606,9 @@ async def _structured_role_invoke(
         first_text_callback(**event)
         tool = event.get("delta", {}).get("toolUse") if isinstance(event.get("delta"), Mapping) else None
         fragment = tool.get("input") if isinstance(tool, Mapping) else None
-        if model_delta is not None and isinstance(fragment, str) and fragment:
+        # Mantle applies output safety only after generation. Discarding a
+        # preview later cannot undo exposure, so that path sends no text deltas.
+        if model_delta is not None and not model_config.uses_mantle_responses and isinstance(fragment, str) and fragment:
             current = event.get("current_tool_use")
             tool_id = str(current.get("toolUseId") or "") if isinstance(current, Mapping) else ""
             model_delta({"event": "model_delta", "tool_id": tool_id[:200], "input": fragment})

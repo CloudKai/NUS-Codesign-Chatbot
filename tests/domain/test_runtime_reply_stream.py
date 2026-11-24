@@ -7,6 +7,8 @@ import types
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from agentcore_runtime.model import HAIKU_4_5_MODEL_ID, SONNET_4_6_MODEL_ID, ROLE_ENV_KEYS, clear_role_model_cache
 from agentcore_runtime.models import FastChatTurnOutput
 
@@ -66,3 +68,57 @@ def test_runtime_yields_model_input_before_structured_generation_finishes(monkey
         asyncio.run(check())
     finally:
         clear_role_model_cache()
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_mantle_never_forwards_text_before_output_guardrail(monkeypatch, blocked: bool) -> None:
+    """Post-generation safety checks must precede any visible Mantle response text."""
+    import agentcore_runtime.main as runtime
+    from agentcore_runtime.model import RuntimeModelConfig, PROVIDER_MANTLE_RESPONSES, GEMMA_4_31B_MODEL_ID
+    from agentcore_runtime.structured_coach import CoachTurnExtractionError
+
+    config = RuntimeModelConfig(provider=PROVIDER_MANTLE_RESPONSES, model_id=GEMMA_4_31B_MODEL_ID,
+                                region="us-west-2", guardrail_id="test", guardrail_version="1")
+    fragments: list[dict[str, Any]] = []
+    checks: list[str] = []
+
+    class Agent:
+        def __init__(self, **kwargs: Any) -> None:
+            self.callback = kwargs["callback_handler"]
+
+        async def invoke_async(self, prompt: Any, **kwargs: Any) -> Any:
+            self.callback(delta={"toolUse": {"input": '{"response_text":"Unsafe provisional text"}'}},
+                          current_tool_use={"toolUseId": "one"})
+            return SimpleNamespace(structured_output=FastChatTurnOutput.model_validate({
+                "mode": "qa", "response_text": "Synthetic final response", "citations": [],
+            }))
+
+    def guard(text: str, *, config: Any, source: str) -> None:
+        checks.append(source)
+        if source == "OUTPUT":
+            assert fragments == [], "Student-visible text escaped before output safety validation"
+            if blocked:
+                raise CoachTurnExtractionError("safety_blocked")
+
+    sdk = types.ModuleType("strands")
+    sdk.Agent = Agent
+    monkeypatch.setitem(sys.modules, "strands", sdk)
+    monkeypatch.setattr(runtime, "_ensure_role_configs", lambda: None)
+    monkeypatch.setattr(runtime, "get_role_config", lambda role: config)
+    monkeypatch.setattr(runtime, "get_role_model", lambda role: object())
+    monkeypatch.setattr(runtime, "_retry_strategy_for_role", lambda role: None)
+    monkeypatch.setattr(runtime, "_install_first_cycle_structured_output", lambda *args, **kwargs: False)
+    monkeypatch.setattr(runtime, "enforce_mantle_guardrail", guard)
+    result = asyncio.run(runtime._structured_role_invoke(
+        role="fast_chat", payload=None, system_prompt="Synthetic instructions",
+        user_prompt="Synthetic input", output_model=FastChatTurnOutput,
+        parse=lambda value: value.structured_output, output_text=lambda value: value.response_text,
+        include_history=False, model_delta=fragments.append,
+    ))
+    assert checks == ["INPUT", "OUTPUT"]
+    assert fragments == []
+    if blocked:
+        assert result.get("category") == "safety_blocked"
+        assert "response_text" not in result
+    else:
+        assert result["response_text"] == "Synthetic final response"

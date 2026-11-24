@@ -315,7 +315,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     setStopping(false);
     setWatching(true);
     setPreview('');
-    setStatus('Reading your message…');
+    setStatus('Sending your message…');
     controller.current.abort();
     controller.current = new AbortController();
     const paint = createReplyPreview(value => { if (active.current) setPreview(value); }, controller.current.signal);
@@ -334,10 +334,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         if (!active.current) return;
         if (event.event === 'started') { setCanStop(true); setStatus('Reading your message…'); }
         if (event.event === 'status' && event.phase === 'saving') { setCanStop(false); progress.saving(); }
-        if (event.event === 'status') setStatus(({ queued: 'Thinking…', retrieving: 'Looking through your sources…', thinking: 'Thinking…', saving: 'Saving…' })[event.phase]);
+        if (event.event === 'status') setStatus(({ queued: 'Waiting for an available coaching slot…', retrieving: 'Looking through your sources…', thinking: 'Preparing your reply…', saving: 'Saving…' })[event.phase]);
         // Deltas are unvalidated and unsaved: they only ever feed the preview, never saved messages.
         if (event.event === 'reply_delta') { progress.writing(); paint.append(event.text); setStatus('Writing your reply…'); }
-        if (event.event === 'reply_discard') { progress.discard(); paint.discard(); }
+        if (event.event === 'reply_discard') { progress.discard(); paint.discard(); setStatus('Preparing your reply…'); }
         if (event.event === 'reply_ready') { progress.saving(); setCanStop(false); setStatus('Saving…'); }
         if (event.event === 'done') { progress.saved(); setCanStop(false); completion.text = event.turn.response_text; }
         if (event.event === 'error') { progress.clear(); terminalError = event; paint.discard(); }

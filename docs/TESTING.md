@@ -505,15 +505,20 @@ run after installing `agentcore_runtime/requirements.txt` in a disposable venv.
 For rendered QA, use the **disposable mock delayed-NDJSON fixture** described in
 [the streaming handoff](specs/REPLY_STREAMING_HANDOFF.md), on port 8096.
 
-For the estimated-progress regression, additionally set
+For the event-based activity regression, additionally set
 `STREAM_FIXTURE_INITIAL_DELAY_SECONDS=7` and
 `STREAM_FIXTURE_SAVE_DELAY_SECONDS=1` before starting that fixture. Run
 `tests/browser/chat_progress.js` with Playwright CLI. It checks the waiting
-cap and delayed AWS explanation, writing/saving/completion states, saved reload,
+indicator stays indeterminate, writing/saving/completion states, saved reload,
 failure without replay, cancelled/discarded previews, new-owner isolation,
 reduced motion, and 1440/390 px light/dark layouts. Screenshots go to
 `/private/tmp/chat-progress-*.png`. The delay settings default to zero for
 existing tests. The fixture operates only on disposable mock workspaces.
+Open the fixture's URL before running the script; it uses that origin, so a
+different free loopback port can be used without touching an existing server.
+Run `tests/browser/identity_inflight.js` afterward to verify that changing Guest
+identity aborts a pending generation, drops its late response and never replays
+the write. It creates only synthetic chats and intercepts the model request.
 
 ```sh
 "$PWCLI" -s=streaming open http://127.0.0.1:8096 --headed
@@ -530,3 +535,50 @@ before selecting the edited message by its stable id. Captures are under ignored
 `output/playwright/reply-streaming/`. Existing edit/recovery/bookmark/Summary
 regressions remain applicable; editor request intercepts now target `/revise/stream`.
 No paid calls or deployment are authorized by these commands.
+
+## Browser contract and frontend unit checks
+
+For the CDE2300 bootstrap follow-up, open an isolated mock server and run
+`tests/browser/workspace_loading.js`, `bootstrap_identity.js`,
+`bootstrap_preferences.js` and the existing `identity_inflight.js` through
+Playwright CLI. The loading script records three trials each at 0/100ms injected
+reader-request delay; this is a synthetic transport input, not measured RTT.
+Its SPA `settledMs` includes an explicit 800ms drain and is not a latency metric.
+Identity regressions hold the old response or generation across a Guest change;
+no real provider is called. Preference screenshots go to `/private/tmp/cde2300-bootstrap-*.png`.
+See the [retained evidence and limitations](operations/ARCHITECTURE_IMPROVEMENTS.md#cde2300-bootstrap-follow-up).
+
+```sh
+.venv/bin/python scripts/export_reader_openapi.py --check
+npm run api:check --prefix frontend
+npm test --prefix frontend
+```
+
+These checks are included in `scripts/build.sh` and Mock CI. Vitest exercises
+the real generated transport with stubbed Fetch, Query cancellation/identity
+cleanup, and NDJSON framing/lifecycle. The exporter tests production-shaped
+environment isolation, deterministic output, allowlisted schemas and drift
+refusal. No test uses a paid provider. See the
+[client update workflow](../frontend/README.md#generated-read-contracts).
+`tests/__init__.py` ensures shared helpers resolve to this repository even when
+a dependency installs another package named `tests`; retain the existing bare
+helper import path in `tests/conftest.py` for compatibility.
+
+## Architecture baseline matrix
+
+Run these locally against new disposable data, without other tests competing
+for resources, and retain the aggregate JSON rows:
+
+```sh
+for users in 1 10 20 40 60 80; do
+  .venv/bin/python scripts/load_probe.py --scenario distinct-owners --users "$users"
+done
+```
+
+The probe reports nearest-rank p50/p90/p95/p99/max, throughput, errors,
+admission rejections, thread high-water mark and process maximum RSS. Earlier
+reports used a floor-based percentile estimator and omitted tail/max fields;
+do not compare small-sample p95 across estimators. One burst per level is a
+smoke baseline, not statistically stable capacity evidence. No real model,
+DSQL, network proxy or browser latency is represented. See the
+[audit and milestone evidence](operations/ARCHITECTURE_IMPROVEMENTS.md).

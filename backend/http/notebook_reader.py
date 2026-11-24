@@ -15,6 +15,8 @@ from backend.auth_profiles import has_streamlit_access
 from backend.http.reader_sources import register_reader_sources
 from backend.http.reader_workspace import (
     ReaderNotebook,
+    ReaderPreferences,
+    reader_preferences,
     reader_notebook,
     reader_notebook_for_owner,
     register_reader_workspace,
@@ -48,6 +50,12 @@ class ReaderSession(BaseModel):
     kind: Literal["guest", "registered"]
 
 
+class ReaderError(BaseModel):
+    """Public read failure; callers use status codes rather than echoing detail."""
+
+    detail: str
+
+
 class ReaderChatSummary(BaseModel):
     """Bounded, owner-scoped preview of an active saved conversation."""
 
@@ -61,6 +69,18 @@ class ReaderNotebooks(BaseModel):
     owner_id: str
     notebooks: list[ReaderNotebook]
     chat_summaries: dict[str, ReaderChatSummary]
+
+
+class ReaderBootstrap(BaseModel):
+    """Initial public projections bound to the same authenticated owner.
+
+    These independently read presentation resources are not a transactional
+    workspace snapshot. No transcript, source body or model call is included.
+    """
+
+    session: ReaderSession
+    listing: ReaderNotebooks
+    preferences: ReaderPreferences
 
 
 class ReaderMessage(BaseModel):
@@ -262,7 +282,8 @@ def register_notebook_reader(
             raise HTTPException(status_code=404, detail="Chat not found")
         return {"status": stop_turn(owner, thread_id, request.idempotency_key)}
 
-    @app.get("/api/v1/reader/session", response_model=ReaderSession)
+    @app.get("/api/v1/reader/session", response_model=ReaderSession, operation_id="readerSession",
+             responses={401: {"model": ReaderError}, 403: {"model": ReaderError}})
     def session(owner: OwnerServices = Depends(reader_owner)) -> ReaderSession:
         """Return the verified owner without tokens or private profile fields."""
         profile = owner.store.get_user_by_id(owner.user_id) or {}
@@ -272,7 +293,8 @@ def register_notebook_reader(
             kind="guest" if owner.identifier.startswith("guest:") else "registered",
         )
 
-    @app.get("/api/v1/reader/threads", response_model=ReaderNotebooks)
+    @app.get("/api/v1/reader/threads", response_model=ReaderNotebooks, operation_id="readerNotebooks",
+             responses={401: {"model": ReaderError}, 403: {"model": ReaderError}})
     def notebooks(owner: OwnerServices = Depends(reader_owner)) -> ReaderNotebooks:
         """List owned notebooks without changing or migrating their data."""
         rows = owner.workspace.list_threads()
@@ -291,7 +313,15 @@ def register_notebook_reader(
         }
         return ReaderNotebooks(owner_id=owner.user_id, notebooks=entries, chat_summaries=summaries)
 
-    @app.get("/api/v1/reader/threads/{thread_id}/messages/page", response_model=ReaderPage)
+    @app.get("/api/v1/reader/bootstrap", response_model=ReaderBootstrap, operation_id="readerBootstrap",
+             responses={401: {"model": ReaderError}, 403: {"model": ReaderError}})
+    def bootstrap(owner: OwnerServices = Depends(reader_owner)) -> ReaderBootstrap:
+        """Load initial projections with one authentication and existing bulk list read."""
+        return ReaderBootstrap(session=session(owner), listing=notebooks(owner),
+                               preferences=reader_preferences(owner))
+
+    @app.get("/api/v1/reader/threads/{thread_id}/messages/page", response_model=ReaderPage,
+             operation_id="readerMessages", responses={code: {"model": ReaderError} for code in (400, 401, 403, 404, 409)})
     def messages(
         thread_id: str,
         limit: int = Query(20, ge=1, le=100),

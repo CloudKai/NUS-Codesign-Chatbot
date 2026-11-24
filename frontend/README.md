@@ -18,12 +18,59 @@ Tailwind 4 runs through its Vite plugin. `src/tailwind.css` imports theme and
 utilities without Preflight, preserving existing app styles and Markdown.
 New progress layout uses utilities; colours and motion use existing CSS tokens.
 
-The chat bar labels its percentages as estimated. It approaches 65% while
-waiting, reaches 90% on reply deltas, 98% while saving, and 100% only on a
-validated saved `done` event or a recovered durable receipt. Discarded previews
-return to indeterminate feedback. After six seconds without reply text, a
-conditional explanation describes possible AWS startup. Timers clean up with
-the component, and reduced-motion settings disable animation.
+Chat activity stays indeterminate while sending, queuing, retrieving, writing
+and saving. Status text follows actual request/stream events. Only validated
+`done` or a recovered saved receipt completes the indicator. It makes no elapsed
+time estimate or cold-start diagnosis. Reduced motion disables animation.
+
+## Generated read contracts
+
+FastAPI/Pydantic own the reviewed bootstrap, session, notebook-list and message-page
+contracts. Their SDK and types live in `src/api/generated/`; never edit these
+files manually. `src/api/client.ts` applies same-origin cookies, `no-store`,
+AbortSignal and status-only errors, then materializes documented optional
+defaults for existing views. Cookie renewal still belongs to `currentSession`.
+Project/source/mutation adapters remain on the existing client; custom NDJSON
+generation and receipt recovery are unchanged.
+
+From the repository root, after changing a reviewed backend model:
+
+```sh
+.venv/bin/python scripts/export_reader_openapi.py
+npm run api:generate --prefix frontend
+.venv/bin/python scripts/export_reader_openapi.py --check
+npm run api:check --prefix frontend
+npm test --prefix frontend
+npm run build --prefix frontend
+```
+
+The exporter uses disposable SQLite/mock storage, blocks network connections,
+and includes only four explicitly reviewed GET operations and reachable public
+schemas. Production `/openapi.json`, `/docs` and `/redoc` stay disabled. Adding
+an operation requires updating the export allowlist, stable operation ID,
+response/error models and its contract/security tests together. Generated files
+and `openapi/reader.json` are checked in so ordinary production builds need no
+Python or running backend. Checks regenerate into a temporary directory and
+compare every file without rewriting source. CI checks both schema and SDK drift.
+
+Hey API and Vitest are development dependencies. The `js-yaml` override selects
+4.3.2 to remove advisories in the generator's pinned transitive parser. Recheck
+this override when updating Hey API. Node 22.18 or newer is required by Hey API;
+the local validation used Node 22.23.2. Query keys/defaults are centralized in
+`src/api/queryKeys.ts` and `src/api/queryClient.ts`. Retention stays zero pending
+resource-specific lifecycle and responsiveness measurements; no private cache
+is written to browser storage.
+
+Initial CDE2300 loading uses `/api/v1/reader/bootstrap` for the verified session,
+sidebar projections and preferences, followed by a fresh session probe before
+rendering private state. All three owner IDs must agree. Expired cookies still
+renew through the existing auth probe; mismatches fail closed. WorkspaceTools
+uses those verified preferences for its initial preference-only mount. Later
+notebook navigation and mutations keep their normal read/revalidation flow.
+This reduces a clean startup from six reader requests to two without retaining
+private resources longer. The response is an owner-bound set of presentation
+reads, not a transactional conversation snapshot. No transcript/source body or
+model output is included. Existing independent routes remain available.
 
 ## Keep the browser contract
 

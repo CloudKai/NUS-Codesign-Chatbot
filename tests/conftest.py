@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 # Allow sibling test helpers such as ``fake_agentcore_runtime`` to import
-# without making ``tests`` a package.
+# without requiring package-qualified imports in existing tests.
 _TESTS_DIR = Path(__file__).resolve().parent
 if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))

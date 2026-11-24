@@ -38,18 +38,20 @@ function Segmented<T extends string>({ label, value, options, disabled, change }
 
 /** Keep tools local to the verified owner; reconcile writes without replaying them. */
 export function WorkspaceTools({ session, thread, disabled, changed, expired, blocked, themeHost, settingsHost, ref,
-  openSettings, closeSettings, onPreferences }: {
+  openSettings, closeSettings, onPreferences, initialPreferences }: {
   themeHost: HTMLDivElement | null; settingsHost: HTMLDivElement | null; ref: Ref<WorkspaceActions>;
   session: Session; thread?: string; disabled: boolean;
   changed: (created?: string) => Promise<void>; expired: () => void; blocked: (value: boolean) => void;
   openSettings: () => void; closeSettings: () => void; onPreferences: (value: Preferences) => void;
+  initialPreferences: Preferences | null;
 }) {
   const owner = session.owner_id;
   const createDialog = useRef<HTMLDialogElement>(null);
   const createName = useRef<HTMLInputElement>(null);
   const [settings, setSettings] = useState<NotebookSettings | null>(null);
-  const [prefs, setPrefs] = useState<Preferences | null>(null);
-  const [displayName, setDisplayName] = useState('');
+  const [prefs, setPrefs] = useState<Preferences | null>(initialPreferences);
+  const [displayName, setDisplayName] = useState(initialPreferences?.display_name ?? '');
+  const initialLoad = useRef(true);
   const appearance = prefs?.appearance ?? 'System';
   const [name, setName] = useState('');
   const [newName, setNewName] = useState('');
@@ -91,6 +93,9 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
   }
   useEffect(() => {
     active.current = true;
+    if (initialPreferences?.owner_id === owner) {
+      document.documentElement.dataset.appearance = initialPreferences.appearance;
+    }
     return () => {
       active.current = false; epoch.current++; control.current.abort();
       delete document.documentElement.dataset.appearance;
@@ -99,6 +104,11 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
   useEffect(() => {
     let stale = false;
     setSettings(null); setConfirm(false); setError('');
+    // Only the initial, already owner-verified bootstrap replaces the redundant
+    // preference-only load. Later notebook changes and mutations revalidate normally.
+    const useBootstrap = initialLoad.current && !thread && initialPreferences?.owner_id === owner;
+    initialLoad.current = false;
+    if (useBootstrap) return;
     void load().catch(() => { if (active.current && !stale) setError('Could not load preferences. Refresh workspace to try again.'); });
     return () => { stale = true; };
   }, [thread]);

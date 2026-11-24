@@ -86,7 +86,8 @@ provisional and separate from grading.
 sh scripts/build.sh
 ```
 
-The build script builds React, compiles Python, and runs the deterministic test suite.
+The build script builds React, checks the reviewed generated API contract,
+compiles Python, and runs Vitest and the deterministic Python test suite.
 See the [testing guide](docs/TESTING.md) for focused tests and browser checks,
 or the [React guide](frontend/README.md) for frontend development.
 

@@ -192,6 +192,15 @@ Runtime guardrail intervention (`guardrail_intervened` or `action=BLOCKED`)
 fails closed as category `safety_blocked`. Refusal text, prompt text, and AWS
 trace bodies are never returned to the student UI or persisted.
 
+Mantle/Gemma output is checked by a separate `ApplyGuardrail(OUTPUT)` after
+generation. The runtime therefore suppresses its provisional text deltas:
+students see actual operation status until the checked final result is ready.
+An eventual discard cannot undo prior text exposure. Deterministic runtime
+tests cover both passing and blocked output, with no extra model/safety calls.
+First-model-text telemetry is internal and differs from first visible reply.
+Existing deployments need the updated runtime published and a fresh session
+generation; this local fix does not change live runtime versions.
+
 On the Haiku and Sonnet `BedrockModel` path, `GUARDRAIL_ID` and
 `GUARDRAIL_VERSION` are required and `guardrail_latest_message=True` so input
 evaluation targets the latest untrusted user turn (current student/evidence),

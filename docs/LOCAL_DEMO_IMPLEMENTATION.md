@@ -353,6 +353,18 @@ model SDK, LangChain and LangGraph access behind FastAPI and its services.
 
 ### API
 
+Four reader GET operations now have stable IDs and reviewed generated browser
+types/SDKs. The offline exporter uses disposable mock storage and selects only
+the explicit allowlist and reachable schemas; it does not publish application
+OpenAPI endpoints. The compatibility adapter preserves cookie renewal,
+ownership fences, cancellation and custom NDJSON generation. See the
+[frontend contract workflow](../frontend/README.md#generated-read-contracts).
+`GET /api/v1/reader/bootstrap` combines the existing session/list/preferences
+projections for a single verified owner. The browser performs a subsequent
+session probe and compares all projection owner IDs before exposing private
+state. These presentation reads do not promise a transactional workspace
+snapshot; message pagination and project reads remain independent.
+
 FastAPI exposes typed, versioned routes below `/api/v1`, consistent structured
 errors, streaming chat, and development-only graph inspection. At minimum,
 cover health/readiness, provider availability, notebooks, folders, history,

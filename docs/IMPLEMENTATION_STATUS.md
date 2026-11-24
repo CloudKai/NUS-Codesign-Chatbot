@@ -2,6 +2,138 @@
 
 ## Current status
 
+### Review cleanup and pre-commit verification (2026-11-24 SGT)
+
+Resolved the review's duplicate-SDK finding by removing the 16 untracked
+`* 2.ts` copies from the generated source directory, retaining the canonical
+16 files. The removed copies were backed up outside the repository. The local
+installed generator also contained duplicate templates; a clean
+`npm ci --ignore-scripts --prefix frontend` restored the unchanged lockfile's
+dependency tree and reported zero npm audit vulnerabilities. No dependency
+version or generated contract was changed by this cleanup.
+
+`sh scripts/build.sh` then passed end to end: TypeScript/Vite, all 30 frontend
+tests, offline schema consistency, generated-client inventory/content checks,
+Python compilation and the complete mock pytest suite. Scoped Ruff, Caddy
+validation and Git whitespace checks also passed. The existing full-repository
+lint findings remain documented below. Changed-file credential-pattern and
+private-path checks found no matches. No student data, live configuration or
+runtime deployment was changed. Source-only rollback and the next Query-coverage
+phase remain as described below.
+
+### CDE2300 verified bootstrap and fewer startup requests (2026-11-24 SGT)
+
+The user confirmed CDE2300 as the active course; the other course is a separate
+copy. No curriculum, source corpus or course name was changed. Existing local
+work on `improvement/architecture-responsiveness` is preserved.
+
+`GET /api/v1/reader/bootstrap` now combines the existing verified session,
+notebook-list and allowlisted preference projections under one reader-owner
+dependency. It performs one bulk list read, includes no transcript/source body,
+and makes no model call. The browser still performs a fresh session probe and
+compares session/list/preferences owner IDs before showing private work. Expired
+cookie renewal uses the existing auth path. WorkspaceTools consumes the already
+verified initial preferences instead of immediately rereading them; later chat
+navigation and mutations retain their existing checks. Query retention stays zero.
+
+The same browser harness measured six clean-startup reader requests before and
+two afterward in all three trials per delay. With a synthetic 100ms delay per
+reader request, median visible startup moved from 823ms to 338ms; without injected
+delay it moved from 77ms to 74ms. These small local samples are illustrative:
+the baseline overlapped part of pytest and neither run isolated CPU/network.
+Chat-opening request counts remain nine; no navigation speedup is claimed.
+[Raw before/after observations](examples/performance/cde2300-bootstrap-2026-11-24.json)
+and [method/limitations](operations/ARCHITECTURE_IMPROVEMENTS.md#cde2300-bootstrap-follow-up)
+are retained. An early harness that mixed trailing SPA reads into later trials
+was corrected before retaining the comparison.
+
+Validation: full mock suite **3,209 passed, one optional skip**; frontend
+**30 tests passed**. After adding the exact Caddy matcher regression, its focused
+deployment/bootstrap suite passed **24 tests**. The security/reader/journey suite
+passed **90 tests**. TypeScript/Vite, generated schema/client consistency,
+compileall, scoped Ruff, Git whitespace and Caddy configuration validation passed.
+Browser tests passed for a held bootstrap across Guest cookie change, account
+switch during pending generation, initial saved name/theme, theme mutation/reload
+and desktop/390px layout. Screenshots were inspected; no JS exceptions in the
+preference regression. Full-repository lint's earlier findings remain outside
+this milestone; no paid/live service or deployment validation was performed.
+
+Changed files add the route/projection, shared preference helper, generated
+bootstrap SDK, browser loader/preference handoff, exact Caddy GET allowlist,
+contract/security/browser tests, benchmark JSON and linked guides. No database
+migration or saved-data change is needed. Existing separate reader endpoints
+and Streamlit remain compatible. Deployment must update backend, frontend and
+Caddy together; an older edge will reject bootstrap. Source/asset/config rollback
+requires no database restore. No commit or deployment was performed.
+
+Next local phase: expand targeted Query coverage in `frontend/src/WorkspaceTools.tsx`
+and source/bookmark loaders, with measured stale/retention policies, owner fencing,
+mutation reconciliation and tests for pending reads at account switch. Keep stage
+progress and generation explicit. The separately authorized Mantle safety rollout,
+deployment manifest reconciliation, durable Deep Review, live cost/capacity and
+previously tracked browser-artifact review remain open.
+
+### Architecture baseline, generated reader contracts and Mantle safety (2026-11-24 SGT)
+
+The initial local milestones of the comprehensive improvement request are on
+`improvement/architecture-responsiveness`, from clean `improvement/combined-testing1`
+at `8a449a7`. The [audit, decisions, measurements and remaining plan](operations/ARCHITECTURE_IMPROVEMENTS.md)
+distinguish this work from the still-open broader programme.
+
+Full test collection now succeeds: a repository test-package marker prevents an
+installed `tests` package from shadowing shared eval helpers. The existing mock
+load probe now reports nearest-rank p50/p90/p95/p99/max and error/rejection rates.
+The retained synthetic 1/10/20/40/60/80-user baseline accepted all 211 turns with
+zero failures/rejections. The 80-user row measured p95 1,130.2ms and 55.3 turns/s
+on this Mac with mock inference and temporary SQLite. It is not AWS sizing or
+proof of live classroom capacity.
+
+Three existing reader GETs now have stable operation IDs and a deterministic,
+allowlisted offline OpenAPI export. Hey API generates the session/list/message
+page client while preserving cookies, renewal, owner/revision checks, AbortSignal,
+no-store and the explicit NDJSON lifecycle. Query keys/defaults are centralized;
+private retention remains zero. CI/local build checks export and generated-client
+drift and runs Vitest. Chat feedback now shows actual operation states with an
+indeterminate track instead of fabricated percentages or an inferred cold start.
+
+The audit reproduced a Mantle/Gemma output-safety gap: provisional text could
+escape before the separate output guardrail. That runtime path now forwards no
+preview fragments; only the checked final result continues to the existing save
+protocol. Internal first-model-text telemetry remains; no extra provider or safety
+calls are introduced. This fix requires a separately authorized runtime publication
+and fresh application session generation to protect an existing deployment.
+
+Validation: **3,206 Python tests passed, one skipped**; **23 Vitest tests passed**.
+The safety regression failed before the fix and the 176 focused runtime/provider/
+streaming tests passed afterward. TypeScript/Vite build, compileall, targeted
+Ruff, schema/client checks and shell syntax passed. Browser QA passed at 1440/390px
+in light/dark and reduced motion, including save/reload, cancellation/discard,
+no automatic generation replay, new-owner isolation and an account switch while
+a generation request was pending. Screenshots were inspected. There were no JS
+exceptions; HTTP console errors were expected signed-out checks and injected
+failure. Disposable FastAPI health/readiness and Streamlit health returned 200.
+The npm dependency tree reported zero advisories with the patched YAML override.
+Full-repository Ruff remains red on 10 pre-existing findings across five files
+whose contents match HEAD; scoped Ruff passed. The audit lists these locations.
+No full-lint or green-CI claim is made.
+
+Changes cover the reader route metadata, runtime preview gate, frontend adapter/
+generated SDK/Query/activity/parser, export/build/CI/load tooling, tests and linked
+guides. No student schema, API method/path, saved data, source or learning migration
+is required. Rollback is source/lockfile rebuild only; preserve all data. Reverting
+the Mantle gate reintroduces the safety risk. No commit, live configuration change,
+billable test or deployment was performed.
+
+Open risks: Compose/runtime record drift; old deployed runtime safety until rollout;
+process-local Deep Review restart loss; unreviewed previously tracked browser
+artifacts; unmeasured live cost, latency and
+80-student capacity. The next exact local phase starts in `frontend/src/useReader.ts`
+and App preference/resource loaders: measure the authenticated startup/navigation
+waterfall, then benchmark resource-specific Query policies and bootstrap aggregation
+with identity-race tests before adopting them. The live safety rollout remains a
+separate authorization gate. Do not treat the earlier estimated-percentage entry
+below as the current UI behavior.
+
 ### React Query, Tailwind, and estimated reply progress implemented locally (2026-11-24 SGT)
 
 The React frontend now provides TanStack Query 5 for owner-scoped notebook-list

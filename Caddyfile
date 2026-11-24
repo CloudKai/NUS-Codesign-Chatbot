@@ -14,7 +14,7 @@
 	# the browser adapter independently requires verified credentials in all modes.
 	@reader {
 		method GET
-		path_regexp reader ^/api/v1/reader/(session|preferences|threads|threads/[^/]+/(settings|transcript\.txt|messages/page|coach-turn|project|bookmarks|uploads|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content))$
+		path_regexp reader ^/api/v1/reader/(bootstrap|session|preferences|threads|threads/[^/]+/(settings|transcript\.txt|messages/page|coach-turn|project|bookmarks|uploads|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content))$
 	}
 	handle @reader {
 		reverse_proxy app:8000

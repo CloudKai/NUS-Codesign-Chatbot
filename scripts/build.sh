@@ -21,6 +21,9 @@ fi
 
 echo "Using Python: $PYTHON"
 npm run build --prefix frontend
+npm test --prefix frontend
+"$PYTHON" scripts/export_reader_openapi.py --check
+npm run api:check --prefix frontend
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/private/tmp/co-design-pycache}"
 
 "$PYTHON" -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime

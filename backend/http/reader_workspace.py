@@ -52,6 +52,21 @@ class ReaderPreferences(BaseModel):
     starter_prompts: bool
 
 
+def reader_preferences(owner: OwnerServices) -> ReaderPreferences:
+    """Project supported presentation defaults from one verified owner's preferences."""
+    values = owner.workspace.get_preferences()
+    theme = values.get("appearance")
+    name = values.get("reader_display_name")
+    return ReaderPreferences(
+        owner_id=owner.user_id,
+        appearance=theme if theme in ("System", "Light", "Dark") else "System",
+        display_name=name if isinstance(name, str) else "",
+        reduce_motion=values.get("reader_reduce_motion") is True,
+        default_mode="project" if values.get("reader_default_mode") == "project" else "lecture",
+        starter_prompts=values.get("reader_starter_prompts") is not False,
+    )
+
+
 class ReaderPreferencesPatch(BaseModel):
     """Allow only supported workspace preferences to be changed."""
 
@@ -269,17 +284,7 @@ def register_reader_workspace(
     @app.get('/api/v1/reader/preferences', response_model=ReaderPreferences)
     def preferences(owner: OwnerServices = Depends(reader_owner)) -> ReaderPreferences:
         """Read supported presentation values without exposing unrelated settings."""
-        values = owner.workspace.get_preferences()
-        theme = values.get("appearance")
-        name = values.get("reader_display_name")
-        return ReaderPreferences(
-            owner_id=owner.user_id,
-            appearance=theme if theme in ("System", "Light", "Dark") else "System",
-            display_name=name if isinstance(name, str) else "",
-            reduce_motion=values.get("reader_reduce_motion") is True,
-            default_mode="project" if values.get("reader_default_mode") == "project" else "lecture",
-            starter_prompts=values.get("reader_starter_prompts") is not False,
-        )
+        return reader_preferences(owner)
 
     @app.post('/api/v1/reader/preferences', response_model=ReaderPreferences)
     def appearance(payload: ReaderPreferencesPatch, owner: OwnerServices = Depends(reader_owner)) -> ReaderPreferences:

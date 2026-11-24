@@ -1,9 +1,9 @@
-/** Exercise estimated feedback and saved recovery against the disposable delayed fixture. */
+/** Exercise actual activity states and saved recovery against the disposable fixture. */
 async page => {
   const assert = (condition, message) => { if (!condition) throw Error(message); };
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  const origin = 'http://127.0.0.1:8096';
+  const origin = new URL(page.url()).origin;
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.goto(origin);
   const guest = page.getByRole('button', { name: 'Continue as Guest' });
@@ -28,11 +28,8 @@ async page => {
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   const progress = page.locator('.chat-progress');
   await progress.waitFor();
-  const explanation = progress.locator('.chat-progress-explanation');
-  assert(!await explanation.count(), 'Do not assume a cold start immediately');
-  await explanation.waitFor({ timeout: 12000 });
-  const percent = Number((await progress.locator('.chat-progress-percent').innerText()).replace('%', ''));
-  assert(percent >= 10 && percent <= 65, 'Waiting estimate stays below its cap');
+  assert(!await progress.locator('.chat-progress-explanation, .chat-progress-percent').count(), 'Do not invent percentages or infer AWS startup');
+  assert(!/\d+%|estimated/i.test(await progress.innerText()), 'Activity makes no fabricated completion claim');
   assert(!await progress.getByRole('progressbar').getAttribute('aria-valuenow'), 'Unknown real progress has no numeric accessibility claim');
   await page.screenshot({ path: '/private/tmp/chat-progress-desktop.png' });
   for (const theme of ['Light', 'Dark']) {
@@ -44,12 +41,11 @@ async page => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   assert(await progress.locator('.chat-progress-fill').evaluate(element => getComputedStyle(element).transitionDuration) === '0s', 'Reduced motion disables the fill transition');
   await page.locator('.chat-progress[data-phase="writing"]').waitFor({ timeout: 15000 });
-  assert(!await explanation.count(), 'Hide startup explanation as soon as reply text arrives');
-  assert(await progress.locator('.chat-progress-percent').innerText() === '90%', 'First reply jumps to 90');
+  assert(!await progress.getByRole('progressbar').getAttribute('aria-valuenow'), 'Writing remains indeterminate');
   await page.locator('.chat-progress[data-phase="saving"]').waitFor({ timeout: 20000 });
-  assert(await progress.locator('.chat-progress-percent').innerText() === '98%', 'Saving does not imply completion');
+  assert(!await progress.getByRole('progressbar').getAttribute('aria-valuenow'), 'Saving does not imply completion');
   await page.locator('.chat-progress[data-phase="saved"]').waitFor({ timeout: 10000 });
-  assert(await progress.locator('.chat-progress-percent').innerText() === '100%', 'Only a saved reply completes');
+  assert(await progress.getByRole('progressbar').getAttribute('aria-valuenow') === '100', 'Only a saved reply completes');
   await progress.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: 'Send message', exact: true }).waitFor();
   await page.reload();
@@ -96,5 +92,5 @@ async page => {
   await nav.waitFor();
   assert(!await nav.getByRole('button', { name, exact: true }).count(), 'A new guest cannot see the previous owner’s cached notebook');
   assert(!errors.length, `Browser errors: ${errors.join(', ')}`);
-  return 'PASS: estimates, delayed explanation, streaming, saving, durable recovery, failure, cancellation, discard, owner isolation, no replay, themes, mobile, and reduced motion';
+  return 'PASS: actual activity, streaming, saving, durable recovery, failure, cancellation, discard, owner isolation, no replay, themes, mobile, and reduced motion';
 }

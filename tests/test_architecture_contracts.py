@@ -379,6 +379,7 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
             ("POST", "/api/v1/reader/threads/{thread_id}/messages/{message_id}/revise/stream", "reader_revise_stream"),
             ("POST", "/api/v1/reader/threads/{thread_id}/messages/{message_id}/learning-signal", "reader_signal"),
             ("GET", "/api/v1/reader/session", "session"),
+            ("GET", "/api/v1/reader/bootstrap", "bootstrap"),
             ("GET", "/api/v1/reader/threads", "notebooks"),
             ("GET", "/api/v1/reader/threads/{thread_id}/messages/page", "messages"),
             ("GET", "/api/v1/auth/login", "auth_login"),

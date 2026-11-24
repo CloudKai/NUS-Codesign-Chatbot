@@ -13,6 +13,7 @@ reset-quarantine/
 .cursorignore
 .streamlit/secrets.toml
 artifacts/evals/
+.playwright-cli/
 
 # Generated learning reference
 /docs/learning/REFERENCE.md

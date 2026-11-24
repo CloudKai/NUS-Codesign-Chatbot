@@ -53,6 +53,11 @@ logic.
 
 ## Environment variables
 
+When changing browser API exports, follow the
+[frontend contract workflow](../frontend/README.md#generated-read-contracts).
+Run `export_reader_openapi.py` in a fresh process so its disposable-storage
+bootstrap cannot reuse previously imported application settings.
+
 `start.sh` sets:
 
 - `USE_LOCAL_API=true`
