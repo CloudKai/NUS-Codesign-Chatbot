@@ -1,0 +1,4 @@
+[     162ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/reader/session:1
+[     228ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/auth/me:1
+[     476ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/reader/session:1
+[     480ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/auth/me:1

@@ -30,6 +30,12 @@ Start with the [local setup](../README.md) to run the app offline.
 ## Run the classroom
 
 - [Capacity and recovery rehearsal](operations/CLASSROOM_CAPACITY_GATE.md)
+- [Gemma latency research and benchmark plan](operations/GEMMA_LATENCY_RESEARCH.md)
+- [AgentCore V2 cost and value for two classes](operations/AGENTCORE_V2_TWO_CLASS_VALUE.md)
+- [AgentCore V2 live comparison and rollback](operations/AGENTCORE_V2_LIVE_COMPARISON.md)
+- [Chat progress feedback and cold-start messaging research](operations/CHAT_PROGRESS_FEEDBACK_RESEARCH.md)
+- [Frontend stack choices for chat feedback and data loading](operations/FRONTEND_STACK_RESEARCH.md)
+- [Bedrock workshop, multimodal retrieval, and chatbot latency research](operations/BEDROCK_WORKSHOP_AND_CHATBOT_RESEARCH.md)
 - [Readiness decisions, post-credit hosting, and a second module](operations/CLASSROOM_READINESS_DECISIONS.md)
 - [Cost accounting](COST_ACCOUNTING.md) and [generation admission](GENERATION_ADMISSION.md)
 - [Research data reset](operations/RESEARCH_DATA_RESET.md)

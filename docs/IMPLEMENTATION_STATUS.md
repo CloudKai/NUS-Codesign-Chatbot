@@ -40,6 +40,385 @@ restoring the touched frontend source and dependencies without restoring any
 database. Next validate the built frontend in an authorized deployment, using
 the mock browser recipe in [testing](TESTING.md).
 
+### AgentCore platform V1 restored in production (2026-11-24 SGT)
+
+Production is pinned to the `GemmaStable37` endpoint, which serves V1
+deployment 38. The app uses a new session generation to start requests on the
+restored runtime. Host readiness passed, production health returned `ok`, and
+the workspace returned HTTP 200. Verification made no new model calls.
+Gemma and Sonnet remain the configured Fast Chat and Deep Review models.
+`HaikuRollback36` is READY. `DEFAULT` points to V2 deployment 39 for
+the prior comparison; keep production on the pinned V1 alias during any
+follow-up research. The waiting experience is deferred at the user's request.
+
+### AgentCore platform V2 comparison on deployment 39 (2026-11-24 SGT)
+
+Production Fast Chat moved to AgentCore V2 consumption pricing in Oregon
+using the deployed Gemma artifact and new session generation. The host and
+public readiness checks passed. The platform change requires no data migration.
+The existing `GemmaStable37` alias pins the known-good V1 deployment 38 for
+rollback, and `HaikuRollback36` remains available. See the
+[live comparison and rollback evidence](operations/AGENTCORE_V2_LIVE_COMPARISON.md).
+
+The matched browser comparison saved all 32 Design Coaching turns. Cold
+median first visible text moved from 11.36 s to 9.63 s. Cold p95 moved from
+12.85 s to 33.99 s with eight observations per platform. The slowest V2
+request waited 27.67 s for reply text inside the runtime, and maximum AWS
+platform overhead was 1.76 s across the V2 wave. A guarded citation smoke,
+private synthetic PDF upload/citation/receipt check, and 2,482 applicable
+offline tests passed, with one offline test skipped. The pilot used 54 of 60
+approved live chat turns. The two-second cold p95 target did not pass and
+80 concurrent live student generations remain unverified.
+
+The first 11 complete minutes of V2 metering averaged approximately 1.62 GB
+per session after adjusting for one earlier V1 session on the endpoint.
+Using the planning assumptions in the live comparison, two 80-student
+classes project to S$6.15 at 60 minutes or S$9.00 at 90 minutes in AgentCore
+compute. The full S$30 bill remains unverified. Next investigate the timing
+inside the runtime, separating input safeguards and the Gemma call before
+attributing the slow replies to either component.
+
+
+### Gemma citation retry fixed; version 38 serving; bounded 80-request checks (2026-11-24 SGT)
+
+**Behavior and cause:** the Strands 1.52 schema converter broadens defaulted,
+omittable strings into nullable strings. Version37 therefore permitted a null
+citation title that canonical Pydantic validation rejected, causing a recovery
+model call. `gemma_responses.py` now consults original canonical output schemas,
+resolves their local definitions and removes only SDK-invented nullability before
+native strict-schema generation. Genuine nullable fields, including Q&A
+recommendations, remain nullable. Application validation is unchanged. Unknown
+output contracts fail closed. No retry suppression or acceptance of invalid
+citations was used to conceal failures.
+
+**Files:** `agentcore_runtime/gemma_responses.py`,
+`tests/domain/test_gemma_native_json.py`, this status, provider/capacity guidance
+and the [aggregate result artifact](examples/classroom-capacity/gemma-results-2026-11-24.json).
+Other dirty baseline files, including the user's startup-script edit, were
+preserved; no files were staged or committed. The regression was observed red
+before the fix (the native citation schema accepted null); it now rejects null
+citation strings while retaining valid empty/default strings and Q&A nulls.
+An offline interleaved 80-stream test also verifies per-invoke reply/tool-ID
+isolation on a cached model instance.
+
+**Validation:** 94 focused tests passed. Applicable domain/HTTP/persistence/
+architecture/deployment suite: **2,482 passed, one skipped**. Compileall and
+`git diff --check` passed. This does not supersede the earlier full-repository
+collection blocker. No UI code changed. Existing persistence/confirmed-stage
+contracts were covered by the mock suite; the live check used no student data.
+
+**Runtime check:** new version38 passed a synthetic citation-grounded Q&A through
+AgentCore and its real input/output guardrails, with **one model cycle**, **no
+structured-output recovery**, 154 stream frames, 6,366 input/154 output tokens.
+Reply streaming began around2.663s; total completion was9.202s including cold
+startup. Its temporary session was explicitly stopped. This verifies the
+observed retry cause, not a population retry rate or a controlled speedup:
+the earlier13.582s version37 probe had different multimodal input.
+
+**80-request provider burst:** all80 direct Mantle calls passed canonical
+Pydantic/citation/fact assertions, zero failures, no client retries. Requests
+used the full canonical coaching prompt with synthetic source Q&A, fixed strict
+schema, no history and at most512 output tokens each. p50 **3.442s**, p95
+**32.319s**, max **42.262s**; wall42.274s. The direct provider burst excludes
+AgentCore session startup, guardrails, FastAPI, persistence, source retrieval
+and browsers. It is not proof of80 simultaneous end-to-end chat completions.
+The long tail is measured; its cause has not been isolated.
+
+**80 application sessions:** created80 independent synthetic Guest cookies
+(eight setup workers), then barrier-released80 empty-workspace reads through
+CloudFront/FastAPI/DSQL. All80 returned their empty owned notebook list; p50
+**3.585s**, p95 **6.506s**, max **6.657s**. No notebooks, uploaded sources or
+student content were created/changed. Synthetic Guest identities remain until
+normal expiration; no account deletion or research-data reset was performed.
+These reads do not exercise generation, retrieval, uploads, browser rendering,
+long histories or save/recovery under an80-generation load.
+
+**Deployment and rollback:** production stayed pinned to `GemmaStable37` while
+DEFAULT38 was published and checked. Serving Compose now selects `DEFAULT`
+with generation `20261124-gemma38-nullability`; host readiness passed. Deep
+Review remains Sonnet4.6. New runtime artifact SHA256:
+`3e75266a14320388d48ea0c26598a80787d434eae4eecafed3427a0a2e002c80`.
+Only `gemma_responses.py` changed in the deployed version37 dependency/source
+zip. No EC2 image, IAM policy, database schema or student data migration changed.
+Haiku36 stays READY on `HaikuRollback36`; its existing executable rollback script
+and old image/settings remain on EC2. `GemmaStable37` is also retained. The
+pre-promotion Compose backup is on EC2 in `.gemma-nullability-20261124/`.
+No rollback drill was run; no rollback was needed.
+
+**Budget:** temporary artifacts from the prior session were cleared. The prior
+reservation **US$0.5000952** and known model-token estimate **US$0.00895796** were
+recovered from this recorded handoff without releasing any prior reservation.
+New reservations: runtime smoke0.06, provider burst0.40, application reads0.02;
+cumulative **US$0.9800952 of US$1**. Known cumulative successful model-token
+estimates are **US$0.0813692**, excluding unknown failed-call usage and non-model
+charges. Reservations include margin, not reconciled AWS billing or a hard
+AWS spending control. Paid testing has stopped. The new explicit80-request
+instruction superseded the older42-attempt comparison limit; the cumulative
+US$1 ceiling remained. Aggregate evidence is now in the repository so its scope,
+cost record and outcomes survive temporary-file cleanup.
+
+**Risks / next exact action:**80-provider capacity and80-workspace-read capacity
+passed separately, with a provider p95 above32s. Full80-generation application
+capacity and sustainable S$30/month remain **unproven**. Next, use the
+[classroom gate](operations/CLASSROOM_CAPACITY_GATE.md) to prepare a separately
+funded, end-to-end80-student generation run with defined queue/total latency
+criteria, bounded retries, known context sizes, saves/recovery, quotas and
+session cleanup. Do not launch more paid tests under the closed allowance.
+
+
+
+### Gemma native JSON fixed and deployed; Haiku rollback retained (2026-11-23 SGT)
+
+**Behavior:** normal Fast Chat and the configured lightweight legacy roles now
+serve `google.gemma-4-31b` through Mantle Responses in Oregon. Deep Review stays
+on Sonnet 4.6. The new `agentcore_runtime/gemma_responses.py` adapter replaces
+Gemma's unusable function-argument output with native strict JSON-schema text,
+then translates incremental JSON into the same Strands validation-tool events.
+Application parsing, citations, input/output ApplyGuardrail, source scope,
+persistence and confirmed stage progression keep their existing boundaries.
+Malformed, truncated and punctuation-only output fails before success. Request
+state is local to each stream. The SDK-flattened nullable recommendation enum
+now includes null, so Q&A can return no stage recommendation.
+
+**Files:** runtime factory + new Gemma transport, production settings validator,
+new transport regressions and existing runtime/config tests, the runtime README, this status and
+[provider guidance](providers/MODEL_PROVIDERS.md#gemma-4-31b).
+The user's local startup-script edit and existing browser artifacts were left
+alone. No source commit or staging was performed.
+
+**Validation:** 92 focused tests passed; the applicable domain/HTTP/persistence/
+architecture/deployment suite passed **2,480 tests, one skipped**. Compileall and
+`git diff --check` passed. The previously observed full-repository collection
+blocker involving `tests.scripts` remains; this is not a full-repository pass.
+The earlier disposable mock startup/restart checks passed. No browser interaction
+or real uploaded student content was used in this release's live tests.
+
+Full canonical-prompt, pinned-SDK checks passed for coaching/stay (3.758s), image
+Q&A (2.253s), application-extracted PDF Q&A with citations (2.758s), and a small
+native PDF (2.807s). Native PDF initially needed a filename ending `.pdf`; the
+application's existing PDF extraction path is unchanged. A combined full-runtime
+image/PDF check passed real input/output guardrails and application parsing in
+5.915s, one model cycle, 166 streaming frames. Synthetic PDF facts were seven
+visitors, a 120cm ramp and the missing wheelchair-user test. The simple image
+check establishes colours/placement, not precision vision: the model called a
+slightly rectangular shape a square.
+
+**Published gate:** version **37**, same existing runtime ARN, passed a synthetic
+combined image/PDF-facts check before promotion. It returned a grounded Q&A
+reply, citation, null recommendation and 333 stream frames in **13.582s**, with
+reply streaming around **3.349s**. It used two model cycles: the first citation
+had a null title, rejected by Pydantic; the bounded existing recovery produced a
+valid result. Do not describe this as consistently one-call or Haiku-equivalent
+latency. Strict-schema citation nullability is the next cost/latency improvement.
+This is functional compatibility evidence, not a broad pedagogy benchmark or an
+80-student load test. Office-file, scanned-PDF/OCR and large-image parity remain
+unmeasured.
+
+**Rollout:** students stayed pinned to READY endpoint `HaikuRollback36` while
+version 37 was published and tested. DEFAULT is now READY on **37**, the serving
+app uses `DEFAULT` and generation `20261123-gemma37-nativejson`, and host health /
+readiness plus the public workspace returned HTTP200. The new runtime package
+SHA256 is `39ac244e27082d36f740e630f38468fbe23941559c2ad7608b9cf7121848f6a2`.
+Dependencies remain the original vendored Linux ARM64/Python3.14 pins. The
+runtime's Gemma prompt cache is disabled; no unsupported cache savings claimed.
+
+The EC2 image is a minimal settings-validation patch over the existing release
+`dc83707dccc6fb08e666bfc310d3d3e0d3aff07d`, not an image of the whole dirty local
+checkout. `APP_GIT_SHA` remains that base revision; the additional image label
+`org.codesign.patch.settings.sha256` is
+`13f9376a10a2a88135a1808b7c95b18dfa9d0ca038a6feb53c1f4c6ea0feea90`.
+The immutable local image ID is
+`sha256:494edc4b0b58a6d4f3a1ebb5b2acb5163dd54804c155a2a1727f1407e95bee02`.
+Only the provider/model-pair validation was patched in that app image; the
+frontend and other backend code stay at the base release. The deployed runtime
+contains the canonical runtime sources, including the Gemma adapter.
+
+The EC2 application role denied ECR authorization, so no publishing permission
+was added. The derived image remains on the host. A small credential-free rebuild
+recipe is durably archived in the existing deployment bucket at
+`app-patches/gemma37-rebuild-c740fa0418d31145.zip`, SHA256
+`c740fa0418d31145a13d2d02547679824a6d9b2c1540b330827f6cc9300cab36`. It pins the original ECR base image by digest and reproduces the exact settings
+patch. A replacement host needs a deployment identity authorized to pull that
+base image; the application role cannot publish/pull via ECR authorization. The
+running service and Haiku rollback are healthy despite this archival limit.
+
+**Budget:** the original ledger was retained, with **39/42 attempts including a
+four-attempt conservative reservation for the published invoke**. Known
+successful model-token estimates total **US$0.00895796**; **US$0.5000952** is
+reserved across all tests, including failed/unknown usage and guardrail margin,
+within the approved US$1. These are estimates, not a reconciled AWS bill. No
+further paid calls are planned. Runtime/infrastructure ongoing use after
+promotion is separate from this test allowance.
+
+**Compatibility and rollback:** no schema/data migration, student-data reset,
+source/file replacement or IAM policy change. The changed identity already had
+the required access, and the runtime role already had Mantle + ApplyGuardrail
+permissions. Haiku **36** remains READY on `HaikuRollback36`. On EC2, the private
+`/home/ubuntu/NUS-Codesign-Chatbot/.gemma-rollout-20261123/` holds the old Compose,
+environment, image ID, settings, container inventory and executable `rollback.sh`.
+Running that script via SSM restores the old app/environment and pins requests to
+Haiku36 with a new session generation, without depending on DEFAULT. An operator
+may then point DEFAULT back to36 with the control API. No rollback was needed;
+restore artifacts were verified present, but a rollback drill was not run.
+
+**Next exact action:** offline, tighten the provider's nullable citation fields
+against the application schema without accepting null titles; add a regression
+for the observed first-cycle failure. Re-evaluate with a bounded allowance before
+publishing another version. Separately run the documented classroom capacity
+and recovery gate before promising 80 simultaneous students or S$30/month.
+
+
+### Gemma rejection traced to test schema; semantic tool-output blocker remains (2026-11-23 SGT)
+
+Further diagnosis corrected the interpretation of the earlier HTTP400 tests:
+the temporary harness sent `FastChatTurnOutput.model_json_schema()` directly,
+whereas pinned Strands 1.52.0 uses `convert_pydantic_to_tool_spec`. The latter
+resolves references and flattens the schema, removing root `$defs`, `if` and
+`then`. The former requests were not evidence of actual SDK-schema rejection.
+No individual JSON Schema keyword has been isolated as the service's cause.
+
+One bounded call using the actual SDK-generated schema returned HTTP200 and a
+Pydantic-valid coaching/stay function call, but its `response_text` was only
+`":"`. A second bounded call with the full canonical production coaching
+prompt (5,771 input tokens) reproduced that unusable reply in 2.291 seconds.
+The simple-prompt call took 1.619 seconds. Neither is an acceptable coaching
+answer despite syntactic validity. The failure is now a semantic tool-output
+generation/serialization blocker; no inference about general response quality
+or about which component produces the colon is established.
+
+Retries of that path stopped after two evidence-based attempts. The prescribed
+next route is an Astra investigation of minimal tool calls, Chat Completions
+tool calling and native JSON-schema Responses, keeping application validation,
+source scope and explicit stage confirmation. Client routing is manual; no
+model switch or delegation occurred. The corrected diagnostic artifact is
+`/private/tmp/oregon-multimodal-check/gemma-diagnosis.json`.
+
+The shared ledger is **27/42 attempts**, approximately **US$0.00137662** in
+known successful token charges and **US$0.077036** conservatively reserved
+across all attempts. No runtime/app configuration, IAM, schema or student data
+changed. Haiku remains live. The local Gemma candidate remains unpromoted.
+
+### Live Gemma/Ministral modality checks; Haiku remains live (2026-11-23 SGT)
+
+The user authorized checking actual Gemma 4 31B access and a Ministral 3 8B
+fallback within US$1. Using the changed `default` identity in Oregon, Gemma
+returned successful Responses API results for text, a synthetic image,
+application-extracted PDF text and a small directly supplied PDF. PDF answers
+correctly reported 7 visitors, a 120 cm ramp and the missing wheelchair-user
+test, with the supplied source label. Image replies identified colours and
+left/right placement, but called the slightly rectangular red shape a square;
+this is a basic vision check, not a precision or OCR pass.
+
+Gemma's plain-prompt coaching reply was relevant but wrapped JSON in Markdown.
+Two requests using the full `FastChatTurnOutput` tool schema returned HTTP 400
+(`task request was rejected by the target`), with forced and automatic tool
+selection respectively. Those retries stopped. This demonstrates access and
+basic modalities, not production structured-output compatibility. The concrete
+Gemma schema/endpoint blocker needs the prescribed focused Astra diagnosis if
+pursued; no delegation or model switch was performed here.
+
+Ministral rejected the Mantle Responses route as unsupported, then succeeded
+through its documented Bedrock Converse route. It returned a Pydantic-valid
+`FastChatTurnOutput` tool call with coaching/stay, answered the image placement
+question, and answered the PDF-extracted-text question accurately. Its native
+Converse PDF request failed explicitly (`This model doesn't support documents`).
+The app's existing PDF extraction/retrieval path is therefore the viable PDF
+route for this candidate. A single structured reply is not proof of complete
+pedagogy, streaming, guardrail or stage-transition parity.
+
+The shared experiment ledger now records **25 of 42 attempts**, including the
+earlier denied calls. Successful-call token charges total approximately
+**US$0.00043532**, with **US$0.0709176** conservatively reserved across all
+attempts; these are estimates, not an AWS billing reconciliation. No production
+database, student file, Knowledge Base or AgentCore generation was used. No IAM
+policy, runtime version, DEFAULT qualifier, app release or source commit was
+changed. Haiku/Sonnet version 36 remains the recorded live baseline. Evidence
+and synthetic fixtures are private temporary artifacts under
+`/private/tmp/oregon-multimodal-check/`; the aggregate ledger is preserved.
+
+**Next exact action:** choose between diagnosing the Gemma tool-schema request
+and a full-prompt Ministral Converse candidate evaluation. Keep the current
+Haiku runtime available. Before promotion, verify streaming, source citations,
+guardrails, confirmed progression and restart/recovery on the actual application
+path, and separately establish classroom capacity. No 80-student performance or
+provider-quality ranking is established by these small direct-model checks.
+
+### Model selection reconsidered; deployment held (2026-11-23 SGT)
+
+The user asked to hold Gemma deployment and reassess actual provider choices.
+No IAM policy write, runtime publication, DEFAULT move, app change or new paid
+inference occurred. The changed `default` identity successfully read and backed
+up the existing runtime and DEFAULT endpoint: **Haiku/Sonnet version 36,
+READY**. The restricted sign-in identity remains denied those reads.
+
+Read-only Oregon account checks returned authorized/available status for Nova
+Lite, Nova 2 Lite, Ministral 3 8B/14B, Gemma 3 12B/27B, Nemotron 12B VL,
+GPT-OSS-120B and Qwen3 Next. The regular text foundation-model catalog contained
+97 entries and did not include Gemma 4; the separate Mantle `/v1/models` listing
+contained 49 entries and did include Gemma 4 31B, 26B-A4B and E2B. Neither list
+proves successful inference. No Qwen4 listing was found; Qwen3 variants are
+distinct. Exact model/endpoint access must be tested before deployment rather
+than inferred from console visibility or public pricing. The local Gemma
+candidate below remains inactive. Next action is a provider/model choice based
+on text-and-image coaching needs and the complete S$30 budget, followed by the
+user-authorized bounded test and existing-runtime rollout only if requested.
+
+### Gemma 4 31B local candidate; AWS deployment blocked (2026-11-23 SGT)
+
+The user requested Gemma 4 31B deployment and text/image/file checks. Local
+preparation now accepts only the explicit `google.gemma-4-31b` /
+`bedrock_mantle_responses` pair in the runtime and app validators. Converse
+rejects this Mantle-only model. The factory retains stateless transcript
+handling and existing `ApplyGuardrail`, disables SDK HTTP retries and parallel
+tool calls, and caps reasoning plus visible output at 2,048 tokens per model
+call. Agent repair/event-loop calls remain separately bounded by existing
+rules. Serving Compose, model roles, Haiku/Sonnet, UI, data and schemas were
+not switched. This completes local candidate preparation only.
+
+- **Files:** `agentcore_runtime/model.py`, `backend/settings.py`,
+  `tests/domain/test_runtime_model.py`, `tests/http/test_production_config.py`,
+  this status and the [provider guide](providers/MODEL_PROVIDERS.md#gemma-4-31b).
+- **Validation:** the first focused runtime/config/source/stream suite passed
+  154 tests; a second focused config/files/upload/runtime suite passed 101
+  tests. The broader backend/domain/HTTP/persistence/architecture/deployment
+  suite passed **2,473 tests, one optional skip** in 80.88 seconds. Compileall
+  for backend/UI/runtime/tests/scripts, diff whitespace and provider-guide
+  local links passed. Disposable mock Uvicorn startup and restart against the
+  same temporary store both returned health/readiness 200. No developer data
+  or paid provider was used by those checks.
+- **Actual SDK check:** a temporary environment with Strands 1.52.0 and
+  Pydantic 2.13.4 passed a socket-blocked compatibility check of the Gemma
+  `/openai/v1` route, extracted-file text, image byte conversion, FastChat
+  schema, stateless requests, single-tool mode, output bound and SDK retry
+  settings. This checks request formatting, not model understanding.
+- **Full-suite blocker:** ordinary full pytest collection failed in two
+  existing `tests.scripts` cross-imports. An evidence-based importlib-mode
+  attempt instead failed in 11 existing bare sibling imports. Full-suite
+  retries stopped under the repository's two-attempt rule; a separate Astra
+  diagnosis is the prescribed route if that unrelated collection blocker is
+  pursued. No model switch or delegation was performed here.
+- **AWS blocker:** read-only `GetAgentRuntime` and `GetAgentRuntimeEndpoint`
+  both returned AccessDeniedException for `chatbot-prod-signin`. Earlier
+  model comparison attempts also lacked direct InvokeModel/CreateInference
+  permissions. No new inference attempt, IAM edit, runtime publication,
+  DEFAULT move, app release, staging or commit occurred in this preparation.
+- **Compatibility/rollback:** no migration or student-data rewrite. Existing
+  production remains the rollback baseline. Reverting the candidate code and
+  test additions needs no database restore. Local launcher modifications and
+  `.playwright-cli/` predate this work and were preserved.
+- **Risks:** live Gemma coaching quality, schema acceptance, image formats,
+  citations, streaming, progression and classroom latency remain unverified.
+  AWS documents a 3.5 MB total request-body limit; general upload acceptance
+  does not prove attachment parity. PDF/Office files use existing text
+  extraction, not a new native document/OCR capability.
+- **Next exact action:** an AWS administrator supplies an identity with scoped
+  existing-runtime read/deploy and Gemma Mantle inference rights. Read and
+  preserve the actual runtime/DEFAULT/rollback configuration before any
+  update. Approve a bounded full-prompt/image integration envelope (the prior
+  4K-input/1K-output comparison envelope does not cover it), then run candidate
+  checks before following the existing runtime/release cutover procedure.
+  Preserve the original comparison ledger: 12 access attempts already used
+  from its US$1/42-attempt ceiling.
 
 ### Visible word groups and system motion preference (2026-11-23 SGT)
 

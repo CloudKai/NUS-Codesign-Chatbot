@@ -302,6 +302,32 @@ def test_production_rejects_missing_role_model_configuration(monkeypatch):
         validate_production_configuration()
 
 
+def test_production_accepts_opt_in_gemma_fast_chat_and_keeps_sonnet_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The candidate model must pass the app boundary, not just runtime parsing."""
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "model_provider", "agentcore")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(
+        settings, "agentcore_runtime_arn",
+        "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test",
+    )
+    monkeypatch.setattr(settings, "agentcore_model_provider", "bedrock_mantle_responses")
+    monkeypatch.setattr(settings, "agentcore_model_id", "google.gemma-4-31b")
+    monkeypatch.setattr(settings, "agentcore_model_region", "us-west-2")
+    monkeypatch.setattr(settings, "guardrail_id", "test-guardrail")
+    monkeypatch.setattr(settings, "guardrail_version", "1")
+    _apply_hybrid_role_models(monkeypatch)
+    monkeypatch.setattr(settings, "coaching_model_provider", "bedrock_mantle_responses")
+    monkeypatch.setattr(settings, "coaching_model_id", "google.gemma-4-31b")
+    validate_production_configuration()
+    assert settings.review_deep_model_provider == "bedrock"
+    monkeypatch.setattr(settings, "coaching_model_provider", "bedrock")
+    with pytest.raises(ValueError, match="requires the Mantle"):
+        validate_production_configuration()
+
+
 def test_production_rejects_users_namespace_as_course_prefix(monkeypatch):
     _apply_valid_production_baseline(monkeypatch)
     monkeypatch.setattr(settings, "course_material_sync_enabled", True)

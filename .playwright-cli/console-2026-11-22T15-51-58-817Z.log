@@ -1,0 +1,146 @@
+[    4459ms] [WARNING] Unrecognized feature: 'ambient-light-sensor'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    4459ms] [WARNING] Unrecognized feature: 'battery'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    4459ms] [WARNING] Unrecognized feature: 'document-domain'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    4459ms] [WARNING] Unrecognized feature: 'layout-animations'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    4459ms] [WARNING] Unrecognized feature: 'legacy-image-formats'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    4459ms] [WARNING] Unrecognized feature: 'oversized-images'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    4459ms] [WARNING] Unrecognized feature: 'vr'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    4459ms] [WARNING] Unrecognized feature: 'wake-lock'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    4467ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ about:srcdoc:1
+[    7301ms] [WARNING] Unrecognized feature: 'ambient-light-sensor'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    7301ms] [WARNING] Unrecognized feature: 'battery'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    7301ms] [WARNING] Unrecognized feature: 'document-domain'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    7301ms] [WARNING] Unrecognized feature: 'layout-animations'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    7301ms] [WARNING] Unrecognized feature: 'legacy-image-formats'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    7301ms] [WARNING] Unrecognized feature: 'oversized-images'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    7302ms] [WARNING] Unrecognized feature: 'vr'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    7302ms] [WARNING] Unrecognized feature: 'wake-lock'. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/react-dom.DZwq-Xzd.js:1
+[    7311ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ about:srcdoc:1
+[    7608ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ about:srcdoc:1
+[    7609ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ about:srcdoc:1
+[    7649ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ about:srcdoc:1
+[    7651ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ about:srcdoc:1
+[    7654ms] [WARNING] An iframe which has both allow-scripts and allow-same-origin for its sandbox attribute can escape its sandboxing. @ about:srcdoc:1
+[  941627ms] [WARNING] WebSocket onclose @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:34
+[  942380ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  942386ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  942848ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  942851ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  943182ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  943182ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  943546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  943546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  943738ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  943906ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  944625ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  944797ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  945545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  945545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  946207ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  946207ms] [ERROR] Client Error: response received with status 502 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  946208ms] [ERROR] Connection failed with status 502. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  946257ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  947546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  947546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  949537ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  949538ms] [ERROR] Client Error: response received with status 502 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  949538ms] [ERROR] Connection failed with status 502. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  949542ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  949545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  949545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  951545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  951545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  953375ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  953376ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  953376ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  953377ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  953546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  953546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  955544ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  955544ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  956887ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  956888ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  956888ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  956933ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  957545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  957546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  959545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  959545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  960747ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  960747ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/host-config @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  960748ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  960919ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  961545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  961545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  963546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  963546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  964773ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  964775ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  964775ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  964776ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  965545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  965545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  967546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  967546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  967787ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  967788ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  967788ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  967793ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  969545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  969546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  970942ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  970942ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  970942ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  970942ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  971546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  971546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  973545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  973545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  974578ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  974579ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  974579ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  974579ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  975545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  975545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  977545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  977545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  978291ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  978291ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  978292ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  978292ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  979545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  979545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  981545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  981546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  982145ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  982146ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  982146ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  982316ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  983545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  983545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  985546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  985546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  986329ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  986329ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/host-config @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  986330ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  986330ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  987546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  987546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  989546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  989546ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  990127ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  990128ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  990128ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  990295ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  991545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  991545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  993545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  993545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  994189ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/health:1
+[  994190ms] [ERROR] Client Error: response received with status 404 when attempting to reach /_stcore/health @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:33
+[  994190ms] [ERROR] Connection failed with status 404. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  994363ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://d1sxfuoybzedj5.cloudfront.net/_stcore/host-config:1
+[  995545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[  995545ms] [ERROR] Cannot send rerun backMessage when disconnected from server. @ https://d1sxfuoybzedj5.cloudfront.net/static/js/index.BvGIeCyC.js:38
+[ 1027328ms] [ERROR] Failed to load resource: the server responded with a status of 502 () @ https://d1sxfuoybzedj5.cloudfront.net/api/v1/reader/session:1
+[ 1827835ms] [ERROR] Failed to load resource: the server responded with a status of 503 () @ https://d1sxfuoybzedj5.cloudfront.net/api/v1/reader/threads/cd2f55e6-dc95-42d3-b387-67e31b8fc312/project/brief:1

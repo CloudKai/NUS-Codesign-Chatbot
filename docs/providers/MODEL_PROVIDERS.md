@@ -166,6 +166,65 @@ through the [isolated adapter](../../backend/agentcore_harness_provider.py).
 It leaves production DEFAULT unchanged and uses Luna for any compression.
 Claude fallback is disabled on that path.
 
+<a id="gemma-4-31b-candidate-not-deployed"></a>
+
+## Gemma 4 31B
+
+**2026-11-24 update:** V1 deployment 38 serves the citation-nullability fix
+through the pinned `GemmaStable37` production endpoint.
+The provider now restores canonical Pydantic nullability after SDK flattening,
+so defaulted citation strings cannot be generated as null. Q&A recommendations
+remain nullable. A real runtime check completed in one cycle with no recovery;
+this is not a guarantee of zero future validation retries. An80-call direct
+provider burst passed80/80 (p50 3.442s, p95 32.319s), separately from80/80
+application workspace reads. Full application generation capacity is unproven.
+`HaikuRollback36` remains READY. See the
+[measured results](../examples/classroom-capacity/gemma-results-2026-11-24.json)
+and [current release evidence](../IMPLEMENTATION_STATUS.md#agentcore-platform-v1-restored-in-production-2026-11-24-sgt).
+
+The following2026-11-23 record describes the preceding version37 rollout.
+
+**Promoted 2026-11-23:** DEFAULT
+version37 now serves `bedrock_mantle_responses` / `google.gemma-4-31b` in Oregon
+for Fast Chat and configured lightweight roles. Deep Review remains Sonnet4.6.
+Haiku36 remains READY on the separate `HaikuRollback36` endpoint. See the
+[release evidence and rollback](../IMPLEMENTATION_STATUS.md#gemma-native-json-fixed-and-deployed-haiku-rollback-retained-2026-11-23-sgt).
+
+The exact Gemma pair is accepted by the runtime and production validators;
+Converse rejects that model ID before constructing a client. Pinned Strands1.52
+selects `https://bedrock-mantle.us-west-2.api.aws/openai/v1`. The Gemma-only
+`gemma_responses.py` adapter uses native strict JSON-schema text in place of
+function arguments, which returned punctuation-only replies in earlier tests.
+Incremental text becomes the existing framework validation-tool stream. Pydantic
+still validates every result; malformed, truncated or punctuation-only replies
+fail. SDK schema conversion's missing null recommendation enum case is restored
+so Q&A does not have to invent a stage recommendation. No application tools are
+enabled; multiple tool specs fail closed.
+
+The factory keeps `stateful=False`, disables SDK HTTP retries and parallel tool
+calls, and limits total reasoning plus visible output to2,048 tokens per model
+call. Existing Strands retry/repair limits still apply; this is not a per-turn or
+monthly spending limit. Mantle input/output `ApplyGuardrail`, notebook-scoped
+sources, citations and confirmed stage progression remain enforced. Prompt cache
+is disabled for Gemma; no cache savings have been established.
+
+Text and images use the pinned SDK's conversions. PDFs and Office/text files
+continue through application extraction/retrieval. A small directly supplied PDF
+also passed a synthetic SDK check when its filename ended `.pdf`, but native
+layout, scanned-document OCR, Office formats and large multimodal requests have
+not been established. AWS documents a **3.5MB total Gemma request-body limit**,
+including images; the application's upload limit does not prove a request fits.
+
+Synthetic full-prompt text, image and PDF checks passed, including citations,
+streaming and full runtime guardrails. The published runtime check took13.582s
+with one recovery (reply streaming around3.349s): the first citation title was
+null and failed validation; recovery returned a valid string. This remains a
+known efficiency risk. These checks do not establish 80-student concurrency,
+consistent one-call latency, broad coaching quality or an S$30 monthly ceiling.
+
+References: [Gemma model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-google-gemma-4-31b.html)
+and [pinned adapter API](https://strandsagents.com/docs/api/python/strands.models.openai_responses).
+
 ## Direct Bedrock Converse
 
 ### Direct Bedrock contract
@@ -225,3 +284,23 @@ AWS references include [Converse and ConverseStream](https://docs.aws.amazon.com
 [structured outputs](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html),
 [tool use](https://docs.aws.amazon.com/bedrock/latest/userguide/tool-use.html)
 and [inference permissions](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-prereq.html).
+
+### Oregon candidate checks (2026-11-23)
+
+Small approved synthetic calls confirmed Gemma 4 31B text, image, extracted-PDF
+text and direct-PDF access through Mantle Responses. Initial HTTP400 requests
+used a raw Pydantic schema, not the actual Strands-converted schema. Correcting
+the temporary harness to use the pinned SDK conversion removed the HTTP400,
+but two accepted calls (including the full production coaching prompt) returned
+only `":"` as `response_text`. Pydantic accepted this nonempty string, but it
+is not a useful reply. The Gemma native JSON transport described above replaced
+that path and passed the later production gate without loosening validation.
+
+`mistral.ministral-3-8b-instruct` rejected Mantle `/v1/responses` but succeeded
+through Bedrock Converse, including one Pydantic-valid FastChat tool result,
+image input and the app's extracted-PDF text. Native Converse document input was
+explicitly unsupported. Preserve application extraction/retrieval for PDFs and
+Office files; these checks do not establish native document support or every
+file type's answer quality. The later native-JSON Gemma release is now serving with Haiku rollback retained.
+Classroom capacity and broader quality remain unmeasured.
+See [implementation evidence](../IMPLEMENTATION_STATUS.md#live-gemmaministral-modality-checks-haiku-remains-live-2026-11-23-sgt).

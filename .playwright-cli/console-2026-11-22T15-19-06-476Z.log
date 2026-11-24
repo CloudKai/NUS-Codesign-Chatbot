@@ -1,0 +1,7 @@
+[     106ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/reader/session:1
+[     115ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/auth/me:1
+[     447ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/reader/session:1
+[     459ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/auth/me:1
+[    7898ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8096/api/v1/reader/threads/6f04d8a2-0df8-4692-a490-3d2a3150d63a/messages/2bd8f0be-bc18-4a6e-9de4-2daa487299db/revise/stream:1
+[    9379ms] [ERROR] Failed to load resource: the server responded with a status of 503 (Service Unavailable) @ http://127.0.0.1:8096/api/v1/reader/threads/d8beb66a-c9a4-4e5f-921c-711956d5cee0/messages/0d7ff7ca-5581-4b5c-97ba-7a9e0b59fb1f/star:1
+[  104292ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8096/api/v1/reader/session:1

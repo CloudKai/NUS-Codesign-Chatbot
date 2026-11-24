@@ -13,7 +13,7 @@ if [ ! -f "$ROOT/frontend/dist/index.html" ]; then
   echo "Build the React app first with: npm run build --prefix frontend" >&2
   exit 1
 fi
-for command in caddy sed; do
+for command in caddy curl lsof sed; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Required command not found: $command" >&2
     exit 1
@@ -31,6 +31,28 @@ export CO_DESIGN_API_URL=http://127.0.0.1:8000
 export CO_DESIGN_PUBLIC_API_URL=http://127.0.0.1:8081
 export CO_DESIGN_UI_URL=http://127.0.0.1:8081
 export KNOWLEDGE_BASE_ID=
+
+stop_existing_listener() {
+  port=$1
+  pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN || true)
+  if [ -n "$pids" ]; then
+    echo "Stopping existing process on port $port."
+    kill $pids 2>/dev/null || true
+    attempt=0
+    while [ "$attempt" -lt 20 ] && lsof -tiTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; do
+      attempt=$((attempt + 1))
+      sleep 0.25
+    done
+    if lsof -tiTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "Port $port is still busy. Stop its process and run this script again." >&2
+      exit 1
+    fi
+  fi
+}
+
+stop_existing_listener 8000
+stop_existing_listener 8081
+stop_existing_listener 8501
 
 CONFIG="$(mktemp "${TMPDIR:-/tmp}/codesign-caddy-8081.XXXXXX")"
 printf '{\n admin off\n}\n' > "$CONFIG"

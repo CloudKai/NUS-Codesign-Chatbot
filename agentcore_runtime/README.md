@@ -4,8 +4,11 @@ This directory is the **authoritative** harness for
 
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`.
 
-One runtime hosts one-call Haiku `fast_chat` plus legacy router, Q&A,
-Coaching, Incremental Review, and Deep Review. Do not treat
+One runtime hosts configured `fast_chat` plus legacy router, Q&A, Coaching,
+Incremental Review, and Deep Review. The 2026-11-23 release uses Gemma 4 31B
+through Mantle native JSON for lightweight roles, with Sonnet Deep Review and
+Haiku version 36 retained for rollback. See the [provider guide](../docs/providers/MODEL_PROVIDERS.md#gemma-4-31b)
+for validation, recovery costs and limits. Do not treat
 `scripts/agentcore/harness_patch/` as a second implementation.
 
 ## Contract

@@ -1,0 +1,66 @@
+{
+  "date_sgt": "2026-11-24",
+  "model": "google.gemma-4-31b",
+  "region": "us-west-2",
+  "runtime_version": "38",
+  "haiku_rollback_version": "36",
+  "runtime_artifact_sha256": "3e75266a14320388d48ea0c26598a80787d434eae4eecafed3427a0a2e002c80",
+  "runtime_smoke": {
+    "passed": true,
+    "completion_seconds": 9.202,
+    "first_reply_ms": 2663,
+    "model_cycles": 1,
+    "recovery_used": false,
+    "session_stopped": true,
+    "input_tokens": 6366,
+    "output_tokens": 154
+  },
+  "provider_burst": {
+    "status": "completed",
+    "submitted": 80,
+    "succeeded": 80,
+    "failed": 0,
+    "wall_seconds": 42.274,
+    "latency_seconds": {
+      "p50": 3.442,
+      "p95": 32.319,
+      "max": 42.262
+    },
+    "known_token_usd": 0.0714584,
+    "scope": "Direct Mantle provider burst; no app, persistence, retrieval, guardrails or browser load; not classroom end-to-end capacity"
+  },
+  "application_reads": {
+    "status": "completed",
+    "sessions": 80,
+    "successful_reads": 80,
+    "latency_seconds": {
+      "p50": 3.585,
+      "p95": 6.506,
+      "max": 6.657
+    },
+    "scope": "80 independent guest cookies; concurrent empty-workspace DSQL reads through CloudFront; no generation, uploads, retrieval or browser rendering. Guests left to expire; no student data touched."
+  },
+  "budget": {
+    "cap_usd": 1,
+    "prior_reservation_carried_usd": 0.5000952,
+    "new_reservation_usd": 0.48,
+    "cumulative_reserved_usd": 0.9800951999999999,
+    "known_cumulative_model_token_estimate_usd": 0.0813692,
+    "billing_reconciled": false,
+    "prior_ledger_cleared": true,
+    "note": "Prior totals recovered conservatively from recorded handoff; unknown failed-call/guardrail/runtime/database/network usage remains reserved. No paid tests remaining."
+  },
+  "validation": {
+    "focused_passed": 94,
+    "backend_passed": 2482,
+    "backend_skipped": 1,
+    "full_repository_pass": false
+  },
+  "end_to_end_80_generations_proven": false,
+  "limitations": [
+    "Direct provider burst omits runtime, guardrails, FastAPI, DSQL, retrieval and browser rendering.",
+    "Application wave tests empty authenticated workspaces only, not concurrent generation.",
+    "One smoke is not a retry-rate or controlled speed benchmark.",
+    "No evidence of sustainable S$30 monthly total."
+  ]
+}

@@ -3,7 +3,8 @@
 The production runtime must not construct a bare ``BedrockModel()``. Roles
 select Claude Haiku 4.5 (router, Q&A, coaching, incremental Review) or
 Claude Sonnet 4.6 (deep Review). There is no silent Haiku↔Sonnet
-substitution. Mantle/Luna remains a supported historical provider pair.
+substitution. Mantle supports the historical Luna path and an opt-in Gemma
+4 31B candidate; selecting a model never changes the production configuration.
 
 This module is Strands-import free except ``load_runtime_model``, so pytest can
 assert constructor kwargs without AWS.
@@ -26,6 +27,7 @@ ALLOWED_PROVIDERS = frozenset({PROVIDER_BEDROCK, PROVIDER_MANTLE_RESPONSES})
 SONNET_4_6_MODEL_ID = "global.anthropic.claude-sonnet-4-6"
 HAIKU_4_5_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 LUNA_MODEL_ID = "openai.gpt-5.6-luna"
+GEMMA_4_31B_MODEL_ID = "google.gemma-4-31b"
 DEFAULT_MODEL_REGION = "us-west-2"
 
 MODEL_ROLE_ROUTER = "router"
@@ -242,8 +244,8 @@ def validate_provider_model_pair(provider: str, model_id: str) -> None:
 
     Raises:
         RuntimeModelError: When an ``openai.*`` id is pointed at ``BedrockModel``
-            or Mantle is pointed at a non-OpenAI model. Never swaps Haiku,
-            Sonnet, or Luna.
+            or Mantle is pointed at a model outside the explicit supported
+            OpenAI/Gemma paths. Never substitutes another model.
     """
     cleaned_provider = _clean(provider).lower()
     cleaned_model = _clean(model_id)
@@ -255,10 +257,15 @@ def validate_provider_model_pair(provider: str, model_id: str) -> None:
         "openai."
     ):
         raise RuntimeModelError("Luna cannot use BedrockModel")
-    if cleaned_provider == PROVIDER_MANTLE_RESPONSES and not cleaned_model.lower().startswith(
-        "openai."
+    if cleaned_provider == PROVIDER_BEDROCK and cleaned_model == GEMMA_4_31B_MODEL_ID:
+        raise RuntimeModelError("Gemma 4 31B requires the Mantle Responses provider")
+    if cleaned_provider == PROVIDER_MANTLE_RESPONSES and not (
+        cleaned_model.lower().startswith("openai.")
+        or cleaned_model == GEMMA_4_31B_MODEL_ID
     ):
-        raise RuntimeModelError("Mantle Responses requires an openai.* model id")
+        raise RuntimeModelError(
+            "Mantle Responses requires an openai.* or google.gemma-4-31b model id"
+        )
 
 
 def role_env_keys_present(values: Mapping[str, Any] | None) -> bool:
@@ -479,11 +486,20 @@ def mantle_responses_kwargs(config: RuntimeModelConfig) -> dict[str, Any]:
     """
     if not config.uses_mantle_responses:
         raise RuntimeModelError("OpenAIResponsesModel kwargs requested for a non-mantle provider")
-    return {
+    kwargs: dict[str, Any] = {
         "model_id": config.model_id,
         "stateful": False,
         "bedrock_mantle_config": {"region": config.region},
     }
+    if config.model_id == GEMMA_4_31B_MODEL_ID:
+        # The pinned SDK selects /openai/v1 for this model line. Disable its
+        # independent HTTP retries and bound reasoning plus visible output.
+        kwargs["client_args"] = {"max_retries": 0}
+        kwargs["params"] = {
+            "max_output_tokens": 2048,
+            "parallel_tool_calls": False,
+        }
+    return kwargs
 
 
 def log_runtime_model_config(config: RuntimeModelConfig) -> None:
@@ -548,7 +564,14 @@ def load_runtime_model(config: RuntimeModelConfig | None = None) -> Any:
         raise RuntimeModelError(
             "Mantle requires strands-agents[openai]; Claude was not substituted"
         ) from error
-    return OpenAIResponsesModel(**mantle_responses_kwargs(resolved))
+    model_class = OpenAIResponsesModel
+    if resolved.model_id == GEMMA_4_31B_MODEL_ID:
+        try:
+            from gemma_responses import gemma_native_model_class
+        except ImportError:  # pragma: no cover - package import in local checks
+            from agentcore_runtime.gemma_responses import gemma_native_model_class
+        model_class = gemma_native_model_class(OpenAIResponsesModel)
+    return model_class(**mantle_responses_kwargs(resolved))
 
 
 class RuntimeModelRegistry:

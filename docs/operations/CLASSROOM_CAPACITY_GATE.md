@@ -9,6 +9,25 @@ off-host rehearsal steps and study scheduling materials, use the
 [readiness decision sheet](CLASSROOM_READINESS_DECISIONS.md). It records research
 and preparation only; all external release gates remain open.
 
+## Gemma 38 bounded live checks (2026-11-24)
+
+[Aggregate evidence](../examples/classroom-capacity/gemma-results-2026-11-24.json)
+records two separate tests within the user's cumulative US$1 allowance:
+80/80 direct Gemma Mantle requests produced valid grounded Q&A results, with
+p50 3.442s / p95 32.319s / max42.262s. Separately,80 independent Guest sessions
+read their empty workspaces through CloudFront/FastAPI/DSQL:80/80 succeeded,
+p95 6.506s. A single guarded AgentCore38 check had one model cycle and no
+validation recovery after the citation nullability fix.
+
+**These are not80 end-to-end student generations.** The provider burst omits
+runtime, guardrails, persistence and retrieval; the workspace wave omits
+model generation and saving. No acceptable-wait criterion was approved, and
+no classroom capacity or monthly S$30 feasibility claim follows. The ledger
+carries US$0.9800952 in conservative cumulative reservations; paid tests have
+stopped. A future full workflow test needs a separate bounded allowance and
+cleanup of its runtime sessions. Preserve Haiku36 rollback.
+
+
 ## Repeat the disposable local rehearsal
 
 ```sh

@@ -1,0 +1,17 @@
+- generic [ref=e2]:
+  - link "Skip to saved work" [ref=e3] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link "CDE2300" [ref=e6] [cursor=pointer]:
+        - /url: /
+      - generic [ref=e7]: Co-design
+  - main [ref=e8]:
+    - heading "Pick up your questions and project thinking." [level=1] [ref=e9]: Pick up your questionsand project thinking.
+    - paragraph [ref=e10]: Ask about lectures, develop your project, and resume saved work in your notebooks.
+    - paragraph [ref=e11]: Your chatbot work is never graded and has no association with your course grades. This companion is used for CDE2300. Researchers want to understand how students use it and whether it benefits learning.
+    - generic [ref=e12]:
+      - link "Sign in" [ref=e13] [cursor=pointer]:
+        - /url: /api/v1/auth/login
+      - button "Continue as Guest" [ref=e14] [cursor=pointer]
+    - paragraph [ref=e15]: Guest notebooks stay with this browser.

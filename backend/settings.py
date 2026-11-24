@@ -733,10 +733,15 @@ def _validate_provider_model_pair(
         raise ValueError(f"{model_env} is not configured")
     if cleaned_provider == "bedrock" and cleaned_model.lower().startswith("openai."):
         raise ValueError("Luna cannot use BedrockModel")
-    if cleaned_provider == "bedrock_mantle_responses" and not cleaned_model.lower().startswith(
-        "openai."
+    if cleaned_provider == "bedrock" and cleaned_model == "google.gemma-4-31b":
+        raise ValueError("Gemma 4 31B requires the Mantle Responses provider")
+    if cleaned_provider == "bedrock_mantle_responses" and not (
+        cleaned_model.lower().startswith("openai.")
+        or cleaned_model == "google.gemma-4-31b"
     ):
-        raise ValueError("Mantle Responses requires an openai.* model id")
+        raise ValueError(
+            "Mantle Responses requires an openai.* or google.gemma-4-31b model id"
+        )
 
 
 def _validate_agentcore_role_models() -> None:

@@ -14,6 +14,7 @@ from agentcore_runtime.guardrails import (
     guardrail_response_is_blocked,
 )
 from agentcore_runtime.model import (
+    GEMMA_4_31B_MODEL_ID,
     HAIKU_4_5_MODEL_ID,
     LIGHTWEIGHT_MODEL_ROLES,
     LUNA_MODEL_ID,
@@ -137,6 +138,42 @@ def test_mantle_rejects_claude_model_id() -> None:
                 "GUARDRAIL_VERSION": "1",
             }
         )
+
+
+def test_gemma_candidate_keeps_mantle_stateless_guarded_and_bounded() -> None:
+    """Opt-in Gemma keeps the existing guardrail and transcript boundaries."""
+    env = dict(_SONNET_ENV)
+    env.update(
+        AGENTCORE_MODEL_PROVIDER="bedrock_mantle_responses",
+        AGENTCORE_MODEL_ID=GEMMA_4_31B_MODEL_ID,
+    )
+    config = runtime_model_config_from_mapping(env)
+    kwargs = mantle_responses_kwargs(config)
+    assert kwargs["model_id"] == GEMMA_4_31B_MODEL_ID
+    assert kwargs["stateful"] is False
+    assert kwargs["bedrock_mantle_config"] == {"region": "us-west-2"}
+    assert kwargs["client_args"] == {"max_retries": 0}
+    assert kwargs["params"] == {
+        "max_output_tokens": 2048,
+        "parallel_tool_calls": False,
+    }
+    client = _FakeGuardrail("GUARDRAIL_INTERVENED")
+    with pytest.raises(CoachTurnExtractionError, match="safety_blocked"):
+        enforce_mantle_guardrail("untrusted input", config=config, source="INPUT", client=client)
+    assert client.calls[0]["source"] == "INPUT"
+
+
+def test_gemma_cannot_be_sent_to_converse_or_enable_other_mantle_models() -> None:
+    """Reject unsupported routes before constructing a network client."""
+    env = dict(_SONNET_ENV, AGENTCORE_MODEL_ID=GEMMA_4_31B_MODEL_ID)
+    with pytest.raises(RuntimeModelError, match="requires the Mantle"):
+        runtime_model_config_from_mapping(env)
+    env.update(
+        AGENTCORE_MODEL_PROVIDER="bedrock_mantle_responses",
+        AGENTCORE_MODEL_ID="google.gemma-3-27b-it",
+    )
+    with pytest.raises(RuntimeModelError, match="requires an openai"):
+        runtime_model_config_from_mapping(env)
 
 
 def test_harness_never_constructs_empty_bedrock_model() -> None:

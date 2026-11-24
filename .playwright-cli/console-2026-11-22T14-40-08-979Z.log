@@ -1,0 +1,6 @@
+[     179ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8094/api/v1/reader/session:1
+[     194ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8094/api/v1/auth/me:1
+[     478ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8094/api/v1/reader/session:1
+[     488ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8094/api/v1/auth/me:1
+[   30050ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8094/api/v1/reader/threads/1a820e0d-0e80-425a-8c49-4c8e7af0a0e4/messages/21fadc6c-7430-43b4-a289-07ca05ffb328/revise:1
+[   68723ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:8094/api/v1/reader/threads/62132a89-1990-4797-bbf9-2fc0848cd088/messages/f82f0eba-28d3-42bb-8344-ed7cd731b7b7/revise:1

@@ -1,0 +1,5 @@
+[     295ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/reader/session:1
+[     303ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/auth/me:1
+[     677ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/reader/session:1
+[     680ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8096/api/v1/auth/me:1
+[ 1124570ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8096/api/v1/reader/session:1

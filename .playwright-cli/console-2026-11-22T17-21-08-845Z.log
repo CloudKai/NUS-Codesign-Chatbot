@@ -1,0 +1,5 @@
+[     208ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8095/api/v1/reader/session:1
+[     214ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8095/api/v1/auth/me:1
+[     648ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8095/api/v1/reader/session:1
+[     654ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://127.0.0.1:8095/api/v1/auth/me:1
+[   23036ms] [ERROR] Failed to load resource: the server responded with a status of 503 (Service Unavailable) @ http://127.0.0.1:8095/api/v1/reader/threads/9abdd8be-262b-464b-b257-9e52fe66ceba/project/brief:1
