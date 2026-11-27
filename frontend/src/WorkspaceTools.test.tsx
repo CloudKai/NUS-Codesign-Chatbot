@@ -156,33 +156,15 @@ describe('notebook lifecycle through the generated contracts', () => {
     expect(cached.notebooks.map(item => item.id)).toEqual(['new', 'nb', 'chat']);
   });
 
-  it('deletes a confirmed notebook and drops its sidebar identity and stale settings', async () => {
+  it('settings omit the model name and current-chat rename, assignment and delete controls', async () => {
     const client = createReaderQueryClient();
     seedNotebooks(client, 'a', list);
-    const { fetch } = renderTools(client, true, 'nb');
-    let removed = false;
-    fetch.mockImplementation((request: Request) => {
-      const url = new URL(request.url);
-      if (request.method === 'GET' && url.pathname.endsWith('/settings')) {
-        // After a confirmed delete the saved settings no longer exist server-side.
-        return Promise.resolve(removed ? Response.json({ detail: 'Notebook not found' }, { status: 404 })
-          : Response.json(nbSettings));
-      }
-      if (request.method === 'POST' && url.pathname.endsWith('/remove')) {
-        removed = true;
-        return Promise.resolve(Response.json({ owner_id: 'a', status: 'deleted' }));
-      }
-      return Promise.resolve(Response.json(session));
-    });
-    fireEvent.click(await screen.findByRole('button', { name: 'Delete notebook…' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm delete notebook' }));
-    await waitFor(async () => expect((await screen.findAllByText('Changes saved.')).length).toBeGreaterThan(0));
-    const request = (fetch.mock.calls.find(([sent]) => (sent as Request).method === 'POST'))![0] as Request;
-    expect(new URL(request.url).pathname).toBe('/api/v1/reader/threads/nb/remove');
-    expect(await request.text()).toBe(JSON.stringify({ confirmed: true }));
-    const cached = client.getQueryData(queryKeys.notebooks('a')) as NotebookList;
-    expect(cached.notebooks.map(item => item.id)).toEqual(['chat']);
-    expect(cached.chat_summaries).toEqual(list.chat_summaries);
-    await waitFor(() => expect(client.getQueryData(queryKeys.notebookSettings('a', 'nb'))).toBeNull());
+    renderTools(client, true, 'nb');
+    expect(await screen.findByText('Preferences are saved to your workspace.')).toBeTruthy();
+    expect(screen.queryByText('Current notebook')).toBeNull();
+    expect(screen.queryByText('Current chat')).toBeNull();
+    expect(screen.queryByText('Model')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Delete notebook/ })).toBeNull();
+    expect(screen.queryByLabelText('Assignment title')).toBeNull();
   });
 });

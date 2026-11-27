@@ -171,15 +171,11 @@ class ReaderRevision(BaseModel):
 
 
 def reader_chat_model_label(saved_model_label: str) -> str:
-    """Label the actual coaching runtime rather than its legacy chat preference."""
+    """Label the coaching runtime without naming an underlying model."""
     if settings.model_provider == "mock":
         return "Mock coach"
     if settings.model_provider == "openai":
         return saved_model_label
-    model_id = (settings.coaching_model_id or settings.agentcore_model_id
-                if settings.model_provider == "agentcore" else settings.bedrock_model_id)
-    if "claude-haiku-4-5" in model_id:
-        return "Claude Haiku 4.5"
     return "Course coach"
 
 

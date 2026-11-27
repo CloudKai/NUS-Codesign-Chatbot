@@ -3,11 +3,11 @@ import { useEffect, useImperativeHandle, useRef, useState, type Ref, type ReactN
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Icon } from './Icon';
-import { ApiError, currentSession, type NotebookSettingsPatch, type Preferences, type Session } from './api';
+import { ApiError, currentSession, type Preferences, type Session } from './api';
 import { createThread, removeThread } from './api/client';
 import { queryKeys } from './api/queryKeys';
 import { reconcileNotebooks, withEntry, withoutEntry } from './api/workspaceNotebooks';
-import { useNotebookSettings, usePreferences, useSaveNotebookSettings, useSavePreferences } from './api/workspaceSettings';
+import { useNotebookSettings, usePreferences, useSavePreferences } from './api/workspaceSettings';
 
 export interface WorkspaceActions {
   promptNotebook: () => void;
@@ -57,14 +57,11 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
   const prefsQuery = usePreferences(owner);
   const settingsQuery = useNotebookSettings(owner, thread);
   const savePreferences = useSavePreferences(owner);
-  const saveSettings = useSaveNotebookSettings(owner, thread);
   const prefs = prefsQuery.data ?? null;
   const settings = settingsQuery.data ?? null;
   const [displayName, setDisplayName] = useState(initialPreferences?.display_name ?? '');
   const appearance = prefs?.appearance ?? 'System';
-  const [name, setName] = useState('');
   const [newName, setNewName] = useState('');
-  const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState('');
@@ -97,9 +94,8 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
   }, [prefs]);
   useEffect(() => {
     // A notebook change resets local form state; the Query resource provides the data.
-    setConfirm(false); setError(''); setName('');
+    setError('');
   }, [thread]);
-  useEffect(() => { if (settings) setName(settings.notebook.name || ''); }, [settings]);
   useEffect(() => {
     if (active.current && (prefsQuery.isError || (thread && settingsQuery.isError))) {
       setError('Could not load preferences. Refresh workspace to try again.');
@@ -126,7 +122,7 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
   }
 
   /** Shared write frame: never replay a write; reconcile through confirmed owner-fenced reads. */
-  function writeFrame(action: () => Promise<unknown>, options: { clearsConfirm?: boolean } = {}) {
+  function writeFrame(action: () => Promise<unknown>) {
     return (async () => {
       if (lock.current || disabled || uncertain) return;
       lock.current = true; setBusy(true); setUncertain(true); setError('');
@@ -136,7 +132,6 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
         await verify();
         if (active.current) {
           setUncertain(false);
-          if (options.clearsConfirm) setConfirm(false);
           setError('Changes saved.');
         }
       } catch (error) {
@@ -148,12 +143,6 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
 
   function updatePreferences(patch: Partial<Omit<Preferences, 'owner_id'>>) {
     return writeFrame(() => savePreferences.mutateAsync({ patch, signal: control.current.signal }));
-  }
-
-  function updateNotebook(patch: NotebookSettingsPatch) {
-    if (!thread) return Promise.resolve();
-    return writeFrame(() => saveSettings.mutateAsync({ patch, signal: control.current.signal }),
-      { clearsConfirm: false });
   }
 
   /** Create and confirmed delete run generated contracts; ambiguous outcomes reconcile through an explicit refresh. */
@@ -180,7 +169,7 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
       }
       await changed(created);
       if (active.current) {
-        setUncertain(false); setConfirm(false);
+        setUncertain(false);
         if (creating) createDialog.current?.close();
         setError('Changes saved.');
       }
@@ -208,7 +197,6 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
       void write('create', { kind: 'chat', parent_notebook_id: parentNotebookId }, true);
     },
   }));
-  const entryName = settings?.notebook.kind === 'chat' ? 'chat' : 'notebook';
   const dark = appearance === 'Dark' || (appearance === 'System' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   return <section className="workspace-tools" aria-label="Workspace actions">
     {themeHost ? createPortal(<button className="theme-toggle" aria-label={dark ? 'Switch to day mode' : 'Switch to night mode'} title={dark ? 'Switch to day mode' : 'Switch to night mode'} disabled={locked} onClick={() => void updatePreferences({ appearance: dark ? 'Light' : 'Dark' })}><Icon name={dark ? 'sun' : 'moon'}/></button>, themeHost) : null}
@@ -235,7 +223,7 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
     {settingsHost ? createPortal(<div className="settings-page">
       <header className="settings-heading">
         <h1 ref={heading} tabIndex={-1}>Settings</h1>
-        <button onClick={() => { setConfirm(false); closeSettings(); }}>Back to chat</button>
+        <button onClick={() => closeSettings()}>Back to chat</button>
       </header>
       <p className="supporting">Preferences are saved to your workspace.</p>
       {busy || error ? <div className="settings-status" role={uncertain && !busy ? 'alert' : 'status'}>
@@ -272,39 +260,8 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
           <input className="settings-switch" id="workspace-starters" type="checkbox" role="switch" checked={prefs?.starter_prompts ?? true}
             disabled={locked || !prefs} onChange={event => void updatePreferences({ starter_prompts: event.target.checked })}/>
         </SettingsRow>
-        {settings ? <>
-          <SettingsRow label="Response language"><span>English</span></SettingsRow>
-          <SettingsRow label="Model"><span>{settings.chat_model_label || 'Course coach'}</span></SettingsRow>
-        </> : null}
+        {settings ? <SettingsRow label="Response language"><span>English</span></SettingsRow> : null}
       </section>
-      {settings ? <section className="settings-group">
-        <h2>{entryName === 'chat' ? 'Current chat' : 'Current notebook'}</h2>
-          <form onSubmit={event => { event.preventDefault(); void updateNotebook({ name: name.trim() }); }}>
-            <SettingsRow label={entryName === 'chat' ? 'Chat name' : 'Notebook name'} htmlFor="rename-notebook">
-              <div className="settings-inline">
-                <input id="rename-notebook" maxLength={120} value={name} onChange={event => setName(event.target.value)}/>
-                <button disabled={locked || !name.trim() || name.trim() === settings.notebook.name}>Save</button>
-              </div>
-            </SettingsRow>
-          </form>
-          <form className="settings-assignment" onSubmit={event => {
-            event.preventDefault();
-            const data = new FormData(event.currentTarget);
-            void updateNotebook({ assignment: { ...settings.assignment, title: String(data.get('title')), brief: String(data.get('brief')) } });
-          }} key={`${thread}:${JSON.stringify(settings.assignment)}`}>
-            <label htmlFor="assignment-title">Assignment title</label><input id="assignment-title" name="title" maxLength={4000} defaultValue={settings.assignment.title || ''}/>
-            <label htmlFor="assignment-brief">Assignment context</label><textarea id="assignment-brief" name="brief" maxLength={4000} defaultValue={settings.assignment.brief || ''}/>
-            <button disabled={locked}>Save assignment context</button>
-          </form>
-          <SettingsRow label={`Delete ${entryName}`}>
-            <button disabled={locked} onClick={() => setConfirm(value => !value)}>{confirm ? 'Cancel deletion' : `Delete ${entryName}…`}</button>
-          </SettingsRow>
-          {confirm ? <div className="remove-confirm">
-            <p>Delete “{settings.notebook.name}” and its conversation, sources, and feedback?</p>
-            {entryName === 'notebook' ? <p>Any chats organized here will return to Chats.</p> : null}
-            <button disabled={locked} onClick={() => void write('remove', { confirmed: true })}>Confirm delete {entryName}</button>
-          </div> : null}
-      </section> : null}
     </div>, settingsHost) : null}
     <button className="refresh-workspace icon-button" aria-label="Refresh workspace" title="Refresh workspace" disabled={busy} onClick={() => void refresh()}><Icon name="refresh"/></button>
     {busy && !settingsHost ? <p role="status">Checking saved workspace…</p> : null}
