@@ -257,6 +257,21 @@ def test_legacy_memory_without_turns_is_superseded() -> None:
     assert "pictograms" in updated.selected_concept
 
 
+def test_incremental_compression_does_not_mutate_existing_memory() -> None:
+    """A request-local correction must not corrupt the saved projection it read."""
+    existing = _compress([
+        {"role": "user", "content": "We chose QR codes for sign-up."},
+        {"role": "user", "content": "We decided the sign must cost at most $30."},
+    ])
+    before = existing.model_dump(mode="json")
+    updated = _compress([
+        {"role": "user", "content": "Actually we chose pictograms instead of QR codes."},
+    ], existing=existing)
+    assert "pictograms" in updated.selected_concept
+    assert existing.model_dump(mode="json") == before
+    assert "We decided the sign must cost at most $30." in updated.key_decisions
+
+
 def test_spec_scenario_two_recovers_current_concept_and_connectivity_constraint() -> None:
     """QR codes -> pictograms (patchy internet) surfaces the current concept AND
     the connectivity constraint, not the superseded concept."""

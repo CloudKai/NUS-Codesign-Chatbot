@@ -14,7 +14,7 @@ derived memory as a fallback. A/B test a shorter stage-blind instruction prefix
 to free room for evidence. Raise the budget only if these changes still leave
 relevant context out of the prompt.
 
-## What reaches the model today
+## Initial context budget and baseline
 
 | Surface | Checked-in default |
 | --- | --- |
@@ -51,21 +51,21 @@ or transport-specific schema overhead. [Demo context](../../scripts/preview_prom
 [Runtime system-prompt estimator](../../agentcore_runtime/system_prompt_budget.py)
 
 SQLite and DSQL retain the complete transcript. Derived memory fills some of
-the gaps when older messages leave the recent window. The current compressor
-extracts text using English keyword patterns. It keeps the first recognized
-selected concept, caps category lists, and uses the last eligible compressed
-student turn as a working conclusion. A student correction can therefore become
-hard to distinguish from the earlier choice. The planner can also omit derived
+the gaps when older messages leave the recent window. The initial compressor
+extracted text using English keyword patterns. It kept the first recognized
+selected concept, capped category lists, and used the last eligible compressed
+student turn as a working conclusion. That made some student corrections hard
+to distinguish from the earlier choice. The planner can also omit derived
 memory when input is crowded. [Context planner](../../backend/context_planner.py)
 
-AgentCore includes stage-derived context both in the adapter and in its runtime
-system prompt. The application also supplies the stage and conversation summary
-to the retrieval path. To make Improve my design stage-blind, build mode-specific
-instructions and stage-state inputs at each of these boundaries. Both modes can
-read the shared transcript and use the same authorized evidence, with retrieval
-gated per turn. Treat student-authored references to a stage as transcript
-content. The existing Project Brief reads the whole active transcript and can
-incorporate both modes' turns in a mixed chat.
+The original AgentCore path included stage-derived context in the adapter and
+the runtime system prompt. The application also supplied the stage and
+conversation summary to retrieval. The Improve spec called for mode-specific
+instructions and stage-state inputs at those boundaries. Both modes can read the
+shared transcript and use the same authorized evidence, with retrieval gated
+per turn. Student-authored stage references remain transcript content. The
+Project Brief reads the whole active transcript and can incorporate both modes'
+turns in a mixed chat.
 [Execution](../../backend/coaching/execution.py) ·
 [AgentCore adapter](../../backend/agentcore_provider.py) ·
 [Runtime Fast Chat prompt](../../agentcore_runtime/specialists/fast_chat.py) ·
@@ -141,3 +141,162 @@ Fast Chat packing, and conversation memory continuity.
 [Prompt architecture tests](../../tests/domain/test_prompt_architecture.py) ·
 [Fast Chat context tests](../../tests/domain/test_fast_chat_context.py) ·
 [Memory continuity tests](../../tests/domain/test_conversation_memory_continuity.py)
+
+## Priorities after integrating the context review
+
+The integrated branch keeps the latest explicit concept selection, preserves
+unrelated decisions, removes a duplicated HMW rubric, and puts retrieved course
+evidence beside the current question. It still relies on recent messages and
+derived memory for older conversation details. The existing scenarios verify
+payload and workflow behavior with mocks. Generated-answer quality, actual
+provider token counts, and cache savings remain unmeasured.
+[Integration and review record](../IMPLEMENTATION_STATUS.md#current-status)
+
+A fresh offline sample asked “How can I improve the visibility of my crossing
+timer?” with a short response and empty history, sources, and images. The table
+counts the reconstructed runtime system prompt and the final user text block
+separately at three characters per estimated token. Reproduce it with the
+scenario test's fake provider: submit a `CoachRequest` with those fields, the
+corresponding intent and stage, and other fields at their defaults. Decode
+`client.calls[0]["payload"]`, then run `estimate_tokens` on
+`specialist_system_prompt(payload)` and on the text of the last message's first
+content block. These estimates exclude transport and schema overhead.
+[Scenario fixture](../../tests/domain/test_context_scenarios.py) ·
+[Runtime system prompt](../../agentcore_runtime/structured_coach.py) ·
+[Estimator](../../backend/context_planner.py)
+
+| Fast Chat mode and stage | System estimate | User block estimate |
+| --- | ---: | ---: |
+| Design coaching, Problem identification | 9,989 | 239 |
+| Design coaching, Concept generation | 7,408 | 239 |
+| Design coaching, Design specification | 7,182 | 239 |
+| Design coaching, Ethics & Critical Thinking | 7,562 | 239 |
+| Design coaching, Reflection | 7,314 | 239 |
+| Improve my design | 572 | 205 |
+
+1. **Compact Design coaching instructions first.** Use a concise shared
+   coaching contract and one stage rubric per request. Consolidate repeated
+   rules and overlapping examples by hand. Hold the student context and output
+   contract fixed. Keep the stage-specific checks, grounding and citation rules,
+   and explicit stage confirmation. Use the existing offline prompt-variant
+   harness as a starting point for measurement. Target at least 20% lower
+   median estimated system tokens over all five stages with every deterministic
+   contract check passing. A shorter prompt can lose useful examples and fall
+   below the Haiku cache threshold, so measure quality and cache economics as
+   separate experiments. LongLLMLingua supports testing information density
+   and placement on long inputs. Its reported gains come from other models
+   and tasks. [Offline prompt harness](../../scripts/evals/benchmark_prompt_variants.py) ·
+   [Runtime assembly](../../agentcore_runtime/specialists/fast_chat.py) ·
+   [LongLLMLingua, ACL](https://aclanthology.org/2024.acl-long.91/)
+2. **Give Improve a budgeted recall path.** Use the active, authorized notebook
+   transcript already loaded by execution. When the student refers to an older
+   decision, rank a small number of original excerpts by entity overlap and
+   order. Keep speaker, chronology, and any adjacent turn that establishes a
+   correction or rationale. Deduplicate against the recent exchange and pin
+   the applicable constraint or selection during packing. The current planner
+   can evict the whole memory block under pressure. Start with a per-turn
+   projection and the existing durable memory format. Lexical matching can
+   miss paraphrases and multilingual references, so score it against a hand-
+   labeled evidence set before adding an index or model call. Test an oracle
+   variant with the known matching excerpts at the same budget. The gap to
+   oracle helps identify retrieval misses, while failures with oracle evidence
+   point to reading or response generation. Keep recalled turns untrusted and
+   validate course citations through the existing evidence path.
+   [Execution](../../backend/coaching/execution.py) ·
+   [Planner](../../backend/context_planner.py) ·
+   [LongMemEval, ICLR, §3.4 and §5](https://arxiv.org/html/2410.10813v2)
+3. **Calibrate the budget against the selected provider.** Start with existing
+   planner metrics and provider usage, grouped by model, mode, stage, and
+   payload type. Where supported, count a small set of synthetic, fully
+   composed requests through the matching provider API. Include tools, images,
+   and multilingual samples where the surface supports them. Bedrock exposes
+   model-specific counting on supported Runtime and Mantle surfaces. Verify
+   support for the exact model and transport before using a count. For Converse
+   caching, track uncached, read, and write tokens separately and add them to
+   obtain total input. On Haiku 4.5, compare cold writes and warm same-prefix
+   reads, including cache misses, before changing cache policy. Keep counting
+   off the normal reply path and keep the current Fast Chat ceilings while
+   establishing the baseline. [Turn metrics](../../backend/turn_perf.py) ·
+   [Bedrock token counting](https://docs.aws.amazon.com/bedrock/latest/userguide/count-tokens.html) ·
+   [Bedrock caching](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html) ·
+   [Haiku 4.5 model card](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html)
+
+Start by replaying the existing six synthetic cases. Add coverage for an edited
+or inactive turn, a paraphrased or multilingual reference, and a large turn
+that competes with a relevant memory item for prompt space. At the existing
+ceilings, the recall candidate should include more labeled excerpts on older
+references, preserve recall on recent ones, and exclude other notebooks and
+inactive revisions in every case. For an explicitly authorized, capped model
+comparison, use the same inputs and a blinded rubric for correct constraints,
+useful design feedback, unsupported claims, citations, and stage behavior.
+Record input tokens across all model calls, including retries, and time to
+first reply text. Keep Deep Review on its existing context policy for these
+Fast Chat experiments.
+
+## Paired offline surrogate study (2026-11-27)
+
+This follows the priorities above with a deterministic payload build and a
+blinded, rubric-scored surrogate run. It measures prompt/context coverage and
+rubric behavior, not the production coach.
+
+**Method.** Requests were assembled through the real Fast Chat provider path
+with the fake AgentCore client (no network, no application model call), then
+answered by Hermes `x-test-2` as a surrogate. Twenty Design cases cover four
+cases per stage (`problem_identification`, `concept_generation`,
+`design_specification`, `ethics_critical`, `reflection`): each is a usable
+answer, a premature/solution-locked or unsupported answer, a citation-gap
+question with source knowledge disallowed, and a stay case. Twelve Improve
+cases ask for one aged-out detail after an unrelated recent exchange.
+Candidate arms: compact shared coaching + compact `fast_chat.md` (and the
+compact Problem Identification stage file), with canonical stage files for the
+other four stages; the recall candidate instead adds a bounded
+`<older_student_excerpts>` block while holding the canonical prompt fixed.
+Scoring is deterministic against gold `mode`, `recommendation`, citations,
+scaffold flag, required/forbidden phrases, and required recall fact; verdicts
+are computed before arm labels are read. One answer per case per arm, generated
+in one batch per arm per stage.
+
+| Stage | Design cases (base / candidate) | Estimated system tokens (base → candidate) |
+| --- | --- | --- |
+| Problem Identification | 4/4 / 4/4 | 9,924 → 5,344 (−46.2%) |
+| Concept Generation | 4/4 / 4/4 | 7,343 → 4,985 (−32.1%) |
+| Design Specification | 4/4 / 4/4 | 7,117 → 4,759 (−33.1%) |
+| Ethics & Critical Thinking | 4/4 / 4/4 | 7,497 → 5,140 (−31.4%) |
+| Reflection | 4/4 / 4/4 | 7,249 → 4,891 (−32.5%) |
+| Improve older-detail recall | 4/12 → 12/12 | prompt fixed; excerpt adds ~30–70 user-block tokens per case |
+
+No rubric regression appeared at this sample size: both arms kept the stage
+contract in the usable, premature, citation-gap and stay cases, both advanced a
+complete Reflection in place, and both refused to grade. The compact
+candidate is still above the estimated Haiku cache floor in every stage, but
+the actual provider tokens and cache eligibility were not measured.
+
+The recall arm isolates the excerpt: the canonical prompt was fixed in both
+arms. Without it, four of twelve details survived — the ones derived memory or
+constraints already carried (`$30`, the pictogram selection, the matte/glare
+reason, the December deadline). The other eight (measurement, name, location,
+count, weather, dimensions, percentage, part swap) were absent from the
+baseline payload and recovered only with the excerpt. So the gain depends on
+whether packing/memory already surfaces the detail; injecting an excerpt that
+duplicates memory adds tokens without new recall.
+
+**Limitations.** One surrogate model, one answer per case per arm, batches of
+four to twelve records (cross-case leakage possible), and deterministic rubric
+scoring rather than an independent human or second-model grader. Four design
+cases per stage cannot establish an accuracy rate, and the rubric checks listed
+fields, not pedagogical quality. Token figures are local 3-chars/token
+estimates. The compact Problem Identification file and the compact shared
+contract were changed together, so their separate contributions are not
+isolated. A first recall fixture was discarded because a single aged-out user
+message is stored as `problem_definition` by the extractive compressor, which
+hid the gap; the reported recall run puts a neutral turn before the fact.
+
+**Next exact step.** Get explicit approval and a hard cap for a small live
+AgentCore comparison (same cases, blinded grading, recorded input/uncached/
+cache-read tokens), or expand the offline set to 10+ cases per stage with an
+independent grader. Do not adopt the compact prompts or the excerpt path on
+this evidence alone; keep the dedupe-against-memory requirement from priority 2.
+
+Evidence: `/private/tmp/coach_context_stage_study` (`build_requests.py`,
+`requests/`, `answers/`, `score.py`, `score.txt`, `manifest.json`) and the
+earlier three-case run in `/private/tmp/coach_context_study` (`score.md`).

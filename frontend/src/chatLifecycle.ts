@@ -130,7 +130,9 @@ export function useChatLifecycle({
       progress.clear();
       // Wordless recovery: a check that found nothing saved returns the question
       // to the composer automatically, so no recovery buttons are needed.
-      draft.remember(receipt.message
+      // The composer remains editable during a send. Keep both texts when
+      // recovery finds no saved answer, rather than dropping the sent question.
+      draft.remember(receipt.message || draft.text.current !== receipt.text
         ? (draft.text.current.trim() ? `${draft.text.current}\n\n${receipt.text}` : receipt.text)
         : draft.text.current, null);
       setStatus('');

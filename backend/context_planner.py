@@ -571,18 +571,22 @@ def _append_turned(
 
 
 def _demote_earlier(
-    items: list[str], turns: list[int], demotions: list[str], *, after_turn: int
+    items: list[str],
+    turns: list[int],
+    demotions: list[str],
+    *,
+    after_turn: int,
+    superseded_choice: str,
 ) -> None:
-    """Drop every entry with an older turn index into demotions.
+    """Demote only the earlier selected choice, preserving unrelated decisions.
 
-    Used when a later explicit correction appears: the superseded earlier
-    decision stays in the transcript but must not share equal authority in
-    derived memory. Older means a strictly smaller transcript index.
+    Correction words do not establish that every earlier project decision has
+    been revoked. Match the previous selection's bounded excerpt explicitly.
     """
     kept_items: list[str] = []
     kept_turns: list[int] = []
     for item, item_turn in zip(items, turns):
-        if item_turn < after_turn:
+        if item_turn < after_turn and _memory_excerpt(item) == superseded_choice:
             _append_unique(demotions, f"Superseded by later decision: {item}")
             continue
         kept_items.append(item)
@@ -607,7 +611,7 @@ class ExtractiveHistoryCompressor:
     ) -> ConversationMemory:
         """Merge aged-out turns into derived memory without adding new facts."""
         memory = (
-            existing.model_copy()
+            existing.model_copy(deep=True)
             if existing is not None
             else ConversationMemory(conversation_revision=conversation_revision)
         )
@@ -653,7 +657,7 @@ class ExtractiveHistoryCompressor:
             is_selection = bool(
                 re.search(
                     r"\b(chose|selected|will use|going with|went with|switched to|"
-                    r"revised)\b",
+                    r"decided to use)\b",
                     text,
                     re.IGNORECASE,
                 )
@@ -663,19 +667,20 @@ class ExtractiveHistoryCompressor:
                     _append_turned(
                         memory.key_decisions, memory.key_decision_turns, text, turn
                     )
-                    # A later explicit correction supersedes earlier decisions,
-                    # so they no longer share equal authority in derived memory.
-                    if is_correction:
+                # Latest explicit selection wins. The replaced choice is noted,
+                # not dropped silently, and its transcript index is tracked.
+                if is_selection:
+                    if (
+                        memory.selected_concept
+                        and memory.selected_concept != _memory_excerpt(text)
+                    ):
                         _demote_earlier(
                             memory.key_decisions,
                             memory.key_decision_turns,
                             memory.changes_in_reasoning,
                             after_turn=turn,
+                            superseded_choice=memory.selected_concept,
                         )
-                # Latest explicit selection wins. The replaced choice is noted,
-                # not dropped silently, and its transcript index is tracked.
-                if is_correction or is_selection:
-                    if memory.selected_concept and memory.selected_concept != text:
                         _append_unique(
                             memory.changes_in_reasoning,
                             f"Superseded choice: {memory.selected_concept}",

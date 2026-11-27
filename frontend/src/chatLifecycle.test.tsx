@@ -27,7 +27,7 @@ function ndjson(events: unknown[]) {
   } }), { headers: { 'Content-Type': 'application/x-ndjson' } }));
 }
 
-function mountLifecycle(initialPending: Receipt | null, options: { saved?: unknown; failCheck?: boolean } = {}) {
+function mountLifecycle(initialPending: Receipt | null, options: { saved?: unknown; failCheck?: boolean; draftText?: string } = {}) {
   browserClient.setConfig({ baseUrl: 'https://app.test' });
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
@@ -37,7 +37,7 @@ function mountLifecycle(initialPending: Receipt | null, options: { saved?: unkno
     return jsonResponse({ detail: 'unexpected request' }, 500);
   });
   vi.stubGlobal('fetch', fetchMock);
-  const text = { current: 'Queued question' };
+  const text = { current: options.draftText ?? 'Queued question' };
   const intent = { current: 'improve' as const };
   const remember = vi.fn((nextText: string) => { text.current = nextText; });
   const refresh = vi.fn(async () => {});
@@ -56,6 +56,14 @@ it('a check that finds no saved reply frees the composer automatically', async (
   const view = mountLifecycle({ key: 'k1', text: 'Queued question' });
   await waitFor(() => expect(view.remember).toHaveBeenLastCalledWith('Queued question', null));
   expect(view.text.current).toBe('Queued question');
+});
+
+it('an unsaved question survives recovery alongside a newer composer draft', async () => {
+  const view = mountLifecycle({ key: 'k1', text: 'Queued question' }, { draftText: 'Follow-up draft' });
+  await waitFor(() => expect(view.remember).toHaveBeenLastCalledWith('Follow-up draft\n\nQueued question', null));
+  expect(view.text.current).toContain('Follow-up draft');
+  expect(view.text.current).toContain('Queued question');
+  expect(view.fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
 });
 
 it('a saved reply is adopted, clears the receipt and clears the composer', async () => {

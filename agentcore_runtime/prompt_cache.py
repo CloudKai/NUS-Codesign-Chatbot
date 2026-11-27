@@ -26,8 +26,8 @@ HAIKU_MIN_CACHE_TOKENS = 4096
 # Cache-eligibility estimate uses the same chars-per-token ratio as the
 # fast-chat budget estimator (DEFAULT_CHARS_PER_TOKEN = 3.0 in
 # backend/context_planner.py) so "is it worth caching" and "fits the 12K soft
-# target" agree. A cache point that Bedrock cannot honor is simply a cache miss,
-# never an error, so this is a conservative-enough guarantee, not a cap.
+# target" use one heuristic. This is not provider tokenization or proof of a
+# cache hit; actual eligibility and savings require provider usage evidence.
 CACHE_ELIGIBILITY_CHARS_PER_TOKEN = 3.0
 CACHE_POINT_TYPE = "default"
 
@@ -47,13 +47,13 @@ def prompt_cache_enabled_from_environ(values: Mapping[str, Any] | None = None) -
 
 
 def estimate_prefix_tokens(text: str) -> int:
-    """Return a conservative token estimate for cache eligibility.
+    """Return a heuristic token estimate for cache eligibility.
 
     Args:
         text: Static pedagogical prefix. Must not include student text.
 
     Returns:
-        Estimated token count using a high chars-per-token ratio.
+        Estimated token count; not a provider-tokenized lower bound.
     """
     cleaned = str(text or "")
     if not cleaned:

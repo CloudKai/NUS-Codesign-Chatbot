@@ -2,6 +2,102 @@
 
 ## Current status
 
+### Integrated — both targeted review fixes carried into `improvements/Context-window` (2026-11-27)
+
+The Improve review fixes (`ade0abd`) and the context review fixes (`106256d`) are
+both integrated locally in this checkout, unstaged, on top of `improvements/Context-window`
+at `106256d`. The reviewed patches
+(`improve.patch`, `context.patch` under the 2026-11-27 review artifact directory)
+were applied as-is; the code/test files in this checkout are byte-identical to the
+reviewed copies.
+
+- Improve worktree: `~/.hermes/worktrees/codesign-review-improve` is now attached
+  to `improvement/architecture-responsiveness` at `ade0abd`, preserving its seven
+  edited files unstaged.
+- Context worktree: `~/.hermes/worktrees/codesign-review-context` remains detached
+  at `106256d` with its edits untouched.
+- Integrated files: `frontend/src/Conversation.tsx`, `chatLifecycle.ts` and their
+  mock regressions, `recoveryDots.test.tsx`, `tests/browser/improve_review.spec.ts`,
+  `frontend/README.md`, `backend/context_planner.py`,
+  `agentcore_runtime/prompt_cache.py`, `tests/domain/test_context_scenarios.py`,
+  `tests/domain/test_conversation_memory_continuity.py`, and this status file.
+- Doc merge: both review records are kept verbatim below this entry; only
+  the shared top-of-file insertion and the Iteration-4 cache-wording hunk were
+  reconciled.
+
+Focused validation on the integrated checkout (mock/deterministic only):
+`tests/domain/test_context_planner.py`, `test_context_scenarios.py`,
+`test_conversation_memory_continuity.py`, `test_prompt_cache.py`,
+`test_agentcore_provider.py`, `test_fast_chat_context.py` **136 passed**; extra
+`test_prompt_architecture.py`, `test_hmw_scaffold_gate.py`, `test_evidence_scope.py`
+**152 passed**; Vitest `chatLifecycle.test.tsx` + `recoveryDots.test.tsx`
+**10 passed**; ESLint clean and `npm run build` succeeded; `compileall` clean on
+`backend agentcore_runtime tests`; `git diff --check` clean. The Improve Playwright
+browser spec was not re-run here because it needs the full served stack; the
+equivalent recovery behaviors are covered by the Vitest regressions above. No live
+model/tokenizer/cache measurement. No schema or stored-data change; rollback is
+discarding the unstaged diff. Next exact action: independent verification of this
+integrated unstaged diff before any staging or commit.
+
+### Hermes targeted review — Improve implementation at `ade0abd` (2026-11-27)
+
+Reviewed `4f12995..ade0abd` against `specs/IMPROVE_MY_DESIGN.md`, tracing the
+reader stream through authoritative execution, workflow, provider/prompt assembly,
+receipts, and the mode-aware React conversation. Two red-first regressions fixed:
+
+- A failed saved-answer read hid its error behind permanent waiting dots and left
+  no recovery action. The idle pending state now exposes the error and a read-only
+  **Check saved answer** control; an active check remains wordless. Recovery uses
+  the same receipt and performs no generation POST.
+- If the student edited the composer while a question was in flight, an empty
+  recovery read discarded the original unsaved question. Keep both texts in the
+  composer instead. A confirmed saved answer still preserves only the newer draft.
+
+Changed `frontend/src/Conversation.tsx`, `chatLifecycle.ts`, their focused mock
+regressions, and the existing Improve browser journey. Validation: full mock
+Python suite **3444 passed, 1 skipped**; Vitest **215 passed, 3 skipped**; Chromium
+Improve/recovery at 1440 px and 390 px **4 passed**; frontend build and ESLint passed.
+Tests used disposable data and mock providers only. Initial fresh-worktree HTTP
+shell failures were resolved by building the frontend, not by changing the API.
+The optional Strands test remains skipped. No migration, student-data rewrite,
+staging, commit, push, deployment, or live model request. Rollback is source-only.
+Next action: superseded — these predecessor fixes are integrated locally on
+`improvements/Context-window` (see the integration entry above); the remaining
+step is independent verification of that unstaged diff.
+
+### Hermes targeted review — context implementation at `106256d` (2026-11-27)
+
+Reviewed `ade0abd..106256d` against the recorded scope and
+`operations/COACH_CONTEXT_RESEARCH.md`. Red-first mock regressions demonstrated:
+
+- An unrelated correction ("Actually the budget is $20 because the grant was
+  cut") replaced a pictogram selection and falsely marked it superseded in the
+  actual AgentCore adapter payload. Only explicit selection language now changes
+  `selected_concept`; only the previous selected choice is demoted, not every
+  earlier decision. Bare "revised" is no longer a concept-selection cue.
+- Incremental compression shallow-copied memory and mutated the caller's lists,
+  leaving its decision text/indices inconsistent with its unchanged scalar choice.
+  Deep-copy the derived projection before merging; retain unrelated decisions.
+
+Changed `backend/context_planner.py` and focused continuity/provider-payload
+regressions. Corrected cache comments/status claims: the local character estimate
+is not a tokenizer guarantee and a checkpoint does not remove text from the input.
+No cache policy or feature flag was changed by this review. Validation: affected planner, provider, prompt, cache, gate, HMW and
+review suites **477 passed**; full mock Python suite **3461 passed, 1 skipped**.
+No live inference or tokenizer/caching measurement was performed. The scenario
+suite verifies packing/invariants, not generated-answer quality, and several
+original scenarios exercise only the gate/composer rather than the complete HTTP
+path. The optional Strands test remains skipped. No canonical student rows or
+schema changed. Rollback is source-only. Integration status: this diff and the
+predecessor Improve fixes are now applied unstaged on `improvements/Context-window`
+(see the integration entry above); independent verification of the integrated diff
+is the remaining step.
+
+The predecessor Improve browser fixes were integrated alongside this diff rather
+than conflated with its implementation range. Older-message lookup, robust
+multilingual/semantic fact updates, and measured provider cache savings remain
+outside the verified scope.
+
 ### Implemented — "Improve my design" replaces Lecture help (2026-11-27 SGT)
 
 The approved [spec](specs/IMPROVE_MY_DESIGN.md) is implemented across backend,
@@ -98,16 +194,18 @@ offline passes, still gated by mocks and no live model call.
   ~10K-token Fast Chat prefix is the dominant sink and the root cause of the
   "77 percent instruction" figure. AgentCore already had prefix caching wired
   (`agentcore_runtime/prompt_cache.py`), but its eligibility estimate used a
-  conservative `4.0` chars/token while the rest of the system estimates at
+  `4.0` chars/token while the input-budget estimator uses
   `3.0` (`DEFAULT_CHARS_PER_TOKEN` in `context_planner.py`). Under `4.0` only
-  `problem_identification` cleared the Haiku 4096-token floor; concept, design,
-  reflection and deep analysis did not, so four of five stages paid the full
-  prefix every turn. Aligning the eligibility ratio to `3.0` makes all five
-  stages eligible, so enabling `FAST_CHAT_PROMPT_CACHE_ENABLED` on the AgentCore
-  process removes the static prefix from per-request input across the board. A
-  cache point Bedrock cannot honor is a cache miss, never an error, so this swaps
-  a guaranteed miss for real savings. `test_prompt_cache.py` gains a guard that
-  all five topics clear the floor under `prefix_meets_haiku_cache_minimum`.
+  `problem_identification` cleared the local estimate of the Haiku 4096-token
+  floor; the other four stages did not emit a checkpoint. This does not establish
+  their actual provider token counts or costs. Using `3.0` makes all five
+  stages eligible under the local estimate when
+  `FAST_CHAT_PROMPT_CACHE_ENABLED` is enabled on the AgentCore process. The prefix
+  still appears in the request and counts against the context budget. A character
+  ratio is not provider tokenization: these tests prove checkpoint selection and
+  request shape, not actual cache eligibility, cache hits, or cost/latency savings.
+  `test_prompt_cache.py` checks that all five topics clear the *estimated* floor
+  under `prefix_meets_haiku_cache_minimum`; provider usage remains unmeasured.
 
 Validation (iterations 3-4 targeted subsets, green): full architecture/composer
 suite **341 passed**; cache + agentcore + fast-chat one-call suite **197

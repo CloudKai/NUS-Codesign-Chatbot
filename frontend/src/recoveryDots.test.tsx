@@ -42,15 +42,16 @@ function LayoutHost({ children }: { children: React.ReactNode }) {
   </QueryClientProvider>;
 }
 
-function mountConversation({ activity = () => {}, saved = savedTurn as unknown, gate = false, gateStream = false, refresh = async () => {}, seedPending = true }:
-  { activity?: (value: boolean) => void; saved?: unknown; gate?: boolean; gateStream?: boolean; refresh?: () => Promise<void>; seedPending?: boolean } = {}) {
+function mountConversation({ activity = () => {}, saved = savedTurn as unknown, gate = false, gateStream = false, refresh = async () => {}, seedPending = true, failCheck = false }:
+  { activity?: (value: boolean) => void; saved?: unknown; gate?: boolean; gateStream?: boolean; refresh?: () => Promise<void>; seedPending?: boolean; failCheck?: boolean } = {}) {
   browserClient.setConfig({ baseUrl: 'https://app.test' });
   let releaseCheck: (() => void) | undefined;
   const gatePromise = new Promise<void>(resolve => { releaseCheck = resolve; });
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
     if (url.includes('/reader/session')) return jsonResponse(session);
-    if (url.includes('/coach-turn')) return (gate ? gatePromise : Promise.resolve()).then(() => jsonResponse(saved));
+    if (url.includes('/coach-turn')) return (gate ? gatePromise : Promise.resolve()).then(() => failCheck
+      ? jsonResponse({ detail: 'Offline' }, 503) : jsonResponse(saved));
     if (url.includes('/bookmarks')) return jsonResponse(bookmarks);
     if (init?.method === 'POST' && url.includes('/stream')) {
       const body = JSON.parse(String(init.body)) as { idempotency_key: string };
@@ -79,7 +80,7 @@ function mountConversation({ activity = () => {}, saved = savedTurn as unknown, 
     onHelp={() => {}} preferredIntent="improve" showStarters={false} externalBlocked={false}
     activity={activity} locateMessage={async () => true} busy={false} loadEarlier={async () => {}}
     onCanvasSelectionConsumed={() => {}} onArtifactSelectionConsumed={() => {}}/></LayoutHost>);
-  return { fetchMock, release: () => releaseCheck!() };
+  return { fetchMock, release: () => releaseCheck!(), restoreConnection: () => { failCheck = false; } };
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); sessionStorage.clear(); });
@@ -103,6 +104,20 @@ it('a pending receipt shows only bouncing dots — no words, no buttons — then
   release();
   await waitFor(() => expect(document.querySelector('.recovery-actions')).toBeNull());
   expect((screen.getByPlaceholderText(/Share your design/) as HTMLTextAreaElement).value).toBe('Queued question');
+});
+
+it('a failed recovery read is visible and can be retried without resending', async () => {
+  const refresh = vi.fn(async () => {});
+  const { fetchMock, restoreConnection } = mountConversation({ failCheck: true, refresh });
+  await waitFor(() => expect(screen.getByRole('status', { name: 'Checking your answer' }).textContent)
+    .toContain('couldn’t check'));
+  const receipt = JSON.parse(sessionStorage.getItem('codesign-mode:a:t1') ?? 'null');
+  expect(receipt.pending.key).toBe('k1');
+  restoreConnection();
+  fireEvent.click(screen.getByRole('button', { name: 'Check saved answer' }));
+  await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+  expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+  expect(JSON.parse(sessionStorage.getItem('codesign-mode:a:t1') ?? 'null').pending).toBeNull();
 });
 
 it('a queued turn shows dots without words and never locks the workspace', async () => {

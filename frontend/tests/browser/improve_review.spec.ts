@@ -19,6 +19,34 @@ async function chooseMode(page: Page, name: string) {
 }
 
 for (const viewport of [{ width: 1440, height: 960 }, { width: 390, height: 844 }]) {
+  test(`A failed reply check recovers without resending at ${viewport.width} px`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize(viewport);
+    await page.goto(stack.url);
+    await page.getByRole('button', { name: 'Continue as Guest' }).click();
+    await page.getByRole('button', { name: 'Improve my design', exact: true }).click();
+    let failCheck = true;
+    let sends = 0;
+    page.on('request', request => {
+      if (request.method() === 'POST' && request.url().endsWith('/improve/stream')) sends++;
+    });
+    await page.route('**/coach-turn?*', route => failCheck
+      ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"detail":"Offline"}' })
+      : route.continue());
+    const draft = page.getByRole('textbox', { name: 'What you want to improve' });
+    await draft.fill('How can I improve the visibility of my crossing timer?');
+    await page.getByRole('button', { name: 'Send message' }).click();
+    await expect(page.getByRole('status', { name: 'Checking your answer' })).toContainText('couldn’t check');
+    failCheck = false;
+    await page.getByRole('button', { name: 'Check saved answer' }).click();
+    await expect(page.locator('.message.coach .message-content')).toHaveCount(1);
+    await expect(draft).toHaveValue('');
+    expect(sends).toBe(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+    expect(errors).toEqual([]);
+  });
+
   test(`Improve Review preserves bookmarks and Design coaching progress at ${viewport.width} px`, async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));

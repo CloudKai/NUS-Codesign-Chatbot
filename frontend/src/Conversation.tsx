@@ -243,7 +243,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     watching, canStop, checking, stopping,
     pending, setPending, pendingRef,
     status, setStatus, preview,
-    send, stopGeneration,
+    send, reconcile, stopGeneration,
   } = useChatLifecycle({
     threadId: page.notebook.id, owner, expired, refresh, composer,
     busy, moving, externalBlocked, feedbackBusy, projectUncertain,
@@ -701,7 +701,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     </aside> : null}
     {preview ? <article className="message preview"><h3>Coach · unsaved preview</h3><CoachText text={preview}/></article> : null}
     {pending && !watching ? <div className="recovery-actions" role="status" aria-label="Checking your answer">
-      <span className="typing-dots" aria-hidden="true"><i/><i/><i/></span>
+      {checking ? <span className="typing-dots" aria-hidden="true"><i/><i/><i/></span> : <>
+        <span>{status}</span>
+        <button type="button" disabled={externalBlocked || busy} onClick={() => void reconcile(pending)}>Check saved answer</button>
+      </>}
     </div> : null}
     </div></div>
     <div className="composer-dock"><div className="chat-column">

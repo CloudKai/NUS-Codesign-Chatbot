@@ -209,6 +209,25 @@ def test_scenario_two_current_concept_and_connectivity_constraint() -> None:
     ), constraints
 
 
+def test_unrelated_budget_correction_preserves_selected_concept() -> None:
+    """Correcting the grant is not a new concept selection in provider context."""
+    untrusted = _assess_payload(
+        intent="improve_design",
+        stage="concept_generation",
+        message="Does our current concept need a phone?",
+        history=[
+            {"role": "user", "content": "We chose pictograms for the sign."},
+            {"role": "assistant", "content": "What is the budget?"},
+            {"role": "user", "content": "Actually the budget is $20 because the grant was cut."},
+        ] + _filler_tail(14),
+    )
+    memory = _conversation_memory(untrusted)
+    assert "pictograms" in _mem_field(memory, "selected_concept")
+    assert "pictograms" in _mem_field(memory, "key_decisions")
+    assert "pictograms" not in _mem_field(memory, "changes_in_reasoning")
+    assert "$20" in _mem_field(memory, "constraints")
+
+
 # --------------------------------------------------------------------------- #
 # Scenario 3 — a one-handed design change needs no course search
 # --------------------------------------------------------------------------- #

@@ -439,6 +439,11 @@ before this marker existed, so the sidebar treats those entries as chats too.
 Chat actions open upward and are repositioned when settings finish loading or
 the visible browser area changes. The menu scrolls internally on short screens.
 
+If a saved-answer recovery read fails, the error and **Check saved answer**
+control remain visible. This retries only the read, using the existing receipt;
+it never resends the question. Waiting dots are shown only while checking. If
+nothing was saved and the composer has a newer draft, both texts are retained.
+
 While generation runs, the bouncing dots and the composer’s **Stop generating**
 button show its state. The button requests server cancellation. If saving has
 started, the reply can finish normally. A stopped edit leaves the already
