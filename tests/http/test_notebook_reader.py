@@ -154,6 +154,33 @@ def test_direct_api_origin_is_accepted_for_writes(tmp_path: Path, monkeypatch: M
     ).status_code == 403
 
 
+def test_malformed_origin_fails_closed(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """A malformed Origin or Host header is refused with 403, never a 500."""
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "public_api_base_url", "http://127.0.0.1:8080")
+    root = StudentStore(tmp_path / "malformed.sqlite3")
+    client = TestClient(create_app(root, oidc_client=FakeOIDC(root)), base_url="http://127.0.0.1:8080")
+    for origin in ("http://evil:99999", "http://evil:notaport", "http://[::1:8080"):
+        assert client.post("/api/v1/auth/guest/start", headers={"Origin": origin}).status_code == 403
+    # Unauthenticated requests are refused even earlier (401), never with a 500.
+    assert client.post(
+        "/api/v1/reader/threads", headers={"Origin": "http://evil:99999"}, json={"kind": "chat"},
+    ).status_code == 401
+    # An authenticated request with a malformed Origin must fail closed (403).
+    assert client.post(
+        "/api/v1/auth/guest/start", headers={"Origin": "http://127.0.0.1:8080"},
+    ).status_code == 200
+    for origin in ("http://evil:99999", "http://evil:notaport"):
+        assert client.post(
+            "/api/v1/reader/threads", headers={"Origin": origin}, json={"kind": "chat"},
+        ).status_code == 403
+    # A malformed Host mismatches every expected netloc on the guest entrypoint.
+    assert client.post(
+        "/api/v1/auth/guest/start",
+        headers={"Host": "127.0.0.1:notaport", "Origin": "http://127.0.0.1:8080"},
+    ).status_code == 403
+
+
 def test_pilot_serves_only_built_public_assets(tmp_path: Path) -> None:
     """The static shell works without exposing source files or private paths."""
     client = TestClient(create_app(StudentStore(tmp_path / "static.sqlite3")))

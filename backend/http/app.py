@@ -40,7 +40,7 @@ from backend.domain import (
 )
 from backend.owner_context import OwnerResolver, OwnerServices
 from backend.http.notebook_reader import register_notebook_reader
-from backend.http.origin import same_configured_origin, same_netloc
+from backend.http.origin import parsed_origin, same_configured_origin, same_netloc
 from backend.upload_queue import SourceUploadCoordinator
 from starlette.concurrency import run_in_threadpool
 from backend.persistence.guest_sessions import GUEST_SESSION_TTL
@@ -571,11 +571,12 @@ def create_app(
             raise HTTPException(status_code=404, detail="Not found")
 
         origin = str(request.headers.get("origin") or "").strip()
-        expected = urlparse(settings.public_api_base_url)
-        supplied = urlparse(origin)
+        expected = parsed_origin(settings.public_api_base_url)
+        supplied = parsed_origin(origin)
         request_host = str(request.headers.get("host") or "").strip()
         if (
-            not origin
+            supplied is None or expected is None
+            or not origin
             or supplied.scheme not in {"http", "https"}
             or not same_configured_origin(
                 origin, settings.public_api_base_url, settings.api_base_url,
@@ -610,17 +611,22 @@ def create_app(
     def _require_guest_browser_origin(request: Request) -> None:
         """Validate the public Origin from browsers and the configured API Host for server calls."""
         origin = str(request.headers.get("origin") or "").strip()
-        expected = urlparse(settings.public_api_base_url)
-        supplied = urlparse(origin)
+        expected = parsed_origin(settings.public_api_base_url)
+        supplied = parsed_origin(origin)
         request_host = str(request.headers.get("host") or "").strip()
-        internal_api = urlparse(settings.api_base_url)
+        internal_api = parsed_origin(settings.api_base_url)
         request_scheme = str(request.url.scheme or "").lower()
-        trusted_host = request_host.lower() == supplied.netloc.lower() or (
-            request_host.lower() == internal_api.netloc.lower()
+        trusted_host = (
+            supplied is not None
+            and request_host.lower() == supplied.netloc.lower()
+        ) or (
+            internal_api is not None
+            and request_host.lower() == internal_api.netloc.lower()
             and request_scheme == internal_api.scheme.lower()
         )
         if (
-            not origin
+            supplied is None or expected is None
+            or not origin
             or supplied.scheme not in {"http", "https"}
             or supplied.username
             or supplied.password
@@ -712,12 +718,13 @@ def create_app(
         if not settings.guest_access_enabled:
             raise HTTPException(status_code=404, detail="Not found")
         origin = str(request.headers.get("origin") or "").strip()
-        expected_origin = urlparse(settings.public_api_base_url)
-        api_origin = urlparse(settings.api_base_url)
+        expected_origin = parsed_origin(settings.public_api_base_url)
+        api_origin = parsed_origin(settings.api_base_url)
         request_host = str(request.headers.get("host") or "").strip()
-        supplied_origin = urlparse(origin)
+        supplied_origin = parsed_origin(origin)
         if (
-            not origin
+            supplied_origin is None or expected_origin is None or api_origin is None
+            or not origin
             or supplied_origin.scheme != expected_origin.scheme
             or not same_configured_origin(
                 origin, settings.public_api_base_url, settings.api_base_url,

@@ -17,7 +17,7 @@ from backend.auth_oidc import (
     OAUTH_STATE_TTL_SECONDS,
 )
 from backend.auth_profiles import has_streamlit_access, sync_authenticated_user
-from backend.http.origin import same_configured_origin
+from backend.http.origin import parsed_origin, same_configured_origin
 from backend.cognito_cookies import (
     SESSION_HINT_COOKIE_VALUE,
     id_token_cookie_settings,
@@ -114,11 +114,12 @@ def _read_cookie(request: Request, name: str) -> str | None:
 def _is_configured_same_origin(request: Request) -> bool:
     """Return whether a browser request matches the configured public origin."""
     origin = str(request.headers.get("origin") or "").strip()
-    expected = urlparse(settings.public_api_base_url)
-    supplied = urlparse(origin)
+    expected = parsed_origin(settings.public_api_base_url)
+    supplied = parsed_origin(origin)
     host = str(request.headers.get("host") or "").strip()
     return bool(
-        origin
+        supplied and expected
+        and origin
         and supplied.scheme in {"http", "https"}
         and supplied.netloc
         and not supplied.username

@@ -6,15 +6,35 @@ students often open ``http://localhost:8000``; hosts that differ only as
 loopback aliases with the same scheme and port are one origin in practice.
 Foreign hosts and ports still never match.
 """
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
+def parsed_origin(value: str) -> ParseResult | None:
+    """Return ``urlparse(value)``, or ``None`` when the URL is malformed.
+
+    Browser headers are attacker-controlled; every same-origin guard must
+    treat an unparseable URL as no match, never as an exception.
+    """
+    try:
+        return urlparse(value or "")
+    except ValueError:
+        return None
+
+
 def _netloc_parts(netloc: str) -> tuple[str, int | None]:
-    """Split a ``host[:port]`` pair into a lowercased hostname and port."""
-    parsed = urlparse(f"//{netloc}")
-    return (parsed.hostname or "").lower(), parsed.port
+    """Split a ``host[:port]`` pair into a lowercased hostname and port.
+
+    Malformed netlocs (invalid or out-of-range ports) compare as no match
+    instead of raising: the same-origin guards must fail closed with 403,
+    never surface a 500.
+    """
+    try:
+        parsed = urlparse(f"//{netloc}")
+        return (parsed.hostname or "").lower(), parsed.port
+    except ValueError:
+        return "", None
 
 
 def same_netloc(left: str, right: str) -> bool:
@@ -32,11 +52,15 @@ def same_public_origin(supplied: str, expected: str) -> bool:
 
     The scheme must match exactly; hosts compare through :func:`same_netloc`.
     """
-    supplied_scheme = (urlparse(supplied or "").scheme or "").lower()
-    expected_scheme = (urlparse(expected or "").scheme or "").lower()
+    supplied_parsed = parsed_origin(supplied)
+    expected_parsed = parsed_origin(expected)
+    if supplied_parsed is None or expected_parsed is None:
+        return False
+    supplied_scheme = (supplied_parsed.scheme or "").lower()
+    expected_scheme = (expected_parsed.scheme or "").lower()
     if not expected_scheme or supplied_scheme != expected_scheme:
         return False
-    return same_netloc(urlparse(supplied or "").netloc, urlparse(expected).netloc)
+    return same_netloc(supplied_parsed.netloc, expected_parsed.netloc)
 
 
 def same_configured_origin(supplied: str, *expected_urls: str) -> bool:
