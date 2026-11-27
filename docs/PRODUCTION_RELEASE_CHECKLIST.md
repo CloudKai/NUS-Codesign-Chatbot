@@ -3,6 +3,22 @@
 Use this checklist to promote an approved SHA to the CloudFront + EC2 origin.
 Use placeholders for secrets and account-specific settings.
 
+**Reconciliation, 2026-11-24:** use the [deployment safety record and versioned
+manifest](deploy/DEPLOYMENT_SAFETY_RECORD.md) before selecting any release or
+rollback target. The [coordinated release and rollback rehearsal
+(tickets 51)](deploy/COORDINATED_RELEASE_REHEARSAL.md) documents the ordered
+release steps, exact edge allowlist state, backup/restore and Mantle
+preservation checks, and the disposable-local rehearsal evidence; its 2026-11-26
+[manifest](examples/deployment/release-rehearsal-ticket51-2026-11-26.json)
+supersedes ticket 04's for repository-default hashes only. Latest recorded
+restoration pins `GemmaStable37` to V1 version
+38 while DEFAULT points to V2 version 39; checked-in Compose still selects
+Haiku/DEFAULT. These are historical records and repository settings, not
+verified current live values. Mantle provisional-output suppression is locally
+verified source work; publication, fresh sessions and blocked-output validation
+remain unverified. The gates below must be applied to the selected qualifier,
+not assumed to follow DEFAULT.
+
 Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).  
 Current SHA / CI / deploy impact: [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) (**CURRENT STATUS**).  
 Topology and build commands: [`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md).
@@ -41,8 +57,9 @@ image tag at their respective gates.
 3. Publish a **new version** to the **existing** AgentCore runtime ARN.
    Follow the [runtime publishing procedure](deploy/AWS_STATELESS_EC2.md#publish-an-agentcore-runtime-version).
 4. Wait until that new runtime version is **READY**.
-5. Move the **DEFAULT** qualifier only after READY.
-6. Increase `AGENTCORE_SESSION_GENERATION` in host `compose.prod.yaml` so warm microVMs
+5. Move the approved application-selected endpoint only after READY; record
+   DEFAULT separately if the app uses a pinned qualifier.
+6. Change `AGENTCORE_SESSION_GENERATION` in host `compose.prod.yaml` so warm microVMs
    cannot keep the previous assets.
 
 `update-agent-runtime` may move DEFAULT automatically when the new version
@@ -57,10 +74,11 @@ before publishing. Deploy the compatible parser first if needed.
 8. Deploy that image (`APP_IMAGE` immutable tag; never `:latest`).
 9. Confirm host-local `/api/v1/ready` (Caddy must **not** expose `/ready`
    publicly).
-10. Run a small controlled live validation.
+10. Run the separately approved capped live validation, including the [fresh-session
+    and forced OUTPUT-block checks](deploy/DEPLOYMENT_SAFETY_RECORD.md#reviewable-publication-and-verification-procedure).
 
-Intended order is 1 → 10. Do not skip the READY wait. Do not move DEFAULT
-onto a non-READY version. For the planned Fast Chat prompt-cache rollout, set
+Intended order is 1 → 10. Do not skip the READY wait. Do not move a serving
+endpoint onto a non-READY version. For the planned Fast Chat prompt-cache rollout, set
 `FAST_CHAT_PROMPT_CACHE_ENABLED=true` in the published AgentCore runtime
 environment as well as Compose. Confirm cache-read tokens on repeated turns
 before claiming a latency benefit. Session affinity is
@@ -89,8 +107,8 @@ remain unique Cognito subjects.
 | | |
 |---|---|
 | **How** | AWS console: Bedrock AgentCore → this environment’s runtime (ARN from host `.env`) → **DEFAULT** endpoint. See the [runtime publishing procedure](deploy/AWS_STATELESS_EC2.md#publish-an-agentcore-runtime-version). |
-| **Expected** | Qualifier `DEFAULT`. Record the current liveVersion before publishing. This release publishes a **new version on the existing ARN**, waits until READY, then moves DEFAULT. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. The published runtime environment must contain `DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS=180`; this is runtime-only and must not be added to the EC2 app container. |
-| **Pass** | Endpoint **READY**; DEFAULT liveVersion is the version you intend to serve; the runtime configuration reports the Deep Review Bedrock read timeout as **180s**. FastAPI host env qualifier is `DEFAULT`. |
+| **Expected** | Record the application-selected qualifier and its liveVersion, plus DEFAULT separately. Checked-in Compose selects `DEFAULT`; the last restoration record selects `GemmaStable37`. Resolve the intended release tuple before publishing a **new version on the existing ARN**, waiting until READY, and moving the approved endpoint. FastAPI uses `MODEL_PROVIDER=agentcore`. The published runtime environment must contain `DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS=180`; this is runtime-only and must not be added to the EC2 app container. |
+| **Pass** | Selected endpoint **READY**; its liveVersion is the intended version; the runtime configuration reports the Deep Review Bedrock read timeout as **180s**. FastAPI qualifier matches that endpoint. Record DEFAULT independently. |
 
 ## 4. `AGENTCORE_SESSION_GENERATION` (required on republish)
 
@@ -104,7 +122,7 @@ generation.
 |---|---|
 | **When** | Every authorised AgentCore republish. Not required for an app-image-only deploy that does not publish a new runtime version. |
 | **How** | **Always** set a new non-secret generation value in host `compose.prod.yaml` for a republish (and recreate the app container so FastAPI picks it up). This is required even when only runtime environment or prompt/schema assets changed. |
-| **Pass** | Host env generation differs from the pre-publish value; app container recreated after the change; DEFAULT liveVersion is the new published version. |
+| **Pass** | Host env generation differs from the pre-publish value; app container recreated after the change; selected endpoint resolves to the new published version; fresh-session evidence confirms it is used. |
 
 Rolling back an AgentCore version has the same rule: change generation again
 and redeploy FastAPI, or warm sessions may keep the version you just left.
@@ -179,10 +197,16 @@ Stop if health/ready fails, login loops, or coach turns return 503/`provider-una
 
 ## 11. Rollback
 
-1. Set `APP_IMAGE` to the **previous immutable tag** (known-good SHA). Follow the [EC2 rollback procedure](deploy/AWS_STATELESS_EC2.md#ec2-refresh).
-2. If this release also published an AgentCore version: point DEFAULT back to the previous **READY** liveVersion **and** change `AGENTCORE_SESSION_GENERATION`, then recreate the app container. Version rollback without a new session generation can leave warm microVMs on the version you meant to leave.
+Before rollback, apply the [safe rollback gate](deploy/DEPLOYMENT_SAFETY_RECORD.md#safe-rollback).
+An old READY version or host rollback script is not sufficient: never restore
+a Mantle artifact that lacks provisional-output suppression. If no verified
+safe target exists, keep generation suspended under an approved operational
+action while preserving saved work.
+
+1. Set `APP_IMAGE` to the **verified safety-compatible immutable tag** (known-good SHA). Follow the [EC2 rollback procedure](deploy/AWS_STATELESS_EC2.md#ec2-refresh).
+2. If this release changed the serving runtime: point the application-selected endpoint back to the verified safety-compatible **READY** liveVersion **and** change `AGENTCORE_SESSION_GENERATION`, then recreate the app container. Version rollback without a new session generation can leave warm microVMs on the version you meant to leave.
 3. Do not roll schema forward/back during the app rollback. Additive DSQL columns already applied stay; old app code ignores extra columns.
-4. Pass: previous image SHA is running; DEFAULT liveVersion matches the rollback target; login + one coach turn succeed.
+4. Pass: approved image SHA is running; the selected qualifier resolves to the rollback target; fresh-session, allowed/blocked-output and saved-data checks pass within the approved cap.
 
 ## 12. CloudWatch / logs after deploy
 

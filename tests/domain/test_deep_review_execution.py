@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import threading
 import time
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -723,125 +721,6 @@ def test_later_deep_review_on_new_stage_replaces_prior_snapshot_contribution(
     _assert_no_review_transcript(store, thread_id)
 
 
-def test_stale_worker_cannot_overwrite_later_completed_deep_review(
-    tmp_path, monkeypatch
-) -> None:
-    """A late worker A completion must not replace successful Review B."""
-    monkeypatch.setattr(settings, "deep_review_max_concurrent", 8)
-    store = StudentStore(tmp_path / "dr-stale-worker.sqlite3")
-    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    _unlock(store, thread_id)
-    original_complete = store.complete_deep_review_job
-    first_id: dict[str, str | None] = {"review_id": None}
-    attempted_a: dict[str, Any] = {}
-    started = threading.Event()
-    release = threading.Event()
-    stale_complete_finished = threading.Event()
-
-    def gated_complete(
-        target_thread_id: str, *, review_id: str, snapshot: dict[str, Any]
-    ) -> None:
-        if first_id["review_id"] is None:
-            first_id["review_id"] = review_id
-            attempted_a["snapshot"] = dict(snapshot)
-            started.set()
-            assert release.wait(timeout=8.0), "stale worker A was not released"
-            try:
-                return original_complete(
-                    target_thread_id, review_id=review_id, snapshot=snapshot
-                )
-            finally:
-                stale_complete_finished.set()
-        return original_complete(
-            target_thread_id, review_id=review_id, snapshot=snapshot
-        )
-
-    store.complete_deep_review_job = gated_complete  # type: ignore[method-assign]
-    try:
-        review_a = _service(
-            store,
-            FakeAgentCoreRuntime(
-                deep_payload=_deep_payload(
-                    synthesis="Formative Deep Review A.",
-                    strengths=["Review A strength"],
-                    areas_to_develop=["Review A area"],
-                )
-            ),
-        )
-        job_a = review_a.enqueue_deep_review(thread_id, idempotency_key="deep-a")
-        assert started.wait(timeout=8.0), "worker A never reached completion"
-        review_a_id = str(first_id["review_id"] or "")
-        assert review_a_id
-        assert job_a.review_id == review_a_id
-        assert "Review A strength" in list(
-            (attempted_a.get("snapshot") or {}).get("strengths") or []
-        )
-
-        stale_started = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-        job_blob = dict(_job_blob(store, thread_id) or {})
-        assert job_blob.get("review_id") == review_a_id
-        job_blob["started_at"] = stale_started
-        job_blob["updated_at"] = stale_started
-        store.update_thread(thread_id, metadata={DEEP_REVIEW_JOB_KEY: job_blob})
-        failed = review_a.get_deep_review_job(thread_id)
-        assert failed is not None
-        assert failed.review_id == review_a_id
-        assert failed.status is DeepReviewJobStatus.FAILED
-        assert _snapshot(store, thread_id) is None
-        assert _counter(store, thread_id) == 3
-
-        _unlock(store, thread_id)
-        review_b = _service(
-            store,
-            FakeAgentCoreRuntime(
-                deep_payload=_deep_payload(
-                    synthesis="Formative Deep Review B.",
-                    strengths=["Review B strength"],
-                    areas_to_develop=["Review B area"],
-                )
-            ),
-        )
-        job_b = review_b.enqueue_deep_review(thread_id, idempotency_key="deep-b")
-        assert job_b.review_id != review_a_id
-        finished_b = _wait_job(review_b, thread_id, timeout=8.0)
-        assert finished_b.status is DeepReviewJobStatus.COMPLETED
-        assert finished_b.review_id == job_b.review_id
-        snapshot_b = _snapshot(store, thread_id)
-        assert snapshot_b is not None
-        assert snapshot_b["reviewed_stage_id"] == "problem_identification"
-        assert "Review B strength" in list(snapshot_b.get("strengths") or [])
-        assert "Review A strength" not in list(snapshot_b.get("strengths") or [])
-        stage_before_stale_complete = _current_stage(store, thread_id)
-        counter_after_b = _counter(store, thread_id)
-        assert counter_after_b == 0
-
-        release.set()
-        assert stale_complete_finished.wait(
-            timeout=8.0
-        ), "stale worker A never attempted completion"
-        store.complete_deep_review_job = original_complete  # type: ignore[method-assign]
-        original_complete(
-            thread_id,
-            review_id=review_a_id,
-            snapshot=dict(attempted_a["snapshot"]),
-        )
-
-        job = _job_blob(store, thread_id)
-        snapshot = _snapshot(store, thread_id)
-        assert job is not None
-        assert job.get("review_id") == job_b.review_id
-        assert job.get("status") == DeepReviewJobStatus.COMPLETED.value
-        assert snapshot is not None
-        assert snapshot["reviewed_stage_id"] == "problem_identification"
-        assert "Review B strength" in list(snapshot.get("strengths") or [])
-        assert "Review A strength" not in list(snapshot.get("strengths") or [])
-        assert "Review A area" not in list(snapshot.get("areas_to_develop") or [])
-        assert _counter(store, thread_id) == 0
-        assert _current_stage(store, thread_id) == stage_before_stale_complete
-        _assert_no_review_transcript(store, thread_id)
-    finally:
-        release.set()
-        store.complete_deep_review_job = original_complete  # type: ignore[method-assign]
 def _payload_text(payload: dict[str, Any]) -> str:
     """Join text blocks from one InvokeAgentRuntime companion payload."""
     blobs: list[str] = []

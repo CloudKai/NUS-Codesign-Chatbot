@@ -2211,13 +2211,19 @@ def _render_critical_thinking(client) -> None:
 
 def _render_engagement(client) -> None:
     """Render meaningful usage patterns without rewarding high message volume."""
-    with st.expander('Lecture help and project progression'):
+    with st.expander('Design feedback and project progression'):
         try:
             funnel = client.professor_learning_funnel().model_dump()
         except Exception:
             st.info('Learning measures are unavailable. Reopen this page to retry.')
         else:
-            for group, title in [('lecture_help', 'Lecture help'), ('project_work', 'Project work')]:
+            for group, title in [
+                ('improve_design', 'Improve my design'),
+                ('lecture_help', 'Historical Lecture help'),
+                ('project_work', 'Project work'),
+            ]:
+                if not funnel[group]:
+                    continue
                 st.markdown(f'**{title}**')
                 for name, measure in funnel[group].items():
                     label = name.replace('_', ' ').capitalize()

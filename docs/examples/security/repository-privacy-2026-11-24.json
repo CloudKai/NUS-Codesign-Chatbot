@@ -1,0 +1,1945 @@
+{
+  "audit_date_sgt": "2026-11-24",
+  "revision": "4f12995afbfba4c5c975ad12eb9874fcd4cfea39",
+  "scope": "Current tracked working-tree bytes; excludes ignored/private files, history, remote state and binary content certification",
+  "tracked_count": 865,
+  "extensions": {
+    ".md": 97,
+    ".json": 52,
+    ".txt": 89,
+    ".py": 452,
+    ".zip": 1,
+    ".tsv": 4,
+    ".sh": 8,
+    "": 6,
+    ".example": 2,
+    ".yml": 14,
+    ".log": 10,
+    ".toml": 2,
+    ".local": 1,
+    ".yaml": 4,
+    ".pptx": 1,
+    ".jsonl": 7,
+    ".html": 1,
+    ".ts": 34,
+    ".png": 1,
+    ".ttf": 2,
+    ".woff2": 1,
+    ".mjs": 1,
+    ".tsx": 22,
+    ".css": 14,
+    ".pdf": 10,
+    ".js": 29
+  },
+  "groups": {
+    "agent_evidence": [
+      {
+        "path": ".agents/tasks/headtohead-2026-11-20.md",
+        "bytes": 31037
+      },
+      {
+        "path": ".agents/tasks/headtohead-prereg/kb-gate.json",
+        "bytes": 79687
+      },
+      {
+        "path": ".agents/tasks/headtohead-prereg/plan.md",
+        "bytes": 21279
+      },
+      {
+        "path": ".agents/tasks/phase1-backend-correctness-2026-11-19.md",
+        "bytes": 15560
+      },
+      {
+        "path": ".agents/tasks/phase1-choices.md",
+        "bytes": 2899
+      },
+      {
+        "path": ".agents/tasks/phase1-item4-finding.md",
+        "bytes": 3449
+      },
+      {
+        "path": ".agents/tasks/phase1-review.json",
+        "bytes": 126
+      },
+      {
+        "path": ".agents/tasks/phase1-review.md",
+        "bytes": 3301
+      },
+      {
+        "path": ".agents/tasks/phase2-retrieval-eval-2026-11-19.md",
+        "bytes": 20601
+      },
+      {
+        "path": ".agents/tasks/phase3-2026-11-19.md",
+        "bytes": 25640
+      },
+      {
+        "path": ".agents/tasks/phase3b-2026-11-19.md",
+        "bytes": 37154
+      },
+      {
+        "path": ".agents/tasks/phase3b-work/after-c.json",
+        "bytes": 29524
+      },
+      {
+        "path": ".agents/tasks/phase3b-work/item-c-notes.md",
+        "bytes": 17468
+      },
+      {
+        "path": ".agents/tasks/phase3c-2026-11-19.md",
+        "bytes": 36729
+      },
+      {
+        "path": ".agents/tasks/phase3c-work/live-item1-greetings-on-off.json",
+        "bytes": 58881
+      },
+      {
+        "path": ".agents/tasks/phase3c-work/live-item3-baseline.json",
+        "bytes": 84038
+      },
+      {
+        "path": ".agents/tasks/phase3c-work/live-item3-titles.json",
+        "bytes": 82678
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/course-intent-by-turn-extra.json",
+        "bytes": 7554
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/course-intent-by-turn.json",
+        "bytes": 60458
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/course-intent-compact-v2.json",
+        "bytes": 56260
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/course-intent-followups-v2.json",
+        "bytes": 4887
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/multilingual-concurrency8.json",
+        "bytes": 44650
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/multilingual.json",
+        "bytes": 44477
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/report.json",
+        "bytes": 56431
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/sol-teacher/README.md",
+        "bytes": 1361
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/sol-teacher/evaluation.txt",
+        "bytes": 4765
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/sol-teacher/report.json",
+        "bytes": 68886
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/sol-teacher/run.py",
+        "bytes": 5012
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/sol-teacher/sol-learner.zip",
+        "bytes": 1271413
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/sol-teacher/training.txt",
+        "bytes": 3089
+      },
+      {
+        "path": ".agents/tasks/phase3d-work/typed-decisions.json",
+        "bytes": 44452
+      },
+      {
+        "path": ".agents/tasks/phase4-2026-11-19.md",
+        "bytes": 59584
+      },
+      {
+        "path": ".agents/tasks/phase4-work/item2-combined-gate.json",
+        "bytes": 1292968
+      },
+      {
+        "path": ".agents/tasks/phase4-work/item3-harness-stub.json",
+        "bytes": 2431
+      },
+      {
+        "path": ".agents/tasks/phase4-work/item4-first-text-after.json",
+        "bytes": 1360
+      },
+      {
+        "path": ".agents/tasks/phase4-work/item4-first-text-before.json",
+        "bytes": 1217
+      },
+      {
+        "path": ".agents/tasks/phase4-work/item4-notes.md",
+        "bytes": 13674
+      },
+      {
+        "path": ".agents/tasks/phase4-work/item5-notes.md",
+        "bytes": 11295
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/benchmark_agentcore_vs_converse_dry_run.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/benchmark_agentcore_vs_converse_dry_run.after.stdout.txt",
+        "bytes": 378
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/benchmark_agentcore_vs_converse_refusal.after.stderr.txt",
+        "bytes": 66
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/benchmark_agentcore_vs_converse_refusal.after.stdout.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/benchmark_course_intent_stub.after.json",
+        "bytes": 2432
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/benchmark_course_intent_stub.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/benchmark_course_intent_stub.after.stdout.txt",
+        "bytes": 2286
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/diff-outputs.after.txt",
+        "bytes": 1870
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_combined_gate.after.json",
+        "bytes": 1292968
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_combined_gate.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_combined_gate.after.stdout.txt",
+        "bytes": 43259
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_fast_chat_regression_dry_run.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_fast_chat_regression_dry_run.after.stdout.txt",
+        "bytes": 1389
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_retrieval.after.json",
+        "bytes": 45144
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_retrieval.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_retrieval.after.stdout.txt",
+        "bytes": 5404
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_retrieval_live_kb_refusal.after.stderr.txt",
+        "bytes": 83
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/evaluate_retrieval_live_kb_refusal.after.stdout.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/exit-codes.after.tsv",
+        "bytes": 605
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/fast_chat_quality_matrix_dry_run.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/fast_chat_quality_matrix_dry_run.after.stdout.txt",
+        "bytes": 682
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/gate-decisions-after.json",
+        "bytes": 165736
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_benchmark_agentcore_vs_converse.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_benchmark_agentcore_vs_converse.after.stdout.txt",
+        "bytes": 1013
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_benchmark_course_intent.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_benchmark_course_intent.after.stdout.txt",
+        "bytes": 1022
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_compare_turn_routes.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_compare_turn_routes.after.stdout.txt",
+        "bytes": 467
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_combined_gate.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_combined_gate.after.stdout.txt",
+        "bytes": 2775
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_course_intent.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_course_intent.after.stdout.txt",
+        "bytes": 481
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_course_intent_learn.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_course_intent_learn.after.stdout.txt",
+        "bytes": 428
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_laya_turn_decisions.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_laya_turn_decisions.after.stdout.txt",
+        "bytes": 536
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_passage_support.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_passage_support.after.stdout.txt",
+        "bytes": 524
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_retrieval.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/help_evaluate_retrieval.after.stdout.txt",
+        "bytes": 3076
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/measure_stream_first_text.after.json",
+        "bytes": 1361
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/measure_stream_first_text.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/measure_stream_first_text.after.stdout.txt",
+        "bytes": 1361
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/stub_snapshots.after.json",
+        "bytes": 451916
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/stub_snapshots.after.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/after/stub_snapshots.after.stdout.txt",
+        "bytes": 70
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/benchmark_agentcore_vs_converse_dry_run.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/benchmark_agentcore_vs_converse_dry_run.before.stdout.txt",
+        "bytes": 378
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/benchmark_agentcore_vs_converse_refusal.before.stderr.txt",
+        "bytes": 66
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/benchmark_agentcore_vs_converse_refusal.before.stdout.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/benchmark_course_intent_stub.before.json",
+        "bytes": 2434
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/benchmark_course_intent_stub.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/benchmark_course_intent_stub.before.stdout.txt",
+        "bytes": 2288
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/commands.md",
+        "bytes": 10534
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/diff_outputs.py",
+        "bytes": 4464
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/dump_gate_decisions.py",
+        "bytes": 3935
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_combined_gate.before.json",
+        "bytes": 1292968
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_combined_gate.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_combined_gate.before.stdout.txt",
+        "bytes": 43259
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_fast_chat_regression_dry_run.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_fast_chat_regression_dry_run.before.stdout.txt",
+        "bytes": 1389
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_retrieval.before.json",
+        "bytes": 45144
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_retrieval.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_retrieval.before.stdout.txt",
+        "bytes": 5404
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_retrieval_live_kb_refusal.before.stderr.txt",
+        "bytes": 83
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/evaluate_retrieval_live_kb_refusal.before.stdout.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/exit-codes.before.tsv",
+        "bytes": 605
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/fast_chat_quality_matrix_dry_run.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/fast_chat_quality_matrix_dry_run.before.stdout.txt",
+        "bytes": 682
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/gate-decisions-after.json",
+        "bytes": 165736
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/gate-decisions-before.json",
+        "bytes": 165736
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_benchmark_agentcore_vs_converse.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_benchmark_agentcore_vs_converse.before.stdout.txt",
+        "bytes": 1013
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_benchmark_course_intent.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_benchmark_course_intent.before.stdout.txt",
+        "bytes": 1022
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_compare_turn_routes.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_compare_turn_routes.before.stdout.txt",
+        "bytes": 467
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_combined_gate.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_combined_gate.before.stdout.txt",
+        "bytes": 2775
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_course_intent.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_course_intent.before.stdout.txt",
+        "bytes": 481
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_course_intent_learn.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_course_intent_learn.before.stdout.txt",
+        "bytes": 428
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_laya_turn_decisions.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_laya_turn_decisions.before.stdout.txt",
+        "bytes": 536
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_passage_support.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_passage_support.before.stdout.txt",
+        "bytes": 524
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_retrieval.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/help_evaluate_retrieval.before.stdout.txt",
+        "bytes": 3076
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/measure_stream_first_text.before.json",
+        "bytes": 1361
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/measure_stream_first_text.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/measure_stream_first_text.before.stdout.txt",
+        "bytes": 1361
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/run_offline_evals.sh",
+        "bytes": 3459
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/stub_snapshots.before.json",
+        "bytes": 451916
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/stub_snapshots.before.stderr.txt",
+        "bytes": 0
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/stub_snapshots.before.stdout.txt",
+        "bytes": 65
+      },
+      {
+        "path": ".agents/tasks/refactor-baseline/stub_snapshots.py",
+        "bytes": 7596
+      },
+      {
+        "path": ".agents/tasks/refactor-evidence-scope-2026-11-20.md",
+        "bytes": 40525
+      },
+      {
+        "path": ".agents/tasks/refactor-evidence-scope/item1-offline-diff.txt",
+        "bytes": 2033
+      },
+      {
+        "path": ".agents/tasks/refactor-evidence-scope/legacy-cross-product.json",
+        "bytes": 1427294
+      },
+      {
+        "path": ".agents/tasks/refactor-evidence-scope/legacy_gate_snapshot.py",
+        "bytes": 3091
+      },
+      {
+        "path": ".agents/tasks/refactor-evidence-scope/plan.md",
+        "bytes": 43764
+      }
+    ],
+    "browser": [
+      {
+        "path": ".playwright-cli/brief-3e311707-faa6-46db-b6a7-a272212b15b8-summary.md",
+        "bytes": 528
+      },
+      {
+        "path": ".playwright-cli/brief-458bb92a-fed8-49e8-920f-12c805d1ab49-summary-1.md",
+        "bytes": 528
+      },
+      {
+        "path": ".playwright-cli/brief-458bb92a-fed8-49e8-920f-12c805d1ab49-summary-2.md",
+        "bytes": 528
+      },
+      {
+        "path": ".playwright-cli/brief-458bb92a-fed8-49e8-920f-12c805d1ab49-summary.md",
+        "bytes": 528
+      },
+      {
+        "path": ".playwright-cli/brief-ab5cd9b0-9b68-4dfd-9c1a-565b3c0b32eb-summary.md",
+        "bytes": 528
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T11-26-55-064Z.log",
+        "bytes": 89284
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T14-40-08-979Z.log",
+        "bytes": 1090
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T14-45-08-903Z.log",
+        "bytes": 1090
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T15-02-04-719Z.log",
+        "bytes": 712
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T15-19-06-476Z.log",
+        "bytes": 1215
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T15-51-58-817Z.log",
+        "bytes": 22034
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T17-01-18-966Z.log",
+        "bytes": 590
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T17-21-08-845Z.log",
+        "bytes": 799
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T17-46-49-416Z.log",
+        "bytes": 590
+      },
+      {
+        "path": ".playwright-cli/console-2026-11-22T17-56-24-925Z.log",
+        "bytes": 590
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T11-26-55-276Z.yml",
+        "bytes": 778
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T14-40-09-183Z.yml",
+        "bytes": 778
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T14-45-09-084Z.yml",
+        "bytes": 969
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T15-02-05-045Z.yml",
+        "bytes": 969
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T15-19-06-612Z.yml",
+        "bytes": 969
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T15-52-00-874Z.yml",
+        "bytes": 30
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T17-01-19-247Z.yml",
+        "bytes": 778
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T17-21-09-110Z.yml",
+        "bytes": 969
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T17-46-49-627Z.yml",
+        "bytes": 969
+      },
+      {
+        "path": ".playwright-cli/page-2026-11-22T17-56-25-138Z.yml",
+        "bytes": 778
+      }
+    ],
+    "course": [
+      {
+        "path": "lecture_notes/README.txt",
+        "bytes": 1488
+      },
+      {
+        "path": "lecture_notes/lectureNotes/Week 1 Introduction to innovation v3.pdf",
+        "bytes": 5901692
+      },
+      {
+        "path": "lecture_notes/lectureNotes/Week 10 Storytelling.pdf",
+        "bytes": 1281474
+      },
+      {
+        "path": "lecture_notes/lectureNotes/Week 2 JTBD Framework Term 1 2026.pdf",
+        "bytes": 7332092
+      },
+      {
+        "path": "lecture_notes/lectureNotes/Week 4 Affinity Clusters Product Values and Features Oxymoron.pdf",
+        "bytes": 4714364
+      },
+      {
+        "path": "lecture_notes/lectureNotes/Week 7 Concept Generation, Prioritization, Prototyping 2 Mar 2026.pdf",
+        "bytes": 6799039
+      },
+      {
+        "path": "lecture_notes/lectureNotes/Week 8 Prototyping Plan Metaphors Analogy in Design v0.pdf",
+        "bytes": 3282076
+      },
+      {
+        "path": "lecture_notes/lectureNotes/Week 9 Testing Feedback Poster Design Affordance GenAI.pdf",
+        "bytes": 19661095
+      },
+      {
+        "path": "lecture_notes/readings/Reading 1 How Pixar fosters collective creativity.pdf",
+        "bytes": 756439
+      },
+      {
+        "path": "lecture_notes/readings/Reading 2 engaging-personas.pdf",
+        "bytes": 818689
+      },
+      {
+        "path": "lecture_notes/readings/Reading 3 A-technique-for-getting-ideas-james-webb-young.pdf",
+        "bytes": 215977
+      }
+    ],
+    "eval_datasets": [
+      {
+        "path": "scripts/evals/datasets/README.md",
+        "bytes": 13311
+      },
+      {
+        "path": "scripts/evals/datasets/course_materials.json",
+        "bytes": 4773
+      },
+      {
+        "path": "scripts/evals/datasets/laya_routing_training.synthetic.tsv",
+        "bytes": 4709
+      },
+      {
+        "path": "scripts/evals/datasets/laya_sufficiency_training.synthetic.tsv",
+        "bytes": 5203
+      },
+      {
+        "path": "scripts/evals/datasets/passage_fact_labels.json",
+        "bytes": 7222
+      },
+      {
+        "path": "scripts/evals/datasets/retrieval_gate_followups.synthetic.jsonl",
+        "bytes": 7987
+      },
+      {
+        "path": "scripts/evals/datasets/retrieval_gate_messages.synthetic.jsonl",
+        "bytes": 138746
+      },
+      {
+        "path": "scripts/evals/datasets/retrieval_questions.jsonl",
+        "bytes": 36066
+      },
+      {
+        "path": "scripts/evals/datasets/routing_calibration.synthetic.jsonl",
+        "bytes": 2995
+      },
+      {
+        "path": "scripts/evals/datasets/routing_fresh.synthetic.jsonl",
+        "bytes": 7883
+      },
+      {
+        "path": "scripts/evals/datasets/routing_matched_train.jsonl",
+        "bytes": 11415
+      }
+    ],
+    "fixtures": [
+      {
+        "path": "tests/fixtures/coaching_behavior_cases.json",
+        "bytes": 20597
+      },
+      {
+        "path": "tests/fixtures/coaching_prompt_baseline.json",
+        "bytes": 3599
+      },
+      {
+        "path": "tests/fixtures/fast_chat_quality_matrix.json",
+        "bytes": 5720
+      }
+    ]
+  },
+  "binary_inventory": [
+    {
+      "path": ".agents/tasks/phase3d-work/sol-teacher/sol-learner.zip",
+      "bytes": 1271413
+    },
+    {
+      "path": "docs/CDE2300_Design_Thinking_Companion_System_Documentation.pptx",
+      "bytes": 6192102
+    },
+    {
+      "path": "frontend/public/favicon.png",
+      "bytes": 2410
+    },
+    {
+      "path": "frontend/public/fonts/ibm-plex-sans.ttf",
+      "bytes": 537244
+    },
+    {
+      "path": "frontend/public/fonts/inter-latin-wght-normal.woff2",
+      "bytes": 48256
+    },
+    {
+      "path": "frontend/public/fonts/source-serif-4.ttf",
+      "bytes": 1209508
+    },
+    {
+      "path": "lecture_notes/lectureNotes/Week 1 Introduction to innovation v3.pdf",
+      "bytes": 5901692
+    },
+    {
+      "path": "lecture_notes/lectureNotes/Week 10 Storytelling.pdf",
+      "bytes": 1281474
+    },
+    {
+      "path": "lecture_notes/lectureNotes/Week 2 JTBD Framework Term 1 2026.pdf",
+      "bytes": 7332092
+    },
+    {
+      "path": "lecture_notes/lectureNotes/Week 4 Affinity Clusters Product Values and Features Oxymoron.pdf",
+      "bytes": 4714364
+    },
+    {
+      "path": "lecture_notes/lectureNotes/Week 7 Concept Generation, Prioritization, Prototyping 2 Mar 2026.pdf",
+      "bytes": 6799039
+    },
+    {
+      "path": "lecture_notes/lectureNotes/Week 8 Prototyping Plan Metaphors Analogy in Design v0.pdf",
+      "bytes": 3282076
+    },
+    {
+      "path": "lecture_notes/lectureNotes/Week 9 Testing Feedback Poster Design Affordance GenAI.pdf",
+      "bytes": 19661095
+    },
+    {
+      "path": "lecture_notes/readings/Reading 1 How Pixar fosters collective creativity.pdf",
+      "bytes": 756439
+    },
+    {
+      "path": "lecture_notes/readings/Reading 2 engaging-personas.pdf",
+      "bytes": 818689
+    },
+    {
+      "path": "lecture_notes/readings/Reading 3 A-technique-for-getting-ideas-james-webb-young.pdf",
+      "bytes": 215977
+    }
+  ],
+  "text_rule_results": {
+    "private_key": {
+      "files": 0,
+      "line_locations": 0,
+      "locations": []
+    },
+    "aws_access_key": {
+      "files": 0,
+      "line_locations": 0,
+      "locations": []
+    },
+    "provider_token": {
+      "files": 1,
+      "line_locations": 1,
+      "locations": [
+        {
+          "path": "tests/http/test_security_readiness.py",
+          "lines": [
+            773
+          ]
+        }
+      ]
+    },
+    "jwt_shape": {
+      "files": 0,
+      "line_locations": 0,
+      "locations": []
+    },
+    "email_shape": {
+      "files": 24,
+      "line_locations": 95,
+      "locations": [
+        {
+          "path": ".agents/tasks/headtohead-2026-11-20.md",
+          "lines": [
+            262
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase1-backend-correctness-2026-11-19.md",
+          "lines": [
+            124
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase1-review.md",
+          "lines": [
+            6
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3-2026-11-19.md",
+          "lines": [
+            170
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3b-2026-11-19.md",
+          "lines": [
+            269
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3c-2026-11-19.md",
+          "lines": [
+            344
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase4-2026-11-19.md",
+          "lines": [
+            433,
+            439
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase4-work/item4-notes.md",
+          "lines": [
+            7
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase4-work/item5-notes.md",
+          "lines": [
+            89
+          ]
+        },
+        {
+          "path": ".agents/tasks/refactor-evidence-scope-2026-11-20.md",
+          "lines": [
+            93,
+            174
+          ]
+        },
+        {
+          "path": ".agents/tasks/refactor-evidence-scope/plan.md",
+          "lines": [
+            11
+          ]
+        },
+        {
+          "path": "tests/conftest.py",
+          "lines": [
+            204,
+            219
+          ]
+        },
+        {
+          "path": "tests/http/test_api.py",
+          "lines": [
+            48,
+            1027
+          ]
+        },
+        {
+          "path": "tests/http/test_api_client.py",
+          "lines": [
+            209,
+            223,
+            233,
+            255
+          ]
+        },
+        {
+          "path": "tests/http/test_app_sessions.py",
+          "lines": [
+            222,
+            228,
+            238,
+            261,
+            267,
+            270,
+            335,
+            434,
+            472,
+            478,
+            481,
+            482,
+            504,
+            508,
+            577,
+            603,
+            615,
+            618,
+            729,
+            732,
+            815,
+            816,
+            955,
+            1057,
+            1139,
+            1142,
+            1147
+          ]
+        },
+        {
+          "path": "tests/http/test_cognito_token_jwks.py",
+          "lines": [
+            85
+          ]
+        },
+        {
+          "path": "tests/http/test_guest_access.py",
+          "lines": [
+            205,
+            208,
+            348,
+            349,
+            376,
+            421,
+            438,
+            441,
+            533,
+            534,
+            603,
+            604,
+            709,
+            710
+          ]
+        },
+        {
+          "path": "tests/http/test_multiuser_ownership.py",
+          "lines": [
+            134,
+            135,
+            152,
+            200,
+            201,
+            220
+          ]
+        },
+        {
+          "path": "tests/http/test_production_critical_path.py",
+          "lines": [
+            72
+          ]
+        },
+        {
+          "path": "tests/http/test_professor_analytics.py",
+          "lines": [
+            239
+          ]
+        },
+        {
+          "path": "tests/persistence/test_research_persistence.py",
+          "lines": [
+            77,
+            88
+          ]
+        },
+        {
+          "path": "tests/persistence/test_student_store.py",
+          "lines": [
+            369,
+            404,
+            498,
+            591,
+            616
+          ]
+        },
+        {
+          "path": "tests/ui/test_auth_gate.py",
+          "lines": [
+            33,
+            44,
+            543,
+            553,
+            756,
+            763,
+            779,
+            796,
+            807,
+            819,
+            827,
+            833,
+            841,
+            848,
+            951,
+            977
+          ]
+        },
+        {
+          "path": "tests/ui/test_nav_layout.py",
+          "lines": [
+            119
+          ]
+        }
+      ]
+    },
+    "aws_locator": {
+      "files": 52,
+      "line_locations": 99,
+      "locations": [
+        {
+          "path": ".agents/tasks/headtohead-2026-11-20.md",
+          "lines": [
+            190
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3b-2026-11-19.md",
+          "lines": [
+            227,
+            228,
+            229
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3c-2026-11-19.md",
+          "lines": [
+            326,
+            327,
+            328
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3d-work/multilingual.json",
+          "lines": [
+            414
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3d-work/typed-decisions.json",
+          "lines": [
+            534,
+            584,
+            634,
+            664,
+            1194,
+            1624,
+            1704
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase4-2026-11-19.md",
+          "lines": [
+            135,
+            136,
+            137,
+            325,
+            344
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase4-work/item5-notes.md",
+          "lines": [
+            50,
+            54
+          ]
+        },
+        {
+          "path": ".env.example",
+          "lines": [
+            226
+          ]
+        },
+        {
+          "path": "docs/IMPLEMENTATION_STATUS.md",
+          "lines": [
+            1614
+          ]
+        },
+        {
+          "path": "docs/RETRIEVAL_EVAL.md",
+          "lines": [
+            699,
+            700,
+            702,
+            1639,
+            1828,
+            1829,
+            1846,
+            1847,
+            1848
+          ]
+        },
+        {
+          "path": "docs/deploy/AWS_STATELESS_EC2.md",
+          "lines": [
+            544,
+            553,
+            715,
+            745
+          ]
+        },
+        {
+          "path": "docs/operations/BEDROCK_WORKSHOP_AND_CHATBOT_RESEARCH.md",
+          "lines": [
+            40
+          ]
+        },
+        {
+          "path": "docs/providers/MODEL_PROVIDERS.md",
+          "lines": [
+            95
+          ]
+        },
+        {
+          "path": "scripts/deploy_ecr.sh",
+          "lines": [
+            6
+          ]
+        },
+        {
+          "path": "scripts/evals/benchmark_agentcore_vs_converse.py",
+          "lines": [
+            179
+          ]
+        },
+        {
+          "path": "tests/domain/test_agentcore_harness_provider.py",
+          "lines": [
+            101,
+            138,
+            183,
+            193
+          ]
+        },
+        {
+          "path": "tests/domain/test_agentcore_provider.py",
+          "lines": [
+            55
+          ]
+        },
+        {
+          "path": "tests/domain/test_agentcore_session_affinity.py",
+          "lines": [
+            37
+          ]
+        },
+        {
+          "path": "tests/domain/test_agentcore_specialists.py",
+          "lines": [
+            39
+          ]
+        },
+        {
+          "path": "tests/domain/test_bedrock_retrieve.py",
+          "lines": [
+            1417,
+            1428,
+            1457
+          ]
+        },
+        {
+          "path": "tests/domain/test_botocore_retry_config.py",
+          "lines": [
+            80,
+            103,
+            144
+          ]
+        },
+        {
+          "path": "tests/domain/test_citation_resolution.py",
+          "lines": [
+            30
+          ]
+        },
+        {
+          "path": "tests/domain/test_coach_progress.py",
+          "lines": [
+            23
+          ]
+        },
+        {
+          "path": "tests/domain/test_coach_turn_perf.py",
+          "lines": [
+            25
+          ]
+        },
+        {
+          "path": "tests/domain/test_course_library_chat_context.py",
+          "lines": [
+            47
+          ]
+        },
+        {
+          "path": "tests/domain/test_deep_review_execution.py",
+          "lines": [
+            45
+          ]
+        },
+        {
+          "path": "tests/domain/test_fast_chat_one_call.py",
+          "lines": [
+            22
+          ]
+        },
+        {
+          "path": "tests/domain/test_fast_chat_recommendation_default.py",
+          "lines": [
+            35
+          ]
+        },
+        {
+          "path": "tests/domain/test_hmw_scaffold_gate.py",
+          "lines": [
+            37
+          ]
+        },
+        {
+          "path": "tests/domain/test_hybrid_agentcore.py",
+          "lines": [
+            36
+          ]
+        },
+        {
+          "path": "tests/domain/test_legacy_path_containment.py",
+          "lines": [
+            41
+          ]
+        },
+        {
+          "path": "tests/domain/test_mode_classification.py",
+          "lines": [
+            56
+          ]
+        },
+        {
+          "path": "tests/domain/test_needs_sources.py",
+          "lines": [
+            63
+          ]
+        },
+        {
+          "path": "tests/domain/test_progression_effect.py",
+          "lines": [
+            41
+          ]
+        },
+        {
+          "path": "tests/domain/test_qa_grounding.py",
+          "lines": [
+            32
+          ]
+        },
+        {
+          "path": "tests/domain/test_rag_fallback.py",
+          "lines": [
+            44
+          ]
+        },
+        {
+          "path": "tests/domain/test_review_agent.py",
+          "lines": [
+            44
+          ]
+        },
+        {
+          "path": "tests/domain/test_security_invariants.py",
+          "lines": [
+            20
+          ]
+        },
+        {
+          "path": "tests/domain/test_source_hydration_ops.py",
+          "lines": [
+            53
+          ]
+        },
+        {
+          "path": "tests/domain/test_student_chunk_security.py",
+          "lines": [
+            35
+          ]
+        },
+        {
+          "path": "tests/domain/test_upload_retrieval_policy.py",
+          "lines": [
+            46
+          ]
+        },
+        {
+          "path": "tests/http/test_cognito_token_jwks.py",
+          "lines": [
+            47
+          ]
+        },
+        {
+          "path": "tests/http/test_cost_usage.py",
+          "lines": [
+            140,
+            184
+          ]
+        },
+        {
+          "path": "tests/http/test_generation_admission.py",
+          "lines": [
+            364
+          ]
+        },
+        {
+          "path": "tests/http/test_production_config.py",
+          "lines": [
+            19,
+            146,
+            166,
+            184,
+            264,
+            286,
+            314
+          ]
+        },
+        {
+          "path": "tests/http/test_project_brief.py",
+          "lines": [
+            128
+          ]
+        },
+        {
+          "path": "tests/http/test_security_readiness.py",
+          "lines": [
+            773
+          ]
+        },
+        {
+          "path": "tests/persistence/test_delete_idempotency.py",
+          "lines": [
+            422
+          ]
+        },
+        {
+          "path": "tests/scripts/test_benchmark_agentcore_vs_converse.py",
+          "lines": [
+            17,
+            236
+          ]
+        },
+        {
+          "path": "tests/scripts/test_evaluate_fast_chat_regression.py",
+          "lines": [
+            78
+          ]
+        },
+        {
+          "path": "tests/test_infra_templates.py",
+          "lines": [
+            146,
+            214,
+            216,
+            229,
+            231
+          ]
+        },
+        {
+          "path": "tests/ui/test_streamlit_ui.py",
+          "lines": [
+            1588,
+            1619,
+            1692
+          ]
+        }
+      ]
+    },
+    "credential_assignment": {
+      "files": 31,
+      "line_locations": 65,
+      "locations": [
+        {
+          "path": ".agents/tasks/headtohead-2026-11-20.md",
+          "lines": [
+            245
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase1-backend-correctness-2026-11-19.md",
+          "lines": [
+            15
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3-2026-11-19.md",
+          "lines": [
+            158
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3b-2026-11-19.md",
+          "lines": [
+            255
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase3c-2026-11-19.md",
+          "lines": [
+            334
+          ]
+        },
+        {
+          "path": ".agents/tasks/phase4-2026-11-19.md",
+          "lines": [
+            417
+          ]
+        },
+        {
+          "path": ".agents/tasks/refactor-baseline/commands.md",
+          "lines": [
+            8
+          ]
+        },
+        {
+          "path": ".agents/tasks/refactor-baseline/run_offline_evals.sh",
+          "lines": [
+            21
+          ]
+        },
+        {
+          "path": ".agents/tasks/refactor-evidence-scope-2026-11-20.md",
+          "lines": [
+            272
+          ]
+        },
+        {
+          "path": ".agents/tasks/refactor-evidence-scope/plan.md",
+          "lines": [
+            8
+          ]
+        },
+        {
+          "path": ".streamlit/secrets.toml.example",
+          "lines": [
+            15
+          ]
+        },
+        {
+          "path": "backend/auth_oidc.py",
+          "lines": [
+            186,
+            258,
+            259,
+            365,
+            383
+          ]
+        },
+        {
+          "path": "backend/auth_routes.py",
+          "lines": [
+            324,
+            327,
+            358,
+            369,
+            417,
+            428,
+            429
+          ]
+        },
+        {
+          "path": "backend/chat_service.py",
+          "lines": [
+            553
+          ]
+        },
+        {
+          "path": "backend/providers.py",
+          "lines": [
+            103
+          ]
+        },
+        {
+          "path": "docs/LOCAL_DEMO_IMPLEMENTATION.md",
+          "lines": [
+            532
+          ]
+        },
+        {
+          "path": "docs/RETRIEVAL_EVAL.md",
+          "lines": [
+            40
+          ]
+        },
+        {
+          "path": "frontend/src/api/generated/client/utils.gen.ts",
+          "lines": [
+            146
+          ]
+        },
+        {
+          "path": "scripts/evals/measure_stream_first_text.py",
+          "lines": [
+            22
+          ]
+        },
+        {
+          "path": "scripts/load_probe.py",
+          "lines": [
+            566
+          ]
+        },
+        {
+          "path": "tests/domain/test_files_and_engine.py",
+          "lines": [
+            344
+          ]
+        },
+        {
+          "path": "tests/domain/test_prompt_architecture.py",
+          "lines": [
+            805
+          ]
+        },
+        {
+          "path": "tests/http/test_api_client.py",
+          "lines": [
+            239
+          ]
+        },
+        {
+          "path": "tests/http/test_app_sessions.py",
+          "lines": [
+            83,
+            149,
+            227,
+            266,
+            283,
+            334,
+            410,
+            508,
+            622,
+            636,
+            701,
+            1146,
+            1153,
+            1203,
+            1249
+          ]
+        },
+        {
+          "path": "tests/http/test_cognito_token_jwks.py",
+          "lines": [
+            26,
+            46,
+            68
+          ]
+        },
+        {
+          "path": "tests/http/test_guest_access.py",
+          "lines": [
+            794,
+            857
+          ]
+        },
+        {
+          "path": "tests/http/test_multiuser_ownership.py",
+          "lines": [
+            45
+          ]
+        },
+        {
+          "path": "tests/http/test_production_config.py",
+          "lines": [
+            17,
+            415
+          ]
+        },
+        {
+          "path": "tests/http/test_production_critical_path.py",
+          "lines": [
+            63,
+            71
+          ]
+        },
+        {
+          "path": "tests/http/test_professor_analytics.py",
+          "lines": [
+            33,
+            161,
+            286
+          ]
+        },
+        {
+          "path": "tests/http/test_professor_research.py",
+          "lines": [
+            200,
+            266,
+            270,
+            272
+          ]
+        }
+      ]
+    }
+  },
+  "limits": [
+    "Pattern matches are candidates, not proven active credentials or personal records.",
+    "No comprehensive secret scanner installed; no entropy, encoded-secret or Git-history scan.",
+    "PDFs, slides, embedded images and learned weights require owner/rights/provenance review before redistribution.",
+    "No deletion, untracking, credential rotation, live calls or data migration."
+  ],
+  "text_files_scanned": 849,
+  "browser_metadata": [
+    {
+      "path": ".playwright-cli/brief-3e311707-faa6-46db-b6a7-a272212b15b8-summary.md",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/brief-458bb92a-fed8-49e8-920f-12c805d1ab49-summary-1.md",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/brief-458bb92a-fed8-49e8-920f-12c805d1ab49-summary-2.md",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/brief-458bb92a-fed8-49e8-920f-12c805d1ab49-summary.md",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/brief-ab5cd9b0-9b68-4dfd-9c1a-565b3c0b32eb-summary.md",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T11-26-55-064Z.log",
+      "url_count": 731,
+      "loopback_url_count": 731,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T14-40-08-979Z.log",
+      "url_count": 6,
+      "loopback_url_count": 6,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T14-45-08-903Z.log",
+      "url_count": 6,
+      "loopback_url_count": 6,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T15-02-04-719Z.log",
+      "url_count": 5,
+      "loopback_url_count": 5,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T15-19-06-476Z.log",
+      "url_count": 7,
+      "loopback_url_count": 7,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T15-51-58-817Z.log",
+      "url_count": 139,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T17-01-18-966Z.log",
+      "url_count": 4,
+      "loopback_url_count": 4,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T17-21-08-845Z.log",
+      "url_count": 5,
+      "loopback_url_count": 5,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T17-46-49-416Z.log",
+      "url_count": 4,
+      "loopback_url_count": 4,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/console-2026-11-22T17-56-24-925Z.log",
+      "url_count": 4,
+      "loopback_url_count": 4,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T11-26-55-276Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T14-40-09-183Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T14-45-09-084Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T15-02-05-045Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T15-19-06-612Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T15-52-00-874Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T17-01-19-247Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T17-21-09-110Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T17-46-49-627Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    },
+    {
+      "path": ".playwright-cli/page-2026-11-22T17-56-25-138Z.yml",
+      "url_count": 0,
+      "loopback_url_count": 0,
+      "query_or_fragment_url_count": 0,
+      "email_shape_count": 0,
+      "credential_term_count": 0
+    }
+  ],
+  "archive_metadata": [
+    {
+      "path": ".agents/tasks/phase3d-work/sol-teacher/sol-learner.zip",
+      "members": 2,
+      "expanded_bytes": 1370066,
+      "extensions": {
+        ".json": 1,
+        ".npz": 1
+      }
+    },
+    {
+      "path": "docs/CDE2300_Design_Thinking_Companion_System_Documentation.pptx",
+      "members": 76,
+      "expanded_bytes": 6966355,
+      "extensions": {
+        ".xml": 39,
+        "": 1,
+        ".rels": 31,
+        ".fntdata": 4,
+        ".png": 1
+      }
+    }
+  ]
+}

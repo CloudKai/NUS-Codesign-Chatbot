@@ -48,7 +48,8 @@ def _events(text: str, reason: str = 'end_turn') -> list[dict[str, Any]]:
 
 def test_request_uses_native_schema_without_mutating_the_framework_tool() -> None:
     """The unsupported tool-argument path must never reach Gemma."""
-    tool = _spec(); before = copy.deepcopy(tool)
+    tool = _spec()
+    before = copy.deepcopy(tool)
     model = gemma_native_model_class(_Responses)()
     request = model._format_request([], [tool], 'coach', {'any': {}})
     assert 'tools' not in request and 'tool_choice' not in request

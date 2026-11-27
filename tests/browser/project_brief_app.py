@@ -2,6 +2,8 @@
 import os
 from pathlib import Path
 
+from fastapi import FastAPI
+
 from backend import owner_context
 from backend.domain import CoachRequest, EducationalAssessment, ProjectBrief, ProviderAssessmentResult
 from backend.mock_provider import DeterministicCoachProvider
@@ -39,6 +41,12 @@ class ScriptedBriefModel(DeterministicCoachProvider):
             current_stage=request.current_stage, project_brief=brief))
 
 
-owner_context.configured_coach_provider = ScriptedBriefModel
-from backend.api import create_app
-app = create_app()
+def _create_scripted_app() -> FastAPI:
+    """Install the synthetic provider before importing the application façade."""
+    owner_context.configured_coach_provider = ScriptedBriefModel
+    from backend.api import create_app
+
+    return create_app()
+
+
+app = _create_scripted_app()

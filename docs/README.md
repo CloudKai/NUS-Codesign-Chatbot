@@ -7,13 +7,16 @@ Start with the [local setup](../README.md) to run the app offline.
 - [Architecture and package ownership](LOCAL_DEMO_IMPLEMENTATION.md)
 - [Database and migrations](DATABASE.md)
 - [Identity, guest access, and course material security](SECURITY_BOUNDARIES.md)
+- [Repository privacy inventory and publication review queue](security/PUBLIC_REPOSITORY_CONTENT_AUDIT.md)
 - [Retrieval and citations](RAG_ARCHITECTURE.md) and [prompt architecture](PROMPT_ARCHITECTURE.md)
+- [Coach context budgets and memory research](operations/COACH_CONTEXT_RESEARCH.md)
 - [Product brief](../PRODUCT.md), [glossary](../GLOSSARY.md), [React design](../frontend/DESIGN.md), and [Streamlit design](../DESIGN.md)
 
 ## Develop and test
 
-- Approved specs for [stage feedback in Summary](specs/STAGE_REVIEW_SUMMARY.md) and [starred messages](specs/STARRED_MESSAGES.md); [bookmark implementation evidence](specs/STARRED_MESSAGES_HANDOFF.md)
+- Approved specs for [stage feedback in Summary](specs/STAGE_REVIEW_SUMMARY.md), [starred messages](specs/STARRED_MESSAGES.md), and ["Improve my design" replacing Lecture help](specs/IMPROVE_MY_DESIGN.md); [bookmark implementation evidence](specs/STARRED_MESSAGES_HANDOFF.md)
 - [Contribution and issue workflow](CONTRIBUTING.md) and [implementation status](IMPLEMENTATION_STATUS.md)
+- [Approved architecture-completion spec and 53 local TDD tickets](../.scratch/architecture-completion/README.md)
 - [Whole-chat project brief and clean Summary](specs/PROJECT_BRIEF_HANDOFF.md)
 - [Normal/edited LLM reply streaming and AgentCore rollout](specs/REPLY_STREAMING_HANDOFF.md)
 - [Testing and mock load probes](TESTING.md); [Review refinement evidence](specs/REVIEW_REFINEMENTS_HANDOFF.md)
@@ -25,12 +28,15 @@ Start with the [local setup](../README.md) to run the app offline.
 - [AWS deployment runbook](deploy/AWS_STATELESS_EC2.md)
 - [AWS architecture proposal](deploy/AWS_ARCHITECTURE_PROPOSAL.md) (single self-healing app tier, templates in `infra/aws/`)
 - [Production release checklist](PRODUCTION_RELEASE_CHECKLIST.md)
+- [Deployment version manifest and Mantle safety verification](deploy/DEPLOYMENT_SAFETY_RECORD.md)
+- [Coordinated release and rollback rehearsal (ticket 51)](deploy/COORDINATED_RELEASE_REHEARSAL.md)
 - [Model providers](providers/MODEL_PROVIDERS.md)
 - [Required course Knowledge Base filters](KB_REQUIRED_MODE_RUNBOOK.md)
 
 ## Run the classroom
 
 - [Capacity and recovery rehearsal](operations/CLASSROOM_CAPACITY_GATE.md)
+- [Complete-workspace backup and recovery rehearsal](operations/WORKSPACE_RECOVERY_REHEARSAL.md)
 - [Gemma latency research and benchmark plan](operations/GEMMA_LATENCY_RESEARCH.md)
 - [AgentCore V2 cost and value for two classes](operations/AGENTCORE_V2_TWO_CLASS_VALUE.md)
 - [AgentCore V2 live comparison and rollback](operations/AGENTCORE_V2_LIVE_COMPARISON.md)

@@ -207,3 +207,107 @@ def test_malformed_imported_receipts_remain_unknown_without_hiding_answers(tmp_p
     assert saved.json()['signals']['evidence_opened'] == '2026-01-01T12:00:00Z'
     messages = client.get(f'/api/v1/threads/{thread}/messages', cookies=cookie).json()
     assert next(m for m in messages if m['id'] == answer)['content'] == 'Preserved answer'
+
+
+def test_engagement_section_aggregates_activity_within_existing_authorization(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Artifact/canvas/review activity joins the audited funnel as counts, never content."""
+    root = StudentStore(tmp_path / 'engagement.sqlite3', identifier='local-student')
+    _seed_user(root, 'prof', 'lecturer')
+    _seed_user(root, 'student', 'student')
+    _seed_user(root, 'quiet', 'student')
+    student = StudentStore(root.path, identifier='cognito:student')
+    quiet = StudentStore(root.path, identifier='cognito:quiet')
+    monkeypatch.setattr('backend.student_store.utc_now', lambda: '2026-01-01T12:00:00+00:00')
+    thread = student.create_thread(name='PRIVATE NOTEBOOK', model_id='mock', support_mode='critical-thinking')
+    quiet.create_thread(name='Quiet', model_id='mock', support_mode='critical-thinking')
+    student.add_message(thread, 'user', 'What is analogy?', metadata={'interaction_intent': 'lecture_help'})
+    student.add_message(thread, 'user', 'People need accessible crossings', metadata={
+        'interaction_intent': 'project_coaching', 'thinking_stage': 'problem_identification',
+    })
+    monkeypatch.setattr('backend.student_store.utc_now', lambda: '2026-01-02T12:00:00+00:00')
+    student.add_message(thread, 'user', 'Compare concepts', metadata={
+        'interaction_intent': 'project_coaching', 'thinking_stage': 'concept_generation',
+    })
+    artifact = student.create_artifact(thread, 'PRIVATE ARTIFACT TITLE', {
+        'type': 'doc', 'content': [{'type': 'paragraph', 'content': [{'type': 'text', 'text': 'Draft'}]}],
+    })
+    student.update_artifact(artifact['id'], artifact['document'], revision=1)
+    canvas = student.create_canvas(thread, 'PRIVATE CANVAS TITLE', {
+        'nodes': [{'id': 'n0', 'kind': 'concept', 'title': 'Node 0', 'description': '', 'x': 0.0, 'y': 0.0}],
+        'edges': [],
+    })
+    student.update_canvas(canvas['id'], canvas['graph'], revision=1)
+    student.update_canvas(canvas['id'], canvas['graph'], revision=2)
+    thread_row = student.get_thread(thread) or {}
+    metadata = dict(thread_row.get('metadata') or {})
+    metadata['deep_review_job'] = {
+        'review_id': 'review-1', 'status': 'completed', 'reviewed_revision': 1,
+        'stage_at_start': 'problem_identification', 'source_ids': [], 'message_ids': [],
+        'started_at': '2026-01-02T12:00:00+00:00',
+    }
+    student.update_thread(thread, metadata=metadata)
+    student.add_message(thread, 'assistant', 'Answer', metadata={'interaction_intent': 'lecture_help'}, is_error=True)
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc))
+    prof = {settings.cognito_id_token_cookie_name: oidc.add('prof')}
+    student_cookie = {settings.cognito_id_token_cookie_name: oidc.add('student')}
+    url = '/api/v1/professor/learning-funnel'
+    assert client.get(url, cookies=student_cookie).status_code == 403
+    report = client.get(url, cookies=prof)
+    assert report.status_code == 200
+    engagement = report.json()['engagement']
+    assert engagement['returning_students'] == {'numerator': 1, 'denominator': 1, 'unit': 'owner identities'}
+    assert engagement['stage_progression'] == {'numerator': 1, 'denominator': 1, 'unit': 'notebooks'}
+    assert engagement['artifacts_authored'] == {'numerator': 1, 'denominator': 2, 'unit': 'notebooks'}
+    assert engagement['artifact_revisions_saved']['numerator'] == 1
+    assert engagement['canvases_explored'] == {'numerator': 1, 'denominator': 2, 'unit': 'notebooks'}
+    assert engagement['canvas_revisions_saved']['numerator'] == 2
+    assert engagement['coaching_turns'] == {'numerator': 2, 'denominator': 3, 'unit': 'student turns'}
+    assert engagement['lecture_help_turns'] == {'numerator': 1, 'denominator': 3, 'unit': 'student turns'}
+    assert engagement['deep_reviews'] == {'numerator': 1, 'denominator': 2, 'unit': 'notebooks'}
+    assert engagement['notebooks_without_saved_turns'] == {'numerator': 1, 'denominator': 2, 'unit': 'notebooks'}
+    assert engagement['notebooks_with_saved_errors'] == {'numerator': 1, 'denominator': 2, 'unit': 'notebooks'}
+    definitions = report.json()['definitions']
+    for name in engagement:
+        assert definitions.get(name)
+    assert any('activity signals' in limitation for limitation in report.json()['limitations'])
+    assert 'PRIVATE ARTIFACT TITLE' not in report.text
+    assert 'PRIVATE CANVAS TITLE' not in report.text
+    assert 'review-1' not in report.text
+    with root._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM research_access_events WHERE action='professor.learning_funnel'"
+        ).fetchone()[0] == 1
+
+
+def test_lecturer_report_keeps_improve_and_historical_lecture_feedback_separate(tmp_path: Path) -> None:
+    """Classified Improve activity and answer ratings stay in their own funnel."""
+    root = StudentStore(tmp_path / 'improve.sqlite3', identifier='local-student')
+    _seed_user(root, 'prof', 'lecturer')
+    _seed_user(root, 'student', 'student')
+    student = StudentStore(root.path, identifier='cognito:student')
+    thread = student.create_thread(name='Design', model_id='mock', support_mode='critical-thinking')
+    student.add_message(thread, 'user', 'What is analogy?', metadata={'interaction_intent': 'lecture_help'})
+    student.add_message(thread, 'assistant', 'Older answer', metadata={'interaction_intent': 'lecture_help'})
+    student.add_message(thread, 'user', 'How can I improve my timer?', metadata={'interaction_intent': 'improve_design'})
+    answer = student.add_message(thread, 'assistant', 'Try larger digits', metadata={'interaction_intent': 'improve_design'})
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc))
+    prof = {settings.cognito_id_token_cookie_name: oidc.add('prof')}
+    owner = {settings.cognito_id_token_cookie_name: oidc.add('student')}
+
+    assert client.post(
+        f'/api/v1/threads/{thread}/messages/{answer}/learning-signal',
+        json={'kind': 'useful'}, cookies=owner,
+    ).status_code == 200
+    response = client.get('/api/v1/professor/learning-funnel', cookies=prof)
+    assert response.status_code == 200
+    report = response.json()
+    assert report['improve_design']['rated_answers'] == {'numerator': 1, 'denominator': 1, 'unit': 'answers'}
+    assert report['lecture_help']['rated_answers'] == {'numerator': 0, 'denominator': 1, 'unit': 'answers'}
+    assert report['engagement']['improve_design_turns'] == {'numerator': 1, 'denominator': 2, 'unit': 'student turns'}
+    assert report['engagement']['lecture_help_turns'] == {'numerator': 1, 'denominator': 2, 'unit': 'student turns'}
+    assert report['engagement']['coaching_turns']['numerator'] == 0
+    assert report['identities']['unclassified_messages'] == 0

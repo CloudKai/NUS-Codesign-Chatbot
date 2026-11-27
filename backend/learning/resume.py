@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from backend.student_journey import THINKING_STAGES, normalize_journey
+from backend.learning.requirements import stage_criteria
 
 
 class SavedContribution(BaseModel):
@@ -27,6 +28,7 @@ class StageResume(BaseModel):
     coach_summary: str = ''
     decision: Literal['', 'pending', 'confirmed', 'rejected'] = ''
     next_action: str
+    criteria: list[str] = Field(default_factory=list)
 
 
 class ProjectResume(BaseModel):
@@ -65,13 +67,13 @@ def project_resume(
             stage_id=stage.id, artifact_label=label,
             completed=stage.id in journey['completed_stages'],
             coach_summary=str(journey['stage_notes'].get(stage.id) or ''),
-            next_action=action,
+            next_action=action, criteria=list(stage_criteria(stage.id)),
         )
         for row in messages:
             meta = row.get('metadata') or {}
             if not isinstance(meta, Mapping) or meta.get('thinking_stage') != stage.id:
                 continue
-            if meta.get('interaction_intent') == 'lecture_help':
+            if meta.get('interaction_intent') in {'lecture_help', 'improve_design'}:
                 continue
             text = str(row.get('content') or '')
             if not text.strip():

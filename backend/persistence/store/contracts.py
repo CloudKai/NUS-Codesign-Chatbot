@@ -53,6 +53,7 @@ SETTINGS_KEYS = frozenset(
         "deep_review_snapshot",
         "deep_review_job",
         "journey_stage_reviews",
+        "milestone_recaps",
     }
 )
 

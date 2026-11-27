@@ -1,0 +1,159 @@
+{
+  "manifest_schema_version": 1,
+  "record_id": "architecture-ticket04-2026-11-24",
+  "recorded_on_sgt": "2026-11-24",
+  "scope": "Offline repository reconciliation only; null means unknown, not absent. No live queries, publication, session rollover, image build or model calls.",
+  "repository": {
+    "revision": "4f12995afbfba4c5c975ad12eb9874fcd4cfea39",
+    "branch": "improvement/architecture-responsiveness",
+    "dirty_worktree": true,
+    "release_sha": null,
+    "files_sha256": {
+      "compose.prod.yaml": "a59cac18b350f8a301543a34384242d6c553e405eeab98f870f16410ed5f8ab9",
+      "Caddyfile": "3f465bce54bdd9dba45b525d094ee22078d0f9e5ea1ddf5897560e9b55d2684f",
+      "Caddyfile.local": "6719716dfabbafd948b8b3e89dff6534b4f5965ccaffcd7fcbdc53a83eb5061a",
+      "Dockerfile": "ae8dd4f3787178ba6ebd9ab7b74bc75503f45eea3596d7ab8be4caefdf768cec",
+      ".dockerignore": "81a6f268419f1161284a6e094c3706ee9c66d9cc41e04d142660bfdc9e4ff7ec",
+      ".env.example": "fc3a30b146bb56cf1ae11bc64d461f85d02c11663544d36e7d350344014773bf",
+      "backend/settings.py": "a1bd26838305ad2405d47218c2b79f6aa08cfe8402220c2a708593d6e3bc73dc",
+      "backend/agentcore_provider.py": "fb4dc9345af017ee76d2c8b3027ac327e280bd2d7b24be055b3ee6b3c91e6730",
+      "backend/agentcore_stream.py": "26f945c8be1c39d1d9acbe542d1297340c76d85e9df2bf354050f52bcb646e6a",
+      "agentcore_runtime/main.py": "d91c31b6459576bd34d2426b4de71929184d9d9974f95574135580cec369d72f",
+      "agentcore_runtime/gemma_responses.py": "1a9ee11608e9884e19450a89d329ce152dd2f8907b0a7de5f2ee9b5e2cfe629d",
+      "agentcore_runtime/guardrails.py": "3139668179cd90dbad9f15533df0b84f9c8c380a9e8f8346a96b1725496bb414",
+      "agentcore_runtime/requirements.txt": "1b6d7d52f5e29ed6eef0d3defdb8d0d8ef3c8ee4fd30fd63f62a8bfd71c45e01",
+      "frontend/package-lock.json": "d7c9a84d7d962064f686f5db5ffa30dfda129d5146789767bb41e792284e33e0",
+      "frontend/openapi/reader.json": "f51b2006896e1ce7e811719fcb31e1db2041c66baa89364586ab8fd3a9ee3958"
+    }
+  },
+  "repository_defaults": {
+    "settings_without_environment": {
+      "source": "backend/settings.py",
+      "model_provider": "mock",
+      "agentcore_qualifier": "DEFAULT",
+      "agentcore_session_generation": "1",
+      "session_affinity": false,
+      "model_pair": null
+    },
+    "env_example": {
+      "source": ".env.example",
+      "model_provider": "agentcore",
+      "agentcore_qualifier": "DEFAULT",
+      "agentcore_session_generation": "7",
+      "lightweight_provider": "bedrock",
+      "lightweight_model": "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    },
+    "production_compose": {
+      "source": "compose.prod.yaml",
+      "app_image": "${APP_IMAGE}",
+      "model_provider": "agentcore",
+      "agentcore_qualifier": "DEFAULT",
+      "agentcore_session_generation": "20261122-streaming",
+      "session_affinity": true,
+      "lightweight_provider": "bedrock",
+      "lightweight_model": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "deep_review_provider": "bedrock",
+      "deep_review_model": "global.anthropic.claude-sonnet-4-6",
+      "guardrail_version": "4"
+    },
+    "application_image_recipe": {
+      "source": "Dockerfile",
+      "frontend_builder": "node:22-bookworm-slim",
+      "application_base": "python:3.12-slim",
+      "target_platform": "linux/arm64 per runbook; not built here",
+      "image_digest": null
+    },
+    "runtime_package_recipe": {
+      "source": "docs/deploy/AWS_STATELESS_EC2.md#publish-an-agentcore-runtime-version",
+      "python": "3.14",
+      "architecture": "Linux ARM64",
+      "entrypoint": "opentelemetry-instrument main.py",
+      "dependencies": "agentcore_runtime/requirements.txt",
+      "artifact_sha256": null,
+      "dependency_pins": {
+        "strands-agents": "1.52.0",
+        "bedrock-agentcore": "1.21.0",
+        "pydantic": "2.13.4"
+      }
+    },
+    "edge": {
+      "production": "Caddyfile",
+      "local": "Caddyfile.local",
+      "production_bootstrap_get_allowed": true,
+      "local_bootstrap_get_allowed": false,
+      "production_image_tag": "caddy:2-alpine",
+      "production_image_digest": null
+    }
+  },
+  "last_recorded_deployment": {
+    "evidence": "docs/IMPLEMENTATION_STATUS.md#agentcore-platform-v1-restored-in-production-2026-11-24-sgt",
+    "observed_on_sgt": "2026-11-24",
+    "app_git_sha_base": "dc83707dccc6fb08e666bfc310d3d3e0d3aff07d",
+    "settings_patch_sha256": "13f9376a10a2a88135a1808b7c95b18dfa9d0ca038a6feb53c1f4c6ea0feea90",
+    "host_local_image_id": "sha256:494edc4b0b58a6d4f3a1ebb5b2acb5163dd54804c155a2a1727f1407e95bee02",
+    "image_identity_evidence": "docs/IMPLEMENTATION_STATUS.md#gemma-native-json-fixed-and-deployed-haiku-rollback-retained-2026-11-23-sgt",
+    "image_carry_forward_verified": false,
+    "registry_digest": null,
+    "edge_sha256": null,
+    "runtime_qualifier": "GemmaStable37",
+    "runtime_version": "38",
+    "runtime_platform": "V1",
+    "runtime_artifact_sha256": "3e75266a14320388d48ea0c26598a80787d434eae4eecafed3427a0a2e002c80",
+    "runtime_artifact_evidence": "docs/examples/classroom-capacity/gemma-results-2026-11-24.json",
+    "default_endpoint_version": "39",
+    "default_endpoint_platform": "V2",
+    "rollback_qualifier": "HaikuRollback36",
+    "rollback_version": "36",
+    "session_generation": null,
+    "session_generation_note": "Restoration records a new generation but does not disclose its literal value. Do not substitute the earlier 20261123-gemma37-nativejson value.",
+    "lightweight_provider": "bedrock_mantle_responses",
+    "lightweight_model": "google.gemma-4-31b",
+    "deep_review_provider": "bedrock",
+    "deep_review_model": "global.anthropic.claude-sonnet-4-6",
+    "region": "us-west-2",
+    "guardrail_version": null,
+    "provisional_output_fix_published": null
+  },
+  "actually_verified_live": {
+    "checked_at": null,
+    "application_revision": null,
+    "image_digest": null,
+    "settings_patch_sha256": null,
+    "edge_sha256": null,
+    "runtime_qualifier": null,
+    "runtime_version": null,
+    "runtime_platform": null,
+    "runtime_artifact_sha256": null,
+    "default_endpoint_version": null,
+    "session_generation": null,
+    "lightweight_provider": null,
+    "lightweight_model": null,
+    "deep_review_provider": null,
+    "deep_review_model": null,
+    "guardrail_version": null,
+    "fresh_session_verified": null,
+    "blocked_output_verified": null,
+    "provisional_output_fix_published": null
+  },
+  "locally_verified": {
+    "configuration_basis": "Static reads and SHA-256 of listed nonsecret working-tree files; not effective host configuration. Existing deterministic checks are recorded in the ticket 04 ledger.",
+    "mantle_safety_source": "agentcore_runtime/main.py suppresses Mantle model_delta before ApplyGuardrail(OUTPUT).",
+    "runtime_regression": "tests/domain/test_runtime_reply_stream.py::test_mantle_never_forwards_text_before_output_guardrail",
+    "session_regression": "tests/domain/test_agentcore_session_affinity.py",
+    "live_safety_claim": false
+  },
+  "compatibility_contract": {
+    "application": "Tolerant Fast Chat parser must accept legacy JSON final responses and SSE model_delta/result transport; browser uses existing NDJSON receipt/save recovery.",
+    "runtime": "Canonical Gemma nullability fix plus provisional-output suppression; progress-only while Mantle generates, final checked output only.",
+    "edge": "Deploy matching production Caddy GET bootstrap allowlist and built frontend/API together; local edge parity is unresolved.",
+    "sessions": "New generation and FastAPI recreation on every runtime publication, endpoint switch or rollback. DSQL remains canonical transcript.",
+    "rollback": "Only independently verified safety-eligible artifacts. Never restore an old Mantle runtime lacking provisional-output suppression. Old host rollback scripts are not automatically approved."
+  },
+  "open_gates": [
+    "Live state and current endpoint status unknown.",
+    "Safety-fix publication/fresh-session/blocked-output checks pending explicit live approval and request/token or cost cap.",
+    "Local Caddy bootstrap mismatch remains for coordinated release work.",
+    "Docker COPY context can include .agents/.playwright-cli/.scratch historical artifacts; owner review and packaging verification required before release.",
+    "No live capacity, monthly-cost, redistribution, restore-drill or current production-safety certification."
+  ]
+}

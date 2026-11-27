@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { ReaderBootstrapData, ReaderBootstrapErrors, ReaderBootstrapResponses, ReaderMessagesData, ReaderMessagesErrors, ReaderMessagesResponses, ReaderNotebooksData, ReaderNotebooksErrors, ReaderNotebooksResponses, ReaderSessionData, ReaderSessionErrors, ReaderSessionResponses } from './types.gen';
+import type { ReaderArtifactCreateData, ReaderArtifactCreateErrors, ReaderArtifactCreateResponses, ReaderArtifactData, ReaderArtifactDeleteData, ReaderArtifactDeleteErrors, ReaderArtifactDeleteResponses, ReaderArtifactDuplicateData, ReaderArtifactDuplicateErrors, ReaderArtifactDuplicateResponses, ReaderArtifactErrors, ReaderArtifactResponses, ReaderArtifactRestoreData, ReaderArtifactRestoreErrors, ReaderArtifactRestoreResponses, ReaderArtifactsData, ReaderArtifactsErrors, ReaderArtifactsResponses, ReaderArtifactUpdateData, ReaderArtifactUpdateErrors, ReaderArtifactUpdateResponses, ReaderArtifactVersionData, ReaderArtifactVersionErrors, ReaderArtifactVersionResponses, ReaderArtifactVersionsData, ReaderArtifactVersionsErrors, ReaderArtifactVersionsResponses, ReaderBookmarksData, ReaderBookmarksErrors, ReaderBookmarksResponses, ReaderBootstrapData, ReaderBootstrapErrors, ReaderBootstrapResponses, ReaderCanvasCreateData, ReaderCanvasCreateErrors, ReaderCanvasCreateResponses, ReaderCanvasData, ReaderCanvasDeleteData, ReaderCanvasDeleteErrors, ReaderCanvasDeleteResponses, ReaderCanvasErrors, ReaderCanvasesData, ReaderCanvasesErrors, ReaderCanvasesResponses, ReaderCanvasResponses, ReaderCanvasRestoreData, ReaderCanvasRestoreErrors, ReaderCanvasRestoreResponses, ReaderCanvasUpdateData, ReaderCanvasUpdateErrors, ReaderCanvasUpdateResponses, ReaderCanvasVersionData, ReaderCanvasVersionErrors, ReaderCanvasVersionResponses, ReaderCanvasVersionsData, ReaderCanvasVersionsErrors, ReaderCanvasVersionsResponses, ReaderDeepReviewCancelData, ReaderDeepReviewCancelErrors, ReaderDeepReviewCancelResponses, ReaderDeepReviewData, ReaderDeepReviewErrors, ReaderDeepReviewResponses, ReaderDeepReviewStartData, ReaderDeepReviewStartErrors, ReaderDeepReviewStartResponses, ReaderMessagesData, ReaderMessagesErrors, ReaderMessagesResponses, ReaderNotebooksData, ReaderNotebooksErrors, ReaderNotebookSettingsData, ReaderNotebookSettingsErrors, ReaderNotebookSettingsResponses, ReaderNotebookSettingsUpdateData, ReaderNotebookSettingsUpdateErrors, ReaderNotebookSettingsUpdateResponses, ReaderNotebooksResponses, ReaderPreferencesData, ReaderPreferencesErrors, ReaderPreferencesResponses, ReaderPreferencesUpdateData, ReaderPreferencesUpdateErrors, ReaderPreferencesUpdateResponses, ReaderProjectBriefData, ReaderProjectBriefErrors, ReaderProjectBriefResponses, ReaderProjectData, ReaderProjectErrors, ReaderProjectResolveData, ReaderProjectResolveErrors, ReaderProjectResolveResponses, ReaderProjectResponses, ReaderProjectSelectData, ReaderProjectSelectErrors, ReaderProjectSelectResponses, ReaderSessionData, ReaderSessionErrors, ReaderSessionResponses, ReaderSourceData, ReaderSourceErrors, ReaderSourceLinkData, ReaderSourceLinkErrors, ReaderSourceLinkResponses, ReaderSourceRemoveData, ReaderSourceRemoveErrors, ReaderSourceRemoveResponses, ReaderSourceResponses, ReaderSourcesData, ReaderSourceSelectData, ReaderSourceSelectErrors, ReaderSourceSelectResponses, ReaderSourcesErrors, ReaderSourcesResponses, ReaderStarData, ReaderStarErrors, ReaderStarResponses, ReaderThreadMoveData, ReaderThreadMoveErrors, ReaderThreadMoveResponses, ReaderThreadRemoveData, ReaderThreadRemoveErrors, ReaderThreadRemoveResponses, ReaderThreadsCreateData, ReaderThreadsCreateErrors, ReaderThreadsCreateResponses, ReaderThreadWorkspaceData, ReaderThreadWorkspaceErrors, ReaderThreadWorkspaceResponses, ReaderUploadDiscardData, ReaderUploadDiscardErrors, ReaderUploadDiscardResponses, ReaderUploadRetryData, ReaderUploadRetryErrors, ReaderUploadRetryResponses, ReaderUploadsData, ReaderUploadsErrors, ReaderUploadsResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -26,6 +26,27 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
 export const readerBootstrap = <ThrowOnError extends boolean = false>(options?: Options<ReaderBootstrapData, ThrowOnError>): RequestResult<ReaderBootstrapResponses, ReaderBootstrapErrors, ThrowOnError> => (options?.client ?? client).get<ReaderBootstrapResponses, ReaderBootstrapErrors, ThrowOnError>({ url: '/api/v1/reader/bootstrap', ...options });
 
 /**
+ * Preferences
+ *
+ * Read supported presentation values without exposing unrelated settings.
+ */
+export const readerPreferences = <ThrowOnError extends boolean = false>(options?: Options<ReaderPreferencesData, ThrowOnError>): RequestResult<ReaderPreferencesResponses, ReaderPreferencesErrors, ThrowOnError> => (options?.client ?? client).get<ReaderPreferencesResponses, ReaderPreferencesErrors, ThrowOnError>({ url: '/api/v1/reader/preferences', ...options });
+
+/**
+ * Appearance
+ *
+ * Merge only supplied keys with the owner's existing preferences.
+ */
+export const readerPreferencesUpdate = <ThrowOnError extends boolean = false>(options: Options<ReaderPreferencesUpdateData, ThrowOnError>): RequestResult<ReaderPreferencesUpdateResponses, ReaderPreferencesUpdateErrors, ThrowOnError> => (options.client ?? client).post<ReaderPreferencesUpdateResponses, ReaderPreferencesUpdateErrors, ThrowOnError>({
+    url: '/api/v1/reader/preferences',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * Session
  *
  * Return the verified owner without tokens or private profile fields.
@@ -40,8 +61,421 @@ export const readerSession = <ThrowOnError extends boolean = false>(options?: Op
 export const readerNotebooks = <ThrowOnError extends boolean = false>(options?: Options<ReaderNotebooksData, ThrowOnError>): RequestResult<ReaderNotebooksResponses, ReaderNotebooksErrors, ThrowOnError> => (options?.client ?? client).get<ReaderNotebooksResponses, ReaderNotebooksErrors, ThrowOnError>({ url: '/api/v1/reader/threads', ...options });
 
 /**
+ * Create
+ *
+ * Create an owned entry using the canonical workspace defaults.
+ */
+export const readerThreadsCreate = <ThrowOnError extends boolean = false>(options: Options<ReaderThreadsCreateData, ThrowOnError>): RequestResult<ReaderThreadsCreateResponses, ReaderThreadsCreateErrors, ThrowOnError> => (options.client ?? client).post<ReaderThreadsCreateResponses, ReaderThreadsCreateErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Artifacts
+ *
+ * List one owned notebook's artifacts without their document bodies.
+ */
+export const readerArtifacts = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactsData, ThrowOnError>): RequestResult<ReaderArtifactsResponses, ReaderArtifactsErrors, ThrowOnError> => (options.client ?? client).get<ReaderArtifactsResponses, ReaderArtifactsErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/artifacts', ...options });
+
+/**
+ * Create
+ *
+ * Create one owned persistent artifact anchored to this notebook.
+ */
+export const readerArtifactCreate = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactCreateData, ThrowOnError>): RequestResult<ReaderArtifactCreateResponses, ReaderArtifactCreateErrors, ThrowOnError> => (options.client ?? client).post<ReaderArtifactCreateResponses, ReaderArtifactCreateErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/artifacts',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Artifact
+ *
+ * Read one owned artifact with its canonical document.
+ */
+export const readerArtifact = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactData, ThrowOnError>): RequestResult<ReaderArtifactResponses, ReaderArtifactErrors, ThrowOnError> => (options.client ?? client).get<ReaderArtifactResponses, ReaderArtifactErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}', ...options });
+
+/**
+ * Update
+ *
+ * Apply one explicit revision-guarded save for an owned artifact.
+ */
+export const readerArtifactUpdate = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactUpdateData, ThrowOnError>): RequestResult<ReaderArtifactUpdateResponses, ReaderArtifactUpdateErrors, ThrowOnError> => (options.client ?? client).put<ReaderArtifactUpdateResponses, ReaderArtifactUpdateErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete
+ *
+ * Delete one owned artifact only after an explicit confirmation.
+ */
+export const readerArtifactDelete = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactDeleteData, ThrowOnError>): RequestResult<ReaderArtifactDeleteResponses, ReaderArtifactDeleteErrors, ThrowOnError> => (options.client ?? client).post<ReaderArtifactDeleteResponses, ReaderArtifactDeleteErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/delete',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Duplicate
+ *
+ * Copy one owned artifact with its kind, title and canonical document.
+ */
+export const readerArtifactDuplicate = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactDuplicateData, ThrowOnError>): RequestResult<ReaderArtifactDuplicateResponses, ReaderArtifactDuplicateErrors, ThrowOnError> => (options.client ?? client).post<ReaderArtifactDuplicateResponses, ReaderArtifactDuplicateErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/duplicate', ...options });
+
+/**
+ * Versions
+ *
+ * List one owned artifact's bounded version checkpoints, newest first.
+ */
+export const readerArtifactVersions = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactVersionsData, ThrowOnError>): RequestResult<ReaderArtifactVersionsResponses, ReaderArtifactVersionsErrors, ThrowOnError> => (options.client ?? client).get<ReaderArtifactVersionsResponses, ReaderArtifactVersionsErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions', ...options });
+
+/**
+ * Version
+ *
+ * Read one owned version's readable preview.
+ */
+export const readerArtifactVersion = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactVersionData, ThrowOnError>): RequestResult<ReaderArtifactVersionResponses, ReaderArtifactVersionErrors, ThrowOnError> => (options.client ?? client).get<ReaderArtifactVersionResponses, ReaderArtifactVersionErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions/{revision}', ...options });
+
+/**
+ * Restore
+ *
+ * Restore an older version as a new revision guarded by the current one.
+ */
+export const readerArtifactRestore = <ThrowOnError extends boolean = false>(options: Options<ReaderArtifactRestoreData, ThrowOnError>): RequestResult<ReaderArtifactRestoreResponses, ReaderArtifactRestoreErrors, ThrowOnError> => (options.client ?? client).post<ReaderArtifactRestoreResponses, ReaderArtifactRestoreErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions/{revision}/restore',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Bookmarks
+ *
+ * Project only owned active stars; never infer context from the live stage.
+ */
+export const readerBookmarks = <ThrowOnError extends boolean = false>(options: Options<ReaderBookmarksData, ThrowOnError>): RequestResult<ReaderBookmarksResponses, ReaderBookmarksErrors, ThrowOnError> => (options.client ?? client).get<ReaderBookmarksResponses, ReaderBookmarksErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/bookmarks', ...options });
+
+/**
+ * Canvases
+ *
+ * List one owned notebook's canvases without their graph bodies.
+ */
+export const readerCanvases = <ThrowOnError extends boolean = false>(options: Options<ReaderCanvasesData, ThrowOnError>): RequestResult<ReaderCanvasesResponses, ReaderCanvasesErrors, ThrowOnError> => (options.client ?? client).get<ReaderCanvasesResponses, ReaderCanvasesErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/canvases', ...options });
+
+/**
+ * Create
+ *
+ * Create one owned persistent canvas anchored to this notebook.
+ */
+export const readerCanvasCreate = <ThrowOnError extends boolean = false>(options: Options<ReaderCanvasCreateData, ThrowOnError>): RequestResult<ReaderCanvasCreateResponses, ReaderCanvasCreateErrors, ThrowOnError> => (options.client ?? client).post<ReaderCanvasCreateResponses, ReaderCanvasCreateErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/canvases',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Canvas
+ *
+ * Read one owned canvas with its canonical graph.
+ */
+export const readerCanvas = <ThrowOnError extends boolean = false>(options: Options<ReaderCanvasData, ThrowOnError>): RequestResult<ReaderCanvasResponses, ReaderCanvasErrors, ThrowOnError> => (options.client ?? client).get<ReaderCanvasResponses, ReaderCanvasErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}', ...options });
+
+/**
+ * Update
+ *
+ * Apply one explicit revision-guarded save for an owned canvas.
+ */
+export const readerCanvasUpdate = <ThrowOnError extends boolean = false>(options: Options<ReaderCanvasUpdateData, ThrowOnError>): RequestResult<ReaderCanvasUpdateResponses, ReaderCanvasUpdateErrors, ThrowOnError> => (options.client ?? client).put<ReaderCanvasUpdateResponses, ReaderCanvasUpdateErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Delete
+ *
+ * Delete the confirmed canvas revision and return its former summary.
+ */
+export const readerCanvasDelete = <ThrowOnError extends boolean = false>(options: Options<ReaderCanvasDeleteData, ThrowOnError>): RequestResult<ReaderCanvasDeleteResponses, ReaderCanvasDeleteErrors, ThrowOnError> => (options.client ?? client).post<ReaderCanvasDeleteResponses, ReaderCanvasDeleteErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/delete',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Versions
+ *
+ * List one owned canvas's bounded version checkpoints, newest first.
+ */
+export const readerCanvasVersions = <ThrowOnError extends boolean = false>(options: Options<ReaderCanvasVersionsData, ThrowOnError>): RequestResult<ReaderCanvasVersionsResponses, ReaderCanvasVersionsErrors, ThrowOnError> => (options.client ?? client).get<ReaderCanvasVersionsResponses, ReaderCanvasVersionsErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions', ...options });
+
+/**
+ * Version
+ *
+ * Read one owned version's readable preview.
+ */
+export const readerCanvasVersion = <ThrowOnError extends boolean = false>(options: Options<ReaderCanvasVersionData, ThrowOnError>): RequestResult<ReaderCanvasVersionResponses, ReaderCanvasVersionErrors, ThrowOnError> => (options.client ?? client).get<ReaderCanvasVersionResponses, ReaderCanvasVersionErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions/{revision}', ...options });
+
+/**
+ * Restore
+ *
+ * Restore an older version as a new revision guarded by the current one.
+ */
+export const readerCanvasRestore = <ThrowOnError extends boolean = false>(options: Options<ReaderCanvasRestoreData, ThrowOnError>): RequestResult<ReaderCanvasRestoreResponses, ReaderCanvasRestoreErrors, ThrowOnError> => (options.client ?? client).post<ReaderCanvasRestoreResponses, ReaderCanvasRestoreErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions/{revision}/restore',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Read
+ *
+ * Recover and show the latest Deep Review job for this owned chat.
+ */
+export const readerDeepReview = <ThrowOnError extends boolean = false>(options: Options<ReaderDeepReviewData, ThrowOnError>): RequestResult<ReaderDeepReviewResponses, ReaderDeepReviewErrors, ThrowOnError> => (options.client ?? client).get<ReaderDeepReviewResponses, ReaderDeepReviewErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/deep-review', ...options });
+
+/**
+ * Start
+ *
+ * Explicitly enqueue a review under the normal server gate and generation allowance.
+ */
+export const readerDeepReviewStart = <ThrowOnError extends boolean = false>(options: Options<ReaderDeepReviewStartData, ThrowOnError>): RequestResult<ReaderDeepReviewStartResponses, ReaderDeepReviewStartErrors, ThrowOnError> => (options.client ?? client).post<ReaderDeepReviewStartResponses, ReaderDeepReviewStartErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/deep-review', ...options });
+
+/**
+ * Cancel
+ *
+ * Request cancellation without affecting a replacement review job.
+ */
+export const readerDeepReviewCancel = <ThrowOnError extends boolean = false>(options: Options<ReaderDeepReviewCancelData, ThrowOnError>): RequestResult<ReaderDeepReviewCancelResponses, ReaderDeepReviewCancelErrors, ThrowOnError> => (options.client ?? client).post<ReaderDeepReviewCancelResponses, ReaderDeepReviewCancelErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/deep-review/cancel',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * Messages
  *
  * Read active saved history using existing revision-bound pagination.
  */
 export const readerMessages = <ThrowOnError extends boolean = false>(options: Options<ReaderMessagesData, ThrowOnError>): RequestResult<ReaderMessagesResponses, ReaderMessagesErrors, ThrowOnError> => (options.client ?? client).get<ReaderMessagesResponses, ReaderMessagesErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/messages/page', ...options });
+
+/**
+ * Star Message
+ *
+ * Set an owned active message's star without starting a coaching turn.
+ */
+export const readerStar = <ThrowOnError extends boolean = false>(options: Options<ReaderStarData, ThrowOnError>): RequestResult<ReaderStarResponses, ReaderStarErrors, ThrowOnError> => (options.client ?? client).post<ReaderStarResponses, ReaderStarErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/messages/{message_id}/star',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Move
+ *
+ * Save an owner-validated chat location without moving any conversation data.
+ */
+export const readerThreadMove = <ThrowOnError extends boolean = false>(options: Options<ReaderThreadMoveData, ThrowOnError>): RequestResult<ReaderThreadMoveResponses, ReaderThreadMoveErrors, ThrowOnError> => (options.client ?? client).post<ReaderThreadMoveResponses, ReaderThreadMoveErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/move',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Project
+ *
+ * Read canonical artifacts and navigation without invoking a provider or writing data.
+ */
+export const readerProject = <ThrowOnError extends boolean = false>(options: Options<ReaderProjectData, ThrowOnError>): RequestResult<ReaderProjectResponses, ReaderProjectErrors, ThrowOnError> => (options.client ?? client).get<ReaderProjectResponses, ReaderProjectErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/project', ...options });
+
+/**
+ * Project Brief
+ *
+ * Generate or reuse a whole-chat brief; accept no browser-supplied history or instructions.
+ */
+export const readerProjectBrief = <ThrowOnError extends boolean = false>(options: Options<ReaderProjectBriefData, ThrowOnError>): RequestResult<ReaderProjectBriefResponses, ReaderProjectBriefErrors, ThrowOnError> => (options.client ?? client).post<ReaderProjectBriefResponses, ReaderProjectBriefErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/project/brief',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Project Resolve
+ *
+ * Apply the shared atomic decision; stale/duplicate requests require canonical rereading.
+ */
+export const readerProjectResolve = <ThrowOnError extends boolean = false>(options: Options<ReaderProjectResolveData, ThrowOnError>): RequestResult<ReaderProjectResolveResponses, ReaderProjectResolveErrors, ThrowOnError> => (options.client ?? client).post<ReaderProjectResolveResponses, ReaderProjectResolveErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/project/resolve/{transition_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Project Select
+ *
+ * Select only application-authorized stages without awarding completion in the browser.
+ */
+export const readerProjectSelect = <ThrowOnError extends boolean = false>(options: Options<ReaderProjectSelectData, ThrowOnError>): RequestResult<ReaderProjectSelectResponses, ReaderProjectSelectErrors, ThrowOnError> => (options.client ?? client).post<ReaderProjectSelectResponses, ReaderProjectSelectErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/project/select-stage',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Remove
+ *
+ * Delete confirmed owned data through the existing cleanup-aware service.
+ */
+export const readerThreadRemove = <ThrowOnError extends boolean = false>(options: Options<ReaderThreadRemoveData, ThrowOnError>): RequestResult<ReaderThreadRemoveResponses, ReaderThreadRemoveErrors, ThrowOnError> => (options.client ?? client).post<ReaderThreadRemoveResponses, ReaderThreadRemoveErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/remove',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Read
+ *
+ * Read the canonical notebook action projection without private metadata.
+ */
+export const readerNotebookSettings = <ThrowOnError extends boolean = false>(options: Options<ReaderNotebookSettingsData, ThrowOnError>): RequestResult<ReaderNotebookSettingsResponses, ReaderNotebookSettingsErrors, ThrowOnError> => (options.client ?? client).get<ReaderNotebookSettingsResponses, ReaderNotebookSettingsErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/settings', ...options });
+
+/**
+ * Rename
+ *
+ * Rename only an owned notebook, preserving all transcript and learning state.
+ */
+export const readerNotebookSettingsUpdate = <ThrowOnError extends boolean = false>(options: Options<ReaderNotebookSettingsUpdateData, ThrowOnError>): RequestResult<ReaderNotebookSettingsUpdateResponses, ReaderNotebookSettingsUpdateErrors, ThrowOnError> => (options.client ?? client).post<ReaderNotebookSettingsUpdateResponses, ReaderNotebookSettingsUpdateErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/settings',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Reader Sources
+ *
+ * List current canonical selection without returning private storage metadata.
+ */
+export const readerSources = <ThrowOnError extends boolean = false>(options: Options<ReaderSourcesData, ThrowOnError>): RequestResult<ReaderSourcesResponses, ReaderSourcesErrors, ThrowOnError> => (options.client ?? client).get<ReaderSourcesResponses, ReaderSourcesErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/sources', ...options });
+
+/**
+ * Reader Source
+ *
+ * Inspect up to 24,000 characters of owned extracted text without executing it.
+ */
+export const readerSource = <ThrowOnError extends boolean = false>(options: Options<ReaderSourceData, ThrowOnError>): RequestResult<ReaderSourceResponses, ReaderSourceErrors, ThrowOnError> => (options.client ?? client).get<ReaderSourceResponses, ReaderSourceErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/sources/{source_id}', ...options });
+
+/**
+ * Reader Source Link
+ *
+ * Add an owned Library source to the target notebook and enable it.
+ */
+export const readerSourceLink = <ThrowOnError extends boolean = false>(options: Options<ReaderSourceLinkData, ThrowOnError>): RequestResult<ReaderSourceLinkResponses, ReaderSourceLinkErrors, ThrowOnError> => (options.client ?? client).post<ReaderSourceLinkResponses, ReaderSourceLinkErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/sources/{source_id}/link', ...options });
+
+/**
+ * Reader Source Remove
+ *
+ * Detach a notebook source or permanently delete an explicitly confirmed Library original.
+ */
+export const readerSourceRemove = <ThrowOnError extends boolean = false>(options: Options<ReaderSourceRemoveData, ThrowOnError>): RequestResult<ReaderSourceRemoveResponses, ReaderSourceRemoveErrors, ThrowOnError> => (options.client ?? client).post<ReaderSourceRemoveResponses, ReaderSourceRemoveErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/sources/{source_id}/remove',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Reader Source Select
+ *
+ * Set explicit selection through the shared store; locked sources remain authoritative.
+ */
+export const readerSourceSelect = <ThrowOnError extends boolean = false>(options: Options<ReaderSourceSelectData, ThrowOnError>): RequestResult<ReaderSourceSelectResponses, ReaderSourceSelectErrors, ThrowOnError> => (options.client ?? client).post<ReaderSourceSelectResponses, ReaderSourceSelectErrors, ThrowOnError>({
+    url: '/api/v1/reader/threads/{thread_id}/sources/{source_id}/select',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Reader Uploads
+ *
+ * Read ephemeral owned progress after reload; never restart missing work automatically.
+ */
+export const readerUploads = <ThrowOnError extends boolean = false>(options: Options<ReaderUploadsData, ThrowOnError>): RequestResult<ReaderUploadsResponses, ReaderUploadsErrors, ThrowOnError> => (options.client ?? client).get<ReaderUploadsResponses, ReaderUploadsErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/uploads', ...options });
+
+/**
+ * Reader Upload Discard
+ *
+ * Release a terminal receipt/failure only after checking both notebook and owner.
+ */
+export const readerUploadDiscard = <ThrowOnError extends boolean = false>(options: Options<ReaderUploadDiscardData, ThrowOnError>): RequestResult<ReaderUploadDiscardResponses, ReaderUploadDiscardErrors, ThrowOnError> => (options.client ?? client).post<ReaderUploadDiscardResponses, ReaderUploadDiscardErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/discard', ...options });
+
+/**
+ * Reader Upload Retry
+ *
+ * Retry only an owned retained failure with freshly authenticated owner services.
+ */
+export const readerUploadRetry = <ThrowOnError extends boolean = false>(options: Options<ReaderUploadRetryData, ThrowOnError>): RequestResult<ReaderUploadRetryResponses, ReaderUploadRetryErrors, ThrowOnError> => (options.client ?? client).post<ReaderUploadRetryResponses, ReaderUploadRetryErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/retry', ...options });
+
+/**
+ * Workspace
+ *
+ * Load one bounded owner-consistent open read; not a transactional snapshot.
+ */
+export const readerThreadWorkspace = <ThrowOnError extends boolean = false>(options: Options<ReaderThreadWorkspaceData, ThrowOnError>): RequestResult<ReaderThreadWorkspaceResponses, ReaderThreadWorkspaceErrors, ThrowOnError> => (options.client ?? client).get<ReaderThreadWorkspaceResponses, ReaderThreadWorkspaceErrors, ThrowOnError>({ url: '/api/v1/reader/threads/{thread_id}/workspace', ...options });

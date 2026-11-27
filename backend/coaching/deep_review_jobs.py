@@ -1,8 +1,10 @@
 """Process-local background executor for Deep Review jobs.
 
 Production runs one Uvicorn worker, so this in-process pool is the job
-runtime. Jobs persisted as ``queued``/``running`` are lost on restart; the
-next GET marks them ``failed`` / ``review_timeout``.
+runtime. The job envelope itself is durable: queued/claimed work left behind
+by a restart is recovered on the next owner read (``get_deep_review_job``)
+within the bounded attempt budget, and stale claims past that budget fail
+honestly with ``review_timeout``.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ def submit_deep_review_job(
     service: CoachApplicationService,
     thread_id: str,
     review_id: str,
-) -> None:
+) -> bool:
     """Enqueue one Deep Review worker if *review_id* is not already submitted.
 
     Args:
@@ -49,15 +51,21 @@ def submit_deep_review_job(
         thread_id: Owned notebook id.
         review_id: Persisted job id.
 
+    Returns:
+        ``True`` when a new worker was dispatched in this process, ``False``
+        when the id is already submitted here or admission refused it. This
+        lets read seams distinguish "recovery started a worker" from "a
+        worker is already live" without exposing internals.
+
     Side effects:
         Starts a daemon worker that calls ``execute_deep_review_job``.
     """
     cleaned_id = str(review_id or "").strip()
     if not cleaned_id:
-        return
+        return False
     with _LOCK:
         if cleaned_id in _SUBMITTED:
-            return
+            return False
         _SUBMITTED.add(cleaned_id)
 
     def _run() -> None:
@@ -79,11 +87,29 @@ def submit_deep_review_job(
             with _LOCK:
                 _SUBMITTED.discard(cleaned_id)
 
-    background_review_admission().submit(get_deep_review_executor(), _run, reject)
+    accepted = background_review_admission().submit(
+        get_deep_review_executor(), _run, reject
+    )
+    if not accepted:
+        with _LOCK:
+            _SUBMITTED.discard(cleaned_id)
+    return accepted
 
 
 def reset_deep_review_jobs_for_tests() -> None:
     """Drop the in-process executor so tests do not leak worker threads."""
+    shutdown_deep_review_executor()
+
+
+def shutdown_deep_review_executor() -> None:
+    """Stop accepting new Deep Review work and drop the process-local pool.
+
+    Clean-shutdown seam for the FastAPI lifespan: queued-but-unstarted
+    dispatches are cancelled locally while their durable envelopes stay
+    ``queued`` for the next owner read, and running workers are left to
+    finish their current bounded phase (lease expiry plus bounded recovery
+    covers a process that exits first). Never blocks on provider work.
+    """
     global _EXECUTOR
     with _LOCK:
         executor = _EXECUTOR

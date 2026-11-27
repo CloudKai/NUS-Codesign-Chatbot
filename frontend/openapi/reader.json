@@ -1,6 +1,282 @@
 {
   "components": {
     "schemas": {
+      "ArtifactFeedback": {
+        "description": "One validated before/after proposal for the student's artifact.\n\n``original_text`` is the server-resolved saved passage (or the whole\nbounded document text when ``paragraph`` is None). ``base_artifact_id``\nand ``base_artifact_revision`` are server-stamped from the snapshot the\ncoaching context was resolved from; the model never supplies them.",
+        "properties": {
+          "base_artifact_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Artifact Id"
+          },
+          "base_artifact_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Artifact Revision"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 4,
+            "pattern": "^af-[A-Za-z0-9][A-Za-z0-9._:-]{3,63}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "revise_text",
+            "title": "Kind",
+            "type": "string"
+          },
+          "original_text": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Original Text",
+            "type": "string"
+          },
+          "paragraph": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paragraph"
+          },
+          "proposed_text": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Proposed Text",
+            "type": "string"
+          },
+          "rationale": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "proposed_text",
+          "rationale"
+        ],
+        "title": "ArtifactFeedback",
+        "type": "object"
+      },
+      "CanvasDraftProposal": {
+        "description": "One reviewable synthesized draft from the student's selected canvas nodes.",
+        "properties": {
+          "base_canvas_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Canvas Id"
+          },
+          "base_canvas_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Canvas Revision"
+          },
+          "draft_text": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Draft Text",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 4,
+            "title": "Id",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "provenance": {
+            "const": "coach",
+            "default": "coach",
+            "title": "Provenance",
+            "type": "string"
+          },
+          "rationale": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "draft_text"
+        ],
+        "title": "CanvasDraftProposal",
+        "type": "object"
+      },
+      "CanvasSuggestion": {
+        "description": "One validated proposal for the student's Design Canvas.\n\n``base_canvas_revision`` is server-stamped from the canvas snapshot the\ncoaching context was resolved from; the model never supplies it. Target\nnode ids for ``new_edge`` proposals are untrusted text \u2014 they are checked\nagainst the real graph only at acceptance, by the ordinary canvas save.",
+        "properties": {
+          "base_canvas_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Canvas Id"
+          },
+          "base_canvas_revision": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Canvas Revision"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Description",
+            "type": "string"
+          },
+          "explanation": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Explanation",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 4,
+            "pattern": "^sg-[A-Za-z0-9][A-Za-z0-9._:-]{3,63}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "new_node",
+              "new_edge"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_kind": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Kind"
+          },
+          "rationale": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Rationale",
+            "type": "string"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relation"
+          },
+          "source_node_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Node Id"
+          },
+          "target_node_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Node Id"
+          },
+          "title": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "rationale"
+        ],
+        "title": "CanvasSuggestion",
+        "type": "object"
+      },
       "CitationReference": {
         "description": "A stable source citation that can be resolved in the notebook source viewer.",
         "properties": {
@@ -42,6 +318,20 @@
         "title": "CitationReference",
         "type": "object"
       },
+      "DeepReviewJobStatus": {
+        "description": "Durable status of one background Deep Review job.",
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "failed",
+          "cancel_requested",
+          "cancelled",
+          "ambiguous"
+        ],
+        "title": "DeepReviewJobStatus",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -53,6 +343,735 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "MilestoneRecap": {
+        "description": "One persisted recap of a confirmed educational milestone.\n\nEvery field is derived server-side from the confirmed transition, the\nsaved assessment and saved student work. ``id`` is content-derived from\nthe transition so duplicate confirmation is detectable.",
+        "properties": {
+          "accomplishments": {
+            "default": "",
+            "maxLength": 600,
+            "title": "Accomplishments",
+            "type": "string"
+          },
+          "changes": {
+            "default": "",
+            "maxLength": 600,
+            "title": "Changes",
+            "type": "string"
+          },
+          "confirmed_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Confirmed At",
+            "type": "string"
+          },
+          "gaps": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Gaps",
+            "type": "array"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 4,
+            "title": "Id",
+            "type": "string"
+          },
+          "next_action": {
+            "maxLength": 600,
+            "minLength": 1,
+            "title": "Next Action",
+            "type": "string"
+          },
+          "next_stage_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Next Stage Id",
+            "type": "string"
+          },
+          "next_stage_label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Next Stage Label",
+            "type": "string"
+          },
+          "relevant_work": {
+            "items": {
+              "$ref": "#/components/schemas/RecapWork"
+            },
+            "maxItems": 2,
+            "title": "Relevant Work",
+            "type": "array"
+          },
+          "stage_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Stage Id",
+            "type": "string"
+          },
+          "stage_label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Stage Label",
+            "type": "string"
+          },
+          "transition_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Transition Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "stage_id",
+          "stage_label",
+          "transition_id",
+          "next_stage_id",
+          "next_stage_label",
+          "next_action",
+          "confirmed_at"
+        ],
+        "title": "MilestoneRecap",
+        "type": "object"
+      },
+      "ProjectBrief": {
+        "additionalProperties": false,
+        "description": "Lecture-informed whole-chat brief; absent facts must remain null.",
+        "properties": {
+          "current_idea": {
+            "$ref": "#/components/schemas/ProjectBriefPoint"
+          },
+          "problem": {
+            "$ref": "#/components/schemas/ProjectBriefPoint"
+          },
+          "still_to_explore": {
+            "$ref": "#/components/schemas/ProjectBriefPoint"
+          },
+          "what_matters": {
+            "$ref": "#/components/schemas/ProjectBriefPoint"
+          },
+          "who_and_why": {
+            "$ref": "#/components/schemas/ProjectBriefPoint"
+          }
+        },
+        "title": "ProjectBrief",
+        "type": "object"
+      },
+      "ProjectBriefPoint": {
+        "additionalProperties": false,
+        "description": "One concise project claim with exact supporting student quotations, or an explicit unknown.",
+        "properties": {
+          "evidence": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Evidence",
+            "type": "array"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 400,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "ProjectBriefPoint",
+        "type": "object"
+      },
+      "ProjectBriefResult": {
+        "description": "Owner-authorized summary state; only current results contain generated claims.",
+        "properties": {
+          "brief": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectBrief"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "current",
+              "missing",
+              "empty",
+              "preview",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "version": {
+            "default": "",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ProjectBriefResult",
+        "type": "object"
+      },
+      "ReaderArtifact": {
+        "description": "One owner-authorized persistent artifact with its canonical document and resolved references.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "references": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "References",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "id",
+          "title",
+          "kind",
+          "document",
+          "schema_version",
+          "revision",
+          "origin",
+          "created_at",
+          "updated_at",
+          "references"
+        ],
+        "title": "ReaderArtifact",
+        "type": "object"
+      },
+      "ReaderArtifactCreate": {
+        "additionalProperties": false,
+        "description": "Explicit create payload; the document and references are validated server-side.",
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "kind": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "pattern": "^(editor|coach_draft)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "references": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "References"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "kind",
+          "document"
+        ],
+        "title": "ReaderArtifactCreate",
+        "type": "object"
+      },
+      "ReaderArtifactDelete": {
+        "additionalProperties": false,
+        "description": "Require an explicit confirmation before deleting owned work.",
+        "properties": {
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirmed"
+        ],
+        "title": "ReaderArtifactDelete",
+        "type": "object"
+      },
+      "ReaderArtifactRestore": {
+        "additionalProperties": false,
+        "description": "Restore guard: the caller must have seen the current revision.",
+        "properties": {
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ReaderArtifactRestore",
+        "type": "object"
+      },
+      "ReaderArtifactSummary": {
+        "description": "Bounded artifact identity without the document body.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "thread_id",
+          "title",
+          "kind",
+          "schema_version",
+          "revision",
+          "origin",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ReaderArtifactSummary",
+        "type": "object"
+      },
+      "ReaderArtifactUpdate": {
+        "additionalProperties": false,
+        "description": "Explicit save payload; the seen revision guards against stale writes.\n\nOmitted references keep the saved list; an explicit list replaces it.",
+        "properties": {
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "references": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "References"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "document",
+          "revision"
+        ],
+        "title": "ReaderArtifactUpdate",
+        "type": "object"
+      },
+      "ReaderArtifactVersion": {
+        "description": "One readable version preview with its canonical document.",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "document": {
+            "additionalProperties": true,
+            "title": "Document",
+            "type": "object"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "restored_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored From"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "artifact_id",
+          "revision",
+          "title",
+          "kind",
+          "document",
+          "origin",
+          "restored_from",
+          "created_at"
+        ],
+        "title": "ReaderArtifactVersion",
+        "type": "object"
+      },
+      "ReaderArtifactVersionSummary": {
+        "description": "Bounded version checkpoint metadata without the document body.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "restored_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored From"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "title",
+          "kind",
+          "origin",
+          "restored_from",
+          "created_at"
+        ],
+        "title": "ReaderArtifactVersionSummary",
+        "type": "object"
+      },
+      "ReaderArtifactVersions": {
+        "description": "Owner-fenced bounded version history, newest first.",
+        "properties": {
+          "artifact_id": {
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderArtifactVersionSummary"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "artifact_id",
+          "versions"
+        ],
+        "title": "ReaderArtifactVersions",
+        "type": "object"
+      },
+      "ReaderArtifacts": {
+        "description": "Owner/notebook-fenced artifact list, newest first.",
+        "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderArtifactSummary"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "artifacts",
+          "kinds"
+        ],
+        "title": "ReaderArtifacts",
+        "type": "object"
+      },
+      "ReaderBookmark": {
+        "description": "Bounded preview with authoritative saved stage and mode for one bookmark.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "interaction_intent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "lecture_help",
+                  "improve_design",
+                  "project_coaching"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interaction Intent"
+          },
+          "preview": {
+            "title": "Preview",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "stage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Id"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "preview",
+          "stage_id",
+          "interaction_intent"
+        ],
+        "title": "ReaderBookmark",
+        "type": "object"
+      },
+      "ReaderBookmarks": {
+        "description": "All active bookmarks, independent of the currently loaded transcript page.",
+        "properties": {
+          "conversation_revision": {
+            "title": "Conversation Revision",
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderBookmark"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "conversation_revision",
+          "messages"
+        ],
+        "title": "ReaderBookmarks",
         "type": "object"
       },
       "ReaderBootstrap": {
@@ -76,6 +1095,409 @@
         "title": "ReaderBootstrap",
         "type": "object"
       },
+      "ReaderBriefRequest": {
+        "additionalProperties": false,
+        "description": "Only explicit retry intent is accepted; all summary inputs are server-owned.",
+        "properties": {
+          "retry": {
+            "default": false,
+            "title": "Retry",
+            "type": "boolean"
+          }
+        },
+        "title": "ReaderBriefRequest",
+        "type": "object"
+      },
+      "ReaderCanvas": {
+        "description": "One owner-authorized persistent canvas with its canonical graph.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "graph": {
+            "additionalProperties": true,
+            "title": "Graph",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "id",
+          "title",
+          "graph",
+          "schema_version",
+          "revision",
+          "origin",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ReaderCanvas",
+        "type": "object"
+      },
+      "ReaderCanvasCreate": {
+        "additionalProperties": false,
+        "description": "Explicit create payload; the graph is validated canonically server-side.",
+        "properties": {
+          "graph": {
+            "additionalProperties": true,
+            "title": "Graph",
+            "type": "object"
+          },
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "graph"
+        ],
+        "title": "ReaderCanvasCreate",
+        "type": "object"
+      },
+      "ReaderCanvasDelete": {
+        "additionalProperties": false,
+        "description": "Explicit deletion confirmation for the canvas revision shown to the student.",
+        "properties": {
+          "confirmed": {
+            "title": "Confirmed",
+            "type": "boolean"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "confirmed",
+          "revision"
+        ],
+        "title": "ReaderCanvasDelete",
+        "type": "object"
+      },
+      "ReaderCanvasRestore": {
+        "additionalProperties": false,
+        "description": "Restore guard: the caller must have seen the current revision.",
+        "properties": {
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "title": "ReaderCanvasRestore",
+        "type": "object"
+      },
+      "ReaderCanvasSummary": {
+        "description": "Bounded canvas identity without the graph body.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "thread_id",
+          "title",
+          "schema_version",
+          "revision",
+          "origin",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ReaderCanvasSummary",
+        "type": "object"
+      },
+      "ReaderCanvasUpdate": {
+        "additionalProperties": false,
+        "description": "Explicit save payload; the seen revision guards against stale writes.",
+        "properties": {
+          "graph": {
+            "additionalProperties": true,
+            "title": "Graph",
+            "type": "object"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "graph",
+          "revision"
+        ],
+        "title": "ReaderCanvasUpdate",
+        "type": "object"
+      },
+      "ReaderCanvasVersion": {
+        "description": "One readable version preview with its canonical graph.",
+        "properties": {
+          "canvas_id": {
+            "title": "Canvas Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "graph": {
+            "additionalProperties": true,
+            "title": "Graph",
+            "type": "object"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "restored_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored From"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "canvas_id",
+          "revision",
+          "title",
+          "graph",
+          "origin",
+          "restored_from",
+          "created_at"
+        ],
+        "title": "ReaderCanvasVersion",
+        "type": "object"
+      },
+      "ReaderCanvasVersionSummary": {
+        "description": "Bounded version checkpoint metadata without the graph body.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "restored_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Restored From"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "title",
+          "origin",
+          "restored_from",
+          "created_at"
+        ],
+        "title": "ReaderCanvasVersionSummary",
+        "type": "object"
+      },
+      "ReaderCanvasVersions": {
+        "description": "Owner-fenced bounded version history, newest first.",
+        "properties": {
+          "canvas_id": {
+            "title": "Canvas Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderCanvasVersionSummary"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "canvas_id",
+          "versions"
+        ],
+        "title": "ReaderCanvasVersions",
+        "type": "object"
+      },
+      "ReaderCanvases": {
+        "description": "Owner/notebook-fenced canvas list, newest first.",
+        "properties": {
+          "canvases": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderCanvasSummary"
+            },
+            "title": "Canvases",
+            "type": "array"
+          },
+          "node_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Node Kinds",
+            "type": "array"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "relations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Relations",
+            "type": "array"
+          },
+          "stages": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "canvases",
+          "node_kinds",
+          "relations",
+          "stages"
+        ],
+        "title": "ReaderCanvases",
+        "type": "object"
+      },
       "ReaderChatSummary": {
         "description": "Bounded, owner-scoped preview of an active saved conversation.",
         "properties": {
@@ -95,6 +1517,116 @@
         "title": "ReaderChatSummary",
         "type": "object"
       },
+      "ReaderCreate": {
+        "additionalProperties": false,
+        "description": "Create a named project notebook or an untitled standalone chat.",
+        "properties": {
+          "kind": {
+            "default": "notebook",
+            "enum": [
+              "notebook",
+              "chat"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parent_notebook_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Notebook Id"
+          }
+        },
+        "title": "ReaderCreate",
+        "type": "object"
+      },
+      "ReaderDecision": {
+        "additionalProperties": false,
+        "description": "Explicit decision for one saved recommendation; additional authority is forbidden.",
+        "properties": {
+          "accepted": {
+            "title": "Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "title": "ReaderDecision",
+        "type": "object"
+      },
+      "ReaderDeepReview": {
+        "description": "Owner-bound Deep Review eligibility and the latest durable job, if any.",
+        "properties": {
+          "eligible": {
+            "title": "Eligible",
+            "type": "boolean"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReaderReviewJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "eligible",
+          "job"
+        ],
+        "title": "ReaderDeepReview",
+        "type": "object"
+      },
+      "ReaderDeepReviewCancel": {
+        "additionalProperties": false,
+        "description": "Cancel only the review job shown to the student at the time of the action.",
+        "properties": {
+          "review_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Review Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_id"
+        ],
+        "title": "ReaderDeepReviewCancel",
+        "type": "object"
+      },
       "ReaderError": {
         "description": "Public read failure; callers use status codes rather than echoing detail.",
         "properties": {
@@ -109,9 +1641,77 @@
         "title": "ReaderError",
         "type": "object"
       },
+      "ReaderFacioneScore": {
+        "description": "A rubric dimension and its saved score, when assessed.",
+        "properties": {
+          "dimension": {
+            "title": "Dimension",
+            "type": "string"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "maximum": 4.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "dimension",
+          "score"
+        ],
+        "title": "ReaderFacioneScore",
+        "type": "object"
+      },
+      "ReaderLibraryDelete": {
+        "additionalProperties": false,
+        "description": "Require a deliberate permanent delete from the private Library.",
+        "properties": {
+          "confirmed": {
+            "const": true,
+            "title": "Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirmed"
+        ],
+        "title": "ReaderLibraryDelete",
+        "type": "object"
+      },
       "ReaderMessage": {
         "description": "Visible saved message without private assessment or storage metadata.",
         "properties": {
+          "artifact_feedback": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactFeedback"
+            },
+            "title": "Artifact Feedback",
+            "type": "array"
+          },
+          "canvas_draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CanvasDraftProposal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canvas_suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/CanvasSuggestion"
+            },
+            "title": "Canvas Suggestions",
+            "type": "array"
+          },
           "citations": {
             "items": {
               "$ref": "#/components/schemas/CitationReference"
@@ -131,6 +1731,22 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "interaction_intent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "lecture_help",
+                  "improve_design",
+                  "project_coaching"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interaction Intent"
           },
           "rating": {
             "anyOf": [
@@ -167,6 +1783,57 @@
           "content"
         ],
         "title": "ReaderMessage",
+        "type": "object"
+      },
+      "ReaderModel": {
+        "description": "A configured model choice and supported reasoning settings.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reasoning_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasoning Efforts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "reasoning_efforts"
+        ],
+        "title": "ReaderModel",
+        "type": "object"
+      },
+      "ReaderMoveChat": {
+        "additionalProperties": false,
+        "description": "Move an existing chat to an owned notebook, or to Chats with null.",
+        "properties": {
+          "parent_notebook_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Notebook Id"
+          }
+        },
+        "required": [
+          "parent_notebook_id"
+        ],
+        "title": "ReaderMoveChat",
         "type": "object"
       },
       "ReaderNotebook": {
@@ -211,6 +1878,76 @@
           "name"
         ],
         "title": "ReaderNotebook",
+        "type": "object"
+      },
+      "ReaderNotebookSettings": {
+        "description": "Owner-fenced notebook identity for workspace actions.",
+        "properties": {
+          "assignment": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Assignment",
+            "type": "object"
+          },
+          "chat_model_label": {
+            "title": "Chat Model Label",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderModel"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "notebook": {
+            "$ref": "#/components/schemas/ReaderNotebook"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          },
+          "response_detail": {
+            "enum": [
+              "short",
+              "long"
+            ],
+            "title": "Response Detail",
+            "type": "string"
+          },
+          "response_language": {
+            "title": "Response Language",
+            "type": "string"
+          },
+          "selected_model": {
+            "title": "Selected Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "notebook",
+          "response_detail",
+          "response_language",
+          "selected_model",
+          "reasoning_effort",
+          "assignment",
+          "models",
+          "chat_model_label"
+        ],
+        "title": "ReaderNotebookSettings",
         "type": "object"
       },
       "ReaderNotebooks": {
@@ -291,6 +2028,35 @@
         "title": "ReaderPage",
         "type": "object"
       },
+      "ReaderPending": {
+        "description": "Visible recommendation without private assessment or research metadata.",
+        "properties": {
+          "from_stage": {
+            "title": "From Stage",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "to_stage": {
+            "title": "To Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "from_stage",
+          "to_stage",
+          "rationale"
+        ],
+        "title": "ReaderPending",
+        "type": "object"
+      },
       "ReaderPreferences": {
         "description": "Presentation defaults scoped to the verified workspace owner.",
         "properties": {
@@ -305,7 +2071,7 @@
           },
           "default_mode": {
             "enum": [
-              "lecture",
+              "improve",
               "project"
             ],
             "title": "Default Mode",
@@ -339,6 +2105,297 @@
         "title": "ReaderPreferences",
         "type": "object"
       },
+      "ReaderPreferencesPatch": {
+        "additionalProperties": false,
+        "description": "Allow only supported workspace preferences to be changed.",
+        "properties": {
+          "appearance": {
+            "anyOf": [
+              {
+                "enum": [
+                  "System",
+                  "Light",
+                  "Dark"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Appearance"
+          },
+          "default_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "improve",
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Mode"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "reduce_motion": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reduce Motion"
+          },
+          "starter_prompts": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starter Prompts"
+          }
+        },
+        "title": "ReaderPreferencesPatch",
+        "type": "object"
+      },
+      "ReaderProject": {
+        "description": "Owner-fenced saved project work and canonical pending action.",
+        "properties": {
+          "current_stage": {
+            "title": "Current Stage",
+            "type": "string"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReaderPending"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recaps": {
+            "items": {
+              "$ref": "#/components/schemas/MilestoneRecap"
+            },
+            "title": "Recaps",
+            "type": "array"
+          },
+          "review": {
+            "$ref": "#/components/schemas/ReaderReview"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderStage"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "current_stage",
+          "stages",
+          "pending",
+          "review"
+        ],
+        "title": "ReaderProject",
+        "type": "object"
+      },
+      "ReaderRemove": {
+        "additionalProperties": false,
+        "description": "Require affirmative confirmation before deleting owned notebook data.",
+        "properties": {
+          "confirmed": {
+            "const": true,
+            "title": "Confirmed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "confirmed"
+        ],
+        "title": "ReaderRemove",
+        "type": "object"
+      },
+      "ReaderRemoved": {
+        "description": "Owner-fenced receipt for one confirmed deletion.",
+        "properties": {
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "status": {
+            "const": "deleted",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "status"
+        ],
+        "title": "ReaderRemoved",
+        "type": "object"
+      },
+      "ReaderReview": {
+        "description": "Student-facing review projected from saved conversation assessments.",
+        "properties": {
+          "facione_scores": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderFacioneScore"
+            },
+            "title": "Facione Scores",
+            "type": "array"
+          },
+          "improvements": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderReviewFeedback"
+            },
+            "title": "Improvements",
+            "type": "array"
+          },
+          "project_brief": {
+            "$ref": "#/components/schemas/ProjectBriefResult"
+          },
+          "strengths": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderReviewFeedback"
+            },
+            "title": "Strengths",
+            "type": "array"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_brief",
+          "summary",
+          "strengths",
+          "improvements",
+          "facione_scores"
+        ],
+        "title": "ReaderReview",
+        "type": "object"
+      },
+      "ReaderReviewFeedback": {
+        "description": "Saved formative feedback grouped by the stage it addresses.",
+        "properties": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "stage_id": {
+            "title": "Stage Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_id",
+          "items"
+        ],
+        "title": "ReaderReviewFeedback",
+        "type": "object"
+      },
+      "ReaderReviewJob": {
+        "description": "Saved Deep Review information needed by the student workspace.",
+        "properties": {
+          "conversation_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Revision"
+          },
+          "review_id": {
+            "title": "Review Id",
+            "type": "string"
+          },
+          "reviewed_revision": {
+            "title": "Reviewed Revision",
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeepReviewJobStatus"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "review_id",
+          "status",
+          "reviewed_revision",
+          "conversation_revision",
+          "summary"
+        ],
+        "title": "ReaderReviewJob",
+        "type": "object"
+      },
+      "ReaderSelection": {
+        "additionalProperties": false,
+        "description": "Requested focus; the application enforces the canonical unlock policy.",
+        "properties": {
+          "stage_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Stage Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_id"
+        ],
+        "title": "ReaderSelection",
+        "type": "object"
+      },
       "ReaderSession": {
         "description": "Nonsecret identity used to fence in-memory browser state.",
         "properties": {
@@ -365,6 +2422,458 @@
           "kind"
         ],
         "title": "ReaderSession",
+        "type": "object"
+      },
+      "ReaderSettingsPatch": {
+        "additionalProperties": false,
+        "description": "Allowlisted notebook controls without access to learning assessments or stage state.",
+        "properties": {
+          "assignment": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                "maxProperties": 20,
+                "propertyNames": {
+                  "maxLength": 80
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "maxLength": 30,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          },
+          "response_detail": {
+            "anyOf": [
+              {
+                "enum": [
+                  "short",
+                  "long"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Detail"
+          },
+          "response_language": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Language"
+          },
+          "selected_model": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Model"
+          }
+        },
+        "title": "ReaderSettingsPatch",
+        "type": "object"
+      },
+      "ReaderSource": {
+        "description": "Source identity and selection without storage keys or extracted content.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "locked": {
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          },
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "selected",
+          "locked",
+          "kind",
+          "size"
+        ],
+        "title": "ReaderSource",
+        "type": "object"
+      },
+      "ReaderSourceDetail": {
+        "description": "Bounded extracted text for safe plain-text inspection, never embedded HTML.",
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/ReaderSource"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source",
+          "text",
+          "truncated"
+        ],
+        "title": "ReaderSourceDetail",
+        "type": "object"
+      },
+      "ReaderSourceSelection": {
+        "additionalProperties": false,
+        "description": "Explicit desired selection; stale repeats cannot invert canonical selection.",
+        "properties": {
+          "selected": {
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "selected"
+        ],
+        "title": "ReaderSourceSelection",
+        "type": "object"
+      },
+      "ReaderSources": {
+        "description": "Owner/notebook fence around the available grounding sources.",
+        "properties": {
+          "max_file_bytes": {
+            "title": "Max File Bytes",
+            "type": "integer"
+          },
+          "max_files": {
+            "title": "Max Files",
+            "type": "integer"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderSource"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "sources",
+          "max_files",
+          "max_file_bytes"
+        ],
+        "title": "ReaderSources",
+        "type": "object"
+      },
+      "ReaderStage": {
+        "description": "Canonical stage artifact with server-projected navigation availability.",
+        "properties": {
+          "artifact_label": {
+            "title": "Artifact Label",
+            "type": "string"
+          },
+          "coach_summary": {
+            "default": "",
+            "title": "Coach Summary",
+            "type": "string"
+          },
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "criteria": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Criteria",
+            "type": "array"
+          },
+          "decision": {
+            "default": "",
+            "enum": [
+              "",
+              "pending",
+              "confirmed",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "feedback": {
+            "items": {
+              "$ref": "#/components/schemas/SavedContribution"
+            },
+            "title": "Feedback",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "next_action": {
+            "title": "Next Action",
+            "type": "string"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          },
+          "stage_id": {
+            "title": "Stage Id",
+            "type": "string"
+          },
+          "student_work": {
+            "items": {
+              "$ref": "#/components/schemas/SavedContribution"
+            },
+            "title": "Student Work",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stage_id",
+          "artifact_label",
+          "completed",
+          "next_action",
+          "id",
+          "label",
+          "selectable"
+        ],
+        "title": "ReaderStage",
+        "type": "object"
+      },
+      "ReaderStar": {
+        "additionalProperties": false,
+        "description": "Explicit desired bookmark state; no transcript or stage authority.",
+        "properties": {
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "starred"
+        ],
+        "title": "ReaderStar",
+        "type": "object"
+      },
+      "ReaderThreadWorkspace": {
+        "description": "One owner-consistent bounded open read for the student workspace.\n\nThese independently read projections are not a transactional snapshot. No\ntranscript beyond the first page, uploaded source body or version history\nis included; bounded counts inside each projection are the availability\nindicators until typed source resources own them.",
+        "properties": {
+          "bookmarks": {
+            "$ref": "#/components/schemas/ReaderBookmarks"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "page": {
+            "$ref": "#/components/schemas/ReaderPage"
+          },
+          "project": {
+            "$ref": "#/components/schemas/ReaderProject"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/ReaderNotebookSettings"
+          }
+        },
+        "required": [
+          "owner_id",
+          "page",
+          "project",
+          "bookmarks",
+          "settings"
+        ],
+        "title": "ReaderThreadWorkspace",
+        "type": "object"
+      },
+      "ReaderUpload": {
+        "description": "Payload-free receipt; queue and processing phases have no invented percentages.",
+        "properties": {
+          "filenames": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Filenames",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "processing",
+              "saved",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "filenames",
+          "state",
+          "retryable"
+        ],
+        "title": "ReaderUpload",
+        "type": "object"
+      },
+      "ReaderUploads": {
+        "description": "Owner/notebook-fenced upload receipts, not durable upload history.",
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderUpload"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "owner_id": {
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "thread_id": {
+            "title": "Thread Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner_id",
+          "thread_id",
+          "jobs"
+        ],
+        "title": "ReaderUploads",
+        "type": "object"
+      },
+      "RecapWork": {
+        "description": "One bounded pointer at the student's own saved stage contribution.",
+        "properties": {
+          "message_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Message Id",
+            "type": "string"
+          },
+          "preview": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Preview",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "preview"
+        ],
+        "title": "RecapWork",
+        "type": "object"
+      },
+      "SavedContribution": {
+        "description": "Exact active transcript text with its original message identifier.",
+        "properties": {
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "text"
+        ],
+        "title": "SavedContribution",
         "type": "object"
       },
       "ValidationError": {
@@ -454,6 +2963,102 @@
         "summary": "Bootstrap"
       }
     },
+    "/api/v1/reader/preferences": {
+      "get": {
+        "description": "Read supported presentation values without exposing unrelated settings.",
+        "operationId": "readerPreferences",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderPreferences"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "summary": "Preferences"
+      },
+      "post": {
+        "description": "Merge only supplied keys with the owner's existing preferences.",
+        "operationId": "readerPreferencesUpdate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderPreferencesPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderPreferences"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Appearance"
+      }
+    },
     "/api/v1/reader/session": {
       "get": {
         "description": "Return the verified owner without tokens or private profile fields.",
@@ -530,6 +3135,1856 @@
           }
         },
         "summary": "Notebooks"
+      },
+      "post": {
+        "description": "Create an owned entry using the canonical workspace defaults.",
+        "operationId": "readerThreadsCreate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderNotebookSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/artifacts": {
+      "get": {
+        "description": "List one owned notebook's artifacts without their document bodies.",
+        "operationId": "readerArtifacts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifacts"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Artifacts"
+      },
+      "post": {
+        "description": "Create one owned persistent artifact anchored to this notebook.",
+        "operationId": "readerArtifactCreate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderArtifactCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifact"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}": {
+      "get": {
+        "description": "Read one owned artifact with its canonical document.",
+        "operationId": "readerArtifact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifact"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Artifact"
+      },
+      "put": {
+        "description": "Apply one explicit revision-guarded save for an owned artifact.",
+        "operationId": "readerArtifactUpdate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderArtifactUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifact"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/delete": {
+      "post": {
+        "description": "Delete one owned artifact only after an explicit confirmation.",
+        "operationId": "readerArtifactDelete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderArtifactDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifactSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/duplicate": {
+      "post": {
+        "description": "Copy one owned artifact with its kind, title and canonical document.",
+        "operationId": "readerArtifactDuplicate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifact"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Duplicate"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions": {
+      "get": {
+        "description": "List one owned artifact's bounded version checkpoints, newest first.",
+        "operationId": "readerArtifactVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifactVersions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Versions"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions/{revision}": {
+      "get": {
+        "description": "Read one owned version's readable preview.",
+        "operationId": "readerArtifactVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifactVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Version"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions/{revision}/restore": {
+      "post": {
+        "description": "Restore an older version as a new revision guarded by the current one.",
+        "operationId": "readerArtifactRestore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "title": "Artifact Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderArtifactRestore"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderArtifact"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/bookmarks": {
+      "get": {
+        "description": "Project only owned active stars; never infer context from the live stage.",
+        "operationId": "readerBookmarks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderBookmarks"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bookmarks"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/canvases": {
+      "get": {
+        "description": "List one owned notebook's canvases without their graph bodies.",
+        "operationId": "readerCanvases",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderCanvases"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Canvases"
+      },
+      "post": {
+        "description": "Create one owned persistent canvas anchored to this notebook.",
+        "operationId": "readerCanvasCreate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderCanvasCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderCanvas"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}": {
+      "get": {
+        "description": "Read one owned canvas with its canonical graph.",
+        "operationId": "readerCanvas",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderCanvas"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Canvas"
+      },
+      "put": {
+        "description": "Apply one explicit revision-guarded save for an owned canvas.",
+        "operationId": "readerCanvasUpdate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderCanvasUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderCanvas"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/delete": {
+      "post": {
+        "description": "Delete the confirmed canvas revision and return its former summary.",
+        "operationId": "readerCanvasDelete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderCanvasDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderCanvasSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions": {
+      "get": {
+        "description": "List one owned canvas's bounded version checkpoints, newest first.",
+        "operationId": "readerCanvasVersions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderCanvasVersions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Versions"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions/{revision}": {
+      "get": {
+        "description": "Read one owned version's readable preview.",
+        "operationId": "readerCanvasVersion",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderCanvasVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Version"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions/{revision}/restore": {
+      "post": {
+        "description": "Restore an older version as a new revision guarded by the current one.",
+        "operationId": "readerCanvasRestore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderCanvasRestore"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderCanvas"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/deep-review": {
+      "get": {
+        "description": "Recover and show the latest Deep Review job for this owned chat.",
+        "operationId": "readerDeepReview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderDeepReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read"
+      },
+      "post": {
+        "description": "Explicitly enqueue a review under the normal server gate and generation allowance.",
+        "operationId": "readerDeepReviewStart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderDeepReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/deep-review/cancel": {
+      "post": {
+        "description": "Request cancellation without affecting a replacement review job.",
+        "operationId": "readerDeepReviewCancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderDeepReviewCancel"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderDeepReview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel"
       }
     },
     "/api/v1/reader/threads/{thread_id}/messages/page": {
@@ -649,6 +5104,1531 @@
           }
         },
         "summary": "Messages"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/messages/{message_id}/star": {
+      "post": {
+        "description": "Set an owned active message's star without starting a coaching turn.",
+        "operationId": "readerStar",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderStar"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderStar"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Star Message"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/move": {
+      "post": {
+        "description": "Save an owner-validated chat location without moving any conversation data.",
+        "operationId": "readerThreadMove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderMoveChat"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderNotebookSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/project": {
+      "get": {
+        "description": "Read canonical artifacts and navigation without invoking a provider or writing data.",
+        "operationId": "readerProject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderProject"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Project"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/project/brief": {
+      "post": {
+        "description": "Generate or reuse a whole-chat brief; accept no browser-supplied history or instructions.",
+        "operationId": "readerProjectBrief",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderBriefRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectBriefResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Project Brief"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/project/resolve/{transition_id}": {
+      "post": {
+        "description": "Apply the shared atomic decision; stale/duplicate requests require canonical rereading.",
+        "operationId": "readerProjectResolve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "transition_id",
+            "required": true,
+            "schema": {
+              "title": "Transition Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderProject"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Project Resolve"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/project/select-stage": {
+      "post": {
+        "description": "Select only application-authorized stages without awarding completion in the browser.",
+        "operationId": "readerProjectSelect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderProject"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Project Select"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/remove": {
+      "post": {
+        "description": "Delete confirmed owned data through the existing cleanup-aware service.",
+        "operationId": "readerThreadRemove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderRemoved"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/settings": {
+      "get": {
+        "description": "Read the canonical notebook action projection without private metadata.",
+        "operationId": "readerNotebookSettings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderNotebookSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read"
+      },
+      "post": {
+        "description": "Rename only an owned notebook, preserving all transcript and learning state.",
+        "operationId": "readerNotebookSettingsUpdate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderSettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderNotebookSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rename"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/sources": {
+      "get": {
+        "description": "List current canonical selection without returning private storage metadata.",
+        "operationId": "readerSources",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderSources"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reader Sources"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/sources/{source_id}": {
+      "get": {
+        "description": "Inspect up to 24,000 characters of owned extracted text without executing it.",
+        "operationId": "readerSource",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderSourceDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reader Source"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/sources/{source_id}/link": {
+      "post": {
+        "description": "Add an owned Library source to the target notebook and enable it.",
+        "operationId": "readerSourceLink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderSources"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reader Source Link"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/sources/{source_id}/remove": {
+      "post": {
+        "description": "Detach a notebook source or permanently delete an explicitly confirmed Library original.",
+        "operationId": "readerSourceRemove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReaderLibraryDelete"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderSources"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reader Source Remove"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/sources/{source_id}/select": {
+      "post": {
+        "description": "Set explicit selection through the shared store; locked sources remain authoritative.",
+        "operationId": "readerSourceSelect",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReaderSourceSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderSources"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reader Source Select"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/uploads": {
+      "get": {
+        "description": "Read ephemeral owned progress after reload; never restart missing work automatically.",
+        "operationId": "readerUploads",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderUploads"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reader Uploads"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/discard": {
+      "post": {
+        "description": "Release a terminal receipt/failure only after checking both notebook and owner.",
+        "operationId": "readerUploadDiscard",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Readeruploaddiscard",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reader Upload Discard"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/retry": {
+      "post": {
+        "description": "Retry only an owned retained failure with freshly authenticated owner services.",
+        "operationId": "readerUploadRetry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upload_id",
+            "required": true,
+            "schema": {
+              "title": "Upload Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Readeruploadretry",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reader Upload Retry"
+      }
+    },
+    "/api/v1/reader/threads/{thread_id}/workspace": {
+      "get": {
+        "description": "Load one bounded owner-consistent open read; not a transactional snapshot.",
+        "operationId": "readerThreadWorkspace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "thread_id",
+            "required": true,
+            "schema": {
+              "title": "Thread Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderThreadWorkspace"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReaderError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Workspace"
       }
     }
   }

@@ -72,23 +72,28 @@ numbers run the production rules and not a copy.
 Precedence, in the order the rules run:
 
 1. `resolve_mode_policy` on the message, titles and filenames.
-2. Lecture Help (`interaction_intent == "lecture_help"`) sets
-   `high_confidence_source`, `qa`, retrieve, and masks every navigation
-   override below. Project Coaching sets the mode to `coaching`.
+2. The legacy Lecture help intent sets `high_confidence_source`, `qa`, and
+   retrieves for course questions and other substantive turns. Improve my
+   design uses `qa` for its non-progression reply contract and retrieves when
+   existing course or selected-source cues call for evidence. Both intents
+   bypass Thinking Path navigation overrides. Project Coaching sets the mode
+   to `coaching`.
 3. Current-stage status clears the evidence scope and sets `qa`, no retrieve.
 4. Stage progression, terminal completion or workflow meta-guidance (the
    latter only when it is not a status request) clears the scope and sets
    `coaching`, no retrieve.
 5. A private-attachment question narrows the scope to the attachments. It runs
    after a clear too, so it still forces retrieval while the kept scope is
-   empty.
+   empty. Improve also uses the files attached to the current turn when a
+   critique directive does not name them. A course comparison can draw on
+   both scopes.
 6. Missing image Q&A: every selected source is an image, none loaded, and the
    message is an information request. It forces retrieval, stamps `qa` and
    fails closed.
 7. `force_retrieval` with any originally selected source forces retrieval,
    even after a clear.
 8. Course catalog: retrieval is needed and the turn is not attachment-only,
-   status, progression or workflow guidance, and it is Lecture Help or a
+   status, progression or workflow guidance, and it is legacy Lecture help or a
    course-catalog cue fired.
 9. Local course-intent promotion (Laya), only for an eligible ambiguous turn.
 10. Upload retrieval policy (below).
@@ -116,6 +121,12 @@ The offline eval cannot supply four inputs and holds them at the values the
 old gate assumed: image bytes loaded, `force_retrieval` false, no locked
 course-library rows, and no frozen Deep Review history. The model-driven
 second chance stays outside the gate.
+
+Improve searches using the same authorized source catalog and citation
+validation as Design coaching. The first search and any retry omit the saved
+stage and the staged learning summary from their retrieval inputs. An Improve
+reply saves validated citations with the message independently of educational
+assessment, so sources remain inspectable when the student reopens the chat.
 
 ### `needs_sources` (first-call source check, opt-in)
 

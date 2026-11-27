@@ -312,6 +312,10 @@ def is_retryable_db_error(error: BaseException) -> bool:
         or "serialization failure" in text
         or "occonflict" in text.replace(" ", "")
         or "optimistic concurrency" in text
+        # SQLite busy locks are the OCC analog in the DSQL-over-SQLite test
+        # seam (two independent store instances sharing one file).
+        or "database is locked" in text
+        or "database table is locked" in text
     )
 
 

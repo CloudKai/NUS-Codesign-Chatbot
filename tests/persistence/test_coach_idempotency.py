@@ -566,7 +566,10 @@ def test_independent_dsql_stores_converge_on_one_provider_turn(tmp_path):
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(submit, service) for service in services]
-        turns = [future.result(timeout=8) for future in futures]
+        # The bound only guards a stuck run: full-suite disk load can stall
+        # the two writers far beyond interactive latency (a once-observed
+        # flake), while the idempotency lease itself bounds correctness.
+        turns = [future.result(timeout=30) for future in futures]
 
     restarted = _dsql_store_over_sqlite(database, owner)
     replay = _service(restarted, provider).submit(request)

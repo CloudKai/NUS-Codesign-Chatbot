@@ -1,0 +1,147 @@
+{
+  "manifest_schema_version": 2,
+  "record_id": "release-rehearsal-ticket51-2026-11-26",
+  "recorded_on_sgt": "2026-11-26",
+  "scope": "Coordinated release/rollback preparation only. Repository defaults are static reads of the current dirty working tree; last_recorded_deployment carries the ticket 04 reconciliation forward unchanged; actually_verified_live is entirely null because no live query, publication, migration, session rollover or model call was performed. null means unknown, never absent and never filled from a default or a health check.",
+  "replaces": "docs/examples/deployment/architecture-ticket04-2026-11-24.json (superseded for repository-default hashes only; its deployment evidence and open gates remain authoritative history)",
+  "repository": {
+    "revision": "4f12995afbfba4c5c975ad12eb9874fcd4cfea39",
+    "branch": "improvement/architecture-responsiveness",
+    "dirty_worktree": true,
+    "release_sha": null,
+    "files_sha256": {
+      "compose.prod.yaml": "a59cac18b350f8a301543a34384242d6c553e405eeab98f870f16410ed5f8ab9",
+      "Caddyfile": "b2203e690dbf9ed4ac22e02324088bc131643e3676df60da0c19689c93228dc2",
+      "Caddyfile.local": "3d01fc1dd3c6db82ff7c9b214c4ace85649753de2d3b3fe17974387506358c79",
+      "Dockerfile": "ae8dd4f3787178ba6ebd9ab7b74bc75503f45eea3596d7ab8be4caefdf768cec",
+      ".dockerignore": "74b8b9d43742e83843455a9f4d0334f5ff870d50e9a2067c64359ba192677b82",
+      ".env.example": "fc3a30b146bb56cf1ae11bc64d461f85d02c11663544d36e7d350344014773bf",
+      "backend/settings.py": "752b50dc905ae5aff26a6d6a7293783e636879113c594d70b60daf2fd9237290",
+      "backend/agentcore_provider.py": "51383824be5e74363bb9852bee5a672a438d3015828c9bffa06252554d5e9c82",
+      "backend/learning_signals.py": "bf7a294f7e72415987100073ded7ab4764f09a51527ddeb8cc5923cd8f2fb78e",
+      "agentcore_runtime/main.py": "d91c31b6459576bd34d2426b4de71929184d9d9974f95574135580cec369d72f",
+      "agentcore_runtime/guardrails.py": "3139668179cd90dbad9f15533df0b84f9c8c380a9e8f8346a96b1725496bb414",
+      "agentcore_runtime/requirements.txt": "1b6d7d52f5e29ed6eef0d3defdb8d0d8ef3c8ee4fd30fd63f62a8bfd71c45e01",
+      "frontend/package-lock.json": "b4e4eafbad87ae129ddb4a6f3b5835ef23dc254a85eda4838751bdd08c2497ec",
+      "frontend/openapi/reader.json": "6655d447812188929183ecfe9f2158c20290e4bcaa0b304053b2eecc36603265",
+      "frontend/dist/index.html": "66c1db39f2c1fc81f67905e7579c8cf2aa61a41e505ea0f03a6ef1a43afbe8b8"
+    }
+  },
+  "repository_defaults": {
+    "source": "Static reads of the listed working-tree files; never effective host configuration.",
+    "production_compose": {
+      "stage_selection": "STUDENT_STAGE_SELECTION=true with AUTO_ADVANCE_STAGES=false",
+      "app_image": "${APP_IMAGE} (immutable placeholder; :latest forbidden)",
+      "model_provider": "agentcore",
+      "agentcore_qualifier": "DEFAULT",
+      "agentcore_session_generation": "20261122-streaming (repository value; a new unique value is required at every republish/rollback)",
+      "session_affinity": true,
+      "guardrail_version": "4",
+      "database_provider": "dsql",
+      "file_storage_provider": "s3"
+    },
+    "edge": {
+      "production": "Caddyfile",
+      "local": "Caddyfile.local",
+      "reader_get_routes": "chat lifecycle plus artifacts/canvases CRUD, version reads, exports and workspace (ticket 51 additive fix)",
+      "reader_put_routes": "artifact/canvas guarded saves only (ticket 51 additive matcher)",
+      "reader_post_routes": "chat lifecycle plus artifact create/delete/duplicate/version restore and canvas create/version restore (ticket 51 additive fix)",
+      "private_at_edge": ["/api/v1/ready", "professor and admin APIs", "internal CRUD outside the reader prefixes"],
+      "production_image_tag": "caddy:2-alpine (mutable; running digest unknown)",
+      "local_bootstrap_difference": "Caddyfile.local still omits the bootstrap GET (recorded ticket 01/04 gap, unchanged by ticket 51)"
+    },
+    "application_image_recipe": {
+      "frontend_builder": "node:22-bookworm-slim",
+      "application_base": "python:3.12-slim",
+      "target_platform": "linux/arm64 per runbook; not built here",
+      "image_digest": null,
+      "build_context": ".dockerignore now excludes .agents/, .playwright-cli/, .scratch/ (ticket 04 audit finding resolved by ticket 51); the final image inventory still needs owner review before release"
+    },
+    "runtime_package_recipe": {
+      "python": "3.14",
+      "architecture": "Linux ARM64",
+      "entrypoint": "opentelemetry-instrument main.py",
+      "dependencies": "agentcore_runtime/requirements.txt",
+      "artifact_sha256": null,
+      "dependency_pins": {
+        "strands-agents": "1.52.0",
+        "bedrock-agentcore": "1.21.0",
+        "pydantic": "2.13.4"
+      },
+      "mantle_safety_source": "agentcore_runtime/main.py suppresses Mantle model_delta before ApplyGuardrail(OUTPUT); local regression tests/domain/test_runtime_reply_stream.py"
+    }
+  },
+  "last_recorded_deployment": {
+    "evidence": "docs/examples/deployment/architecture-ticket04-2026-11-24.json#last_recorded_deployment",
+    "observed_on_sgt": "2026-11-24",
+    "app_git_sha_base": "dc83707dccc6fb08e666bfc310d3d3e0d3aff07d",
+    "runtime_qualifier": "GemmaStable37",
+    "runtime_version": "38",
+    "runtime_platform": "V1",
+    "runtime_artifact_sha256": "3e75266a14320388d48ea0c26598a80787d434eae4eecafed3427a0a2e002c80",
+    "default_endpoint_version": "39",
+    "default_endpoint_platform": "V2",
+    "rollback_qualifier": "HaikuRollback36",
+    "rollback_version": "36",
+    "rollback_safety_note": "v36/v38/v39 artifacts predate the Mantle provisional-output suppression; none of them is an approved rollback target without independent path-specific safety evidence.",
+    "session_generation": null,
+    "session_generation_note": "The restoration records a new generation without its literal value. Never substitute an earlier value by inference.",
+    "lightweight_provider": "bedrock_mantle_responses",
+    "lightweight_model": "google.gemma-4-31b",
+    "guardrail_version": null,
+    "provisional_output_fix_published": null
+  },
+  "actually_verified_live": {
+    "checked_at": null,
+    "application_revision": null,
+    "image_digest": null,
+    "edge_sha256": null,
+    "runtime_qualifier": null,
+    "runtime_version": null,
+    "runtime_platform": null,
+    "runtime_artifact_sha256": null,
+    "default_endpoint_version": null,
+    "session_generation": null,
+    "guardrail_version": null,
+    "fresh_session_verified": null,
+    "blocked_output_verified": null,
+    "provisional_output_fix_published": null,
+    "note": "No live check was performed by ticket 51. Fill each field only from an authorized check against the exact released tuple; a successful health check never substitutes for any field here."
+  },
+  "coordinated_release_ordering": {
+    "source": "docs/deploy/COORDINATED_RELEASE_REHEARSAL.md",
+    "order": [
+      "1. Freeze and verify the approved release SHA (mock CI green, generated reader contract committed).",
+      "2. Build the production frontend from that SHA (npm run build; record dist hashes).",
+      "3. Build and push the immutable backend image from the same SHA (never :latest).",
+      "4. Confirm generated contracts compatibility: serving FastAPI must accept the deployed runtime's response shapes before any runtime publication.",
+      "5. Apply the documented additive DSQL migration plan as administrator, one DDL per transaction; never app-startup DDL.",
+      "6. Update the Caddy allowlist exactly as in repository defaults (additive artifact/canvas reader routes and PUT matcher) and reload the edge.",
+      "7. Publish the new AgentCore runtime version on the existing ARN, wait READY, move only the approved qualifier, and set a NEW AGENTCORE_SESSION_GENERATION with a FastAPI recreation.",
+      "8. Health/readiness and direct-link checks, then the separately approved capped live validation including Mantle fresh-session and blocked-output checks."
+    ],
+    "rehearsal_evidence": "python -m scripts.release_rehearsal (disposable local data only; stages: configuration, contracts_and_builds, coordinated_startup, backup_restore)"
+  },
+  "rehearsal_status": {
+    "configuration": "pass (repository defaults)",
+    "contracts_and_builds": "pass (reader contract 35 paths; production dist built)",
+    "coordinated_startup": "pass (real API, disposable SQLite, mock adapters; health 200, readiness 200; production fail-closed validation refused the mock tuple)",
+    "backup_restore": "pass via scripts.workspace_recovery_rehearsal (disposable synthetic workspace)",
+    "production_safety_claim": false
+  },
+  "compatibility_contract": {
+    "application": "Tolerant Fast Chat parser accepts legacy JSON and SSE transport; browser NDJSON receipt/save recovery unchanged; serving API must accept the deployed runtime's shapes before publishing.",
+    "runtime": "Candidate runtime must retain the Gemma canonical-nullability correction AND Mantle provisional-output suppression; progress-only while Mantle generates.",
+    "edge": "The built frontend's reader routes (including artifacts/canvases CRUD, versions, exports, workspace) and the edge allowlist must ship together; deploying the frontend ahead of the edge 404s saved-workspace writes at the edge.",
+    "migrations": "Additive only; applied columns stay during app rollback; old app code ignores extra columns; no destructive restore as a rollback step.",
+    "sessions": "New unique session generation plus FastAPI recreation on every runtime publication, endpoint switch and rollback; never reuse an earlier generation value.",
+    "rollback": "Only independently verified safety-eligible artifacts that retain the Mantle fix; old rollback scripts and v36/v38/v39 artifacts are not approved targets; if none exists, suspend generation under an approved operational action while preserving saved work."
+  },
+  "open_gates": [
+    "Live state and current endpoint status unknown; actually_verified_live is entirely null.",
+    "Mantle fix publication, fresh-session and blocked-output checks remain unverified pending explicit live approval and request/token or cost cap.",
+    "Local Caddy bootstrap difference (Caddyfile.local omits bootstrap GET) remains documented, unchanged.",
+    "Image build-context sanitization is configured but the resulting image inventory has not been inspected (no image was built).",
+    "No live migration, publication, capacity, cost or production-safety certification was performed."
+  ]
+}

@@ -185,6 +185,81 @@ def test_dsql_validated_phase2_completion_keeps_focus_and_pending_transition(
     assert pending["to_stage"] == "concept_generation"
 
 
+def test_dsql_heartbeat_retries_sqlstate_40001_and_extends_lease(
+    tmp_path, monkeypatch
+) -> None:
+    """A serialization conflict during a lease heartbeat retries as one OCC unit.
+
+    The pre-invoke heartbeat is what keeps a healthy worker's claim alive; if
+    a DSQL serialization conflict could surface from the heartbeat, the worker
+    would die mid-run and a live claim would be treated as crashed.
+    """
+    database = tmp_path / "dsql-deep-review-heartbeat.sqlite3"
+    owner = StudentStore(database)
+    thread_id = owner.create_thread(model_id="mock", support_mode="critical-thinking")
+    dsql_store = _dsql_store_over_sqlite(database, owner)
+    review_id = "heartbeat-occ-review"
+    dsql_store.start_or_get_deep_review_job(
+        thread_id,
+        review_id=review_id,
+        reviewed_revision=0,
+        stage_at_start="problem_identification",
+        source_ids=[],
+        message_ids=[],
+    )
+    assert (
+        dsql_store.mark_deep_review_job_running(
+            thread_id,
+            review_id,
+            lease_owner="worker-a",
+            lease_seconds=240,
+            max_attempts=2,
+        )
+        is True
+    )
+
+    class SerializationFailure(RuntimeError):
+        sqlstate = "40001"
+
+    import backend.persistence.dsql_student_store as dsql_module
+
+    original_transaction = dsql_module.run_dsql_transaction
+    attempts = 0
+
+    def retry_with_injected_conflict(work, **_kwargs):
+        def flaky_work():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise SerializationFailure("could not serialize access")
+            return work()
+
+        return original_transaction(flaky_work, sleep=lambda _seconds: None)
+
+    monkeypatch.setattr(
+        dsql_module, "run_dsql_transaction", retry_with_injected_conflict
+    )
+    assert (
+        dsql_store.heartbeat_deep_review_job(
+            thread_id,
+            review_id,
+            lease_owner="worker-a",
+            lease_seconds=240,
+        )
+        is True
+    )
+    assert attempts == 2
+    job = parse_deep_review_job(
+        dict((owner.get_thread(thread_id) or {}).get("metadata") or {}).get(
+            DEEP_REVIEW_JOB_KEY
+        )
+    )
+    assert job is not None
+    assert job.get("status") == "running"
+    assert job.get("lease_owner") == "worker-a"
+    assert job.get("lease_expires_at") is not None
+
+
 def test_dsql_occ_wrappers_include_deep_review_writes() -> None:
     """Production DSQL adapter must retry Deep Review writes as whole OCC units."""
     assert issubclass(DsqlStudentStore, StudentStore)

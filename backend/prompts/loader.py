@@ -14,6 +14,7 @@ from backend.student_journey import STAGE_BY_ID
 
 _PROMPTS_ROOT = Path(__file__).resolve().parent
 _SHARED_PATH = _PROMPTS_ROOT / "shared" / "coaching.md"
+_IMPROVE_PATH = _PROMPTS_ROOT / "shared" / "improve_design.md"
 _STAGES_DIR = _PROMPTS_ROOT / "stages"
 
 
@@ -101,7 +102,17 @@ def load_stage_prompt(stage_id: str) -> str:
     return text
 
 
+@lru_cache(maxsize=1)
+def load_improve_prompt() -> str:
+    """Return the independent design feedback instructions or reject an empty file."""
+    text = _read_utf8(_IMPROVE_PATH).strip()
+    if not text:
+        raise PromptLoadError(f"Improve prompt is empty: {_IMPROVE_PATH}")
+    return text
+
+
 def clear_prompt_cache() -> None:
     """Clear the in-process prompt cache (tests and hot-reload helpers only)."""
     load_shared_prompt.cache_clear()
     load_stage_prompt.cache_clear()
+    load_improve_prompt.cache_clear()

@@ -272,3 +272,44 @@ def test_revisit_keeps_completed_frontier_and_valid_selection_rejects_pending(
     SQLitePhaseTransitionRepository(store).create(pending)
     service.select_stage(thread_id, "concept_generation")
     assert SQLitePhaseTransitionRepository(store).get_pending(thread_id) is None
+
+
+def test_confirmation_persists_one_deduplicated_milestone_recap(tmp_path):
+    """A confirmed milestone saves exactly one recap bound to the confirmed transition."""
+    store = StudentStore(tmp_path / "recap.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    store.add_message(thread_id, "user",
+                      "Students cross the road unsafely at peak hours.",
+                      metadata={"thinking_stage": "problem_identification",
+                                "interaction_intent": "project_coaching"})
+    pending = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.ADVANCE), transitions
+    ).run(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    ).pending_transition
+    assert pending is not None
+    pending = transitions.create(pending)
+
+    service = LearningProgressService(store, notebooks, transitions)
+    service.resolve(thread_id, pending.id, accepted=True)
+
+    thread = store.get_thread(thread_id) or {}
+    recaps = thread["metadata"].get("milestone_recaps")
+    assert isinstance(recaps, list) and len(recaps) == 1
+    recap = recaps[0]
+    assert recap["stage_id"] == "problem_identification"
+    assert recap["transition_id"] == pending.id
+    assert recap["next_stage_id"] == "concept_generation"
+    # The recap records persisted data only; it never claims stage authority.
+    assert recap["next_action"] == (
+        "Describe two different concepts and compare how each addresses the need.")

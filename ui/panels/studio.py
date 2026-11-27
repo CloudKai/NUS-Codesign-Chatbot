@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 import streamlit as st
 
+from backend.domain import DeepReviewJobStatus
 from backend.learning.journey import (
     complete_checkpoint_review as _complete_checkpoint_review,
     merge_checkpoint_items_into_sections as _merge_checkpoint_items_into_sections,
@@ -59,6 +60,7 @@ from ui.components import (
 )
 from ui.layout.chat_scroll import sync_chat_scroll
 from ui.runtime import (
+    cancel_deep_review,
     coach_turn_is_streaming,
     get_deep_review_job,
     get_journey_stage_reviews,
@@ -194,26 +196,39 @@ def _render_deep_review_stable() -> None:
         or [],
         running=False,
     )
+    status = job.get("status") if job else None
     with st.container(key="deep_review_control", gap=10):
-        if job and str(job.get("status") or "") == DEEP_REVIEW_JOB_COMPLETED:
+        if job and status == DEEP_REVIEW_JOB_COMPLETED:
             st.caption(_DEEP_REVIEW_COMPLETE_CAPTION)
             live_revision = int(thread.get("conversation_revision") or 0)
             reviewed_revision = int(job.get("reviewed_revision") or 0)
             if live_revision > reviewed_revision:
                 st.caption(_DEEP_REVIEW_NEWER_TURNS_CAPTION)
             _render_deep_analysis_pdf_download(thread_id)
+        if status == DeepReviewJobStatus.CANCELLED:
+            st.info("Deep Review cancelled.")
+        elif status == DeepReviewJobStatus.AMBIGUOUS:
+            st.warning(
+                "The previous Deep Review may have run, but no result was saved. "
+                "Starting a new Deep Review runs another generation."
+            )
         if view.caption:
             st.caption(view.caption)
         if view.detail_caption:
             st.caption(view.detail_caption)
+        button_label = (
+            "Start a new Deep Review"
+            if status == DeepReviewJobStatus.AMBIGUOUS
+            else _DEEP_ANALYSIS_BUTTON_LABEL
+        )
         clicked = st.button(
-            _DEEP_ANALYSIS_BUTTON_LABEL,
+            button_label,
             key="start_deep_review",
             type=view.button_type,
             disabled=view.disabled,
             use_container_width=True,
         )
-        if job and str(job.get("status") or "") == DEEP_REVIEW_JOB_FAILED:
+        if job and status == DEEP_REVIEW_JOB_FAILED:
             st.error(generation_limit_message(str(job.get("error_code") or "")) or _DEEP_REVIEW_ERROR)
         if clicked and not view.disabled:
             try:
@@ -230,11 +245,20 @@ def _render_deep_review_polling() -> None:
     """Poll Deep Review job status until the backend job is terminal."""
     thread_id = str(st.session_state.thread_id or "")
     job = get_deep_review_job(thread_id)
-    status = str(getattr(job, "status", "") or "")
-    if job is None or status not in {"queued", "running"}:
+    active_status_labels = {
+        DeepReviewJobStatus.QUEUED: "Waiting for a review worker…",
+        DeepReviewJobStatus.RUNNING: (
+            "Preparing review. Generation may be waiting for a slot…"
+        ),
+        DeepReviewJobStatus.CANCEL_REQUESTED: (
+            "Cancellation requested. A review already generating may still finish."
+        ),
+    }
+    if job is None or job.status not in active_status_labels:
         if not coach_turn_is_streaming():
             rerun_app()
         return
+    status = job.status
     thread = store.get_thread(thread_id) or {}
     metadata = dict(thread.get("metadata") or {})
     view = deep_review_control_view(
@@ -250,10 +274,23 @@ def _render_deep_review_polling() -> None:
             disabled=True,
             use_container_width=True,
         )
-        if view.status_label:
-            label = ("Waiting for a review worker (up to 30 seconds)…" if status == "queued"
-                     else "Preparing review; generation may be waiting for a slot…")
-            st.status(label, expanded=False, type="compact")
+        if status != DeepReviewJobStatus.CANCEL_REQUESTED and st.button(
+            "Cancel Deep Review", key=f"cancel_deep_review_{job.review_id}", use_container_width=True
+        ):
+            try:
+                result = cancel_deep_review(thread_id, expected_review_id=job.review_id)
+            except Exception:
+                logger.exception("deep_review_ui_cancel_failed")
+                st.error(
+                    "Could not request cancellation. Check the review status before trying again."
+                )
+            else:
+                if result is None or result.status not in active_status_labels:
+                    if not coach_turn_is_streaming():
+                        rerun_app()
+                    return
+                status = result.status
+        st.status(active_status_labels[status], expanded=False, type="compact")
 
 
 def _render_deep_analysis_pdf_download(thread_id: str) -> None:
@@ -524,24 +561,25 @@ def render_journey_track() -> None:
         ),
         unsafe_allow_html=True,
     )
-    if explicit_deep_review_available(
-        completed_stages=list(completed),
-    ) and not isinstance(thread_meta.get(DEEP_REVIEW_SNAPSHOT_KEY), dict):
+    if explicit_deep_review_available(completed_stages=list(completed)):
         with st.container(key="journey_deep_review"):
             st.markdown("**Deep Analysis PDF**")
-            st.caption("Your full learning journey is ready.")
-            if st.button(
-                _DEEP_ANALYSIS_BUTTON_LABEL,
-                key="journey_generate_deep_review",
-                type="primary",
-                use_container_width=True,
-            ):
-                try:
-                    start_deep_review(str(st.session_state.thread_id or ""))
-                    rerun_app()
-                except Exception:
-                    logger.exception("journey_deep_review_ui_failed")
-                    st.error(_DEEP_REVIEW_ERROR)
+            if parse_deep_review_job(thread_meta.get(DEEP_REVIEW_JOB_KEY)):
+                _render_deep_review_chrome(thread_meta)
+            elif not isinstance(thread_meta.get(DEEP_REVIEW_SNAPSHOT_KEY), dict):
+                st.caption("Your full learning journey is ready.")
+                if st.button(
+                    _DEEP_ANALYSIS_BUTTON_LABEL,
+                    key="journey_generate_deep_review",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    try:
+                        start_deep_review(str(st.session_state.thread_id or ""))
+                        rerun_app()
+                    except Exception:
+                        logger.exception("journey_deep_review_ui_failed")
+                        st.error(_DEEP_REVIEW_ERROR)
     resume_stages: dict[str, dict[str, Any]] = {}
     if st.session_state.thread_id:
         try:

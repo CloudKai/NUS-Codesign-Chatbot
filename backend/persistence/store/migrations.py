@@ -10,6 +10,148 @@ from __future__ import annotations
 import sqlite3
 
 
+def migrate_student_artifact_versions(connection: sqlite3.Connection) -> None:
+    """Add the bounded version-history table additively; legacy artifacts gain history on their next save."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS student_artifact_versions (
+            id TEXT PRIMARY KEY,
+            artifact_id TEXT NOT NULL,
+            notebook_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            document_text TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            restored_from INTEGER,
+            created_at TEXT NOT NULL,
+            UNIQUE (artifact_id, revision)
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_student_artifact_versions_artifact "
+        "ON student_artifact_versions(artifact_id, revision)"
+    )
+
+
+def migrate_student_artifact_kind(connection: sqlite3.Connection) -> None:
+    """Add the artifact category column additively; legacy artifacts are general notes."""
+    columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(student_artifacts)")}
+    if 'kind' not in columns:
+        connection.execute("ALTER TABLE student_artifacts ADD COLUMN kind TEXT NOT NULL DEFAULT 'notes'")
+
+
+def migrate_student_artifacts(connection: sqlite3.Connection) -> None:
+    """Add the persistent artifact table and index additively to legacy stores.
+
+    Existing rows in every other table are untouched. The statement matches the
+    canonical schema, so pre-artifact databases upgrade in place and the
+    rollback path is a source-only revert of this migration plus the schema.
+    """
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS student_artifacts (
+            id TEXT PRIMARY KEY,
+            notebook_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            document_text TEXT NOT NULL,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            revision INTEGER NOT NULL DEFAULT 1,
+            origin TEXT NOT NULL DEFAULT 'editor',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_student_artifacts_notebook_updated "
+        "ON student_artifacts(notebook_id, updated_at)"
+    )
+
+
+def migrate_artifact_reference_columns(connection: sqlite3.Connection) -> None:
+    """Add the evidence-reference columns additively; legacy artifacts start with none."""
+    for table in ('student_artifacts', 'student_artifact_versions'):
+        columns = {str(row[1]) for row in connection.execute(f'PRAGMA table_info({table})')}
+        if 'references_text' not in columns:
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN references_text TEXT NOT NULL DEFAULT '[]'")
+
+
+def migrate_student_artifact_request_id(connection: sqlite3.Connection) -> None:
+    """Add the idempotent create key and retry fingerprint additively; legacy rows keep NULLs."""
+    columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(student_artifacts)")}
+    if 'request_id' not in columns:
+        connection.execute("ALTER TABLE student_artifacts ADD COLUMN request_id TEXT")
+    if 'request_fingerprint' not in columns:
+        connection.execute("ALTER TABLE student_artifacts ADD COLUMN request_fingerprint TEXT")
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_student_artifacts_request "
+        "ON student_artifacts(notebook_id, request_id) WHERE request_id IS NOT NULL"
+    )
+
+
+def migrate_student_canvases(connection: sqlite3.Connection) -> None:
+    """Add the persistent canvas table and index additively to legacy stores.
+
+    Existing rows in every other table are untouched. The statement matches the
+    canonical schema, so pre-canvas databases upgrade in place and the
+    rollback path is a source-only revert of this migration plus the schema.
+    """
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS student_canvases (
+            id TEXT PRIMARY KEY,
+            notebook_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            graph_text TEXT NOT NULL,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            revision INTEGER NOT NULL DEFAULT 1,
+            origin TEXT NOT NULL DEFAULT 'editor',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_student_canvases_notebook_updated "
+        "ON student_canvases(notebook_id, updated_at)"
+    )
+
+
+def migrate_student_canvas_versions(connection: sqlite3.Connection) -> None:
+    """Add the bounded canvas version-history table additively; legacy canvases gain history on their next save."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS student_canvas_versions (
+            id TEXT PRIMARY KEY,
+            canvas_id TEXT NOT NULL,
+            notebook_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            graph_text TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            restored_from INTEGER,
+            created_at TEXT NOT NULL,
+            UNIQUE (canvas_id, revision)
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_student_canvas_versions_canvas "
+        "ON student_canvas_versions(canvas_id, revision)"
+    )
+
+
 def migrate_guest_claim_columns(connection: sqlite3.Connection) -> None:
     """Add the small retry tombstone fields to existing guest sessions."""
     columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(guest_sessions)")}

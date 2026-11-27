@@ -410,6 +410,12 @@ grant above is the required runtime grant while application tables remain in
 
 ## Publish an AgentCore runtime version
 
+First reconcile the selected endpoint, artifact and session generation using the
+[version manifest and Mantle safety procedure](DEPLOYMENT_SAFETY_RECORD.md).
+The latest recorded restoration pins GemmaStable37 to V1 deployment 38; DEFAULT
+was V2 deployment 39. This is not current live verification. Never publish or
+roll back a Mantle artifact without provisional-output suppression.
+
 Use the [canonical runtime source](../../agentcore_runtime/) and its
 [pinned dependencies](../../agentcore_runtime/requirements.txt). Package
 `main.py` at the zip root with vendored Linux ARM64 Python 3.14
@@ -487,9 +493,11 @@ docker compose -f compose.prod.yaml ps
 docker compose -f compose.prod.yaml exec -T app printenv APP_GIT_SHA
 ```
 
-For an app rollback, set `APP_IMAGE` to the prior immutable tag and repeat
-the EC2 refresh command. For a runtime rollback, point DEFAULT to the prior
-READY version, change the session generation in Compose, and recreate the
+For an app rollback, select a verified safety-compatible immutable tag per the
+[safe rollback gate](DEPLOYMENT_SAFETY_RECORD.md#safe-rollback), then repeat
+the EC2 refresh command. For a runtime rollback, select the verified safe
+READY version on the application-selected endpoint, change the session
+generation in Compose, and recreate the
 app container. The [release checklist](../PRODUCTION_RELEASE_CHECKLIST.md#11-rollback)
 defines rollback acceptance.
 
@@ -698,11 +706,13 @@ from the EC2 instance profile.
 Haiku 4.5 and Sonnet 4.6 use `bedrock:InvokeModel` on the existing runtime
 role. They do **not** use Bedrock Mantle.
 
-Historical DEFAULT versions that ran GPT-5.6 Luna still needed
+The latest recorded Gemma deployment uses Mantle; current live configuration
+is unverified. Historical DEFAULT versions that ran GPT-5.6 Luna also needed
 `bedrock-mantle:CreateInference` on this account's default Mantle project
 and `bedrock-mantle:CallWithBearerToken`. Keep those statements on the
-runtime role for rollback to v14–v17. Do not treat Mantle as the current
-lightweight path.
+runtime role only as required by the reviewed active/rollback model paths.
+Do not infer current IAM or model selection from these historical examples;
+old v14–v17 artifacts are not approved safety rollback targets.
 
 ```json
 {

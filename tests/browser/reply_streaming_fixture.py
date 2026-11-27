@@ -25,9 +25,13 @@ def _require_disposable_mock() -> None:
             raise RuntimeError('All fixture workspace paths must be explicit and temporary')
 
 
-_require_disposable_mock()
+def _create_mock_app() -> ASGIApp:
+    """Validate disposable paths before importing the application composition root."""
+    _require_disposable_mock()
 
-from backend.http.app import create_app
+    from backend.http.app import create_app
+
+    return create_app()
 
 
 class DelayedNDJSON:
@@ -69,4 +73,4 @@ class DelayedNDJSON:
         await self.app(scope, receive, relay)
 
 
-app = DelayedNDJSON(create_app())
+app = DelayedNDJSON(_create_mock_app())

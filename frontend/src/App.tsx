@@ -1,7 +1,8 @@
 /** CDE2300 lecture and project companion over the shared coaching policy. */
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { SIGN_OUT_SIGNAL, useReader } from './useReader';
 import { Conversation } from './Conversation';
+import { createArtifact } from './api/client';
 import { ChatNavigation } from './ChatNavigation';
 import { Sources } from './Sources';
 import { NotebookPage } from './NotebookPage';
@@ -10,7 +11,21 @@ import type { Preferences } from './api';
 import { WorkspaceTools, type WorkspaceActions } from './WorkspaceTools';
 import { Icon } from './Icon';
 import { HomeView } from './HomeView';
-import { ResizeHandle, SIDEBAR_LIMITS, WorkspaceLayoutContext, useWorkspaceLayout } from './workspaceLayout';
+import { ResizeHandle, SIDEBAR_LIMITS, WorkspaceLayoutContext, useWorkspaceLayout, applyLayoutStyle } from './workspaceLayout';
+import { openWorkspaceRoute, useWorkspaceRoute, type WorkspaceRoute } from './workspaceRoute';
+import type { CanvasSelection, ArtifactSelection } from './chatLifecycle';
+
+// Tiptap and React Flow are only needed on their routed editor views, so they
+// load behind dynamic imports: the chat-first startup bundle stays free of them
+// while deep links still mount the same components (measured in
+// tests/browser/route_load.spec.ts).
+const ArtifactEditor = lazy(() => import('./ArtifactEditor').then(m => ({ default: m.ArtifactEditor })));
+const CanvasEditor = lazy(() => import('./CanvasEditor').then(m => ({ default: m.CanvasEditor })));
+
+/** Indeterminate status while a lazily imported editor chunk loads; deep links stay hosted. */
+function EditorFallback() {
+  return <p className="editor-loading" role="status">Loading editor…</p>;
+}
 
 /** Render authentication, notebook navigation, and saved transcript reading states. */
 export default function App() {
@@ -20,7 +35,7 @@ export default function App() {
     if (reader.phase !== 'signed-out' && !(reader.phase === 'error' && reader.error === 'This account cannot access the student workspace.')) return;
     try {
       for (const key of Object.keys(sessionStorage)) {
-        if (key.startsWith('codesign-lecture:') || key.startsWith('codesign-selected:') || key.startsWith('codesign-checkin:') || key.startsWith('codesign-starters:') || key.startsWith('codesign-review:')) sessionStorage.removeItem(key);
+        if (['codesign-mode:', 'codesign-lecture:', 'codesign-selected:', 'codesign-checkin:', 'codesign-starters:', 'codesign-review:'].some(prefix => key.startsWith(prefix))) sessionStorage.removeItem(key);
       }
     } catch { /* No persistent draft exists when tab storage is blocked. */ }
   }, [reader.phase, reader.error]);
@@ -28,7 +43,7 @@ export default function App() {
     <a className="skip-link" href="#main">Skip to saved work</a>
     {!session ? <><header className="app-header"><Brand/></header><main id="main" className="entry">
       <h1>Pick up your questions<br/>and project thinking.</h1>
-      <p>Ask about lectures, develop your project, and resume saved work in your notebooks.</p>
+      <p>Improve an existing design, develop a project, and resume saved work in your notebooks.</p>
       <p className="course-notice">Your chatbot work is never graded and has no association with your course grades. This companion is used for CDE2300. Researchers want to understand how students use it and whether it benefits learning.</p>
       {reader.phase === 'checking' ? <p role="status">Checking your session…</p> : <>
         <div className="entry-actions"><a className="primary action" href="/api/v1/auth/login">Sign in</a>
@@ -50,25 +65,31 @@ function Brand() {
 function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const [themeHost, setThemeHost] = useState<HTMLDivElement | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [view, setView] = useState<'chat' | 'home' | 'notebook' | 'library' | 'search' | 'settings'>('chat');
-  const [settingsReturn, setSettingsReturn] = useState<'chat' | 'home' | 'notebook' | 'library' | 'search'>('chat');
-  const [folderId, setFolderId] = useState<string>();
+  // The typed URL is the navigation truth; back/forward, refresh and deep links all resolve here.
+  const route = useWorkspaceRoute();
+  const view = route.view;
+  const folderId = route.view === 'notebook' ? route.folderId : undefined;
+  const [settingsReturn, setSettingsReturn] = useState<WorkspaceRoute>({ view: 'home' });
   const [settingsHost, setSettingsHost] = useState<HTMLDivElement | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(reader.preferences);
-  const [intentRequest, setIntentRequest] = useState<{ id: string; intent: 'project' | 'lecture'; n: number }>();
+  const [intentRequest, setIntentRequest] = useState<{ id: string; intent: 'project' | 'improve'; n: number }>();
   const [search, setSearch] = useState('');
   const [activity, setActivity] = useState(false);
   const [workspaceBlocked, setWorkspaceBlocked] = useState(false);
   const layout = useWorkspaceLayout();
+  // The saved panel width rides a CSSOM rule: the production CSP blocks inline style attributes.
+  useEffect(() => { applyLayoutStyle('workspace', { '--nav-w': `${layout.navWidth}px` }); }, [layout.navWidth]);
   // The sidebar is docked when it fits beside the chat. Otherwise it is an icon rail, with the full list as a drawer on demand.
   const navDocked = layout.nav === 'docked';
   const [drawerOpen, setDrawerOpen] = useState(false);
   const listOpen = navDocked || drawerOpen;
   const overlay = drawerOpen && !navDocked;
   const workspaceActions = useRef<WorkspaceActions>(null);
-  const pendingIntent = useRef<'project' | 'lecture'>(undefined);
-  const startIntents = useRef<Record<string, 'project' | 'lecture'>>({});
+  const pendingIntent = useRef<'project' | 'improve'>(undefined);
+  const startIntents = useRef<Record<string, 'project' | 'improve'>>({});
   const [sections, setSections] = useState({ notebooks: true, chats: true });
+  const [canvasSelection, setCanvasSelection] = useState<CanvasSelection | null>(null);
+  const [artifactSelection, setArtifactSelection] = useState<ArtifactSelection | null>(null);
   const setSection = (section: keyof typeof sections, open: boolean) => setSections(value => ({ ...value, [section]: open }));
   const promptNotebook = () => workspaceActions.current?.promptNotebook();
   const workspaceLocked = activity || reader.busy || workspaceBlocked;
@@ -85,7 +106,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const accountLink = useRef<HTMLAnchorElement>(null);
   const helpDialog = useRef<HTMLDialogElement>(null);
   function openSearch() {
-    setView('search');
+    openWorkspaceRoute({ view: 'search' });
     closeMobileList();
     searchInput.current?.focus();
   }
@@ -116,25 +137,36 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   }, [helpOpen]);
   const searchInput = useRef<HTMLInputElement>(null);
   const session = reader.session!;
+  const readerRef = useRef(reader);
+  readerRef.current = reader;
+  const attemptedLink = useRef<string | null>(null);
   useEffect(() => {
     try {
       // Drafts belong to one verified owner in this tab. Replies are never stored.
       for (const key of Object.keys(sessionStorage)) {
-        for (const prefix of ['codesign-lecture:', 'codesign-checkin:', 'codesign-starters:']) {
+        for (const prefix of ['codesign-mode:', 'codesign-lecture:', 'codesign-checkin:', 'codesign-starters:']) {
           if (key.startsWith(prefix) && !key.startsWith(`${prefix}${session.owner_id}:`)) sessionStorage.removeItem(key);
         }
       }
-      const selected = sessionStorage.getItem(`codesign-selected:${session.owner_id}`);
-      if (selected?.startsWith('folder:')) {
-        const id = selected.slice('folder:'.length);
-        if (reader.notebooks.some(item => item.id === id && item.kind === 'notebook')) openFolder(id);
-      } else if (selected && reader.notebooks.some(item => item.id === selected)) {
-        closeMobileList();
-        void reader.open(selected);
-      }
     } catch { /* Reading still works when browser tab storage is unavailable. */ }
   }, []);
-  function startChat(intent?: 'project' | 'lecture') {
+  // The typed URL drives the open flow: deep links, refresh and back/forward all resolve here,
+  // and a foreign, deleted or expired link shows no private data and returns to the default view.
+  useEffect(() => {
+    if (route.view !== 'chat' || reader.phase !== 'ready') return;
+    if (reader.page?.notebook.id === route.threadId) { attemptedLink.current = null; return; }
+    if (reader.busy || attemptedLink.current === route.threadId) return;
+    attemptedLink.current = route.threadId;
+    void reader.open(route.threadId).then(result => {
+      const latest = readerRef.current;
+      if (result !== true && attemptedLink.current === route.threadId
+        && latest.page?.notebook.id !== route.threadId && !latest.busy) {
+        attemptedLink.current = null;
+        openWorkspaceRoute({ view: 'home' }, { replace: true });
+      } else if (result === true) attemptedLink.current = null;
+    });
+  }, [route, reader.phase, reader.busy, reader.page]);
+  function startChat(intent?: 'project' | 'improve') {
     if (workspaceLocked) return;
     pendingIntent.current = intent;
     if (reader.page?.notebook.kind === 'chat' && !reader.page.notebook.parent_notebook_id && reader.page.total_count === 0) {
@@ -142,7 +174,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
       // The empty chat is already mounted, so tell it which mode the student asked to start in.
       const emptyId = reader.page.notebook.id;
       if (intent) setIntentRequest(value => ({ id: emptyId, intent, n: (value?.n ?? 0) + 1 }));
-      setView('chat');
+      openWorkspaceRoute({ view: 'chat', threadId: emptyId });
       closeMobileList();
       window.requestAnimationFrame(() => document.getElementById('lecture-question')?.focus({ preventScroll: true }));
     } else {
@@ -150,29 +182,25 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
     }
   }
   function openHome() {
-    setView('home');
+    openWorkspaceRoute({ view: 'home' });
     setSearch('');
     closeMobileList();
     window.requestAnimationFrame(() => document.getElementById('main')?.focus({ preventScroll: true }));
   }
   function openChat(id: string) {
-    setView('chat');
+    openWorkspaceRoute({ view: 'chat', threadId: id });
     setSearch('');
     closeMobileList();
     document.getElementById('main')?.focus();
-    try { sessionStorage.setItem(`codesign-selected:${session.owner_id}`, id); } catch { /* Optional navigation restoration. */ }
-    if (reader.page?.notebook.id !== id) void reader.open(id);
   }
   function openFolder(id: string) {
-    setFolderId(id);
-    setView('notebook');
+    openWorkspaceRoute({ view: 'notebook', folderId: id });
     setSearch('');
     closeMobileList();
     window.requestAnimationFrame(() => document.getElementById('main')?.focus({ preventScroll: true }));
-    try { sessionStorage.setItem(`codesign-selected:${session.owner_id}`, `folder:${id}`); } catch { /* Optional navigation restoration. */ }
   }
   function openLibrary() {
-    setView('library');
+    openWorkspaceRoute({ view: 'library' });
     closeMobileList();
   }
   const folder = reader.notebooks.find(item => item.id === folderId && item.kind === 'notebook');
@@ -180,7 +208,7 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
   const parentId = selectedChat?.kind === 'notebook' ? selectedChat.id : selectedChat?.parent_notebook_id;
   const parentFolder = reader.notebooks.find(item => item.id === parentId && item.kind === 'notebook');
   const showHome = view === 'home' || (view === 'chat' && !reader.page && !reader.busy);
-  const folderSettings = view === 'notebook' || (view === 'settings' && settingsReturn === 'notebook');
+  const folderSettings = view === 'notebook' || (view === 'settings' && settingsReturn.view === 'notebook');
 
   return <WorkspaceLayoutContext.Provider value={layout}>
     <header className="app-header">
@@ -193,11 +221,11 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
     </header>
     <dialog className="course-dialog" ref={helpDialog} onClose={() => setHelpOpen(false)}>
       <h2>How does this work?</h2>
-      <p>Ask about lectures in Lecture help, or work through your design project in Design coaching.</p>
+      <p>Get feedback on an existing design, or work through your project in Design coaching.</p>
       <p>Use the Thinking Path to review your progress. When the coach recommends a new stage, you decide whether to move on.</p>
       <form method="dialog"><button>Done</button></form>
     </dialog>
-    <div className={`workspace ${listOpen ? 'nav-open' : 'nav-collapsed'}`} data-nav={layout.nav} style={{ '--nav-w': `${layout.navWidth}px` } as CSSProperties}>
+    <div className={`workspace ${listOpen ? 'nav-open' : 'nav-collapsed'}`} data-nav={layout.nav}>
       {overlay ? <button className="drawer-backdrop" aria-label="Close navigation" onClick={closeNavigation}/> : null}
       {!listOpen ? <nav className="navigation-rail" aria-label="Workspace shortcuts">
         <button ref={railToggle} className="icon-button" aria-label="Expand navigation" title="Expand navigation" onClick={openNavigation}><Icon name="panel"/></button>
@@ -224,8 +252,12 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           commands={{ rename: reader.renameChat, pin: reader.pinChat, remove: reader.deleteChat, share: reader.shareChat }}/>
         <WorkspaceTools ref={workspaceActions} themeHost={themeHost} settingsHost={settingsHost}
           session={session} initialPreferences={reader.preferences} onPreferences={setPreferences}
-          openSettings={() => { if (view !== 'settings') setSettingsReturn(view); setView('settings'); closeMobileList(); }}
-          closeSettings={() => { setView(settingsReturn === 'notebook' && !folder ? 'chat' : settingsReturn); document.getElementById('main')?.focus(); }}
+          openSettings={() => { if (view !== 'settings') setSettingsReturn(route); openWorkspaceRoute({ view: 'settings' }); closeMobileList(); }}
+          closeSettings={() => {
+            // The explicit back button mirrors browser Back; a vanished folder returns to the default view.
+            openWorkspaceRoute(settingsReturn.view === 'notebook' && !folder ? { view: 'home' } : settingsReturn);
+            document.getElementById('main')?.focus();
+          }}
           thread={folderSettings ? folder?.id : selectedChat?.id} disabled={activity || reader.busy}
           blocked={setWorkspaceBlocked} expired={() => void reader.reload()} changed={async created => {
             const list = await reader.refreshList();
@@ -240,17 +272,20 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
               if (pendingIntent.current) startIntents.current[created] = pendingIntent.current;
               pendingIntent.current = undefined;
               if (!await reader.open(created)) throw new Error('Created workspace could not open');
-              setView('chat'); setSearch(''); closeMobileList();
+              openWorkspaceRoute({ view: 'chat', threadId: created }); setSearch(''); closeMobileList();
               setSection(entry.parent_notebook_id ? 'notebooks' : 'chats', true);
               window.requestAnimationFrame(() => document.getElementById('lecture-question')?.focus({ preventScroll: true }));
-              try { sessionStorage.setItem(`codesign-selected:${session.owner_id}`, created); } catch { /* Optional navigation only. */ }
             } else if (folderSettings && folderId && !list.notebooks.some(item => item.id === folderId)) {
-              setFolderId(undefined);
-              setSettingsReturn('chat');
-              try { sessionStorage.removeItem(`codesign-selected:${session.owner_id}`); } catch { /* Optional navigation restoration. */ }
-            } else if (reader.page && !list.notebooks.some(item => item.id === reader.page!.notebook.id)) {
+              setSettingsReturn({ view: 'home' });
+              openWorkspaceRoute({ view: 'home' }, { replace: true });
+            } else if (reader.page?.notebook.id
+              && !list.notebooks.some(item => item.id === reader.page?.notebook.id)) {
               showNavigation();
-              try { sessionStorage.removeItem(`codesign-selected:${session.owner_id}`); sessionStorage.removeItem(`codesign-lecture:${session.owner_id}:${reader.page.notebook.id}`); } catch { /* Optional tab draft cleanup. */ }
+              try {
+                sessionStorage.removeItem(`codesign-selected:${session.owner_id}`);
+                sessionStorage.removeItem(`codesign-mode:${session.owner_id}:${reader.page.notebook.id}`);
+                sessionStorage.removeItem(`codesign-lecture:${session.owner_id}:${reader.page.notebook.id}`);
+              } catch { /* Optional tab draft cleanup. */ }
               window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.nav-new')?.focus());
             }
           }}/>
@@ -275,22 +310,51 @@ function ReaderWorkspace({ reader }: { reader: ReturnType<typeof useReader> }) {
           setQuery={setSearch} input={searchInput} locked={workspaceLocked} openChat={openChat} openNotebook={openFolder}/> : null}
         {view === 'notebook' && folder ? <NotebookPage key={folder.id} notebook={folder} entries={reader.notebooks} summaries={reader.chatSummaries}
           owner={session.owner_id} locked={workspaceLocked} expired={() => void reader.reload()}
-          createChat={() => workspaceActions.current?.createChat(folder.id)} openChat={openChat}/> : null}
+          createChat={() => workspaceActions.current?.createChat(folder.id)} openChat={openChat}
+          openArtifact={artifactId => openWorkspaceRoute({ view: 'artifact', folderId: folder.id, artifactId })}
+          createArtifact={async (title, kind) => {
+            const created = await createArtifact(folder.id, title, { type: 'doc', content: [] },
+              new AbortController().signal, kind);
+            return created;
+          }}
+          openCanvas={canvasId => openWorkspaceRoute({ view: 'canvas', folderId: folder.id, canvasId })}/> : null}
+        {view === 'artifact' && route.view === 'artifact' ? <Suspense fallback={<EditorFallback/>}><ArtifactEditor owner={session.owner_id} threadId={route.folderId}
+          artifactId={route.artifactId} expired={() => void reader.reload()} onClose={() => openFolder(route.folderId)}
+          onDiscuss={(artifactId, revision, paragraph, label) => {
+            setArtifactSelection({ artifactId, revision, paragraph, label });
+            // The family's original notebook chat carries the saved discussion.
+            openChat(route.folderId);
+          }}/></Suspense> : null}
+        {view === 'canvas' && route.view === 'canvas' ? <Suspense fallback={<EditorFallback/>}><CanvasEditor owner={session.owner_id} threadId={route.folderId}
+          canvasId={route.canvasId} expired={() => void reader.reload()} onClose={() => openFolder(route.folderId)}
+          onDiscuss={(canvasId, revision, nodeIds, label, purpose) => {
+            setCanvasSelection({ canvasId, revision, nodeIds, label, purpose });
+            // The family's original notebook chat carries the saved discussion.
+            openChat(route.folderId);
+          }}/></Suspense> : null}
         {showHome ? <HomeView owner={session.owner_id} name={preferences?.display_name || (session.kind === 'guest' ? '' : session.display_name)}
           entries={reader.notebooks} summaries={reader.chatSummaries} locked={workspaceLocked} openChat={openChat} startChat={startChat}
           expired={() => void reader.reload()}
-          decided={async id => { if (reader.page?.notebook.id === id) await reader.open(id, false, true); else await reader.refreshList(); }}/> : null}
+          openArtifact={(folderId, artifactId) => openWorkspaceRoute({ view: 'artifact', folderId, artifactId })}
+          openCanvas={(folderId, canvasId) => openWorkspaceRoute({ view: 'canvas', folderId, canvasId })}/> : null}
         {view === 'settings' ? <div className="settings-host" ref={setSettingsHost}/> : null}
         <div className="reading-content" hidden={view !== 'chat' || showHome}>
         {reader.page && reader.project ? <Conversation key={`${session.owner_id}:${reader.page.notebook.id}`} page={reader.page} project={reader.project} owner={session.owner_id}
+          canvasSelection={canvasSelection} onCanvasSelectionConsumed={() => setCanvasSelection(null)}
+          artifactSelection={artifactSelection} onArtifactSelectionConsumed={() => setArtifactSelection(null)}
+          seededBookmarks={reader.bookmarks}
           displayTitle={reader.page.notebook.kind === 'notebook' ? 'Original chat' : undefined}
           parent={parentFolder ? { name: parentFolder.name, open: () => openFolder(parentFolder.id), disabled: workspaceLocked } : undefined}
-          onHelp={() => setHelpOpen(true)} preferredIntent={preferences?.default_mode ?? 'lecture'}
+          onHelp={() => setHelpOpen(true)} preferredIntent={preferences?.default_mode ?? 'improve'}
           showStarters={preferences?.starter_prompts ?? true}
           summary={reader.chatSummaries[reader.page.notebook.id]} startIntent={startIntents.current[reader.page.notebook.id]}
-          intentRequest={intentRequest} busy={reader.busy} externalBlocked={workspaceBlocked} activity={setActivity} refresh={async () => { if (!await reader.open(reader.page!.notebook.id, false, true)) throw new Error('Refresh failed'); }} expired={() => void reader.reload()}
-          locateMessage={id => reader.open(reader.page!.notebook.id, false, true, id).then(result => !!result)}
-          loadEarlier={() => reader.open(reader.page!.notebook.id, true).then(() => {})}/> : null}
+          intentRequest={intentRequest} busy={reader.busy} externalBlocked={workspaceBlocked} activity={setActivity}
+          refresh={async () => {
+            const id = reader.page?.notebook.id;
+            if (!id || !await reader.open(id, false, true)) throw new Error('Refresh failed');
+          }} expired={() => void reader.reload()}
+          locateMessage={id => (reader.page ? reader.open(reader.page.notebook.id, false, true, id).then(result => !!result) : Promise.resolve(false))}
+          loadEarlier={() => { const id = reader.page?.notebook.id; return id ? reader.open(id, true).then(() => {}) : Promise.resolve(); }}/> : null}
         </div>
       </main>
       {navDocked ? <ResizeHandle side="sidebar" label="Resize sidebar" value={layout.navWidth} min={SIDEBAR_LIMITS.min} max={layout.sidebarMax}

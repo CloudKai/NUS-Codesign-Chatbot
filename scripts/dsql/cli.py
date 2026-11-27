@@ -10,6 +10,11 @@ connection before continuing. After CREATE/INDEX bootstrap it inspects
 five-phase workflow marker only when no notebooks exist; populated unmarked
 data remains reset-gated. It never runs at application startup.
 
+Additive guest-session and student workspace-table migrations (missing
+columns, async indexes, runtime grants and batched NULL backfills for the
+post-rollout workspace columns) are available through their dedicated
+flags; nothing here runs at application startup.
+
 Admin auth uses ``generate_db_connect_admin_auth_token`` (DbConnectAdmin).
 Runtime traffic must use ``DSQL_USER=co_design_app`` with DbConnect only.
 
@@ -78,6 +83,47 @@ _GUEST_SESSION_COLUMNS = frozenset(
     {"token_digest", "owner_user_id", "created_at", "expires_at", "revoked_at"}
 )
 
+# Student workspace tables added by the architecture programme. Fresh clusters
+# get them from backend/persistence/dsql_schema.py; existing clusters get the
+# additive plan below because runtime startup issues no DDL.
+_WORKSPACE_TABLES: tuple[str, ...] = (
+    "student_artifacts",
+    "student_artifact_versions",
+    "student_canvases",
+    "student_canvas_versions",
+)
+
+# Columns introduced after the original workspace rollout. Aurora DSQL ADD
+# COLUMN accepts only a name and type (no NOT NULL / DEFAULT in the same
+# statement), so each missing column is a separate ALTER.
+_WORKSPACE_POST_ROLLOUT_COLUMNS: dict[str, tuple[tuple[str, str], ...]] = {
+    "student_artifacts": (
+        ("kind", "TEXT"),
+        ("references_text", "TEXT"),
+        ("request_id", "TEXT"),
+        ("request_fingerprint", "TEXT"),
+    ),
+    "student_artifact_versions": (("references_text", "TEXT"),),
+}
+
+# Mirror exactly the indexes declared by dsql_schema.py; do not invent more.
+_WORKSPACE_INDEX_NAMES: tuple[str, ...] = (
+    "idx_student_artifact_versions_unique",
+    "idx_student_artifacts_notebook_updated",
+    "idx_student_artifacts_request",
+    "idx_student_canvases_notebook_updated",
+    "idx_student_canvas_versions_unique",
+)
+
+# Post-rollout workspace columns that DSQL-safe ADD COLUMN leaves NULL on
+# legacy rows, backfilled to the canonical defaults from dsql_schema.py
+# (batched by primary key like the notebooks/messages revision backfill).
+# request_id / request_fingerprint are nullable by design: no backfill.
+_WORKSPACE_NULL_BACKFILL_TARGETS: dict[str, tuple[tuple[str, str], ...]] = {
+    "student_artifacts": (("kind", "'notes'"), ("references_text", "'[]'")),
+    "student_artifact_versions": (("references_text", "'[]'"),),
+}
+
 
 def is_async_index_ddl(statement: str) -> bool:
     """Return True when *statement* is a CREATE [UNIQUE] INDEX ASYNC DDL."""
@@ -123,6 +169,86 @@ def plan_guest_session_migration(existing_columns: set[str]) -> list[str]:
     return statements
 
 
+def _normalized_ddl(statement: str) -> str:
+    """Strip comment lines and collapse whitespace for canonical comparison."""
+    lines = [
+        line
+        for line in statement.splitlines()
+        if not line.lstrip().startswith("--")
+    ]
+    return " ".join(" ".join(lines).split())
+
+
+def _canonical_table_ddl(table: str) -> str:
+    """Return the canonical ``CREATE TABLE`` statement for *table*."""
+    prefix = f"CREATE TABLE IF NOT EXISTS {table}".upper()
+    for statement in iter_dsql_ddl_statements():
+        normalized = _normalized_ddl(statement)
+        if normalized.upper().startswith(prefix):
+            return normalized
+    raise RuntimeError(f"Canonical DSQL schema has no CREATE TABLE for {table!r}")
+
+
+def _canonical_index_ddl(index_name: str) -> str:
+    """Return the canonical ``CREATE [UNIQUE] INDEX ASYNC`` for *index_name*."""
+    for statement in iter_dsql_ddl_statements():
+        normalized = _normalized_ddl(statement)
+        upper = normalized.upper()
+        if (
+            upper.startswith("CREATE")
+            and " INDEX ASYNC " in f" {upper} "
+            and index_name in normalized.split()
+        ):
+            return normalized
+    raise RuntimeError(f"Canonical DSQL schema has no index named {index_name!r}")
+
+
+def plan_workspace_table_migrations(tables: dict[str, set[str]]) -> list[str]:
+    """Plan additive DSQL DDL for the student workspace tables.
+
+    Args:
+        tables: Inspected shape keyed by workspace table name. An absent table
+            maps to an empty column set (or is omitted).
+
+    Returns:
+        Ordered statements: ``CREATE TABLE IF NOT EXISTS`` for absent tables
+        (mirroring :mod:`backend.persistence.dsql_schema`), one DSQL-safe
+        ``ALTER TABLE ... ADD COLUMN`` per missing post-rollout column on
+        present tables, the async indexes declared by the canonical schema,
+        then runtime-role grants. Legacy NULL ``kind`` / ``references_text``
+        rows are deliberately *not* part of the plan: like the
+        notebooks/messages revision backfill, they run through batched
+        id-keyed updates after the DDL (``apply_workspace_null_backfills``),
+        never as unbounded statement-level UPDATEs.
+    """
+    present = {
+        str(table).lower(): {str(column).lower() for column in columns}
+        for table, columns in tables.items()
+    }
+    statements: list[str] = []
+    for table in _WORKSPACE_TABLES:
+        if present.get(table):
+            continue
+        statements.append(_canonical_table_ddl(table))
+    for table in _WORKSPACE_TABLES:
+        columns = present.get(table)
+        if not columns:
+            continue
+        for column_name, column_type in _WORKSPACE_POST_ROLLOUT_COLUMNS.get(table, ()):
+            if column_name not in columns:
+                statements.append(
+                    f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}"
+                )
+    for index_name in _WORKSPACE_INDEX_NAMES:
+        statements.append(_canonical_index_ddl(index_name))
+    for table in _WORKSPACE_TABLES:
+        statements.append(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table} "
+            f"TO {RUNTIME_ROLE_NAME}"
+        )
+    return statements
+
+
 def inspect_guest_session_migration(
     *,
     endpoint: str,
@@ -146,6 +272,34 @@ def inspect_guest_session_migration(
     finally:
         connection.close()
     return plan_guest_session_migration(columns)
+
+
+def inspect_workspace_table_migrations(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+) -> list[str]:
+    """Read the DSQL catalog as admin and plan the workspace-table migration."""
+    connection = _connect_admin(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    try:
+        tables = {
+            table: fetch_table_columns(connection, table)
+            for table in _WORKSPACE_TABLES
+        }
+    finally:
+        connection.close()
+    return plan_workspace_table_migrations(tables)
 
 
 def column_default_is_zero(column_default: Any) -> bool:
@@ -239,6 +393,42 @@ def plan_missing_message_revision_statements(
     return planned
 
 
+def build_null_backfill_update(
+    table: str,
+    column: str,
+    value_sql: str,
+    row_ids: list[str] | tuple[str, ...],
+) -> str | None:
+    """Build one deterministic NULL→*value_sql* UPDATE for a known id batch.
+
+    Args:
+        table: Target table (allowlisted by the calling planner).
+        column: Column to repair; must exist on *table*.
+        value_sql: SQL literal default (``0``, ``'notes'``, ``'[]'``).
+        row_ids: Ordered primary-key ids to repair (already selected).
+
+    Returns:
+        A single UPDATE statement, or ``None`` when *row_ids* is empty.
+
+    Raises:
+        ValueError: When *table* or *column* is empty.
+    """
+    cleaned_table = str(table or "").strip().lower()
+    cleaned_column = str(column or "").strip().lower()
+    if not cleaned_table or not cleaned_column:
+        raise ValueError(f"Unsupported null backfill target: {table!r}.{column!r}")
+    cleaned_ids = [str(item).strip() for item in row_ids if str(item).strip()]
+    if not cleaned_ids:
+        return None
+    # Literal ids are admin-migration only; values come from a prior SELECT on
+    # the same table. Escape single quotes for safe SQL literals.
+    rendered = ", ".join("'" + item.replace("'", "''") + "'" for item in cleaned_ids)
+    return (
+        f"UPDATE {cleaned_table} SET {cleaned_column} = {value_sql} "
+        f"WHERE id IN ({rendered}) AND {cleaned_column} IS NULL"
+    )
+
+
 def build_revision_null_backfill_update(
     table: str,
     row_ids: list[str] | tuple[str, ...],
@@ -258,15 +448,8 @@ def build_revision_null_backfill_update(
     cleaned_table = str(table or "").strip().lower()
     if cleaned_table not in _REVISION_BACKFILL_TABLES:
         raise ValueError(f"Unsupported revision backfill table: {table!r}")
-    cleaned_ids = [str(item).strip() for item in row_ids if str(item).strip()]
-    if not cleaned_ids:
-        return None
-    # Literal ids are admin-migration only; values come from a prior SELECT on
-    # the same table. Escape single quotes for safe SQL literals.
-    rendered = ", ".join("'" + item.replace("'", "''") + "'" for item in cleaned_ids)
-    return (
-        f"UPDATE {cleaned_table} SET conversation_revision = 0 "
-        f"WHERE id IN ({rendered}) AND conversation_revision IS NULL"
+    return build_null_backfill_update(
+        cleaned_table, "conversation_revision", "0", row_ids
     )
 
 
@@ -346,22 +529,30 @@ def count_null_conversation_revisions(connection: Any, table_name: str) -> int:
         return 0
 
 
-def fetch_null_conversation_revision_ids(
+def fetch_null_column_ids(
     connection: Any,
     table_name: str,
+    column_name: str,
     *,
     batch_size: int = REVISION_NULL_BACKFILL_BATCH_SIZE,
 ) -> list[str]:
-    """Return up to *batch_size* ids with NULL ``conversation_revision``."""
-    cleaned = str(table_name or "").strip().lower()
-    if cleaned not in _REVISION_BACKFILL_TABLES:
-        raise ValueError(f"Unsupported revision backfill table: {table_name!r}")
+    """Return up to *batch_size* primary-key ids whose *column_name* is NULL.
+
+    Ordered by ``id`` so repeated batches partition the remaining NULL rows
+    deterministically under Aurora DSQL's per-transaction row limits.
+    """
+    cleaned_table = str(table_name or "").strip().lower()
+    cleaned_column = str(column_name or "").strip().lower()
+    if not cleaned_table or not cleaned_column:
+        raise ValueError(
+            f"Unsupported null backfill target: {table_name!r}.{column_name!r}"
+        )
     limit = max(1, int(batch_size))
     result = connection.execute(
         f"""
         SELECT id
-        FROM {cleaned}
-        WHERE conversation_revision IS NULL
+        FROM {cleaned_table}
+        WHERE {cleaned_column} IS NULL
         ORDER BY id
         LIMIT ?
         """,
@@ -373,6 +564,24 @@ def fetch_null_conversation_revision_ids(
         if value:
             ids.append(value)
     return ids
+
+
+def fetch_null_conversation_revision_ids(
+    connection: Any,
+    table_name: str,
+    *,
+    batch_size: int = REVISION_NULL_BACKFILL_BATCH_SIZE,
+) -> list[str]:
+    """Return up to *batch_size* ids with NULL ``conversation_revision``."""
+    cleaned = str(table_name or "").strip().lower()
+    if cleaned not in _REVISION_BACKFILL_TABLES:
+        raise ValueError(f"Unsupported revision backfill table: {table_name!r}")
+    return fetch_null_column_ids(
+        connection,
+        cleaned,
+        "conversation_revision",
+        batch_size=batch_size,
+    )
 
 
 def _job_id_from_result(result: Any) -> str | None:
@@ -640,27 +849,21 @@ def _apply_admin_statements(
     return applied
 
 
-def apply_guest_session_migration(
+def _apply_planned_ddl_statements(
+    planned: list[str],
     *,
     endpoint: str,
     region: str,
-    database: str = "postgres",
-    admin_user: str = "admin",
-    connect_fn: Callable[..., Any] | None = None,
-    token_provider: Callable[[], str] | None = None,
-    dry_run: bool = False,
+    database: str,
+    admin_user: str,
+    connect_fn: Callable[..., Any] | None,
+    token_provider: Callable[[], str] | None,
 ) -> list[str]:
-    """Inspect and optionally apply the additive guest-session DSQL migration."""
-    planned = inspect_guest_session_migration(
-        endpoint=endpoint,
-        region=region,
-        database=database,
-        admin_user=admin_user,
-        connect_fn=connect_fn,
-        token_provider=token_provider,
-    )
-    if dry_run:
-        return planned
+    """Apply planned DDL one statement per committed admin transaction.
+
+    Waits for each new ``CREATE INDEX ASYNC`` job before the next statement;
+    ``IF NOT EXISTS`` reruns return no job id and skip the wait.
+    """
     applied: list[str] = []
     waiter = wait_for_async_index_job
     for statement in planned:
@@ -698,6 +901,88 @@ def apply_guest_session_migration(
                 token_provider=token_provider,
             )
         applied.append(statement)
+    return applied
+
+
+def apply_guest_session_migration(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+    dry_run: bool = False,
+) -> list[str]:
+    """Inspect and optionally apply the additive guest-session DSQL migration."""
+    planned = inspect_guest_session_migration(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    if dry_run:
+        return planned
+    return _apply_planned_ddl_statements(
+        planned,
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+
+
+def apply_workspace_table_migration(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+    dry_run: bool = False,
+    batch_size: int = REVISION_NULL_BACKFILL_BATCH_SIZE,
+) -> list[str]:
+    """Inspect and optionally apply the additive workspace-table DSQL migration.
+
+    DDL runs one statement per committed admin transaction; afterwards legacy
+    NULL ``kind`` / ``references_text`` rows are backfilled in id-keyed
+    batches (see :func:`apply_workspace_null_backfills`).
+    """
+    planned = inspect_workspace_table_migrations(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    if dry_run:
+        return planned
+    applied = _apply_planned_ddl_statements(
+        planned,
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    applied.extend(
+        apply_workspace_null_backfills(
+            endpoint=endpoint,
+            region=region,
+            database=database,
+            admin_user=admin_user,
+            connect_fn=connect_fn,
+            token_provider=token_provider,
+            batch_size=batch_size,
+        )
+    )
     return applied
 
 
@@ -940,6 +1225,77 @@ def apply_revision_null_backfills(
 apply_missing_message_revision_columns = apply_missing_revision_columns
 
 
+def apply_workspace_null_backfills(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+    batch_size: int = REVISION_NULL_BACKFILL_BATCH_SIZE,
+) -> list[str]:
+    """Batch-repair NULL post-rollout workspace columns until none remain.
+
+    DSQL-safe ``ADD COLUMN`` cannot carry NOT NULL / DEFAULT, so legacy
+    ``student_artifacts`` and ``student_artifact_versions`` rows hold NULL
+    ``kind`` / ``references_text`` after an upgrade. Each SELECT+UPDATE batch
+    uses its own committed admin transaction and stays within *batch_size* row
+    modifications — the same id-keyed ``ORDER BY id`` batching as the
+    notebooks/messages revision backfill. ``request_id`` and
+    ``request_fingerprint`` are nullable by design and never backfilled.
+    Safe to rerun; no-op when columns are absent or no NULLs remain.
+
+    Returns:
+        UPDATE statements that were executed.
+    """
+    limit = max(1, int(batch_size))
+    applied: list[str] = []
+    for table, targets in _WORKSPACE_NULL_BACKFILL_TARGETS.items():
+        for column_name, value_sql in targets:
+            while True:
+                connection = _connect_admin(
+                    endpoint=endpoint,
+                    region=region,
+                    database=database,
+                    admin_user=admin_user,
+                    connect_fn=connect_fn,
+                    token_provider=token_provider,
+                )
+                try:
+                    details = fetch_table_column_details(connection, table)
+                    if column_name not in details:
+                        connection.commit()
+                        connection.close()
+                        break
+                    ids = fetch_null_column_ids(
+                        connection,
+                        table,
+                        column_name,
+                        batch_size=limit,
+                    )
+                    statement = build_null_backfill_update(
+                        table, column_name, value_sql, ids
+                    )
+                    if statement is None:
+                        connection.commit()
+                        connection.close()
+                        break
+                    connection.execute(statement)
+                    connection.commit()
+                except Exception:
+                    try:
+                        connection.rollback()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    connection.close()
+                    raise
+                else:
+                    connection.close()
+                applied.append(statement)
+    return applied
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse CLI flags and apply the DSQL schema as admin."""
     parser = argparse.ArgumentParser(
@@ -947,6 +1303,7 @@ def main(argv: list[str] | None = None) -> int:
             "Admin-only Aurora DSQL schema bootstrap. "
             "One DDL per transaction; waits for ASYNC index jobs; "
             "additive notebook/message revision ALTERs from catalog; "
+            "guest-session and workspace-table migration flags; "
             "five-phase marker only for an empty database; "
             "not used by application startup."
         )
@@ -977,17 +1334,38 @@ def main(argv: list[str] | None = None) -> int:
         help="Inspect/apply only the additive guest-session DSQL migration.",
     )
     parser.add_argument(
+        "--workspace-tables-only",
+        action="store_true",
+        help=(
+            "Inspect/apply only the additive student workspace-table "
+            "DSQL migration."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="With --guest-sessions-only, inspect catalog and print planned SQL.",
+        help=(
+            "With --guest-sessions-only or --workspace-tables-only, inspect "
+            "the catalog and print planned SQL."
+        ),
     )
     args = parser.parse_args(argv)
     if (args.admin_user or "").strip().lower() == RUNTIME_ROLE_NAME.lower():
         raise SystemExit(
             f"--admin-user must not be the runtime role {RUNTIME_ROLE_NAME!r}"
         )
-    if args.dry_run and not args.guest_sessions_only:
-        parser.error("--dry-run requires --guest-sessions-only")
+    if args.guest_sessions_only and args.workspace_tables_only:
+        parser.error(
+            "--guest-sessions-only and --workspace-tables-only are mutually "
+            "exclusive"
+        )
+    if args.dry_run and not (
+        args.guest_sessions_only or args.workspace_tables_only
+    ):
+        parser.error(
+            "--dry-run requires --guest-sessions-only or "
+            "--workspace-tables-only"
+        )
     if args.guest_sessions_only:
         planned = apply_guest_session_migration(
             endpoint=str(args.endpoint or ""),
@@ -997,6 +1375,23 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=bool(args.dry_run),
         )
         heading = "Guest-session migration plan" if args.dry_run else "Applied"
+        print(f"{heading} ({len(planned)} statement(s)):")
+        for statement in planned:
+            print(statement + ";")
+        if args.dry_run:
+            print("Dry run only; no DDL or grants were applied.")
+        return 0
+    if args.workspace_tables_only:
+        planned = apply_workspace_table_migration(
+            endpoint=str(args.endpoint or ""),
+            region=str(args.region or ""),
+            database=str(args.database or "postgres"),
+            admin_user=str(args.admin_user or "admin"),
+            dry_run=bool(args.dry_run),
+        )
+        heading = (
+            "Workspace-table migration plan" if args.dry_run else "Applied"
+        )
         print(f"{heading} ({len(planned)} statement(s)):")
         for statement in planned:
             print(statement + ";")

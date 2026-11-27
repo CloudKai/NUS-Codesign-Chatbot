@@ -2,11 +2,46 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
 from backend.settings import settings
 from backend.student_store import StudentStore
+from backend.workspace_service import WorkspaceService
+
+
+def test_upload_processing_runs_off_the_event_loop(tmp_path, monkeypatch):
+    """Blocking upload writes must not stall the event loop (ticket 39).
+
+    The measured harness (``scripts/benchmark_concurrency.py``) shows the
+    same blocking work placed on the asyncio loop stalls every concurrent
+    request, while bounded threadpool offloading does not. The two ``async``
+    upload routes must therefore run their workspace writes via the bounded
+    threadpool like every sync route.
+    """
+    store = StudentStore(tmp_path / "upload-offloop.sqlite3")
+    client = TestClient(create_app(store))
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    observations: list[str] = []
+    real = WorkspaceService.upload_sources
+
+    def spy(self, spy_thread_id, uploads):
+        try:
+            asyncio.get_running_loop()
+            observations.append("event-loop")
+        except RuntimeError:
+            observations.append("worker-thread")
+        return real(self, spy_thread_id, uploads)
+
+    monkeypatch.setattr(WorkspaceService, "upload_sources", spy)
+    response = client.post(
+        f"/api/v1/threads/{thread_id}/sources",
+        files=[("files", ("a.txt", b"one", "text/plain"))],
+    )
+    assert response.status_code == 200, response.text
+    assert observations == ["worker-thread"]
 
 
 def test_upload_rejects_too_many_files(tmp_path, monkeypatch):

@@ -558,3 +558,67 @@ def test_importing_the_module_loads_no_storage_provider_or_settings() -> None:
         check=True,
     )
     assert result.stdout.strip() == "[]", result.stdout
+
+
+@pytest.mark.parametrize(
+    ("message", "sources", "retrieves", "catalog", "kept"),
+    [
+        (
+            "How can I improve the contrast of the timer on my crossing prototype?",
+            (UPLOAD, COURSE_ROW),
+            False,
+            False,
+            ("up-1", "course-1"),
+        ),
+        (
+            "Can we finish the Thinking Path?",
+            (UPLOAD,),
+            False,
+            False,
+            ("up-1",),
+        ),
+        (
+            "Please critique my prototype for visibility.",
+            (UPLOAD, ATTACHMENT, COURSE_ROW),
+            True,
+            False,
+            ("att-1",),
+        ),
+        (
+            "How could I improve my prototype using the method from Lecture 4?",
+            (COURSE_ROW,),
+            True,
+            True,
+            ("course-1",),
+        ),
+        (
+            "What do the Survey results say about peak hours?",
+            (UPLOAD,),
+            True,
+            False,
+            ("up-1",),
+        ),
+    ],
+)
+def test_improve_evidence_retrieval_depends_on_the_student_request(
+    message: str,
+    sources: tuple[ScopeSource, ...],
+    retrieves: bool,
+    catalog: bool,
+    kept: tuple[str, ...],
+) -> None:
+    """Improve uses authorized evidence without a Thinking Path retrieval override."""
+    inputs = dict(
+        message=message,
+        sources=sources,
+        attachment_count=sum(source.is_attachment for source in sources),
+        interaction_intent="improve_design",
+    )
+    first = decide_first_pass_scope(ScopeInputs(current_stage="problem_identification", **inputs))
+    later = decide_first_pass_scope(ScopeInputs(current_stage="reflection", **inputs))
+    assert first == later
+    assert first.expected_mode == "qa"
+    assert first.scope_cleared is False
+    assert first.needs_retrieval is retrieves
+    assert first.include_course_catalog is catalog
+    assert first.kept_source_ids == kept

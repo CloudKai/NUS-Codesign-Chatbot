@@ -31,12 +31,12 @@ def record_display(message_id: str) -> None:
 
 
 def render_answer_feedback(message: dict[str, Any]) -> None:
-    """Offer optional usefulness feedback on lecture answers; report save failures."""
+    """Offer optional usefulness feedback on freeform answers and report save failures."""
     metadata = message.get('metadata') or {}
-    if metadata.get('interaction_intent') != 'lecture_help' or message.get('is_error'):
+    if metadata.get('interaction_intent') not in {'lecture_help', 'improve_design'} or message.get('is_error'):
         return
     rating = (learning_receipts(metadata.get('learning_signals')).get('rating') or {}).get('kind')
-    st.write('Was this answer useful? Optional feedback for improving lecture help.')
+    st.write('Was this answer useful?')
     with st.container(horizontal=True):
         for kind, label in [('useful', 'Useful'), ('not_useful', 'Not useful')]:
             if st.button(label, key=f'learning-{kind}-{message["id"]}',

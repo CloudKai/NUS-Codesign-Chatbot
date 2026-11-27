@@ -1,14 +1,12 @@
 /** Notebook-scoped source work independent of the mounted conversation and composer. */
 import { Icon } from './Icon';
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, currentSession, get } from './api';
+import { useQueryClient } from '@tanstack/react-query';
+import { ApiError, currentSession, type Source, type SourceDetail, type SourceList } from './api';
+import { discardUpload, linkLibrarySource, readSourceDetail, removeSource, retryUpload, setSourceSelected } from './api/client';
+import { fetchConfirmedSources, fetchConfirmedUploads, reconcileSources, seedSources, seedUploads } from './api/workspaceSources';
+import type { UploadJob } from './api';
 import './sources.css';
-
-interface Source { id: string; title: string; selected: boolean; locked: boolean; kind: string; size: number }
-interface SourceList { owner_id: string; thread_id: string; sources: Source[]; max_files: number; max_file_bytes: number }
-interface Job { id: string; filenames: string[]; state: 'queued' | 'processing' | 'saved' | 'failed'; retryable: boolean }
-interface Jobs { owner_id: string; thread_id: string; jobs: Job[] }
-interface Detail { source: Source; text: string; truncated: boolean }
 
 /** Format source metadata for a quick file scan. */
 function fileDescription(source: Source) {
@@ -28,8 +26,8 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
   const panel = !library && !embedded;
   const [open, setOpen] = useState(!panel);
   const [list, setList] = useState<SourceList | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [detail, setDetail] = useState<Detail | null>(null);
+  const [jobs, setJobs] = useState<UploadJob[]>([]);
+  const [detail, setDetail] = useState<SourceDetail | null>(null);
   const [removing, setRemoving] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -44,6 +42,7 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
   const active = useRef(true);
   const lock = useRef(false);
   const controller = useRef(new AbortController());
+  const queryClient = useQueryClient();
   const trigger = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const detailHeading = useRef<HTMLHeadingElement>(null);
@@ -78,15 +77,16 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
   async function refresh() {
     const epoch = ++sequence.current;
     await verify();
+    // Owner-fenced generated reads; a foreign or mismatched answer fails closed.
     const [next, uploads] = await Promise.all([
-      get<SourceList>(`${path}/sources`, controller.current.signal), get<Jobs>(`${path}/uploads`, controller.current.signal),
+      fetchConfirmedSources(owner, thread, controller.current.signal),
+      fetchConfirmedUploads(owner, thread, controller.current.signal),
     ]);
     await verify();
     if (epoch !== sequence.current) return;
-    if (next.owner_id !== owner || uploads.owner_id !== owner || next.thread_id !== thread || uploads.thread_id !== thread) {
-      expired(); throw new Error('Session changed');
-    }
     setList(next); setJobs(uploads.jobs);
+    seedSources(queryClient, owner, thread, next);
+    seedUploads(queryClient, owner, thread, uploads);
     if (uploads.jobs.length && uploads.jobs.every(job => job.state === 'saved')) {
       setNotice(value => value.startsWith('Upload submitted.') ? '' : value);
     }
@@ -94,41 +94,80 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
     setUnverified(false); uncertain?.(false); setError('');
   }
 
-  async function act(route: string, body?: object | FormData) {
+  /** Reconcile one confirmed catalog into the resource and the local surface. */
+  function applyCatalog(confirmed: SourceList) {
+    setList(confirmed);
+    void reconcileSources(queryClient, owner, thread, () => confirmed);
+  }
+
+  type SourceAction =
+    | { kind: 'select'; sourceId: string; selected: boolean }
+    | { kind: 'link'; sourceId: string }
+    | { kind: 'remove'; sourceId: string; confirmed?: boolean }
+    | { kind: 'upload'; files: File[] }
+    | { kind: 'retry'; uploadId: string }
+    | { kind: 'discard'; uploadId: string };
+
+  const successNotice = (action: SourceAction, library: boolean) =>
+    action.kind === 'upload' ? 'Upload submitted. Files appear below when ready.'
+      : action.kind === 'link' ? 'Source added and enabled.'
+      : action.kind === 'select' ? 'Source selection saved.'
+      : action.kind === 'remove' ? (library ? 'File deleted.' : 'Source removed from this notebook.')
+      : action.kind === 'retry' ? 'Upload queued for retry.' : 'Upload dismissed.';
+
+  async function apply(action: SourceAction): Promise<boolean | undefined> {
     if (lock.current || unverified || disabled) return;
     lock.current = true; setBusy(true); setError('');
     setUnverified(true); uncertain?.(true);
     // Invalidate older reads before a mutation; an ambiguous write is followed only by reads.
     sequence.current += 1;
     let submitted = false;
+    let uploadAccepted = false;
     try {
       await verify();
-      const response = await fetch(`${path}/${route}`, {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
-        headers: body instanceof FormData || !body ? undefined : { 'Content-Type': 'application/json' },
-        body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
-      });
-      submitted = true;
-      await verify();
-      if ([401, 403].includes(response.status)) { expired(); return; }
-      const success = route === 'uploads' ? 'Upload submitted. Files appear below when ready.'
-        : route.endsWith('/link') ? 'Source added and enabled.' : route.endsWith('/select') ? 'Source selection saved.'
-        : route.endsWith('/remove') ? library ? 'File deleted.' : 'Source removed from this notebook.'
-        : route.endsWith('/retry') ? 'Upload queued for retry.' : 'Upload dismissed.';
-      setNotice(response.ok ? success
-        : response.status === 429 ? 'Upload allowance is full or uploads are busy. Wait, or dismiss failed uploads and choose fewer or smaller files.'
-        : response.status === 422 && route === 'uploads' ? 'An image could not be validated. Use a readable PNG, JPEG, WebP, or GIF under 24 megapixels.'
-        : response.status === 413 || response.status === 400 ? 'Files exceed the upload limits. Choose fewer or smaller files.'
-        : 'That source action is unavailable or changed. Saved sources refreshed.');
+      if (action.kind === 'upload') {
+        // Multipart submission keeps its specialized browser adapter.
+        const data = new FormData(); action.files.forEach(file => data.append('files', file));
+        const response = await fetch(`${path}/uploads`, {
+          method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal, body: data });
+        submitted = true;
+        await verify();
+        if ([401, 403].includes(response.status)) { expired(); return; }
+        uploadAccepted = response.ok;
+        setNotice(response.ok ? successNotice(action, library)
+          : response.status === 429 ? 'Upload allowance is full or uploads are busy. Wait, or dismiss failed uploads and choose fewer or smaller files.'
+          : response.status === 422 ? 'An image could not be validated. Use a readable PNG, JPEG, WebP, or GIF under 24 megapixels.'
+          : 'Files exceed the upload limits. Choose fewer or smaller files.');
+      } else {
+        if (action.kind === 'select') {
+          applyCatalog(await setSourceSelected(thread, action.sourceId, action.selected, controller.current.signal));
+        } else if (action.kind === 'link') {
+          applyCatalog(await linkLibrarySource(thread, action.sourceId, controller.current.signal));
+        } else if (action.kind === 'remove') {
+          applyCatalog(await removeSource(thread, action.sourceId, controller.current.signal, action.confirmed));
+        } else if (action.kind === 'retry') {
+          await retryUpload(thread, action.uploadId, controller.current.signal);
+        } else {
+          await discardUpload(thread, action.uploadId, controller.current.signal);
+        }
+        await verify();
+        setNotice(successNotice(action, library));
+      }
       await refresh();
-      if (response.ok && route === 'uploads') setAddingFiles(false);
-      return response.ok;
+      if (active.current && action.kind === 'upload' && uploadAccepted) setAddingFiles(false);
+      return true;
     } catch (error) {
+      if (error instanceof ApiError && [401, 403].includes(error.status)) { expired(); return; }
+      if (error instanceof ApiError) {
+        setNotice('That source action is unavailable or changed. Saved sources refreshed.');
+        try { await refresh(); } catch { /* The refresh failure is already reported. */ }
+        return;
+      }
       failure(error);
       setNotice('The action may have reached the server. Refresh sources before continuing. No action is replayed automatically.');
     } finally {
       if (active.current) {
-        if (route === 'uploads') {
+        if (action.kind === 'upload') {
           setFiles([]); if (fileInput.current) fileInput.current.value = '';
           if (!submitted) setNotice('Upload outcome is unknown. Refresh sources and check filenames before selecting files again.');
         }
@@ -143,7 +182,7 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
     lock.current = true; setBusy(true); setError('');
     try {
       await verify();
-      const next = await get<Detail>(`${path}/sources/${encodeURIComponent(source.id)}`, controller.current.signal);
+      const next = await readSourceDetail(thread, source.id, controller.current.signal);
       await verify();
       if (next.source.id !== source.id) throw new Error('Source changed');
       setDetail(next); setRemoving(''); setActionsFor('');
@@ -156,9 +195,8 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
     setLoadingLibrary(true);
     try {
       await verify();
-      const result = await get<SourceList>('/api/v1/reader/threads/library/sources', controller.current.signal);
+      const result = await fetchConfirmedSources(owner, 'library', controller.current.signal);
       await verify();
-      if (result.owner_id !== owner || result.thread_id !== 'library') throw new Error('Library changed');
       setLibraryChoices(result.sources);
     } catch (error) { failure(error); }
     finally { if (active.current) setLoadingLibrary(false); }
@@ -218,7 +256,7 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
         </button>
         {!library && !source.locked ? <label className="source-use">
           <input type="checkbox" checked={source.selected} disabled={blocked} aria-label={`Use ${source.title} in answers`}
-            onChange={event => void act(`sources/${encodeURIComponent(source.id)}/select`, { selected: event.target.checked })}/>
+            onChange={event => void apply({ kind: 'select', sourceId: source.id, selected: event.target.checked })}/>
           <span aria-hidden="true">{source.selected ? 'In use' : 'Off'}</span>
         </label> : null}
         <button className="icon-button source-more" id={`${rowId}-more`} aria-label={`Actions for ${source.title}`}
@@ -237,7 +275,7 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
           : 'Remove this source from the notebook? The original stays in your Library.'}</p>
         <div className="source-row-actions">
           <button className="danger-action" disabled={blocked} onClick={() => {
-            void act(`sources/${encodeURIComponent(source.id)}/remove`, library ? { confirmed: true } : undefined).then(saved => {
+            void apply({ kind: 'remove', sourceId: source.id, confirmed: library ? true : undefined }).then(saved => {
               if (saved && active.current) { setRemoving(''); setActionsFor(''); heading.current?.focus(); }
             });
           }}>{library ? 'Confirm deletion' : 'Confirm removal'}</button>
@@ -296,8 +334,7 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
       </div>
       {addingFiles ? <form id={`${panelId}-upload`} className="source-inline source-upload" onSubmit={event => {
         event.preventDefault(); if (!files.length || blocked) return;
-        const data = new FormData(); files.forEach(file => data.append('files', file));
-        void act('uploads', data).then(saved => { if (saved) requestAnimationFrame(() => uploadToggle.current?.focus()); });
+        void apply({ kind: 'upload', files }).then(saved => { if (saved) requestAnimationFrame(() => uploadToggle.current?.focus()); });
       }}>
         <label htmlFor={fileId}>Choose documents or images</label>
         <input ref={fileInput} id={fileId} type="file" multiple disabled={blocked}
@@ -315,7 +352,7 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
           <button className="icon-button" aria-label="Close Library picker" onClick={() => setLibraryChoices(null)}><Icon name="close"/></button></div>
         {available.length ? <ul className="source-list">{available.map(source => <li key={source.id}>
           <div className="source-row"><span className="source-file-text"><strong>{source.title}</strong><small>{fileDescription(source)}</small></span>
-            <button disabled={blocked} aria-label={`Add ${source.title}`} onClick={() => void act(`sources/${encodeURIComponent(source.id)}/link`)}>Add</button>
+            <button disabled={blocked} aria-label={`Add ${source.title}`} onClick={() => void apply({ kind: 'link', sourceId: source.id })}>Add</button>
           </div>
         </li>)}</ul> : <p className="supporting">No additional Library files to add.</p>}
       </section> : null}
@@ -330,8 +367,8 @@ export function Sources({ owner, thread, expired, uncertain, opened, disabled, l
           <strong>{job.filenames.join(', ')}</strong>
           <p className="supporting">{job.state === 'failed' ? 'Upload failed. Check the file list before retrying.' : job.state === 'queued' ? 'Waiting to process…' : 'Processing…'}</p>
           {job.state === 'failed' ? <div className="source-row-actions">
-            <button disabled={blocked || !job.retryable} onClick={() => void act(`uploads/${encodeURIComponent(job.id)}/retry`)}>Retry upload</button>
-            <button disabled={blocked} onClick={() => void act(`uploads/${encodeURIComponent(job.id)}/discard`)}>Dismiss</button>
+            <button disabled={blocked || !job.retryable} onClick={() => void apply({ kind: 'retry', uploadId: job.id })}>Retry upload</button>
+            <button disabled={blocked} onClick={() => void apply({ kind: 'discard', uploadId: job.id })}>Dismiss</button>
           </div> : null}
         </div>)}
       </section> : null}

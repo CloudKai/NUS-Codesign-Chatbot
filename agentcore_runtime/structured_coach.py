@@ -308,6 +308,20 @@ Decide Coaching versus Q&A internally; this turn is Fast Chat, not a locked Coac
   latest request or attachment is clearly unrelated to both CDE2300 course
   content and the student's active CDE2300 design project. Technical or
   domain material that could support that project is not out of scope.
+- canvas_suggestions: optional array, [] unless the untrusted canvas context
+  describes selected canvas nodes and a proposal would genuinely help. At
+  most 5 items. Each item is inert data for the student to review, never an
+  action: kind is exactly "new_node" (with node_kind, title, optional
+  description) or "new_edge" (with relation, source_node_id, target_node_id
+  from the context labels), plus a stable unique id starting with "sg-" and
+  a one-sentence rationale. Never propose database operations, stage
+  changes, or un-discussed content.
+- artifact_feedback: optional single object or null, only when the untrusted
+  artifact context shows saved draft text and revising it would genuinely
+  help. proposed_text is the complete revised passage the student reviews as
+  a before/after pair; rationale is one sentence. Inert data for review,
+  never an action; never propose database operations, stage changes, or
+  content the student did not draft.
 
 Do not return Facione scores, review fields, research coding, or an
 assessment object. Do not use application, retrieval, browsing, database,
@@ -736,6 +750,19 @@ def specialist_system_prompt(payload: Mapping[str, Any] | None) -> str:
         raw_phase = str(payload.get("phase") or "").strip().lower()
         contract = payload_output_contract(payload)
     if raw_phase == PHASE_FAST_CHAT or contract == "fast_chat_turn":
+        if payload_topic(payload) == "improve_design":
+            return (
+                "Improve my design gives student-led, practical design feedback.\n\n"
+                + trusted
+                + "\n\nReturn the structured output immediately with mode qa, "
+                "response_text, citations using only supplied labels, "
+                "hmw_scaffold_ready false, needs_source_retrieval false, and "
+                "out_of_scope true only for clearly unrelated requests. "
+                "Follow the source-check instructions when supplied. Canvas suggestions "
+                "or artifact feedback may propose reviewable changes when the student "
+                "supplied that material. Omit recommendation and rationale. Use no tools "
+                "except the required structured response."
+            )
         return (
             fast_chat_system_prompt(payload_topic(payload), trusted)
             + "\n\n"
@@ -794,6 +821,8 @@ def agent_system_prompt(payload: Mapping[str, Any] | None) -> str | list[dict[st
             prompt_cache_enabled_from_environ,
             system_prompt_with_optional_cache_point,
         )
+    if payload_topic(payload) == "improve_design":
+        return assembled
     prefix = fast_chat_static_prefix(payload_topic(payload))
     if not assembled.startswith(prefix):
         return assembled

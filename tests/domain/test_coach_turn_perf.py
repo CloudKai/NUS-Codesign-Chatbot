@@ -304,6 +304,96 @@ def test_emit_logs_timing_seconds_without_student_text(caplog) -> None:
     assert "total_server_ms=" in blob
 
 
+def test_submit_records_visible_text_and_confirmation_boundaries(caplog, tmp_path) -> None:
+    """Backend telemetry distinguishes the safe visible-text and confirmed boundaries.
+
+    The runtime-internal first-text metrics are provider-reported; when a
+    provider does not report them the label says so instead of leaving the
+    unknown silent.
+    """
+    from backend.application import CoachApplicationService
+    from backend.learning_service import LearningProgressService
+    from backend.mock_provider import DeterministicCoachProvider
+    from backend.repositories import (
+        SQLiteNotebookRepository,
+        SQLitePhaseTransitionRepository,
+    )
+    from backend.student_store import StudentStore
+    from backend.workflow import CoachWorkflow
+
+    caplog.set_level(logging.INFO)
+    store = StudentStore(tmp_path / "perf-boundaries.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    service = CoachApplicationService(
+        store,
+        SQLiteNotebookRepository(store),
+        CoachWorkflow(
+            DeterministicCoachProvider(),
+            SQLitePhaseTransitionRepository(store),
+        ),
+        LearningProgressService(
+            store,
+            SQLiteNotebookRepository(store),
+            SQLitePhaseTransitionRepository(store),
+        ),
+    )
+    service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="I think option B is better because of privacy.",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="boundary-timing",
+        )
+    )
+    payload = _perf_event(caplog)
+    assert_payload_is_safe(
+        {key: value for key, value in payload.items() if key != "event"}
+    )
+    # First safe visible text: measured at the reply_ready boundary, before
+    # the confirmed completion.
+    assert isinstance(payload.get("first_safe_reply_ready_ms"), (int, float))
+    assert 0 <= payload["first_safe_reply_ready_ms"] <= payload["request_total_ms"]
+    # Final confirmed completion: measured once the turn is durably saved.
+    assert isinstance(payload.get("turn_confirmed_ms"), (int, float))
+    assert payload["turn_confirmed_ms"] >= payload["first_safe_reply_ready_ms"]
+    assert payload["turn_confirmed_ms"] <= payload["request_total_ms"]
+    # The deterministic provider reports no internal first-text timing, so the
+    # unknown is labeled rather than left silent.
+    assert payload["first_text_timing_source"] == "not_reported"
+    assert "I think option B" not in json.dumps(payload)
+    assert all("I think option B" not in record.message for record in caplog.records)
+
+
+def test_runtime_reported_first_text_is_labeled_as_measured(caplog) -> None:
+    """When the runtime reports first-token metrics the label says measured."""
+    caplog.set_level(logging.INFO)
+    payload = _output()
+    payload["time_to_first_token_ms"] = 120.0
+    payload["model_first_reply_text_ms"] = 180.0
+    client = FakeAgentCoreRuntime(payload=payload)
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+    )
+    provider.assess(
+        CoachRequest(
+            thread_id="thread-demo",
+            student_message="I think option B is better.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    recorded = _perf_event(caplog)
+    assert recorded["first_text_timing_source"] == "runtime_reported"
+    assert recorded["agentcore_ttft_ms"] == 120.0
+    assert recorded["model_first_reply_text_ms"] == 180.0
+
+
 def test_submit_records_service_latency_breakdown(caplog, tmp_path) -> None:
     from backend.application import CoachApplicationService
     from backend.learning_service import LearningProgressService

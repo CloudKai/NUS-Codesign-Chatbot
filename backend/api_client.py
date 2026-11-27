@@ -983,6 +983,16 @@ class LocalApiClient:
         response.raise_for_status()
         return DeepReviewJob.model_validate(response.json())
 
+    def cancel_deep_review(self, thread_id: str, *, expected_review_id: str) -> DeepReviewJob:
+        """Request cancellation of the displayed job and return the current job state."""
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/deep-review/cancel",
+            params={"expected_review_id": expected_review_id},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return DeepReviewJob.model_validate(response.json())
+
     def get_journey_stage_reviews(self, thread_id: str) -> dict[str, Any]:
         """Return Journey stage-completion review checkpoints for one notebook."""
         response = self._http.get(

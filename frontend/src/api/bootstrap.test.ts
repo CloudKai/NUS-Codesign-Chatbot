@@ -5,7 +5,7 @@ import { browserClient } from './client';
 import { ApiError } from './errors';
 
 const session = { owner_id: 'a', kind: 'guest', display_name: 'Student' };
-const prefs = { owner_id: 'a', appearance: 'System', display_name: '', reduce_motion: false, default_mode: 'lecture', starter_prompts: true };
+const prefs = { owner_id: 'a', appearance: 'System', display_name: '', reduce_motion: false, default_mode: 'improve', starter_prompts: true };
 const bootstrap = { session, listing: { owner_id: 'a', notebooks: [], chat_summaries: {} }, preferences: prefs };
 afterEach(() => vi.unstubAllGlobals());
 

@@ -1,8 +1,13 @@
 /** Notebook actions and preferences over the existing authenticated workspace. */
 import { useEffect, useImperativeHandle, useRef, useState, type Ref, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Icon } from './Icon';
-import { ApiError, currentSession, get, type NotebookSettings, type Preferences, type Session } from './api';
+import { ApiError, currentSession, type NotebookSettingsPatch, type Preferences, type Session } from './api';
+import { createThread, removeThread } from './api/client';
+import { queryKeys } from './api/queryKeys';
+import { reconcileNotebooks, withEntry, withoutEntry } from './api/workspaceNotebooks';
+import { useNotebookSettings, usePreferences, useSaveNotebookSettings, useSavePreferences } from './api/workspaceSettings';
 
 export interface WorkspaceActions {
   promptNotebook: () => void;
@@ -48,10 +53,14 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
   const owner = session.owner_id;
   const createDialog = useRef<HTMLDialogElement>(null);
   const createName = useRef<HTMLInputElement>(null);
-  const [settings, setSettings] = useState<NotebookSettings | null>(null);
-  const [prefs, setPrefs] = useState<Preferences | null>(initialPreferences);
+  const queryClient = useQueryClient();
+  const prefsQuery = usePreferences(owner);
+  const settingsQuery = useNotebookSettings(owner, thread);
+  const savePreferences = useSavePreferences(owner);
+  const saveSettings = useSaveNotebookSettings(owner, thread);
+  const prefs = prefsQuery.data ?? null;
+  const settings = settingsQuery.data ?? null;
   const [displayName, setDisplayName] = useState(initialPreferences?.display_name ?? '');
-  const initialLoad = useRef(true);
   const appearance = prefs?.appearance ?? 'System';
   const [name, setName] = useState('');
   const [newName, setNewName] = useState('');
@@ -61,95 +70,129 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
   const [error, setError] = useState('');
   const active = useRef(true);
   const lock = useRef(false);
-  const epoch = useRef(0);
   const control = useRef(new AbortController());
   const heading = useRef<HTMLHeadingElement>(null);
-  const base = thread ? `/api/v1/reader/threads/${encodeURIComponent(thread)}` : '';
 
   async function verify() {
     const session = await currentSession(control.current.signal);
     if (!active.current) throw new Error('View closed');
     if (session.owner_id !== owner) { expired(); throw new Error('Owner changed'); }
   }
-  async function load() {
-    const token = ++epoch.current;
-    await verify();
-    const [prefs, detail] = await Promise.all([
-      get<Preferences>('/api/v1/reader/preferences', control.current.signal),
-      thread ? get<NotebookSettings>(`${base}/settings`, control.current.signal).catch(error => {
-        if (error instanceof ApiError && error.status === 404) return null;
-        throw error;
-      }) : Promise.resolve(null),
-    ]);
-    await verify();
-    if (token !== epoch.current) throw new Error('View changed');
-    if (prefs.owner_id !== owner || (detail && (detail.owner_id !== owner || detail.notebook.id !== thread))) throw new Error('Owner changed');
-    setPrefs(prefs);
-    onPreferences(prefs);
-    setDisplayName(prefs.display_name);
-    document.documentElement.dataset.appearance = prefs.appearance;
-    setSettings(detail);
-    setName(detail?.notebook.name || '');
-  }
+
   useEffect(() => {
     active.current = true;
     if (initialPreferences?.owner_id === owner) {
       document.documentElement.dataset.appearance = initialPreferences.appearance;
     }
     return () => {
-      active.current = false; epoch.current++; control.current.abort();
+      active.current = false; control.current.abort();
       delete document.documentElement.dataset.appearance;
     };
   }, []);
   useEffect(() => {
-    let stale = false;
-    setSettings(null); setConfirm(false); setError('');
-    // Only the initial, already owner-verified bootstrap replaces the redundant
-    // preference-only load. Later notebook changes and mutations revalidate normally.
-    const useBootstrap = initialLoad.current && !thread && initialPreferences?.owner_id === owner;
-    initialLoad.current = false;
-    if (useBootstrap) return;
-    void load().catch(() => { if (active.current && !stale) setError('Could not load preferences. Refresh workspace to try again.'); });
-    return () => { stale = true; };
+    if (!prefs) return;
+    onPreferences(prefs);
+    setDisplayName(prefs.display_name);
+    document.documentElement.dataset.appearance = prefs.appearance;
+  }, [prefs]);
+  useEffect(() => {
+    // A notebook change resets local form state; the Query resource provides the data.
+    setConfirm(false); setError(''); setName('');
   }, [thread]);
+  useEffect(() => { if (settings) setName(settings.notebook.name || ''); }, [settings]);
+  useEffect(() => {
+    if (active.current && (prefsQuery.isError || (thread && settingsQuery.isError))) {
+      setError('Could not load preferences. Refresh workspace to try again.');
+    }
+  }, [prefsQuery.isError, settingsQuery.isError, thread]);
   useEffect(() => { blocked(busy || uncertain); }, [busy, uncertain]);
   useEffect(() => { if (settingsHost) heading.current?.focus({ preventScroll: true }); }, [settingsHost]);
 
   async function refresh() {
     if (lock.current) return;
     lock.current = true; setBusy(true); setError('');
-    try { await changed(); await load(); if (active.current) { setUncertain(false); setError('Workspace refreshed.'); } }
+    try {
+      await verify();
+      const refetches: Promise<{ isError: boolean }>[] = [prefsQuery.refetch()];
+      if (thread) refetches.push(settingsQuery.refetch());
+      const results = await Promise.all(refetches);
+      await verify();
+      if (results.some(result => result.isError)) throw new Error('Refresh failed');
+      await changed();
+      if (active.current) { setUncertain(false); setError('Workspace refreshed.'); }
+    }
     catch { if (active.current) setError('Could not verify saved workspace. Refresh before another change.'); }
     finally { lock.current = false; if (active.current) setBusy(false); }
   }
-  async function write(route: string, body: object, creating = false) {
+
+  /** Shared write frame: never replay a write; reconcile through confirmed owner-fenced reads. */
+  function writeFrame(action: () => Promise<unknown>, options: { clearsConfirm?: boolean } = {}) {
+    return (async () => {
+      if (lock.current || disabled || uncertain) return;
+      lock.current = true; setBusy(true); setUncertain(true); setError('');
+      try {
+        await verify();
+        await action();
+        await verify();
+        if (active.current) {
+          setUncertain(false);
+          if (options.clearsConfirm) setConfirm(false);
+          setError('Changes saved.');
+        }
+      } catch (error) {
+        if (error instanceof ApiError && [401, 403].includes(error.status)) { expired(); return; }
+        if (active.current) setError('Could not verify the change. Refresh workspace before continuing. A new chat or notebook may already exist. Check the sidebar before trying again.');
+      } finally { lock.current = false; if (active.current) setBusy(false); }
+    })();
+  }
+
+  function updatePreferences(patch: Partial<Omit<Preferences, 'owner_id'>>) {
+    return writeFrame(() => savePreferences.mutateAsync({ patch, signal: control.current.signal }));
+  }
+
+  function updateNotebook(patch: NotebookSettingsPatch) {
+    if (!thread) return Promise.resolve();
+    return writeFrame(() => saveSettings.mutateAsync({ patch, signal: control.current.signal }),
+      { clearsConfirm: false });
+  }
+
+  /** Create and confirmed delete run generated contracts; ambiguous outcomes reconcile through an explicit refresh. */
+  async function write(kind: 'create' | 'remove', body: object, creating = false) {
     if (lock.current || disabled || uncertain) return;
     lock.current = true; setBusy(true); setUncertain(true); setError('');
     let created: string | undefined;
     try {
       await verify();
-      const response = await fetch(route, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
-        signal: control.current.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      await verify();
-      if ([401, 403].includes(response.status)) { expired(); return; }
-      if (creating && response.ok) {
-        const result: NotebookSettings = await response.json();
+      if (kind === 'create') {
+        const result = await createThread(body as { name: string } | { kind: 'chat'; parent_notebook_id?: string | null },
+          control.current.signal);
+        await verify();
         if (result.owner_id !== owner || !result.notebook.id) throw new Error('Invalid created workspace');
         created = result.notebook.id;
+        await reconcileNotebooks(queryClient, owner, list => withEntry(list, result.notebook));
+      } else if (thread) {
+        const removed = await removeThread(thread, control.current.signal);
+        await verify();
+        if (removed.owner_id !== owner) throw new Error('Invalid removed workspace');
+        // The removed notebook's settings resource no longer exists.
+        queryClient.removeQueries({ queryKey: queryKeys.notebookSettings(owner, thread) });
+        await reconcileNotebooks(queryClient, owner, list => withoutEntry(list, thread));
       }
-      // No write is replayed. Even a rejected or lost response is followed by canonical reads.
-      if (!creating && !route.endsWith('/remove')) await load();
       await changed(created);
       if (active.current) {
         setUncertain(false); setConfirm(false);
-        if (response.ok && creating) createDialog.current?.close();
-        setError(response.ok ? 'Changes saved.' : 'That change was unavailable. Saved workspace refreshed.');
+        if (creating) createDialog.current?.close();
+        setError('Changes saved.');
       }
-    } catch { if (active.current) setError('Could not verify the change. Refresh workspace before continuing. A new chat or notebook may already exist. Check the sidebar before trying again.'); }
-    finally { lock.current = false; if (active.current) setBusy(false); }
-  }
-  function updatePreferences(patch: Partial<Omit<Preferences, 'owner_id'>>) {
-    return write('/api/v1/reader/preferences', patch);
+    } catch (error) {
+      if (error instanceof ApiError && [401, 403].includes(error.status)) { expired(); return; }
+      if (error instanceof ApiError) {
+        try { await changed(created); } catch { /* The sidebar refresh failure is reported by its caller. */ }
+        if (active.current) { setUncertain(false); setError('That change was unavailable. Saved workspace refreshed.'); }
+        return;
+      }
+      if (active.current) setError('Could not verify the change. Refresh workspace before continuing. A new chat or notebook may already exist. Check the sidebar before trying again.');
+    } finally { lock.current = false; if (active.current) setBusy(false); }
   }
 
   const locked = disabled || busy || uncertain;
@@ -162,7 +205,7 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
       createName.current?.focus();
     },
     createChat(parentNotebookId) {
-      void write('/api/v1/reader/threads', { kind: 'chat', parent_notebook_id: parentNotebookId }, true);
+      void write('create', { kind: 'chat', parent_notebook_id: parentNotebookId }, true);
     },
   }));
   const entryName = settings?.notebook.kind === 'chat' ? 'chat' : 'notebook';
@@ -176,7 +219,7 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
       <p id="new-notebook-description">Group your project chats and shared sources in one folder.</p>
       <form onSubmit={event => {
         event.preventDefault();
-        if (newName.trim()) void write('/api/v1/reader/threads', { name: newName.trim() }, true);
+        if (newName.trim()) void write('create', { name: newName.trim() }, true);
       }}>
         <label htmlFor="new-notebook-name">Notebook name</label>
         <input ref={createName} id="new-notebook-name" maxLength={120} placeholder="e.g. Campus wellbeing" value={newName} onChange={event => setNewName(event.target.value)}/>
@@ -221,8 +264,8 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
       <section className="settings-group">
         <h2>Learning</h2>
         <SettingsRow label="Default mode for new chats">
-          <Segmented<Preferences['default_mode']> label="Default mode" value={prefs?.default_mode ?? 'lecture'} disabled={locked || !prefs}
-            options={[{ value: 'project', label: 'Design coaching' }, { value: 'lecture', label: 'Lecture help' }]}
+          <Segmented<Preferences['default_mode']> label="Default mode" value={prefs?.default_mode ?? 'improve'} disabled={locked || !prefs}
+            options={[{ value: 'project', label: 'Design coaching' }, { value: 'improve', label: 'Improve my design' }]}
             change={value => void updatePreferences({ default_mode: value })}/>
         </SettingsRow>
         <SettingsRow label="Starter prompts" htmlFor="workspace-starters" description="Show suggestions in an empty conversation.">
@@ -236,7 +279,7 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
       </section>
       {settings ? <section className="settings-group">
         <h2>{entryName === 'chat' ? 'Current chat' : 'Current notebook'}</h2>
-          <form onSubmit={event => { event.preventDefault(); void write(`${base}/settings`, { name: name.trim() }); }}>
+          <form onSubmit={event => { event.preventDefault(); void updateNotebook({ name: name.trim() }); }}>
             <SettingsRow label={entryName === 'chat' ? 'Chat name' : 'Notebook name'} htmlFor="rename-notebook">
               <div className="settings-inline">
                 <input id="rename-notebook" maxLength={120} value={name} onChange={event => setName(event.target.value)}/>
@@ -247,7 +290,7 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
           <form className="settings-assignment" onSubmit={event => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
-            void write(`${base}/settings`, { assignment: { ...settings.assignment, title: String(data.get('title')), brief: String(data.get('brief')) } });
+            void updateNotebook({ assignment: { ...settings.assignment, title: String(data.get('title')), brief: String(data.get('brief')) } });
           }} key={`${thread}:${JSON.stringify(settings.assignment)}`}>
             <label htmlFor="assignment-title">Assignment title</label><input id="assignment-title" name="title" maxLength={4000} defaultValue={settings.assignment.title || ''}/>
             <label htmlFor="assignment-brief">Assignment context</label><textarea id="assignment-brief" name="brief" maxLength={4000} defaultValue={settings.assignment.brief || ''}/>
@@ -259,7 +302,7 @@ export function WorkspaceTools({ session, thread, disabled, changed, expired, bl
           {confirm ? <div className="remove-confirm">
             <p>Delete “{settings.notebook.name}” and its conversation, sources, and feedback?</p>
             {entryName === 'notebook' ? <p>Any chats organized here will return to Chats.</p> : null}
-            <button disabled={locked} onClick={() => void write(`${base}/remove`, { confirmed: true })}>Confirm delete {entryName}</button>
+            <button disabled={locked} onClick={() => void write('remove', { confirmed: true })}>Confirm delete {entryName}</button>
           </div> : null}
       </section> : null}
     </div>, settingsHost) : null}

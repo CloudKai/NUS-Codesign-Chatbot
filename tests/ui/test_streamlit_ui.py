@@ -1709,3 +1709,25 @@ def test_pending_edit_retries_when_coach_is_temporarily_busy(monkeypatch):
         or "still finishing another reply" in (error.value or "")
         for error in app.error
     )
+
+
+def test_streamlit_improve_my_design_keeps_project_stage() -> None:
+    """The Improve action gives design feedback without advancing the Thinking Path."""
+    app = _saved_app()
+    next(button for button in app.button if button.label == "Improve my design").click().run()
+    assert not app.exception
+    assert not any(button.label == "Ask about a lecture" for button in app.button)
+    assert not any(radio.label == "Thinking Path section" for radio in app.radio)
+    assert not any("Students are encouraged to craft" in item.value for item in app.markdown)
+    assert any("Get feedback on a design you already have." in item.value for item in app.caption)
+
+    app.chat_input[0].set_value("My crossing timer is hard to read. What could I improve?").run()
+    assert not app.exception
+    assert any("Improve my design" in item.value for item in app.caption)
+    assert any(button.label == "Useful" for button in app.button)
+    assert app.session_state["learning_journey"]["current_stage"] == "problem_identification"
+
+    next(button for button in app.button if button.label == "Design coaching").click().run()
+    assert not app.exception
+    assert any(radio.label == "Thinking Path section" for radio in app.radio)
+    assert app.session_state["learning_journey"]["current_stage"] == "problem_identification"

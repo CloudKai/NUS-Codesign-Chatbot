@@ -160,6 +160,49 @@ def test_reader_workspace_guards_and_existing_data(tmp_path: Path, monkeypatch: 
     assert client.post(f'{path}/settings', json={'reasoning_effort': 'invented'}, headers=origin).status_code == 422
 
 
+def test_reader_workspace_open_is_bounded_and_owner_fenced(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """One bounded open read returns page, project, bookmarks and settings without source bodies."""
+    monkeypatch.setattr(settings, 'public_api_base_url', 'https://testserver')
+    root = StudentStore(tmp_path / 'workspace-open.sqlite3')
+    for name, role in [('student', 'student'), ('other', 'student'), ('staff', 'lecturer')]:
+        _seed_user(root, name, role)
+    student = StudentStore(root.path, identifier='cognito:student')
+    thread = student.create_thread(name='Crossing study', model_id='mock', support_mode='critical-thinking',
+                                   reader_notebook=True)
+    for index in range(25):
+        student.add_message(thread, 'user', f'Message {index}')
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc), base_url='https://testserver')
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))
+    origin = {'Origin': 'https://testserver'}
+    path = f'/api/v1/reader/threads/{thread}'
+    starred = client.get(f'{path}/messages/page', params={'limit': 1}).json()['messages'][0]['id']
+    assert client.post(f'{path}/messages/{starred}/star', json={'starred': True}, headers=origin).status_code == 200
+
+    response = client.get(f'{path}/workspace', headers=origin)
+    assert response.status_code == 200
+    workspace = response.json()
+    assert set(workspace) == {'owner_id', 'page', 'project', 'bookmarks', 'settings'}
+    assert workspace['owner_id'] == client.get('/api/v1/reader/session', headers=origin).json()['owner_id']
+    assert workspace['page']['total_count'] == 25
+    assert len(workspace['page']['messages']) == 20
+    assert workspace['page'] == client.get(f'{path}/messages/page').json()
+    assert workspace['project']['thread_id'] == thread
+    assert workspace['bookmarks']['thread_id'] == thread
+    assert [item['id'] for item in workspace['bookmarks']['messages']] == [starred]
+    assert workspace['settings']['notebook']['id'] == thread
+    assert workspace['settings']['notebook']['kind'] == 'notebook'
+    assert 'sources' not in workspace and 'transcript' not in workspace
+
+    assert client.get('/api/v1/reader/threads/unknown/workspace', headers=origin).status_code == 404
+    anonymous = TestClient(create_app(root, oidc_client=oidc), base_url='https://testserver')
+    assert anonymous.get(f'{path}/workspace', headers=origin).status_code == 401
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('staff'))
+    assert client.get(f'{path}/workspace', headers=origin).status_code == 403
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('other'))
+    assert client.get(f'{path}/workspace', headers=origin).status_code == 404
+
+
 def test_reader_quick_chats_are_separate_from_named_notebooks(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """Classify new quick chats durably and show pre-existing conversations as chats."""
     monkeypatch.setattr(settings, "public_api_base_url", "https://testserver")

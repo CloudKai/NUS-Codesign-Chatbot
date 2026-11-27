@@ -219,6 +219,11 @@ controls with accessible names.
 
 ### Application shell and sidebar
 
+The chat composer offers **Improve my design** for feedback on an existing design
+and **Design coaching** for working through the Thinking Path. Both modes use the
+same saved conversation and notebook sources. Improve turns preserve saved
+Thinking Path progress.
+
 The CDE2300 mark and wordmark anchor the top of the left sidebar. New Chat,
 Search chats, and Library use quiet rounded navigation rows; teal appears only
 for the active destination. Recents are compact and keep rename, transcript

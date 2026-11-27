@@ -18,6 +18,9 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from .usage import assessed
+from .artifact_feedback import ArtifactFeedback, bounded_artifact_feedback
+from .canvas_draft import CanvasDraftProposal, bounded_canvas_draft
+from .canvas_suggestions import CanvasSuggestion, bounded_canvas_suggestions
 from .domain import (
     CoachRequest,
     CoachTurn,
@@ -74,15 +77,15 @@ def _provider_result(
     )
 
 
-def _lecture_assessment(
+def _non_project_assessment(
     request: CoachRequest, assessment: EducationalAssessment
 ) -> EducationalAssessment:
-    """Remove educational awards from explicit lecture help before graph guards.
+    """Remove educational awards from explicit non-project turns before graph guards.
 
     Provider prose and citations remain available; project progress and readiness
     cannot be inferred from lecture questions, even with a malformed mode choice.
     """
-    if request.interaction_intent != "lecture_help":
+    if request.interaction_intent not in {"lecture_help", "improve_design"}:
         return assessment
     return EducationalAssessment(
         current_stage=request.current_stage,
@@ -245,6 +248,44 @@ class CoachWorkflow:
                 return resolved
         return str(request.model_id or "unknown").strip() or "unknown"
 
+    def _validated_suggestions(
+        self, request: CoachRequest, raw: list[Any]
+    ) -> list[CanvasSuggestion]:
+        """Validate provider proposals and stamp the resolved base revision."""
+        origin = request.canvas_context_origin
+        return bounded_canvas_suggestions(
+            raw,
+            origin_canvas_id=origin.canvas_id if origin is not None else None,
+            origin_revision=int(origin.revision) if origin is not None else None,
+        )
+
+    def _validated_artifact_feedback(
+        self, request: CoachRequest, raw: list[Any]
+    ) -> list[ArtifactFeedback]:
+        """Validate provider feedback and stamp the resolved artifact snapshot."""
+        origin = request.artifact_feedback_origin
+        return bounded_artifact_feedback(
+            raw,
+            origin_artifact_id=origin.artifact_id if origin is not None else None,
+            origin_revision=int(origin.revision) if origin is not None else None,
+            origin_paragraph=origin.paragraph if origin is not None else None,
+            origin_original_text=origin.original_text if origin is not None else "",
+        )
+
+    def _validated_canvas_draft(
+        self, request: CoachRequest, raw: Any
+    ) -> CanvasDraftProposal | None:
+        """Validate one provider draft and stamp the resolved canvas selection."""
+        origin = request.canvas_context_origin
+        if raw is None or origin is None:
+            return None
+        return bounded_canvas_draft(
+            raw if isinstance(raw, dict) else raw.model_dump(mode="json"),
+            canvas_id=origin.canvas_id,
+            revision=int(origin.revision),
+            node_ids=list(origin.node_ids),
+        )
+
     def run(self, request: CoachRequest) -> CoachTurn:
         """Produce coaching output without mutating the student's current stage.
 
@@ -289,7 +330,7 @@ class CoachWorkflow:
         """Portable non-graph path used when LangGraph is unavailable."""
         provider_result = _provider_result(assessed(self.provider, request))
         response_text, assessment = provider_result
-        assessment = _lecture_assessment(request, assessment)
+        assessment = _non_project_assessment(request, assessment)
         assessment = _normalize_terminal_assessment(request, assessment)
         assessment = _formative_review_stays(request, assessment)
         assessment = _promote_free_mode_advance(request, assessment)
@@ -321,6 +362,15 @@ class CoachWorkflow:
             response_text=response_text,
             assessment=assessment,
             pending_transition=pending,
+            canvas_suggestions=self._validated_suggestions(
+                request, provider_result.canvas_suggestions
+            ),
+            artifact_feedback=self._validated_artifact_feedback(
+                request, provider_result.artifact_feedback
+            ),
+            canvas_draft=self._validated_canvas_draft(
+                request, provider_result.canvas_draft
+            ),
         )
         self._remember_state(request.thread_id, {
             "steps": ["load_context", "assess", "recommend", "format"],
@@ -452,7 +502,7 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         request = CoachRequest.model_validate(state["request"])
         provider_result = _provider_result(assessed(workflow.provider, request))
         response_text, assessment = provider_result
-        assessment = _lecture_assessment(request, assessment)
+        assessment = _non_project_assessment(request, assessment)
         assessment = _normalize_terminal_assessment(request, assessment)
         assessment = _formative_review_stays(request, assessment)
         assessment = _promote_free_mode_advance(request, assessment)
@@ -470,10 +520,24 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         )
         orchestration = _review_orchestration(provider_result)
         workflow._last_review_orchestration[request.thread_id] = orchestration
+        suggestions = workflow._validated_suggestions(
+            request, provider_result.canvas_suggestions
+        )
+        feedback = workflow._validated_artifact_feedback(
+            request, provider_result.artifact_feedback
+        )
+        draft = workflow._validated_canvas_draft(request, provider_result.canvas_draft)
         return {
             "request": request.model_dump(mode="json"),
             "response_text": response_text,
             "assessment": assessment.model_dump(mode="json"),
+            "canvas_suggestions": [
+                item.model_dump(mode="json") for item in suggestions
+            ],
+            "artifact_feedback": [
+                item.model_dump(mode="json", exclude_none=True) for item in feedback
+            ],
+            "canvas_draft": draft.model_dump(mode="json", exclude_none=True) if draft else None,
             "steps_completed": steps,
         }
 
@@ -511,6 +575,9 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
             "pending_transition": (
                 pending.model_dump(mode="json") if pending else None
             ),
+            "canvas_suggestions": state.get("canvas_suggestions") or [],
+            "artifact_feedback": state.get("artifact_feedback") or [],
+            "canvas_draft": state.get("canvas_draft"),
             "steps_completed": steps,
         }
 
@@ -526,6 +593,26 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
             response_text=str(state.get("response_text") or ""),
             assessment=assessment,
             pending_transition=pending,
+            canvas_suggestions=[
+                item
+                for item in (
+                    CanvasSuggestion.model_validate(raw)
+                    for raw in state.get("canvas_suggestions") or []
+                    if isinstance(raw, dict)
+                )
+            ],
+            artifact_feedback=[
+                item
+                for item in (
+                    ArtifactFeedback.model_validate(raw)
+                    for raw in state.get("artifact_feedback") or []
+                    if isinstance(raw, dict)
+                )
+            ],
+            canvas_draft=(
+                CanvasDraftProposal.model_validate(state["canvas_draft"])
+                if isinstance(state.get("canvas_draft"), dict) else None
+            ),
         )
         steps = list(state.get("steps_completed") or [])
         steps.append("format")

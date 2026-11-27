@@ -110,13 +110,14 @@ def coach_events(
                 )
             bus.put({"event": "done", "turn": turn.model_dump(mode="json")})
         except BaseException as error:
+            terminal_error = error
             try:
                 check_turn_cancelled()
             except TurnCancelled as cancelled:
-                error = cancelled
+                terminal_error = cancelled
             if reply_deltas and previewed:
                 bus.put({"event": "reply_discard"})
-            bus.put(error)
+            bus.put(terminal_error)
         finally:
             if on_finish is not None:
                 on_finish()

@@ -21,12 +21,18 @@ class BackgroundReviewAdmission:
     def submit(
         self, executor: ThreadPoolExecutor, work: Callable[[], None],
         reject: Callable[[str], None],
-    ) -> None:
+    ) -> bool:
         """Submit within capacity; expire queued work independently.
 
         Running jobs retain their slot until completion. The timer cannot kill
         running provider work; the shared durable generation ledger bounds that
         work separately. Rejected callbacks persist safe terminal job status.
+
+        Returns:
+            ``True`` when the work was dispatched to the executor. A ``False``
+            return means ``reject`` already persisted the refusal; a ``True``
+            return means dispatch happened, while the bounded wait timer may
+            still expire the wait later (existing honest semantics).
         """
         with self._lock:
             accepted = self._active < settings.generation_background_jobs
@@ -34,7 +40,7 @@ class BackgroundReviewAdmission:
                 self._active += 1
         if not accepted:
             reject("generation_capacity")
-            return
+            return False
         started = threading.Event()
         gate = threading.Lock()
         expired = False
@@ -53,7 +59,7 @@ class BackgroundReviewAdmission:
             with self._lock:
                 self._active -= 1
             reject("generation_unavailable")
-            return
+            return False
 
         def expire() -> None:
             nonlocal expired
@@ -79,6 +85,7 @@ class BackgroundReviewAdmission:
         future.add_done_callback(done)
         if not future.done():
             timer.start()
+        return True
 
 
 @lru_cache(maxsize=1)

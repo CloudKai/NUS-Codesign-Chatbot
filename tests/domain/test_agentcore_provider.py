@@ -1631,3 +1631,29 @@ def test_streamed_runtime_unicode_survives_arbitrary_byte_boundaries() -> None:
     with coach_progress(None, reply_delta=observed.append):
         result = _provider(Client()).assess(_request())
     assert result.response_text == text and ''.join(observed) == text
+
+
+def test_improve_prompt_uses_shared_history_without_the_saved_stage() -> None:
+    """Both ends of the AgentCore boundary honor Improve's stage-independent context."""
+    from agentcore_runtime.structured_coach import specialist_system_prompt
+
+    payloads = []
+    for stage in ("problem_identification", "reflection"):
+        client = FakeAgentCoreRuntime(payload=_output())
+        _provider(client).assess(_request(
+            interaction_intent="improve_design",
+            current_stage=stage,
+            student_message="How can I improve the visibility of my crossing timer?",
+            conversation_summary="Private project rubric marker",
+            history=[{"role": "user", "content": "The display is hard to see in sun."}],
+        ))
+        payloads.append(_decoded_payload(_specialist_call(client)))
+
+    system = [specialist_system_prompt(payload) for payload in payloads]
+    assert system[0] == system[1]
+    assert "Improve my design" in system[0]
+    assert "problem_identification" not in system[0]
+    assert "Thinking Path" not in system[0]
+    assert payloads[0]["messages"] == payloads[1]["messages"]
+    assert "The display is hard to see in sun." in str(payloads[0]["messages"])
+    assert "Private project rubric marker" not in str(payloads[0]["messages"])

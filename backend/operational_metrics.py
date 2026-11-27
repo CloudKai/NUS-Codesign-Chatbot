@@ -69,14 +69,21 @@ def record_http_request(
     route: str,
     status_code: int,
     started: float,
+    request_id: str | None = None,
 ) -> None:
-    """Record one API request latency and final status without client content."""
+    """Record one API request latency and final status without client content.
+
+    ``request_id`` is the opaque correlation id the browser already knows (the
+    bounded ``X-Request-ID`` value), so one request can be followed across the
+    access log, coach-turn logs, TIMING lines and ``coach_turn_perf``.
+    """
     _emit(
         "http_request",
         duration_ms=round((perf_counter() - started) * 1000, 1),
         method=method.upper(),
         route=route,
         status_code=int(status_code),
+        **({"request_id": str(request_id)} if request_id else {}),
     )
 
 

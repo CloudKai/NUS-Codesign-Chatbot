@@ -38,7 +38,7 @@ from backend.retrieval import (
 )
 from backend.settings import settings
 
-from .loader import load_shared_prompt, load_stage_prompt
+from .loader import load_improve_prompt, load_shared_prompt, load_stage_prompt
 
 EMPTY_RETRIEVED_COURSE_CONTEXT = (
     "No retrieved source context was provided for this turn."
@@ -49,6 +49,8 @@ COACH_PROMPT_VERSION = "five-phase-research-v2"
 # Retrieved context is capped economically for the temporary pre-Bedrock OpenAI
 # testing path; a future KB adapter must respect the same composition budget.
 MAX_PROJECT_CONTEXT_CHARS = 8_000
+MAX_CANVAS_CONTEXT_CHARS = 3_500
+MAX_ARTIFACT_CONTEXT_CHARS = 4_000
 MAX_RETRIEVED_CONTEXT_CHARS = 24_000
 MAX_CONVERSATION_SUMMARY_CHARS = 4_000
 MAX_CONVERSATION_MEMORY_CHARS = 8_000
@@ -77,6 +79,8 @@ class PromptContext(BaseModel):
 
     current_stage: str
     student_project_context: str = ""
+    canvas_context: str = ""
+    artifact_context: str = ""
     retrieved_course_context: str = ""
     conversation_summary: str = ""
     conversation_memory: str = ""
@@ -205,7 +209,8 @@ def _runtime_instructions(context: PromptContext) -> str:
     from backend.learning.stages import STAGE_BY_ID
 
     parts: list[str] = []
-    hint = runtime_mode_hint(context.expected_response_mode)
+    improving = context.interaction_intent == "improve_design"
+    hint = "" if improving else runtime_mode_hint(context.expected_response_mode)
     if hint:
         parts.append(hint)
     if context.interaction_intent == "lecture_help":
@@ -214,7 +219,13 @@ def _runtime_instructions(context: PromptContext) -> str:
             "were design coaching. If no course question is clear, ask what lecture, reading, "
             "or course concept they want help with. Do not solicit their project or assess stage progress."
         )
-    is_qa = str(context.expected_response_mode or "").strip().lower() == "qa"
+    if improving:
+        parts.append(load_improve_prompt())
+        parts.append(
+            "Keep feedback concise and actionable." if context.response_detail == "short"
+            else "Explain the reasoning behind your feedback and offer practical options."
+        )
+    is_qa = improving or str(context.expected_response_mode or "").strip().lower() == "qa"
     stage_progression_request = is_stage_progression_request(context.student_message)
     if str(context.progression_effect or "").strip().lower() == "none":
         parts.append(
@@ -369,7 +380,7 @@ def _runtime_instructions(context: PromptContext) -> str:
         or COURSE_RETRIEVAL_EMPTY_CONTEXT in retrieved_text
     )
     has_excerpts = bool(retrieved_text.strip()) and not gap_note
-    if not context.allow_model_knowledge and (gap_note or (is_qa and not has_excerpts)):
+    if not context.allow_model_knowledge and (gap_note or (is_qa and not improving and not has_excerpts)):
         parts.append(
             "Selected course material exists, but no validated excerpt was "
             "retrieved for this turn. Tell the student you could not retrieve "
@@ -402,7 +413,13 @@ def _runtime_instructions(context: PromptContext) -> str:
             )
             if block:
                 parts.append(block)
-    if context.context_policy != "fast_chat":
+    if improving and context.context_policy != "fast_chat":
+        parts.append(
+            "Return the required structured response with response_mode qa, an empty "
+            "current_stage, and no recommendation or educational assessment fields "
+            "beyond this neutral envelope and any supported citations."
+        )
+    elif context.context_policy != "fast_chat":
         parts.append(
             "Return only the required one-call structured JSON envelope containing "
             "the complete coaching result and optional provisional research coding. "
@@ -437,7 +454,7 @@ def _runtime_instructions(context: PromptContext) -> str:
 
 _SECTION_TAGS = (
     "shared_coaching", "stage_instructions", "student_project_context",
-    "retrieved_course_context", "deep_review_checkpoint_context",
+    "canvas_context", "artifact_context", "retrieved_course_context", "deep_review_checkpoint_context",
     "conversation_summary", "conversation_memory", "recent_messages",
     "student_message", "runtime_instructions",
 )
@@ -477,11 +494,7 @@ def _join_trusted(
     return "\n\n".join(
         [
             _section("shared_coaching", shared),
-            _section(
-                "stage_instructions",
-                stage,
-                attrs=f' stage="{stage_id}"',
-            ),
+            *([_section("stage_instructions", stage, attrs=f' stage="{stage_id}"')] if stage else []),
             _section("runtime_instructions", runtime),
         ]
     )
@@ -490,6 +503,8 @@ def _join_trusted(
 def _join_untrusted(
     *,
     project: str,
+    canvas: str,
+    artifact: str,
     retrieved: str,
     summary: str,
     memory: str,
@@ -501,8 +516,13 @@ def _join_untrusted(
     """Assemble student, evidence, and memory content for the untrusted channel."""
     parts = [
         _section("student_project_context", project or _EMPTY_PROJECT, untrusted=True),
-        _section("retrieved_course_context", retrieved, untrusted=True),
     ]
+    canvas_text = str(canvas or "").strip()
+    if canvas_text:
+        parts.append(_section("canvas_context", canvas_text, untrusted=True))
+    if artifact:
+        parts.append(_section("artifact_context", artifact, untrusted=True))
+    parts.append(_section("retrieved_course_context", retrieved, untrusted=True))
     compact = str(deep_review_compact_context or "").strip()
     if compact:
         parts.append(_section("deep_review_checkpoint_context", compact, untrusted=True))
@@ -524,6 +544,8 @@ def _join_sections(
     stage: str,
     stage_id: str,
     project: str,
+    canvas: str,
+    artifact: str,
     retrieved: str,
     summary: str,
     memory: str,
@@ -536,14 +558,15 @@ def _join_sections(
     """Assemble the ordered prompt with explicit section delimiters."""
     parts = [
         _section("shared_coaching", shared),
-        _section(
-            "stage_instructions",
-            stage,
-            attrs=f' stage="{stage_id}"',
-        ),
+        *([_section("stage_instructions", stage, attrs=f' stage="{stage_id}"')] if stage else []),
         _section("student_project_context", project or _EMPTY_PROJECT, untrusted=True),
-        _section("retrieved_course_context", retrieved, untrusted=True),
     ]
+    canvas_text = str(canvas or "").strip()
+    if canvas_text:
+        parts.append(_section("canvas_context", canvas_text, untrusted=True))
+    if artifact:
+        parts.append(_section("artifact_context", artifact, untrusted=True))
+    parts.append(_section("retrieved_course_context", retrieved, untrusted=True))
     compact = str(deep_review_compact_context or "").strip()
     if compact:
         parts.append(_section("deep_review_checkpoint_context", compact, untrusted=True))
@@ -566,6 +589,8 @@ def _prepared_prompt(
     stage: str,
     stage_id: str,
     project: str,
+    canvas: str,
+    artifact: str,
     retrieved: str,
     summary: str,
     memory: str,
@@ -588,6 +613,8 @@ def _prepared_prompt(
         ),
         untrusted_turn_text=_join_untrusted(
             project=project,
+            canvas=canvas,
+            artifact=artifact,
             retrieved=retrieved,
             summary=summary,
             memory=memory,
@@ -601,6 +628,8 @@ def _prepared_prompt(
             stage=stage,
             stage_id=stage_id,
             project=project,
+            canvas=canvas,
+            artifact=artifact,
             retrieved=retrieved,
             summary=summary,
             memory=memory,
@@ -638,8 +667,9 @@ class PromptComposer:
             PromptLoadError: Propagated when stage or shared files are invalid.
             ValueError: When mandatory sections alone exceed the total budget.
         """
-        shared = load_shared_prompt()
-        stage = load_stage_prompt(context.current_stage)
+        improving = context.interaction_intent == "improve_design"
+        shared = "Student-led design feedback" if improving else load_shared_prompt()
+        stage = "" if improving else load_stage_prompt(context.current_stage)
         student = _clip(context.student_message, MAX_STUDENT_MESSAGE_CHARS)
         runtime = _runtime_instructions(context)
         is_fast = context.context_policy == "fast_chat"
@@ -655,6 +685,8 @@ class PromptComposer:
         )
 
         project = _clip(context.student_project_context, project_limit)
+        canvas = _clip(str(context.canvas_context or "").strip(), MAX_CANVAS_CONTEXT_CHARS)
+        artifact = _clip(context.artifact_context, MAX_ARTIFACT_CONTEXT_CHARS) if improving else ""
         retrieved_raw = str(context.retrieved_course_context or "").strip()
         has_retrieved = bool(retrieved_raw)
         retrieved = (
@@ -663,8 +695,8 @@ class PromptComposer:
             else EMPTY_RETRIEVED_COURSE_CONTEXT
         )
         memory = _clip(context.conversation_memory, MAX_CONVERSATION_MEMORY_CHARS)
-        summary = _clip(context.conversation_summary, MAX_CONVERSATION_SUMMARY_CHARS)
-        omit_summary = bool(is_fast and memory)
+        summary = "" if improving else _clip(context.conversation_summary, MAX_CONVERSATION_SUMMARY_CHARS)
+        omit_summary = improving or bool(is_fast and memory)
         if omit_summary:
             summary = ""
         recent_limit = MAX_RECENT_MESSAGES if context.include_recent_messages else 0
@@ -683,6 +715,8 @@ class PromptComposer:
                 stage=stage,
                 stage_id=context.current_stage,
                 project=project,
+                canvas=canvas,
+                artifact=artifact,
                 retrieved=retrieved,
                 summary=summary,
                 memory=memory,
@@ -851,6 +885,8 @@ def prompt_context_from_request(
     return PromptContext(
         current_stage=request.current_stage,
         student_project_context=request.student_project_context,
+        canvas_context=request.canvas_context,
+        artifact_context=request.artifact_context,
         retrieved_course_context=request.source_context,
         conversation_summary=request.conversation_summary,
         conversation_memory=_conversation_memory_text(request.conversation_memory),
@@ -865,7 +901,7 @@ def prompt_context_from_request(
         context_policy=context_policy,
         interaction_intent=request.interaction_intent,
         expected_response_mode=request.expected_response_mode,
-        progression_effect=progression_effect_for(
+        progression_effect="" if request.interaction_intent == "improve_design" else progression_effect_for(
             request.student_message,
             current_stage=request.current_stage,
         ),

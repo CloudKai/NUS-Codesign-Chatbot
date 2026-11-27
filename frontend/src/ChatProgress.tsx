@@ -1,4 +1,4 @@
-/** Request-local activity. Only a saved server receipt completes progress. */
+/** Request-local activity state; only a saved server receipt completes progress. */
 import { useEffect, useState } from 'react';
 
 type Phase = 'waiting' | 'writing' | 'saving' | 'saved' | 'discarded';
@@ -28,17 +28,3 @@ export function useChatProgress() {
   };
 }
 
-/** Show indeterminate activity alongside the actual, separately announced status. */
-export function ChatProgress({ value, status }: { value: Progress | null; status: string }) {
-  if (!value) return null;
-  const saved = value.phase === 'saved';
-  return <div className="chat-progress grid gap-2" data-phase={value.phase}>
-    {saved ? <span className="chat-progress-label">Reply saved</span> : null}
-    <div className="chat-progress-track" aria-hidden="true">
-      <div className={`chat-progress-fill motion-reduce:transition-none${saved ? '' : ' chat-progress-indeterminate'}`}/>
-    </div>
-    <span className="sr-only" role="progressbar" aria-label="Coach reply"
-      aria-valuetext={saved ? 'Reply saved' : status}
-      aria-valuenow={saved ? 100 : undefined} aria-valuemin={0} aria-valuemax={100}/>
-  </div>;
-}

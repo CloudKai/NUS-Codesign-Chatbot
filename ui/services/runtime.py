@@ -349,6 +349,16 @@ def get_deep_review_job(thread_id: str) -> DeepReviewJob | None:
         return None
 
 
+def cancel_deep_review(thread_id: str, *, expected_review_id: str) -> DeepReviewJob | None:
+    """Request cancellation of the displayed job via the active owner-bound service."""
+    if local_api_enabled():
+        return local_api_client().cancel_deep_review(
+            thread_id, expected_review_id=expected_review_id
+        )
+    _, _, coach, _ = _resolve_resources()
+    return coach.cancel_deep_review(thread_id, expected_review_id=expected_review_id)
+
+
 def configure_ui_perf_logger() -> None:
     """Attach one INFO stderr handler so Streamlit ``UI TIMING`` reaches Docker logs.
 

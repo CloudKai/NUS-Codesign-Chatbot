@@ -7,7 +7,7 @@ browser checks are engineering evidence, not participant observations.
 
 ## Measures and safeguards
 
-Lecturers open Participation → Lecture help and project progression, or call
+Lecturers open Participation → Design feedback and project progression, or call
 `GET /api/v1/professor/learning-funnel`. Persisted lecturer/admin authorization
 and the existing fail-closed research access audit apply. Only aggregate counts,
 units and limitations leave this endpoint. Use existing audited Research review
@@ -19,8 +19,9 @@ or identity-linking fields appear in its response or new telemetry logs.
 `useful`, `not_useful`, `evidence_opened`, or `recommendation_displayed`; no free
 text, timestamp or client identity is accepted. The server checks notebook
 ownership, active revision, assistant role and event eligibility. Welcome/error
-rows are ineligible. Ratings require lecture intent, evidence requires a cited
-lecture answer, and display requires a saved recommendation. Receipts are client
+rows are ineligible. Ratings accept Improve my design and historical Lecture help
+answers. An evidence receipt requires an eligible answer with a citation, and a
+display receipt requires a saved recommendation. Receipts are client
 assertions, not independently verified reading or quality. They confer no access,
 grade, or stage change.
 
@@ -44,10 +45,10 @@ by an invented enrollment count or label owners as students.
 
 | Measure | Numerator | Denominator / unit |
 | --- | --- | --- |
-| Rated answers | Lecture answers with an explicit current rating | All classified saved lecture answers / answers |
-| Useful answers | Current rating is Useful | Rated lecture answers / answers |
-| Cited answers | Saved lecture answer has a citation | Classified saved lecture answers / answers |
-| Evidence opened | Cited lecture answer with an explicit citation-action receipt | Cited lecture answers / answers |
+| Rated answers | Answers with an explicit current rating | All classified saved answers in this mode / answers |
+| Useful answers | Current rating is Useful | Rated answers in this mode / answers |
+| Cited answers | Saved answer has a citation | Classified saved answers in this mode / answers |
+| Evidence opened | Cited answer with an explicit citation-action receipt | Cited answers in this mode / answers |
 | Returned after useful | Owner has a saved student turn on a later UTC day after its current useful rating | Owners with at least one currently useful answer / owner identities |
 | Framing recognized | Project starter notebook with a model recommendation to Concept generation | Notebooks with a stage-tagged project student contribution / notebooks |
 | Recommendation displayed | Concept-generation recommendation details explicitly opened | Notebooks with a saved Concept-generation recommendation / notebooks |
@@ -56,6 +57,35 @@ by an invented enrollment count or label owners as students.
 
 | Stage 2 saved-turn participation | Project starter notebooks with any saved stage-tagged Concept-generation student turn (unreviewed proxy) | All project starter notebooks / notebooks |
 | Human-reviewed substantive Stage 2 work | Unknown (`null`), requires authorized Research assessment | Not inferred from saved turns or rubric codes |
+
+### Engagement activity extension (ticket 50)
+
+The same audited `GET /api/v1/professor/learning-funnel` response now also
+carries an additive `engagement` section, produced inside the existing
+consent/access rules (same lecturer/admin authorization, same fail-closed
+`research_access_events` audit, same active-branch and student-role predicates).
+It aggregates **metadata-only activity counts** — artifact/canvas presence and
+saved revision saves, recorded Deep Review job presence (any state), classified
+student turns split into Design coaching, Improve my design, and historical
+Lecture help, returning owners
+(saved student turns on two or more distinct UTC days), forward stage movement
+across a notebook's stage-tagged turns, and notebooks without saved turns or
+with saved error rows. Artifact and canvas revision saves come from additive
+per-notebook SQL counts; notebook settings are read only to detect a recorded
+Deep Review job. No artifact/canvas title, document, graph, review identifier,
+transcript text or new identity field leaves the endpoint, and every count ships
+with a numerator, an eligible denominator and a unit.
+
+These counts are **activity signals, not evidence of educational quality**:
+authorship, revision volume, exploration, review requests and saved errors are
+recorded work events, never assessed substance. Silence is unknown, not
+disengagement; a review request is not a review judgement; stage movement is not
+verified progression. Substance remains the province of authorized Research
+review, and `human_reviewed_substantive_stage2_notebooks` stays `null`. The
+existing Streamlit lecturer surface continues to read the same audited endpoint;
+no new React lecturer charts were added (they remain conditional future work),
+and the pre-existing lecture/project measures and their definitions are
+unchanged.
 
 Zero denominator means no eligible observations, never 0% success. Counts are
 separate measures, not a strictly nested conversion chart: historic confirmations

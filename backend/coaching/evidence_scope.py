@@ -60,6 +60,7 @@ _COURSE_CATALOG_RETRIEVAL_CUES = frozenset(
 # Cue names. The first-pass and post-model telemetry names are also the
 # ``record_field`` names ``execution.py`` emits for them.
 CUE_LECTURE_HELP = "lecture_help"
+CUE_IMPROVE_DESIGN = "improve_design"
 CUE_PROJECT_COACHING = "project_coaching"
 CUE_FORCE_RETRIEVAL = "force_retrieval"
 CUE_STAGE_STATUS = "current_stage_status_request"
@@ -120,7 +121,7 @@ class ScopeInputs:
         sources: The turn's selected sources before any scoping, attachments
             included.
         attachment_count: Number of attachment ids on the request.
-        interaction_intent: ``"lecture_help"``, ``"project_coaching"`` or None.
+        interaction_intent: Lecture help, Improve, Project Coaching, or None.
         force_retrieval: True for the Deep Review paths that always retrieve.
         frozen_history: True when the turn replays a frozen Deep Review
             history revision.
@@ -397,6 +398,9 @@ def decide_first_pass_scope(
     classifier_intent = str(policy.intent or "")
 
     lecture_help = inputs.interaction_intent == "lecture_help"
+    improving = inputs.interaction_intent == "improve_design"
+    uses_thinking_path = not (lecture_help or improving)
+    improve_course_cues = course_catalog_cues(message) if improving else ()
     if lecture_help:
         cues.append(CUE_LECTURE_HELP)
         policy = ModePolicy(
@@ -404,6 +408,11 @@ def decide_first_pass_scope(
             expected_mode="qa",
             retrieve=not is_bare_lecture_greeting(message, attachment_count=inputs.attachment_count),
             retrieval_intent=policy.retrieval_intent,
+        )
+    elif improving:
+        cues.append(CUE_IMPROVE_DESIGN)
+        policy = replace(
+            policy, expected_mode="qa", retrieve=policy.retrieve or bool(improve_course_cues)
         )
     elif inputs.interaction_intent == "project_coaching":
         cues.append(CUE_PROJECT_COACHING)
@@ -415,7 +424,7 @@ def decide_first_pass_scope(
         source.source_id for source in images if not source.image_bytes_resolved
     }
 
-    stage_status_request = not lecture_help and is_current_stage_status_request(
+    stage_status_request = uses_thinking_path and is_current_stage_status_request(
         message
     )
     if stage_status_request:
@@ -430,11 +439,11 @@ def decide_first_pass_scope(
         )
         kept, images, unresolved = [], [], set()
         cues.append(CUE_STAGE_STATUS)
-    progression_request = not lecture_help and (
+    progression_request = uses_thinking_path and (
         is_stage_progression_request(message)
         or is_terminal_completion_request(message, current_stage=stage)
     )
-    workflow_no_retrieve = not lecture_help and workflow_skips_retrieval(
+    workflow_no_retrieve = uses_thinking_path and workflow_skips_retrieval(
         message, current_stage=stage
     )
     if progression_request or (workflow_no_retrieve and not stage_status_request):
@@ -461,6 +470,8 @@ def decide_first_pass_scope(
     attachment_only = is_private_attachment_question(
         message, attachment_count=inputs.attachment_count
     )
+    if improving and inputs.attachment_count and not improve_course_cues:
+        attachment_only = True
     if attachment_only:
         kept = [source for source in kept if source.is_attachment]
         images = [source for source in images if source.is_attachment]
@@ -500,6 +511,8 @@ def decide_first_pass_scope(
     if include_course_catalog:
         if lecture_help:
             catalog_cues = (CUE_LECTURE_HELP,)
+        elif improving:
+            catalog_cues = improve_course_cues
         elif policy.retrieve or inputs.force_retrieval:
             catalog_cues = course_catalog_cues(message)
         include_course_catalog = bool(catalog_cues)
@@ -596,6 +609,7 @@ __all__ = (
     "CUE_ATTACHMENT_SCOPED",
     "CUE_COURSE_CATALOG_PREFIX",
     "CUE_FORCE_RETRIEVAL",
+    "CUE_IMPROVE_DESIGN",
     "CUE_LECTURE_HELP",
     "CUE_LOCAL_COURSE_INTENT",
     "CUE_MISSING_IMAGE_QA",

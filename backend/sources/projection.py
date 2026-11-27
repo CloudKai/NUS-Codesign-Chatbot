@@ -33,9 +33,28 @@ def safe_source_file_path(source: dict[str, Any]) -> Path | None:
         return None
     path = Path(str(path_value)).resolve()
     files_root = settings.files_dir.resolve()
-    if not path.is_file() or files_root not in path.parents:
-        return None
-    return path
+    if path.is_file() and files_root in path.parents:
+        return path
+    reanchored = _reanchored_local_path(path, files_root)
+    if reanchored.is_file() and files_root in reanchored.parents:
+        return reanchored
+    return None
+
+
+def _reanchored_local_path(path: Path, files_root: Path) -> Path:
+    """Re-root a stale absolute local path under the configured files root.
+
+    Documented backups restore the files tree into a fresh location while local
+    uploads keep the ``files/threads/<thread>/uploads`` layout, so source rows
+    written by older local-storage saves carry the original absolute path. The
+    stored suffix from ``threads`` onward relocates unchanged; the re-anchored
+    candidate passes the same containment check as any stored path, so
+    traversal stays impossible.
+    """
+    parts = path.parts
+    if "threads" not in parts:
+        return path
+    return files_root.joinpath(*parts[parts.index("threads"):]).resolve()
 
 
 def read_source_bytes(source: dict[str, Any]) -> bytes | None:

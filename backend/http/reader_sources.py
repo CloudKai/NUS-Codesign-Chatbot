@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from backend.owner_context import OwnerServices
 from backend.file_processing import checked_upload_mime
+from backend.http.reader_workspace import ReaderError
 from backend.source_library import is_locked_course_source
 from backend.settings import settings
 from backend.upload_queue import PendingSourceUpload, SourceUploadCoordinator, SourceUploadFailed, UploadAdmissionError
@@ -147,7 +148,9 @@ def register_reader_sources(
             raise HTTPException(status_code=429, detail=str(error), headers={"Retry-After": "5"}) from error
         return next(job for job in coordinator.jobs_for(owner.user_id, scope) if job.upload_id == key)
 
-    @app.get('/api/v1/reader/threads/{thread_id}/uploads', response_model=ReaderUploads)
+    @app.get('/api/v1/reader/threads/{thread_id}/uploads', response_model=ReaderUploads,
+             operation_id="readerUploads",
+             responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
     def reader_uploads(thread_id: str, request: Request, owner: OwnerServices = Depends(reader_owner)) -> ReaderUploads:
         """Read ephemeral owned progress after reload; never restart missing work automatically."""
         require_thread(thread_id, owner)
@@ -195,7 +198,10 @@ def register_reader_sources(
             if "key" in locals():
                 coordinator.discard(key, owner.user_id)
 
-    @app.post('/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/retry', status_code=202)
+    @app.post('/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/retry', status_code=202,
+              response_model=dict[str, bool], operation_id="readerUploadRetry",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError},
+                         409: {"model": ReaderError}})
     def reader_upload_retry(thread_id: str, upload_id: str, request: Request, owner: OwnerServices = Depends(reader_owner)) -> dict[str, bool]:
         """Retry only an owned retained failure with freshly authenticated owner services."""
         require_thread(thread_id, owner)
@@ -206,7 +212,10 @@ def register_reader_sources(
             raise HTTPException(status_code=409, detail='Upload changed or retry expired. Refresh sources.')
         return {'accepted': True}
 
-    @app.post('/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/discard')
+    @app.post('/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/discard', status_code=200,
+              response_model=dict[str, bool], operation_id="readerUploadDiscard",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError},
+                         409: {"model": ReaderError}})
     def reader_upload_discard(thread_id: str, upload_id: str, request: Request, owner: OwnerServices = Depends(reader_owner)) -> dict[str, bool]:
         """Release a terminal receipt/failure only after checking both notebook and owner."""
         require_thread(thread_id, owner)
@@ -216,7 +225,9 @@ def register_reader_sources(
             raise HTTPException(status_code=409, detail='Upload still running or no longer available.')
         return {'discarded': True}
 
-    @app.get('/api/v1/reader/threads/{thread_id}/sources', response_model=ReaderSources)
+    @app.get('/api/v1/reader/threads/{thread_id}/sources', response_model=ReaderSources,
+             operation_id="readerSources",
+             responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
     def reader_sources(thread_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderSources:
         """List current canonical selection without returning private storage metadata."""
         require_thread(thread_id, owner)
@@ -227,7 +238,10 @@ def register_reader_sources(
                                  owner.workspace.list_sources(thread_id, include_extracted_text=False)
                              )])
 
-    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/select', response_model=ReaderSources)
+    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/select', response_model=ReaderSources,
+              operation_id="readerSourceSelect",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError},
+                         409: {"model": ReaderError}})
     def reader_source_select(
         thread_id: str, source_id: str, payload: ReaderSourceSelection,
         owner: OwnerServices = Depends(reader_owner),
@@ -242,7 +256,9 @@ def register_reader_sources(
             raise HTTPException(status_code=409, detail='Source changed or is locked. Refresh sources.') from error
         return reader_sources(thread_id, owner)
 
-    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/link', response_model=ReaderSources)
+    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/link', response_model=ReaderSources,
+              operation_id="readerSourceLink",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
     def reader_source_link(thread_id: str, source_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderSources:
         """Add an owned Library source to the target notebook and enable it."""
         if thread_id == _LIBRARY:
@@ -254,7 +270,10 @@ def register_reader_sources(
             raise HTTPException(status_code=404, detail="Library source not found") from error
         return reader_sources(thread_id, owner)
 
-    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/remove', response_model=ReaderSources)
+    @app.post('/api/v1/reader/threads/{thread_id}/sources/{source_id}/remove', response_model=ReaderSources,
+              operation_id="readerSourceRemove",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError},
+                         409: {"model": ReaderError}})
     def reader_source_remove(thread_id: str, source_id: str, payload: ReaderLibraryDelete | None = None,
                              owner: OwnerServices = Depends(reader_owner)) -> ReaderSources:
         """Detach a notebook source or permanently delete an explicitly confirmed Library original."""
@@ -270,7 +289,9 @@ def register_reader_sources(
             raise HTTPException(status_code=409, detail='Source changed or is locked. Refresh sources.') from error
         return reader_sources(thread_id, owner)
 
-    @app.get('/api/v1/reader/threads/{thread_id}/sources/{source_id}', response_model=ReaderSourceDetail)
+    @app.get('/api/v1/reader/threads/{thread_id}/sources/{source_id}', response_model=ReaderSourceDetail,
+             operation_id="readerSource",
+             responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
     def reader_source(thread_id: str, source_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderSourceDetail:
         """Inspect up to 24,000 characters of owned extracted text without executing it."""
         require_thread(thread_id, owner)

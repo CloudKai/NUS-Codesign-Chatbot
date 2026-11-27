@@ -461,7 +461,7 @@ def render_citations(
             key=f"citation_{message['id']}_{reference['id']}",
             type="secondary",
         ):
-            if (message.get('metadata') or {}).get('interaction_intent') == 'lecture_help':
+            if (message.get("metadata") or {}).get("interaction_intent") in {"lecture_help", "improve_design"}:
                 try:
                     store.record_learning_signal(st.session_state.thread_id, message['id'], 'evidence_opened')
                 except Exception:
@@ -859,7 +859,13 @@ def render_message(
         if metadata.get("kind") == COACH_WELCOME_KIND:
             # Existing notebooks may contain the older persisted welcome copy.
             # Render the current shared welcome text without mutating history.
-            display_content = COACH_WELCOME_MARKDOWN
+            if active_interaction_intent() == "improve_design":
+                display_content = (
+                    "**Improve my design**\n\n"
+                    "Share your design and what you’d like to improve."
+                )
+            else:
+                display_content = COACH_WELCOME_MARKDOWN
             title, _, body = display_content.partition("\n\n")
             title_text = title.removeprefix("**").removesuffix("**").strip() or title
             st.markdown(
@@ -888,14 +894,14 @@ def render_message(
         st.markdown(concise_coach_response(display_content))
         render_citations(message, visible_source_ids=visible_source_ids)
         render_answer_feedback(message)
-        if metadata.get("interaction_intent") == "lecture_help" and metadata.get("source_refs"):
+        if metadata.get("interaction_intent") in {"lecture_help", "improve_design"} and metadata.get("source_refs"):
             if st.button(
                 "Apply this to my project",
-                key=f"apply-lecture-{message['id']}",
+                key=f"apply-feedback-{message['id']}",
                 disabled=coach_turn_is_streaming() or awaiting_coach_turn_for_thread() is not None,
             ):
                 _choose_interaction("project_coaching")
-                rerun_fragment()
+                rerun_app()
         web_sources = metadata.get("sources") or []
         if web_sources:
             with st.expander(f"Web sources ({len(web_sources)})"):
@@ -1331,7 +1337,7 @@ def handle_prompt(
     must be the in-flight sibling, never ``chat_log``: re-entering that
     keyed history container reuses the last assistant ``st.chat_message``.
     """
-    interaction_intent = _interaction_intent()
+    interaction_intent = active_interaction_intent()
     cleaned_prompt = str(prompt or "").strip()
     if not cleaned_prompt and existing_user_message_id is None:
         return
@@ -1348,7 +1354,7 @@ def handle_prompt(
     # Feature-gated exact stage command: journey + assistant briefing only.
     if (
         existing_user_message_id is None
-        and interaction_intent != "lecture_help"
+        and interaction_intent != "improve_design"
         and settings.student_stage_selection
         and cleaned_prompt
     ):
@@ -2288,11 +2294,12 @@ def _render_chat_history(
     return found
 
 
-def _interaction_intent() -> str | None:
-    """Return this notebook's explicit choice, retaining inferred legacy routing."""
+def active_interaction_intent() -> str | None:
+    """Return the notebook's choice, mapping a saved Lecture help choice to Improve."""
     key = str(st.session_state.get("thread_id") or "draft")
     choices = st.session_state.get("interaction_choices") or {}
-    return choices.get(key)
+    intent = choices.get(key)
+    return "improve_design" if intent == "lecture_help" else intent
 
 
 def _choose_interaction(intent: str) -> None:
@@ -2310,20 +2317,20 @@ def _interaction_retry_stage(stage: str, intent: str | None) -> str:
 
 def _render_interaction_choices(locked: bool) -> None:
     """Render two accessible entry actions and the active evidence scope."""
-    intent = _interaction_intent()
-    lecture, project = st.columns(2)
+    intent = active_interaction_intent()
+    improve, project = st.columns(2)
     for column, value, label in (
-        (lecture, "lecture_help", "Ask about a lecture"),
-        (project, "project_coaching", "Develop my project"),
+        (improve, "improve_design", "Improve my design"),
+        (project, "project_coaching", "Design coaching"),
     ):
         if column.button(
             label, key=f"choose-{value}", width="stretch",
             type="primary" if intent == value else "secondary", disabled=locked,
-        ):
+        ) and intent != value:
             _choose_interaction(value)
-            rerun_fragment()
-    if intent == "lecture_help":
-        st.caption("Lecture help · Searches shared course materials and your selected sources. Your project progress stays unchanged.")
+            rerun_app()
+    if intent == "improve_design":
+        st.caption("Improve my design · Get feedback on a design you already have.")
     elif intent == "project_coaching":
         st.caption("Project coaching · Describe how you would use the concept in your project. Your conversation and sources stay here.")
 
@@ -2375,7 +2382,7 @@ def _render_composer_submit_fragment(
         if thread_id not in (st.session_state.get("interaction_choices") or {}):
             for saved_message in reversed(messages):
                 intent = (saved_message.get("metadata") or {}).get("interaction_intent")
-                if intent in {"lecture_help", "project_coaching"}:
+                if intent in {"lecture_help", "improve_design", "project_coaching"}:
                     _choose_interaction(intent)
                     break
         hmw_available = _history_hmw_available(history_state)
@@ -2438,7 +2445,10 @@ def _render_composer_submit_fragment(
                 visible_source_ids.update(
                     _message_source_ids_for_render(loaded_message)
                 )
-            hmw_available = _history_hmw_available(history_state)
+            hmw_available = (
+                active_interaction_intent() != "improve_design"
+                and _history_hmw_available(history_state)
+            )
             chat_log = st.container(key="chat_log")
             with chat_log:
                 history_started = time.perf_counter()
@@ -2507,7 +2517,7 @@ def _render_composer_submit_fragment(
             fragment_enter_ms = _duration_ms(fragment_started)
             prompt_started = time.perf_counter()
             notice = str(st.session_state.get("stage_move_notice") or "").strip()
-            if notice:
+            if notice and active_interaction_intent() != "improve_design":
                 with st.container(key="stage_move_notice"):
                     st.markdown(
                         f'<p class="cd-stage-move-notice">'
@@ -2521,7 +2531,11 @@ def _render_composer_submit_fragment(
             draft_thread = str(st.session_state.get("thread_id") or "")
             draft_scope = composer_scope(draft_owner, draft_thread)
             composer_value = st.chat_input(
-                "Ask a question or share your thinking",
+                (
+                    "Share your design and what you’d like to improve"
+                    if active_interaction_intent() == "improve_design"
+                    else "Ask a question or share your thinking"
+                ),
                 key=f"composer-{draft_scope}-{st.session_state.composer_nonce}",
                 accept_file="multiple",
                 accept_audio=False,

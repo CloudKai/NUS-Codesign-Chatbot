@@ -100,6 +100,60 @@ def test_guest_reader_is_isolated_and_origin_guarded(tmp_path: Path, monkeypatch
     assert client.get("/api/v1/reader/session").status_code == 401
 
 
+def test_loopback_browser_origin_is_accepted_for_writes(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """A browser at localhost may write when the configured public URL says 127.0.0.1.
+
+    The local server binds 127.0.0.1:8000, but the student may open
+    http://localhost:8000. Browser POSTs always carry the Origin header, so the
+    same-origin guard must treat loopback aliases with the same scheme and port
+    as one origin while still refusing foreign origins and cross-site requests.
+    """
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "public_api_base_url", "http://127.0.0.1:8000")
+    root = StudentStore(tmp_path / "loopback.sqlite3")
+    client = TestClient(create_app(root, oidc_client=FakeOIDC(root)), base_url="http://localhost:8000")
+    origin = {"Origin": "http://localhost:8000"}
+    assert client.post("/api/v1/auth/guest/start", headers=origin).status_code == 200
+    created = client.post(
+        "/api/v1/reader/threads", headers=origin,
+        json={"kind": "chat"},
+    )
+    assert created.status_code == 200
+    foreign = {"Origin": "http://evil.test:8000"}
+    assert client.post(
+        "/api/v1/reader/threads", headers=foreign,
+        json={"kind": "chat"},
+    ).status_code == 403
+    assert client.get("/api/v1/reader/threads", headers=foreign).status_code == 403
+    assert client.get(
+        "/api/v1/reader/threads", headers={"Sec-Fetch-Site": "cross-site"}
+    ).status_code == 403
+
+
+def test_direct_api_origin_is_accepted_for_writes(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """A browser on the direct API URL may write when Caddy owns the public URL.
+
+    With Caddy fronting (public :8080), a tab opened on the backend directly
+    (port :8000) sends Origin http://localhost:8000. Both loopback origins are
+    this same server in development, so writes must pass while foreign hosts
+    stay refused.
+    """
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "public_api_base_url", "http://127.0.0.1:8080")
+    monkeypatch.setattr(settings, "api_base_url", "http://127.0.0.1:8000")
+    root = StudentStore(tmp_path / "direct.sqlite3")
+    client = TestClient(create_app(root, oidc_client=FakeOIDC(root)), base_url="http://localhost:8000")
+    origin = {"Origin": "http://localhost:8000"}
+    assert client.post("/api/v1/auth/guest/start", headers=origin).status_code == 200
+    assert client.post("/api/v1/reader/threads", headers=origin, json={"kind": "chat"}).status_code == 200
+    assert client.post(
+        "/api/v1/reader/threads", headers={"Origin": "http://localhost:9999"}, json={"kind": "chat"},
+    ).status_code == 403
+    assert client.post(
+        "/api/v1/reader/threads", headers={"Origin": "http://evil.test:8000"}, json={"kind": "chat"},
+    ).status_code == 403
+
+
 def test_pilot_serves_only_built_public_assets(tmp_path: Path) -> None:
     """The static shell works without exposing source files or private paths."""
     client = TestClient(create_app(StudentStore(tmp_path / "static.sqlite3")))
@@ -110,6 +164,26 @@ def test_pilot_serves_only_built_public_assets(tmp_path: Path) -> None:
     assert client.get("/pilot/package.json").status_code == 404
     assert client.get("/pilot/src/App.tsx").status_code == 404
     assert client.get("/pilot/assets/unknown.js").status_code == 404
+
+
+def test_recognized_student_view_deep_links_serve_only_the_shell(tmp_path: Path) -> None:
+    """Typed view URLs reach the SPA shell; everything else stays a hard 404."""
+    client = TestClient(create_app(StudentStore(tmp_path / "views.sqlite3")))
+    for path in ("/library", "/search", "/settings", "/chats/owned-1", "/notebooks/folder-1",
+                 "/notebooks/folder-1/canvases/canvas-1",
+                 "/pilot/library", "/pilot/chats/owned-1", "/pilot/notebooks/folder-1",
+                 "/pilot/notebooks/folder-1/canvases/canvas-1"):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert '<div id="root">' in response.text
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["vary"] == "Cookie"
+        assert "Cognito" not in response.text and "token" not in response.text.lower()
+    for path in ("/chats/owned-1/extra", "/notebooks/folder-1/extra", "/unknown", "/chats/",
+                 "/pilot/unknown-view"):
+        assert client.get(path).status_code == 404, path
+    # The SPA fallback never swallows real API routes.
+    assert client.get("/api/v1/reader/session").status_code == 401
 
 
 

@@ -8,7 +8,11 @@ SQLite and Aurora DSQL implement the same five-table application model:
 users
   ├── notebooks
   │     ├── messages
-  │     └── sources
+  │     ├── sources
+  │     ├── student_artifacts
+  │     ├── student_artifact_versions
+  │     ├── student_canvases
+  │     └── student_canvas_versions
   └── preferences_text
 
 oauth_login_states           pre-authentication, one-time state/PKCE data
@@ -21,11 +25,30 @@ oauth_login_states           pre-authentication, one-time state/PKCE data
 | `notebooks` | Owner-scoped conversation root, settings, learning metadata, active conversation revision |
 | `messages` | Active/historical turns, assessments, transition decisions, source snapshots, internal idempotency reservations |
 | `sources` | Notebook-scoped source metadata, selection, extracted text/object references |
+| `student_artifacts` | Owner-anchored persistent Tiptap documents: course-aligned kind, canonical validated document JSON, evidence `references_text`, schema version, revision for stale-save detection, timestamps and editor provenance |
+| `student_artifact_versions` | Bounded per-artifact version checkpoints (document and reference snapshots with provenance and restore lineage); deleted with their artifact |
+| `student_canvases` | Owner-anchored persistent design canvases: canonical validated node/relationship graph JSON, schema version, revision for stale-save detection, timestamps and editor provenance |
+| `student_canvas_versions` | Bounded per-canvas version checkpoints (graph snapshots with provenance and restore lineage); deleted with their canvas |
 
 There is no application-session or standalone phase-transition table. Cognito
 owns browser authentication. Pending/resolved transition records and durable
 coach-idempotency reservations use structured internal message rows that normal
 history/count queries filter out.
+
+Confirmed canvas deletion guards the displayed revision and removes the
+canvas and checkpoints in one transaction. References in other saved work
+retain their original identifiers. Evidence resolution reports the deleted
+target as unavailable. The operation uses the existing SQLite and DSQL tables.
+
+Deep Review retains its invocation marker in notebook metadata. Once marked,
+an expired job cannot be claimed for another invocation. Recovery records an
+ambiguous outcome when the external result cannot be confirmed, and late
+workers cannot replace terminal state.
+
+Claiming a Guest workspace transfers the owner IDs on its artifacts, canvases
+and both version histories in the same transaction as the notebooks. IDs,
+revisions and evidence references are preserved, and the account can reopen
+the saved work through the existing owner-scoped interfaces.
 
 ## System of record
 
@@ -146,6 +169,36 @@ The deterministic suite verifies SQL adaptation and transaction policy with
 fakes/proxies. It does not prove wire-level Aurora behavior. Live DSQL writes
 require explicit approval, the guarded smoke command, disposable records, and
 cleanup in `finally`.
+
+### Connection strategy and pooling evidence
+
+The runtime adapter opens one fresh IAM-token connection per transaction
+(`connect_dsql` inside `run_dsql_transaction`); connections are never held
+across model inference. Ticket 38 built an offline harness —
+`scripts/benchmark_dsql_connections.py` (tests:
+`tests/scripts/test_benchmark_dsql_connections.py`) — that separates
+controlled synthetic connect/auth cost from real local SQL/transaction time,
+compares that fresh-connection strategy against a script-local bounded pool
+candidate, runs nine executable pool-contract checks (bounded
+acquisition/size/lifetime, unhealthy replacement, context-manager release,
+rollback reset, whole-transaction OCC retry, no cross-owner contamination,
+clean shutdown), and records actual local numbers with an explicit
+"not live DSQL results" limit note. Live mode is refused without
+`DSQL_BENCH_ALLOW_LIVE=1`; live measurement stays separately approved and
+capped.
+
+Documented Aurora DSQL constraints verified 2026-11-25 against AWS's
+"Connection pooling strategies in Amazon Aurora DSQL" blog and the
+`aurora-dsql-connectors` Python README: 100 new connections/second rate limit
+(burst 1,000), a hard 1-hour maximum connection age, server-side per-transaction
+connection multiplexing (client pools remain useful but PgBouncer-style proxies
+are redundant), recommended psycopg `ConnectionPool` bounds (min_size 2–5,
+max_size 10–20 per instance, 30 s acquisition timeout, max_lifetime 55 min with
+jitter), per-connection token generation as a local signing operation, and
+`sslmode=verify-full`. **Decision: keep the fresh-connection default.** No
+pooling default is adopted without a separately approved live run showing
+connect/auth overhead dominating p95 latency; the harness is the operator's
+entry point for that measurement.
 
 ## Query and index review
 

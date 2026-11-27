@@ -1,5 +1,9 @@
 # Model providers
 
+For repository/default versus recorded-deployment discrepancies, use the
+[version manifest and Mantle publication/rollback gates](../deploy/DEPLOYMENT_SAFETY_RECORD.md).
+No current live safety verification is implied by historical rollout records.
+
 For Mantle/Gemma streaming, the runtime suppresses provisional text because
 its separate output guardrail runs after generation. Only the checked final
 result proceeds to the shared reply/save lifecycle. This adds no calls and

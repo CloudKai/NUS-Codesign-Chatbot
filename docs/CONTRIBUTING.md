@@ -49,6 +49,15 @@ for delegation, cost limits and Git permissions.
 
 ## Published tickets
 
+The user-approved architecture-completion programme is tracked locally in the
+[53-ticket execution pack](../.scratch/architecture-completion/README.md), with
+one file per ticket and explicit blocking edges. Its numbers are local to that
+pack and are not GitHub issue numbers or the earlier rollout's ticket numbers.
+The approved testing seams and TDD execution contract are recorded with the
+pack. Use the existing implementation status as the evidence ledger; start
+ticket 01 first, then only tickets whose blockers have acceptance evidence.
+No new GitHub issue or parent-issue change is implied by local publication.
+
 The initial rollout mapped local tickets 01–16 to GitHub issues #14–#29.
 Use current GitHub state when planning work.
 

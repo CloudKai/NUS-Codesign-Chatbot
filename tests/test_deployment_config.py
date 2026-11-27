@@ -277,6 +277,18 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
         assert needle in env_example
 
 
+def test_recognized_student_view_paths_are_the_only_spa_fallbacks():
+    """Deep links to student views reach the app; everything else stays a 404."""
+    for name in ("Caddyfile", "Caddyfile.local"):
+        caddyfile = (ROOT / name).read_text(encoding="utf-8")
+        for path in ("/chats/*", "/notebooks/*", "/notebooks/*/artifacts/*", "/library", "/search", "/settings"):
+            assert path in caddyfile, (name, path)
+        for forbidden in ("/api/v1/professor", "/streamlit {"):
+            if name == "Caddyfile.local":
+                continue
+            assert forbidden not in caddyfile.split("handle /api/*")[0].split("@streamlit")[0], (name, forbidden)
+
+
 def test_caddy_bootstrap_allowlist_is_exact():
     """The new bootstrap read cannot open wildcard access to other API paths."""
     caddyfile = (ROOT / "Caddyfile").read_text(encoding="utf-8")
@@ -285,6 +297,52 @@ def test_caddy_bootstrap_allowlist_is_exact():
     for path in ("/api/v1/reader/bootstrap/admin", "/api/v1/reader/bootstrap/",
                  "/api/v1/professor/overview", "/api/v1/threads"):
         assert re.fullmatch(pattern, path) is None
+
+
+def test_caddy_local_omits_only_the_documented_bootstrap_difference():
+    """The local edge keeps route parity except the recorded bootstrap gap."""
+    production = re.search(r"path_regexp reader (\S+)",
+                           (ROOT / "Caddyfile").read_text(encoding="utf-8")).group(1)
+    local = re.search(r"path_regexp reader (\S+)",
+                      (ROOT / "Caddyfile.local").read_text(encoding="utf-8")).group(1)
+    assert local == production.replace("(bootstrap|", "(")
+
+
+def test_production_edge_allows_the_built_reader_contract_and_keeps_internal_routes_private():
+    """The coordinated edge config must permit every route the built React app calls.
+
+    The generated reader contract and the schema-less export routes are the
+    browser's exact API surface; a stale allowlist would 404 them at the edge
+    while every test that bypasses Caddy stays green. Host-local readiness and
+    the lecturer API stay private.
+    """
+    contract = __import__("json").loads(
+        (ROOT / "frontend" / "openapi" / "reader.json").read_text(encoding="utf-8")
+    )
+    production = (ROOT / "Caddyfile").read_text(encoding="utf-8")
+    local = (ROOT / "Caddyfile.local").read_text(encoding="utf-8")
+    for name, caddyfile in (("Caddyfile", production), ("Caddyfile.local", local)):
+        get_re = re.search(r"path_regexp reader (\S+)", caddyfile).group(1)
+        post_re = re.search(r"path_regexp lecture (\S+)", caddyfile).group(1)
+        put_re = re.search(r"path_regexp writer (\S+)", caddyfile).group(1)
+        for path, ops in contract["paths"].items():
+            if name == "Caddyfile.local" and path == "/api/v1/reader/bootstrap":
+                continue  # Recorded local/production bootstrap difference (ticket 04).
+            for method in ("get", "post", "put"):
+                if method not in ops:
+                    continue
+                pattern = {"get": get_re, "post": post_re, "put": put_re}[method]
+                assert re.fullmatch(pattern, path), (name, method.upper(), path)
+        # Schema-less browser routes the built frontend calls directly.
+        for path in ("/api/v1/reader/threads/T/artifacts/A/export",
+                     "/api/v1/reader/threads/T/canvases/C/export",
+                     "/api/v1/reader/threads/T/project/export"):
+            assert re.fullmatch(get_re, path), (name, path)
+        # Host-local readiness and privileged surfaces stay private at the edge.
+        for private in ("/api/v1/ready", "/api/v1/professor/overview",
+                        "/api/v1/threads/T/artifacts/A/versions/1/restoreX"):
+            for pattern in (get_re, post_re, put_re):
+                assert re.fullmatch(pattern, private) is None, (name, private)
 
 
 def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
@@ -406,6 +464,10 @@ def test_docker_context_excludes_secrets_state_and_development_artifacts():
         assert required in ignore
     assert ".streamlit/secrets.toml.example" not in ignore
     assert "lecture_notes/" in ignore
+    # Ticket 04 routed these historical agent/scratch artifacts to ticket 51:
+    # the final `COPY . .` must not package eligible planning or tooling state.
+    for required in (".agents/", ".playwright-cli/", ".scratch/"):
+        assert required in ignore
 
 
 def test_dockerfile_is_architecture_neutral():

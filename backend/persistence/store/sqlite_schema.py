@@ -206,6 +206,86 @@ ON research_access_events(actor_user_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_research_access_request
 ON research_access_events(request_id, created_at, id);
 
+CREATE TABLE IF NOT EXISTS student_artifacts (
+    id TEXT PRIMARY KEY,
+    notebook_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'notes',
+    document_text TEXT NOT NULL,
+    references_text TEXT NOT NULL DEFAULT '[]',
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 1,
+    origin TEXT NOT NULL DEFAULT 'editor',
+    request_id TEXT,
+    request_fingerprint TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_artifacts_notebook_updated
+ON student_artifacts(notebook_id, updated_at);
+
+-- The request_id partial unique index is created by
+-- migrate_student_artifact_request_id: the column is additive, so this script
+-- must stay runnable against legacy artifact tables that predate it.
+
+CREATE TABLE IF NOT EXISTS student_artifact_versions (
+    id TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    notebook_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    document_text TEXT NOT NULL,
+    references_text TEXT NOT NULL DEFAULT '[]',
+    origin TEXT NOT NULL,
+    restored_from INTEGER,
+    created_at TEXT NOT NULL,
+    UNIQUE (artifact_id, revision)
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_artifact_versions_artifact
+ON student_artifact_versions(artifact_id, revision);
+
+CREATE TABLE IF NOT EXISTS student_canvases (
+    id TEXT PRIMARY KEY,
+    notebook_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    graph_text TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 1,
+    origin TEXT NOT NULL DEFAULT 'editor',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_canvases_notebook_updated
+ON student_canvases(notebook_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS student_canvas_versions (
+    id TEXT PRIMARY KEY,
+    canvas_id TEXT NOT NULL,
+    notebook_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    graph_text TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    restored_from INTEGER,
+    created_at TEXT NOT NULL,
+    UNIQUE (canvas_id, revision)
+);
+
+CREATE INDEX IF NOT EXISTS idx_student_canvas_versions_canvas
+ON student_canvas_versions(canvas_id, revision);
+
 CREATE TABLE IF NOT EXISTS system_metadata (
     key TEXT PRIMARY KEY,
     value_text TEXT NOT NULL,
@@ -229,6 +309,10 @@ NOTEBOOK_CHILD_DELETE_PLAN = (
     ("research_observations", "notebook_id = ?"),
     ("messages", "notebook_id = ?"),
     ("sources", "notebook_id = ?"),
+    ("student_artifacts", "notebook_id = ?"),
+    ("student_artifact_versions", "notebook_id = ?"),
+    ("student_canvases", "notebook_id = ?"),
+    ("student_canvas_versions", "notebook_id = ?"),
 )
 
 # Backwards-compatible inventory for schema/admin tooling. Runtime deletion

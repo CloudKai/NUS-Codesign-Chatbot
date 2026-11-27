@@ -2,12 +2,38 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
 from backend.student_store import StudentStore
+
+
+def test_http_request_log_correlates_the_client_request_id(tmp_path, caplog):
+    """The access log carries the same opaque request id the browser sent.
+
+    Browser TIMING lines, the coach-turn log and ``coach_turn_perf`` already
+    use this id; the per-request access log must correlate with them too.
+    """
+    store = StudentStore(tmp_path / "privacy-rid.sqlite3")
+    client = TestClient(create_app(store))
+    request_id = "0f0e1d2c-3b4a-5968-7788-990011223344"
+
+    with caplog.at_level(logging.INFO, logger="co_design.operational"):
+        response = client.get("/api/v1/health", headers={"X-Request-ID": request_id})
+
+    assert response.status_code == 200
+    events = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{") and "http_request" in record.message
+    ]
+    assert events
+    assert events[-1]["request_id"] == request_id
+    assert "thread_id" not in events[-1]
+    assert "student_message" not in events[-1]
 
 
 def test_coach_turn_logs_omit_thread_id_and_message_text(tmp_path, caplog):

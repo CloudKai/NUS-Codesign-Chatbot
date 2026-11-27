@@ -353,31 +353,56 @@ def test_stage_advance_during_review_is_not_reverted(tmp_path, monkeypatch) -> N
     assert deep_strength not in by_stage["concept_generation"]
 
 
-def test_stale_running_deep_review_is_failed_on_get(tmp_path) -> None:
+def test_stale_running_deep_review_recovery_is_bounded_on_get(
+    tmp_path, monkeypatch
+) -> None:
+    """Recovery resubmits safe stale work; exhausted attempts fail honestly."""
     store = StudentStore(tmp_path / "http-dr-stale.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     stale_started = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-    store.update_thread(
-        thread_id,
-        metadata={
-            COUNTER_SETTINGS_KEY: 3,
-            DEEP_REVIEW_JOB_KEY: {
-                "review_id": "stale-review",
-                "status": DEEP_REVIEW_JOB_RUNNING,
-                "reviewed_revision": 0,
-                "stage_at_start": "problem_identification",
-                "source_ids": [],
-                "message_ids": [],
-                "started_at": stale_started,
-                "updated_at": stale_started,
-                "error_code": None,
+
+    def _seed_running_job(attempts: int) -> None:
+        """Persist one running job whose claim has already lapsed."""
+        store.update_thread(
+            thread_id,
+            metadata={
+                COUNTER_SETTINGS_KEY: 3,
+                DEEP_REVIEW_JOB_KEY: {
+                    "review_id": "stale-review",
+                    "status": DEEP_REVIEW_JOB_RUNNING,
+                    "reviewed_revision": 0,
+                    "stage_at_start": "problem_identification",
+                    "source_ids": [],
+                    "message_ids": [],
+                    "started_at": stale_started,
+                    "updated_at": stale_started,
+                    "error_code": None,
+                    "attempts": attempts,
+                },
             },
-        },
+        )
+
+    def _no_recovery_worker(*_args, **_kwargs) -> bool:
+        """Simulate the restarted process failing to start a worker."""
+        return True
+
+    monkeypatch.setattr(
+        "backend.coaching.deep_review_jobs.submit_deep_review_job",
+        _no_recovery_worker,
     )
     client = TestClient(create_app(store))
-    response = client.get(f"/api/v1/threads/{thread_id}/deep-review")
-    assert response.status_code == 200
-    body = response.json()
+
+    # Attempts remain: the read seam treats the stale claim as recoverable
+    # work and resubmits it instead of failing an honest retry budget.
+    _seed_running_job(attempts=1)
+    body = client.get(f"/api/v1/threads/{thread_id}/deep-review").json()
+    assert body["status"] == DeepReviewJobStatus.RUNNING.value
+    assert body["error_code"] is None
+
+    # Bounded attempts exhausted: the job fails honestly with review_timeout
+    # and admission accounting (the counter) is preserved for reconciliation.
+    _seed_running_job(attempts=2)
+    body = client.get(f"/api/v1/threads/{thread_id}/deep-review").json()
     assert body["status"] == DeepReviewJobStatus.FAILED.value
     assert body["error_code"] == DEEP_REVIEW_ERROR_TIMEOUT
     assert int(
@@ -385,6 +410,68 @@ def test_stale_running_deep_review_is_failed_on_get(tmp_path) -> None:
             COUNTER_SETTINGS_KEY, -1
         )
     ) == 3
+
+
+def test_cancel_endpoint_cancels_a_queued_job_without_invoking(
+    tmp_path, monkeypatch
+) -> None:
+    """POST cancel on unclaimed work is final: no invocation, no snapshot."""
+    store = StudentStore(tmp_path / "http-dr-cancel.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _unlock_deep_review(store, thread_id)
+    client = TestClient(create_app(store))
+    started = threading.Event()
+    release = threading.Event()
+    original = CoachApplicationService.execute_deep_review_job
+
+    def paused_execute(self, job_thread_id, review_id):
+        started.set()
+        assert release.wait(timeout=2)
+        return original(self, job_thread_id, review_id)
+
+    monkeypatch.setattr(CoachApplicationService, "execute_deep_review_job", paused_execute)
+    posted = client.post(
+        f"/api/v1/threads/{thread_id}/deep-review",
+        json={"idempotency_key": "cancel-http"},
+    )
+    assert started.wait(timeout=2)
+    assert posted.status_code == 200
+
+    cancelled = client.post(f"/api/v1/threads/{thread_id}/deep-review/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == DeepReviewJobStatus.CANCELLED.value
+    assert cancelled.json()["error_code"] == "review_cancelled"
+
+    release.set()
+    final = client.get(f"/api/v1/threads/{thread_id}/deep-review")
+    assert final.status_code == 200
+    assert final.json()["status"] == DeepReviewJobStatus.CANCELLED.value
+    assert final.json()["snapshot"] is None
+
+
+def test_cancel_endpoint_is_idempotent_for_a_terminal_job(tmp_path) -> None:
+    """Cancelling a completed review changes nothing and still answers 200."""
+    store = StudentStore(tmp_path / "http-dr-cancel-done.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _unlock_deep_review(store, thread_id)
+    client = TestClient(create_app(store))
+    client.post(f"/api/v1/threads/{thread_id}/deep-review", json={})
+    finished = _wait_http_job(client, thread_id)
+    assert finished["status"] == DeepReviewJobStatus.COMPLETED.value
+    response = client.post(f"/api/v1/threads/{thread_id}/deep-review/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == DeepReviewJobStatus.COMPLETED.value
+    assert response.json()["snapshot"] == finished["snapshot"]
+
+
+def test_cancel_endpoint_is_404_without_a_job(tmp_path) -> None:
+    """A notebook that never queued a Deep Review cannot be cancelled."""
+    store = StudentStore(tmp_path / "http-dr-cancel-404.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store))
+    assert client.post(f"/api/v1/threads/{thread_id}/deep-review/cancel").status_code == 404
+    missing = client.post("/api/v1/threads/unknown/deep-review/cancel")
+    assert missing.status_code == 404
 
 
 def test_another_user_cannot_read_or_invoke_deep_review(tmp_path) -> None:

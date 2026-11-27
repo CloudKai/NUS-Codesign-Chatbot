@@ -9,6 +9,13 @@
 # Documentation, historical artifacts and planning stay in the source tree.
 docs/
 
+# Agent/scratch/planning state must never be packaged into the release image
+# (ticket 04 audit finding, resolved by ticket 51).
+.agents/
+.playwright-cli/
+.scratch/
+.impeccable/
+
 .env
 .env.*
 !.env.example

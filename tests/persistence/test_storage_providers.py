@@ -654,6 +654,32 @@ def test_run_dsql_transaction_retries_occ_then_succeeds():
     assert is_retryable_db_error(_OccError("x"))
 
 
+def test_run_dsql_transaction_retries_sqlite_busy_lock_as_occ_analog():
+    """A cross-instance writer collision in the SQLite seam retries like OCC.
+
+    The DSQL-over-SQLite test fakes (and any two independent store instances
+    sharing one file) can surface SQLite busy-lock errors exactly where live
+    Aurora DSQL raises SQLSTATE 40001. Treating them as retryable is what
+    keeps the two-thread convergence contract deterministic under load.
+    """
+    import sqlite3
+
+    attempts = {"n": 0}
+
+    def work():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+
+    assert run_dsql_transaction(work, max_attempts=5, sleep=lambda _s: None) == "ok"
+    assert attempts["n"] == 3
+    assert is_retryable_db_error(sqlite3.OperationalError("database is locked"))
+    assert is_retryable_db_error(
+        sqlite3.OperationalError("database table is locked")
+    )
+
+
 def test_run_dsql_transaction_does_not_retry_non_occ():
     def work():
         raise ValueError("boom")

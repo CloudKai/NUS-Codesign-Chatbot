@@ -1,8 +1,20 @@
-/** Lecture composer, exact-request reconciliation and saved citation inspection. */
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { ApiError, currentSession, get, type Bookmarks, type ChatSummary, type Page, type Project } from './api';
+/** Shared composer, exact-request reconciliation and saved citation inspection. */
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ApiError, type Bookmarks, type ChatSummary, type Page, type Project } from './api';
+import { setStar } from './api/client';
+import { ChatToCanvasProposal } from './ChatToCanvas';
+import { CanvasSuggestions } from './CanvasSuggestions';
+import { CanvasDraftCard } from './CanvasDraftCard';
+import { ArtifactFeedbackCard } from './ArtifactFeedback';
+import type { CanvasSelection, ArtifactSelection } from './chatLifecycle';
+import { selectStage, resolveTransition } from './api/client';
+import { fetchConfirmedBookmarks, reconcileBookmarks } from './api/workspaceBookmarks';
+import { reconcileProject } from './api/workspaceProject';
+import { useQueryClient } from '@tanstack/react-query';
+import { useChatLifecycle, type Attachment, type Intent, type Receipt } from './chatLifecycle';
+import { newRequestKey } from './requestKey';
 import { ThinkingPath, type ReviewTab } from './ThinkingPath';
-import { REVIEW_LIMITS, ResizeHandle, useWorkspaceLayoutContext } from './workspaceLayout';
+import { REVIEW_LIMITS, ResizeHandle, useWorkspaceLayoutContext, applyLayoutStyle } from './workspaceLayout';
 import { Icon } from './Icon';
 import { CoachText } from './CoachText';
 import { ReasoningPrompts } from './ReasoningPrompts';
@@ -11,27 +23,38 @@ import { ModeSwitch } from './ModeSwitch';
 import { StageRecommendation, MilestoneBanner, type Milestone } from './StageRecommendation';
 import { StageStarters } from './StageStarters';
 import { CoachCheckIn } from './CoachCheckIn';
-import { chooseCheckIn, hintScaffold, lectureToProjectScaffold, reflectionScaffold, type CheckIn } from './coachingContent';
-import { createReplyPreview } from './replyPreview';
-import { ChatProgress, useChatProgress } from './ChatProgress';
-import { newRequestKey } from './requestKey';
-import { REPLY_DELTAS_HEADER, citationText, isTurn, readStream, type Citation, type Event } from './stream';
+import { chooseCheckIn, hintScaffold, feedbackToProjectScaffold, reflectionScaffold, type CheckIn } from './coachingContent';
+import { citationText, type Citation } from './stream';
 
-type Intent = 'lecture' | 'project';
-interface Attachment { id: string; title: string }
-interface Receipt { key: string; text: string; intent?: Intent; message?: string; attachments?: Attachment[] }
 interface Draft { text: string; pending: Receipt | null; intent?: Intent; attachments?: Attachment[] }
 const empty: Draft = { text: '', pending: null };
 
 /** Read only this owner's tab-scoped unsent text and recovery identity; never store replies. */
-function restore(key: string): Draft {
+function restore(key: string, legacyKey: string): Draft {
   try {
-    const value = JSON.parse(sessionStorage.getItem(key) || 'null');
+    const current = sessionStorage.getItem(key);
+    const value = JSON.parse(current ?? sessionStorage.getItem(legacyKey) ?? 'null');
     if (!value || typeof value.text !== 'string') return empty;
     const pending = value.pending;
-    return { text: value.text, intent: value.intent === 'project' ? 'project' : 'lecture',
-      attachments: Array.isArray(value.attachments) ? value.attachments : [],
-      pending: pending && typeof pending.key === 'string' && typeof pending.text === 'string' ? pending : null };
+    const validPending = pending && typeof pending.key === 'string' && typeof pending.text === 'string';
+    const intent = value.intent === 'project' ? 'project'
+      : ['improve', 'lecture'].includes(value.intent) ? 'improve' : undefined;
+    // Tab storage is user-mutable: every restored element is re-validated, never cast.
+    const attachments = Array.isArray(value.attachments)
+      ? value.attachments.filter((item: unknown): item is Attachment =>
+          typeof item === 'object' && item !== null
+          && 'id' in item && typeof item.id === 'string'
+          && 'title' in item && typeof item.title === 'string')
+      : [];
+    return { text: value.text, intent,
+      attachments,
+      pending: validPending ? {
+        key: pending.key, text: pending.text,
+        message: typeof pending.message === 'string' ? pending.message : undefined,
+        intent: pending.message ? intent : pending.intent === 'project' ? 'project' : 'improve',
+        legacyLectureRoute: pending.legacyLectureRoute === true ||
+          (!current && !pending.message && pending.intent !== 'project' && pending.intent !== 'improve'),
+      } : null };
   } catch { return empty; }
 }
 
@@ -50,16 +73,19 @@ function savedIntent(page: Page, project: Project): Intent {
   const projectIds = new Set(project.stages.flatMap(stage => [...stage.student_work, ...stage.feedback].map(item => item.message_id)));
   const last = page.messages.map(message => message.role).lastIndexOf('user');
   if (last >= 0) {
+    const intent = page.messages[last].interaction_intent;
+    if (intent === 'project_coaching') return 'project';
+    if (intent === 'improve_design' || intent === 'lecture_help') return 'improve';
     const reply = page.messages[last + 1];
     if (projectIds.has(page.messages[last].id) || (reply && projectIds.has(reply.id))) return 'project';
-    // A finished turn that left no project artifact was Lecture help; an unanswered one is unknown.
-    if (work && reply) return 'lecture';
+    // Older unclassified turns fall back to the saved project projection.
+    if (work && reply) return 'improve';
   }
-  return work ? 'project' : 'lecture';
+  return work ? 'project' : 'improve';
 }
 
 /** Keep draft, focus and loaded transcript stable during progress and evidence inspection. */
-export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, locateMessage, externalBlocked, activity, onHelp, preferredIntent, showStarters, intentRequest, summary, startIntent, displayTitle = page.notebook.name, parent }: {
+export function Conversation({ page, project, owner, refresh, expired, busy, loadEarlier, locateMessage, externalBlocked, activity, onHelp: _onHelp, preferredIntent, showStarters, intentRequest, summary, startIntent, displayTitle = page.notebook.name, parent, seededBookmarks = null, canvasSelection, onCanvasSelectionConsumed, artifactSelection, onArtifactSelectionConsumed }: {
   page: Page; project: Project; owner: string; refresh: () => Promise<void>; expired: () => void;
   onHelp: () => void; preferredIntent: Intent; showStarters: boolean;
   intentRequest?: { id: string; intent: Intent; n: number };
@@ -69,10 +95,32 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   summary?: ChatSummary; startIntent?: Intent;
   displayTitle?: string;
   parent?: { name: string; open: () => void; disabled: boolean };
+  seededBookmarks?: Bookmarks | null;
+  /** Selected canvas nodes attached once to the next coaching send. */
+  canvasSelection?: CanvasSelection | null;
+  onCanvasSelectionConsumed: () => void;
+  /** Selected artifact passage attached once to the next coaching send. */
+  artifactSelection?: ArtifactSelection | null;
+  onArtifactSelectionConsumed: () => void;
 }) {
-  const storageKey = `codesign-lecture:${owner}:${page.notebook.id}`;
-  const initial = useRef(restore(storageKey));
-  const [mode, setIntent] = useState<Intent | undefined>(initial.current.intent ?? (page.total_count ? savedIntent(page, project) : startIntent));
+  const storageKey = `codesign-mode:${owner}:${page.notebook.id}`;
+  const legacyKey = `codesign-lecture:${owner}:${page.notebook.id}`;
+  const [savedDraft] = useState(() => restore(storageKey, legacyKey));
+  const initial = useRef(savedDraft);
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(legacyKey) !== null && savedDraft !== empty) {
+        if (sessionStorage.getItem(storageKey) === null) sessionStorage.setItem(storageKey, JSON.stringify(savedDraft));
+        sessionStorage.removeItem(legacyKey);
+      }
+    } catch { /* Tab-storage recovery remains available in memory. */ }
+  }, [legacyKey, savedDraft, storageKey]);
+  const canvasSelectionRef = useRef<CanvasSelection | null>(canvasSelection ?? null);
+  canvasSelectionRef.current = canvasSelection ?? null;
+  const artifactSelectionRef = useRef<ArtifactSelection | null>(artifactSelection ?? null);
+  artifactSelectionRef.current = artifactSelection ?? null;
+  const [mode, setIntent] = useState<Intent | undefined>(initial.current.pending?.intent ?? initial.current.intent ?? (page.total_count ? savedIntent(page, project) : startIntent));
+  const [canvasProposal, setCanvasProposal] = useState<{ messageId: string; content: string } | null>(null);
   const intent = mode ?? preferredIntent;
   const reviewKey = `codesign-review:${owner}:${page.notebook.id}`;
   const initialReview = useRef(restoreReview(reviewKey));
@@ -96,6 +144,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     try { return sessionStorage.getItem(startersKey) === 'collapsed'; } catch { return false; }
   });
   const layout = useWorkspaceLayoutContext();
+  // The saved Review width rides a CSSOM rule: the production CSP blocks inline style attributes.
+  useEffect(() => { applyLayoutStyle('conversation', { '--review-w': `${layout.reviewWidth}px` }); }, [layout.reviewWidth]);
   const reviewDocked = layout.review === 'docked';
   const { setReviewOpen } = layout;
   // The sidebar gives up room while Review is docked beside the chat.
@@ -124,15 +174,21 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   }, []);
   const pathToggle = useRef<HTMLButtonElement>(null);
   const reviewPanel = useRef<HTMLDialogElement>(null);
+  /** An explicit Review-button click earns the modal drawer; a restored-open panel never blocks the page. */
+  const explicitReview = useRef(false);
   useLayoutEffect(() => {
     const panel = reviewPanel.current;
     if (!panel) return;
     panel.close();
-    if (layout.review === 'docked') panel.show();
+    if (layout.review === 'docked' || !explicitReview.current) panel.show();
     else panel.showModal();
     panel.querySelector<HTMLElement>('#review-heading')?.focus({ preventScroll: true });
     return () => panel.close();
   }, [pathOpen, layout.review]);
+  // A panel restored across visits must say so: the student sees it reopened, not a surprise overlay.
+  useEffect(() => {
+    if (initialReview.current.open) setReviewStatus('Reopened your saved Review panel from your last visit.');
+  }, []);
   const [moving, setMoving] = useState(false);
   const [projectUncertain, setProjectUncertain] = useState(false);
   const intentRef = useRef(intent);
@@ -141,17 +197,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const [attachments, setAttachments] = useState<Attachment[]>(initial.current.attachments ?? []);
   const [uploading, setUploading] = useState(false);
   const attachmentInput = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<Receipt | null>(initial.current.pending);
-  const pendingRef = useRef(pending);
   const textRef = useRef(text);
-  const [watching, setWatching] = useState(false);
-  const [canStop, setCanStop] = useState(false);
-  const [stopping, setStopping] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [checkedKey, setCheckedKey] = useState('');
-  const [status, setStatus] = useState('');
   const [reviewStatus, setReviewStatus] = useState('');
-  const [preview, setPreview] = useState('');
   const [edit, setEdit] = useState<{ id: string; text: string } | null>(null);
   const editField = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
@@ -177,21 +224,35 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   const [bookmarkError, setBookmarkError] = useState('');
   const [highlighted, setHighlighted] = useState('');
   const bookmarkRead = useRef(0);
+  const appliedSeed = useRef<Bookmarks | null>(null);
   const currentRevision = useRef(page.conversation_revision);
   currentRevision.current = page.conversation_revision;
   const [storageError, setStorageError] = useState(false);
   const [evidence, setEvidence] = useState<{ citation: Citation; message: string } | null>(null);
   const [downloadError, setDownloadError] = useState('');
-  const active = useRef(true);
-  const lock = useRef(false);
-  const controller = useRef(new AbortController());
   const composer = useRef<HTMLTextAreaElement>(null);
   const lastScaffold = useRef('');
   const evidenceHeading = useRef<HTMLHeadingElement>(null);
   const citationButton = useRef<HTMLButtonElement | null>(null);
   const returnScroll = useRef(0);
-  const path = `/api/v1/reader/threads/${encodeURIComponent(page.notebook.id)}`;
-  const progress = useChatProgress();
+   const path = `/api/v1/reader/threads/${encodeURIComponent(page.notebook.id)}`;
+  const queryClient = useQueryClient();
+  // One lifecycle owns the coach turn: request/owner identity, phases and recovery.
+  const {
+    active, controller, lock, verify,
+    watching, canStop, checking, stopping,
+    pending, setPending, pendingRef,
+    status, setStatus, preview,
+    send, stopGeneration,
+  } = useChatLifecycle({
+    threadId: page.notebook.id, owner, expired, refresh, composer,
+    busy, moving, externalBlocked, feedbackBusy, projectUncertain,
+    stickToLatest,
+    draft: { text: textRef, intent: intentRef, attachments, remember },
+    initialPending: initial.current.pending,
+    canvasSelection: { current: canvasSelectionRef.current, clear: onCanvasSelectionConsumed },
+    artifactSelection: { current: artifactSelectionRef.current, clear: onArtifactSelectionConsumed },
+  });
   textRef.current = text;
   useLayoutEffect(() => {
     const field = composer.current;
@@ -200,7 +261,6 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     field.style.height = `${Math.min(Math.max(field.scrollHeight, 60), 200)}px`;
     if (stickToLatest.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
   }, [text]);
-  pendingRef.current = pending;
 
   function remember(nextText: string, nextPending: Receipt | null, nextAttachments = attachments) {
     setIntent(intentRef.current);
@@ -211,12 +271,6 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     setAttachments(nextAttachments);
     try { sessionStorage.setItem(storageKey, JSON.stringify({ text: nextText, pending: nextPending, intent: intentRef.current, attachments: nextAttachments })); }
     catch { setStorageError(true); }
-  }
-
-  async function verify() {
-    const session = await currentSession(controller.current.signal);
-    if (!active.current) throw new Error('View closed');
-    if (session.owner_id !== owner) { expired(); throw new Error('Session changed'); }
   }
 
   async function uploadAttachments(files: File[]) {
@@ -251,135 +305,6 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     }
   }
 
-  async function reconcile(receipt: Receipt) {
-    setChecking(true);
-    setCheckedKey('');
-    setPreview('');
-    try {
-      await verify();
-      const saved = await get<unknown>(`${path}/coach-turn?${new URLSearchParams({ idempotency_key: receipt.key })}`, controller.current.signal);
-      await verify();
-      if (saved !== null && !isTurn(saved)) throw new Error('Malformed saved reply');
-      if (saved) {
-        progress.saved();
-        remember(!receipt.message && textRef.current === receipt.text ? '' : textRef.current, null, receipt.message ? attachments : []);
-        setStatus('Your answer is ready.');
-        await refresh();
-        if (receipt.message) composer.current?.focus({ preventScroll: true });
-      } else {
-        progress.clear();
-        setCheckedKey(receipt.key);
-        setStatus('We couldn’t confirm the reply was saved. Your question is safe. Check again before retrying.');
-      }
-    } catch (error) {
-      if (!active.current) return;
-      progress.clear();
-      if (error instanceof ApiError && [401, 403].includes(error.status)) expired();
-      else setStatus('We couldn’t check for your reply. Your question is kept. Check again when you’re connected.');
-    } finally { if (active.current) setChecking(false); }
-  }
-
-  async function stopGeneration() {
-    const receipt = pendingRef.current;
-    if (!receipt || !canStop || stopping) return;
-    setStopping(true);
-    try {
-      const response = await fetch(`${path}/coach-turn/stop`, {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store',
-        signal: controller.current.signal, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idempotency_key: receipt.key }),
-      });
-      if (!active.current || pendingRef.current?.key !== receipt.key) return;
-      if ([401, 403].includes(response.status)) { expired(); return; }
-      if (!response.ok) throw new ApiError(response.status);
-      const result: { status: 'stopping' | 'saving' | 'finished' } = await response.json();
-      if (active.current && pendingRef.current?.key === receipt.key && result.status === 'stopping') setStatus('Stopping generation…');
-    } catch {
-      if (active.current && pendingRef.current?.key === receipt.key) {
-        setStatus('Could not stop generation. Try again.');
-        setStopping(false);
-      }
-    }
-  }
-
-  async function send(retry = false, revision?: Receipt) {
-    if (lock.current || busy || moving || externalBlocked || feedbackBusy || projectUncertain || (!retry && (pendingRef.current || (!revision && !textRef.current.trim())))) return;
-    if (retry && checkedKey !== pendingRef.current?.key) return;
-    lock.current = true;
-    stickToLatest.current = true;
-    const receipt = retry ? pendingRef.current! : revision || { key: newRequestKey(), text: textRef.current, intent: intentRef.current, attachments };
-    if (!receipt) { lock.current = false; return; }
-    remember(textRef.current, receipt);
-    progress.start();
-    setCanStop(false);
-    setStopping(false);
-    setWatching(true);
-    setPreview('');
-    setStatus('Sending your message…');
-    controller.current.abort();
-    controller.current = new AbortController();
-    const paint = createReplyPreview(value => { if (active.current) setPreview(value); }, controller.current.signal);
-    let terminalError: Event & { event: 'error' } | null = null;
-    const completion = { text: '' };
-    try {
-      await verify();
-      const response = await fetch(receipt.message ? `${path}/messages/${encodeURIComponent(receipt.message)}/revise/stream` : `${path}/${receipt.intent || 'lecture'}/stream`, {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
-        headers: { 'Content-Type': 'application/json', ...REPLY_DELTAS_HEADER },
-        body: JSON.stringify(receipt.message ? { content: receipt.text, idempotency_key: receipt.key }
-          : { student_message: receipt.text, idempotency_key: receipt.key, attachment_source_ids: receipt.attachments?.map(file => file.id) ?? [] }),
-      });
-      if (!response.ok) throw new ApiError(response.status);
-      await readStream(response, page.notebook.id, receipt.key, event => {
-        if (!active.current) return;
-        if (event.event === 'started') { setCanStop(true); setStatus('Reading your message…'); }
-        if (event.event === 'status' && event.phase === 'saving') { setCanStop(false); progress.saving(); }
-        if (event.event === 'status') setStatus(({ queued: 'Waiting for an available coaching slot…', retrieving: 'Looking through your sources…', thinking: 'Preparing your reply…', saving: 'Saving…' })[event.phase]);
-        // Deltas are unvalidated and unsaved: they only ever feed the preview, never saved messages.
-        if (event.event === 'reply_delta') { progress.writing(); paint.append(event.text); setStatus('Writing your reply…'); }
-        if (event.event === 'reply_discard') { progress.discard(); paint.discard(); setStatus('Preparing your reply…'); }
-        if (event.event === 'reply_ready') { progress.saving(); setCanStop(false); setStatus('Saving…'); }
-        if (event.event === 'done') { progress.saved(); setCanStop(false); completion.text = event.turn.response_text; }
-        if (event.event === 'error') { progress.clear(); terminalError = event; paint.discard(); }
-      });
-      if (completion.text) await paint.finish(completion.text);
-    } catch (error) {
-      progress.clear();
-      if (active.current && error instanceof ApiError && [401, 403].includes(error.status)) { expired(); return; }
-    } finally {
-      paint.dispose();
-      if (active.current) {
-        setPreview('');
-        setWatching(false);
-        setCanStop(false);
-        setStopping(false);
-        // A terminal cancellation was confirmed by the worker. Other outcomes use read-only recovery.
-        controller.current = new AbortController();
-        const failure = terminalError as (Event & { event: 'error' }) | null;
-        if (failure?.category === 'cancelled') {
-          progress.clear();
-          if (receipt.message || textRef.current !== receipt.text) {
-            setCheckedKey(receipt.key);
-            if (receipt.message) await refresh();
-          } else {
-            remember(receipt.text, null);
-          }
-          setStatus('Generation stopped. Your prompt is kept.');
-        } else {
-          await reconcile(receipt);
-        }
-        if (active.current && failure && failure.category !== 'cancelled' && pendingRef.current) {
-          setStatus(failure.status === 429
-            ? failure.category === 'generation_budget'
-              ? 'This month’s coach allowance is used up. You can still read your work and sources. It resets next month.'
-              : `The coach is busy right now. Wait${failure.retry_after ? ` at least ${failure.retry_after} seconds` : ''}, then check before retrying.`
-            : 'We couldn’t confirm the reply was saved. Your question is safe. Check again before retrying.');
-        }
-      }
-      lock.current = false;
-    }
-  }
-
   async function stageAction(route: string, body: object) {
     if (lock.current || pendingRef.current || busy || moving || externalBlocked || feedbackBusy) return;
     // Only a confirmed move can become a milestone, and only if the refreshed project really changed stage.
@@ -391,21 +316,35 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     setReviewStatus('Checking saved project…');
     try {
       await verify();
-      const response = await fetch(`${path}/project/${route}`, {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
+      // Generated decision writes; the confirmed projection reconciles the
+      // owner-fenced resource while the authoritative refresh updates the view.
+      if (route === 'select-stage') {
+        const confirmed = await selectStage(page.notebook.id, (body as { stage_id: string }).stage_id, controller.current.signal);
+        void reconcileProject(queryClient, owner, page.notebook.id, () => confirmed);
+      } else if (route.startsWith('resolve/')) {
+        const confirmed = await resolveTransition(page.notebook.id, route.slice('resolve/'.length),
+          (body as { accepted: boolean }).accepted, controller.current.signal);
+        void reconcileProject(queryClient, owner, page.notebook.id, () => confirmed);
+      }
       await verify();
-      if ([401, 403].includes(response.status)) { expired(); return; }
       // Even an ambiguous POST is reconciled by reads; decisions are never automatically replayed.
       await refresh();
       if (active.current) {
         setProjectUncertain(false);
-        if (resolving && response.ok) setTransition(resolving);
-        setReviewStatus(response.ok ? 'Saved project updated.' : 'That action is no longer available. Saved project refreshed.');
+        if (resolving) setTransition(resolving);
+        setReviewStatus('Saved project updated.');
       }
-    } catch { if (active.current) setReviewStatus('Could not verify the project action. Refresh saved project before continuing.'); }
-    finally { if (active.current) setMoving(false); lock.current = false; }
+    } catch (error) {
+      if (error instanceof ApiError && [401, 403].includes(error.status)) { expired(); return; }
+      if (error instanceof ApiError) {
+        if (active.current) {
+          setReviewStatus('That action is no longer available. Saved project refreshed.');
+          try { await refresh(); } catch { /* The refresh failure is already reported. */ }
+        }
+        return;
+      }
+      if (active.current) setReviewStatus('Could not verify the project action. Refresh saved project before continuing.');
+    } finally { if (active.current) setMoving(false); lock.current = false; }
   }
 
   async function refreshProject() {
@@ -463,21 +402,38 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   /** Read all saved stars and fence late responses to this owner and active revision. */
   async function readBookmarks() {
     const read = ++bookmarkRead.current;
-    const saved = await get<Bookmarks>(`${path}/bookmarks`, controller.current.signal);
+    const savedValue = await fetchConfirmedBookmarks(owner, page.notebook.id, controller.current.signal);
     await verify();
-    if (saved.owner_id !== owner || saved.thread_id !== page.notebook.id || saved.conversation_revision !== currentRevision.current) {
+    if (savedValue.conversation_revision !== currentRevision.current) {
       throw new Error('History changed. Reopen this chat.');
     }
-    if (read === bookmarkRead.current) { setBookmarks(saved); setBookmarkError(''); }
-    return saved;
+    if (read === bookmarkRead.current) {
+      setBookmarks(savedValue); setBookmarkError('');
+      // The confirmed projection reconciles the owner-fenced resource.
+      void reconcileBookmarks(queryClient, owner, page.notebook.id, () => savedValue);
+    }
+    return savedValue;
   }
   useEffect(() => {
+    // The verified workspace open read already carries this thread's bookmarks
+    // at the current revision; only a mismatch needs its own read. The applied
+    // seed never clobbers newer local reconciliation (for example an explicit
+    // star re-read within the same revision).
+    const seed = seededBookmarks && seededBookmarks.thread_id === page.notebook.id
+      && seededBookmarks.conversation_revision === page.conversation_revision ? seededBookmarks : null;
+    if (seed) {
+      if (appliedSeed.current === seed) return;
+      appliedSeed.current = seed;
+      setBookmarks(seed); setBookmarkError('');
+      return;
+    }
+    appliedSeed.current = null;
     let cancelled = false;
     void readBookmarks().catch(() => {
       if (!cancelled && active.current) setBookmarkError('Could not load bookmarks. Refresh bookmarks to try again.');
     });
     return () => { cancelled = true; };
-  }, [page]);
+  }, [page, seededBookmarks]);
   const visibleBookmarks = bookmarks?.conversation_revision === page.conversation_revision ? bookmarks : null;
   const isStarred = (id: string, fallback: boolean) => visibleBookmarks ? visibleBookmarks.messages.some(item => item.id === id) : fallback;
 
@@ -488,11 +444,13 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     try {
       await verify();
       try {
-        await fetch(`${path}/messages/${encodeURIComponent(message)}/star`, {
-          method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: controller.current.signal,
-          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ starred }),
-        });
-      } catch { /* A lost response can still have saved the state. Read before reporting success. */ }
+        // A generated contract write; a lost response can still have saved the
+        // state, so the read below decides rather than replaying the write.
+        await setStar(page.notebook.id, message, starred, controller.current.signal);
+      } catch (error) {
+        if (error instanceof ApiError && [401, 403].includes(error.status)) { expired(); return; }
+        /* A lost response can still have saved the state. Read before reporting success. */
+      }
       const saved = await readBookmarks();
       const actual = saved.messages.some(item => item.id === message);
       const notice = actual === starred ? (starred ? 'Message starred.' : 'Star removed.') : 'Star was not saved. Try again.';
@@ -520,15 +478,14 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     } catch { if (active.current) setStatus('Could not verify feedback. Refresh saved project to read the latest saved answer before trying again.'); }
     finally { lock.current = false; if (active.current) setFeedbackBusy(false); }
   }
-  useEffect(() => { activity(watching || checking || moving || uploading || !!pending || projectUncertain || feedbackBusy); }, [watching, checking, moving, uploading, pending, projectUncertain, feedbackBusy]);
+  // Neither a pending receipt nor an in-flight turn may lock the whole workspace:
+  // the receipt is persisted before the request leaves, so navigating away is
+  // recoverable (reopening the chat auto-reconciles). Only local UI work that a
+  // remount would lose (stage moves, uploads, project checks, feedback) locks.
+  useEffect(() => { activity(moving || uploading || projectUncertain || feedbackBusy); }, [moving, uploading, projectUncertain, feedbackBusy]);
   const editIndex = pending?.message ? page.messages.findIndex(message => message.id === pending.message) : -1;
   const visibleMessages = editIndex >= 0 ? page.messages.slice(0, editIndex) : page.messages;
 
-  useEffect(() => {
-    active.current = true;
-    if (initial.current.pending) void reconcile(initial.current.pending);
-    return () => { active.current = false; controller.current.abort(); };
-  }, []);
   useEffect(() => { if (evidence) evidenceHeading.current?.focus({ preventScroll: true }); }, [evidence]);
 
   useEffect(() => {
@@ -551,6 +508,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   }, [transition, project]);
 
   function closePath() {
+    explicitReview.current = false;
     setPathOpen(false);
     window.requestAnimationFrame(() => pathToggle.current?.focus({ preventScroll: true }));
   }
@@ -579,10 +537,12 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
   }
   const choosePrompt = (prompt: string) => insertScaffold(prompt);
   const stageLabel = project.stages.find(stage => stage.id === project.current_stage)?.label ?? '';
-  const projectWork = hasProjectWork(project);
+  const projectMode = intent === 'project';
+  const projectWork = projectMode && hasProjectWork(project);
+  const pendingDecision = projectMode && project.pending;
   const stageNumber = Math.max(0, project.stages.findIndex(stage => stage.id === project.current_stage)) + 1;
   const turnBusy = watching || checking || moving || uploading || !!pending;
-  const checkIn = !checkInHidden && !milestone && !isEmpty && !turnBusy && !text.trim() && !projectUncertain && !(pathOpen && !reviewDocked)
+  const checkIn = projectMode && !checkInHidden && !milestone && !isEmpty && !turnBusy && !text.trim() && !projectUncertain && !(pathOpen && !reviewDocked)
     ? chooseCheckIn(project, summary, intent, dismissedRules) : null;
   function dismissCheckIn(item: CheckIn) {
     const next = [...dismissedRules, item.rule];
@@ -590,12 +550,12 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     setDismissedRules(next);
     try { sessionStorage.setItem(checkInKey, JSON.stringify(next)); } catch { /* Optional tab preference. */ }
   }
-  const showChips = intent === 'project' && showStarters && !isEmpty && !checkIn && !milestone && !text.trim() && !turnBusy;
+  const showChips = projectMode && showStarters && !isEmpty && !checkIn && !milestone && !text.trim() && !turnBusy;
   // The composer dock changes height when a check-in or the suggestions appear. Keep the latest message in view.
   useEffect(() => {
     if (stickToLatest.current && transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
   }, [checkIn?.rule, showChips, startersCollapsed]);
-  const openReview = (tab?: ReviewTab) => { setPathTab(value => ({ tab: tab ?? value.tab, n: value.n + 1 })); setPathOpen(true); };
+  const openReview = (tab?: ReviewTab) => { explicitReview.current = true; setPathTab(value => ({ tab: tab ?? value.tab, n: value.n + 1 })); setPathOpen(true); };
   async function decideInline(route: string, body: object) {
     await stageAction(route, body);
     window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
@@ -622,20 +582,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     remember(textRef.current, null);
   }, [intentRequest?.n]);
 
-  /** Free a question the server rejected for good. Only after a check found no saved reply, so nothing is sent twice. */
-  function discardPending() {
-    const receipt = pendingRef.current;
-    if (!receipt || checking || watching || checkedKey !== receipt.key) return;
-    const draft = textRef.current;
-    const restored = receipt.message ? (draft.trim() ? `${draft}\n\n${receipt.text}` : receipt.text) : draft;
-    setCheckedKey('');
-    remember(restored, null);
-    setStatus('Not sent. Your text is back in the composer to edit.');
-    window.requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }));
-  }
-
   return <section aria-label="Saved conversation" className={`conversation ${pathOpen ? 'review-open' : ''}`}
-    data-review={pathOpen ? layout.review : undefined} style={{ '--review-w': `${layout.reviewWidth}px` } as CSSProperties}>
+    data-review={pathOpen ? layout.review : undefined}>
     <header className="chat-heading">
       <h2 title={parent ? `${parent.name} › ${displayTitle}` : displayTitle}>
         {parent ? <><button className="crumb-parent" disabled={parent.disabled} aria-label={`Open notebook ${parent.name}`} onClick={parent.open}>
@@ -643,14 +591,14 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
         <span className="crumb-title">{displayTitle}</span>
       </h2>
       <button ref={pathToggle} className="path-toggle" aria-haspopup="dialog" aria-expanded={pathOpen}
-        aria-description={project.pending ? 'Stage decision pending' : undefined}
+        aria-description={pendingDecision ? 'Stage decision pending' : undefined}
         aria-controls={pathOpen ? 'project-review' : undefined}
-        onClick={() => pathOpen ? closePath() : openReview(project.pending ? 'Progression' : undefined)}>
+        onClick={() => pathOpen ? closePath() : openReview(pendingDecision ? 'Progression' : undefined)}>
         <Icon name="path"/> Review
         {projectWork ? <span className="path-progress"><span aria-hidden="true"> · </span>
           <span className="path-count">{stageNumber}/{project.stages.length}<span className="sr-only"> stages, current: {stageLabel}</span></span>
           <span className="path-stage" aria-hidden="true"> · {stageLabel}</span></span> : null}
-        {project.pending ? <span className="decision-dot" aria-hidden="true"/> : null}
+        {pendingDecision ? <span className="decision-dot" aria-hidden="true"/> : null}
       </button>
     </header>
     <div className="conversation-chat">
@@ -679,8 +627,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       void loadEarlier().then(() => window.requestAnimationFrame(() => { panel.scrollTop = scroll + panel.scrollHeight - height; }));
     }}>Load earlier messages</button> : null}
     {isEmpty ? <div className="chat-welcome"><span className="welcome-mark"><Icon name="spark"/></span>
-      <h1>Make room for a better question.</h1><p>Bring a half-formed thought. We’ll work through it together.</p>
-      {showStarters ? <ReasoningPrompts disabled={checking || moving || externalBlocked} onChoose={choosePrompt}/> : null}
+      <h1>{intent === 'improve' ? 'Improve my design' : 'Make room for a better question.'}</h1>
+      <p>{intent === 'improve' ? 'Share your design and what you’d like to improve.' : 'Bring a half-formed thought. We’ll work through it together.'}</p>
+      {showStarters && intent === 'project' ? <ReasoningPrompts disabled={checking || moving || externalBlocked} onChoose={choosePrompt}/> : null}
     </div> : null}
     {visibleMessages.map(message => <article id={`message-${message.id}`} data-message-id={message.id} data-highlighted={highlighted === message.id || undefined} tabIndex={-1} className={`message ${message.role === 'user' ? 'student' : 'coach'}${edit?.id === message.id ? ' editing' : ''}`} key={message.id}>
       <h3>{message.role === 'user' ? 'You' : 'Coach'}</h3>
@@ -697,7 +646,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
             <button className="edit-submit" aria-label="Confirm edit & ask again" title="Confirm edit & ask again" disabled={!edit.text.trim() || watching || checking || busy || moving || feedbackBusy || !!pending || externalBlocked || projectUncertain}><Icon name="arrow"/></button>
           </div>
         </div>
-        <p className="supporting" id={`edit-note-${message.id}`}>Sending replaces this message and later replies. Your composer draft is kept.</p>
+        <p className="supporting" id={`edit-note-${message.id}`}>Sending replaces this message and later replies, including any Thinking Path progress from those replies. Your composer draft is kept.</p>
       </form> : <>
       {message.role === 'user' ? <div className="message-content">{message.content}</div> : <CoachText text={message.content}/>}
       <div className="message-actions">
@@ -707,9 +656,11 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           disabled={feedbackBusy || watching || checking || moving || !!pending || externalBlocked}
           onClick={() => void star(message.id, !isStarred(message.id, message.starred))}><Icon name="star"/></button>
         <button aria-label={message.role === 'user' ? 'Copy your message' : 'Copy answer'} title="Copy" onClick={() => { void navigator.clipboard.writeText(message.content).then(() => setStatus('Message copied.')).catch(() => setStatus('Could not copy. Select the message text to copy it.')); }}><Icon name="copy"/></button>
+        <button aria-label="Add to canvas" title="Add to a design canvas" disabled={watching || checking || moving || !!pending || externalBlocked}
+          onClick={() => setCanvasProposal({ messageId: message.id, content: message.content })}><Icon name="plus"/></button>
         {message.role === 'user' ? <button aria-label="Edit message" title="Edit message" disabled={watching || checking || moving || !!pending || externalBlocked || projectUncertain} id={`edit-trigger-${message.id}`} onClick={() => { stickToLatest.current = false; setEdit({ id: message.id, text: message.content }); }}><Icon name="edit"/></button> : null}
         {message.role !== 'user' ? <button className="use-in-project" disabled={watching || checking || moving || !!pending || externalBlocked}
-          onClick={() => insertScaffold(lectureToProjectScaffold(message.content), 'project')}><Icon name="path"/> Use in my project</button> : null}
+          onClick={() => insertScaffold(feedbackToProjectScaffold(message.content), 'project')}><Icon name="path"/> Use in my project</button> : null}
         {message.feedback_available ? <div role="group" aria-label="Was this answer useful?">
           {(['useful', 'not_useful'] as const).map(kind => <button key={kind} aria-label={kind === 'useful' ? 'Useful' : 'Not useful'} title={kind === 'useful' ? 'Useful' : 'Not useful'} aria-pressed={message.rating === kind} disabled={feedbackBusy || watching || checking || !!pending || externalBlocked} onClick={() => void rate(message.id, kind)}><Icon name={kind === 'useful' ? 'up' : 'down'}/></button>)}
         </div> : null}
@@ -720,10 +671,24 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           returnScroll.current = transcript.current?.scrollTop || 0; citationButton.current = event.currentTarget;
           setDownloadError(''); setEvidence({ citation, message: message.id });
         }}>{citationText(citation)}</button>)}</div> : null}
+      {message.role !== 'user' && message.canvas_suggestions?.length
+        ? <CanvasSuggestions threadId={page.notebook.id} owner={owner}
+            suggestions={message.canvas_suggestions}
+            disabled={watching || checking || moving || !!pending || externalBlocked || projectUncertain}/>
+        : null}
+      {message.role !== 'user' && message.artifact_feedback?.length
+        ? message.artifact_feedback.map(feedback => <ArtifactFeedbackCard key={feedback.id}
+            threadId={page.notebook.id} owner={owner} feedback={feedback}
+            disabled={watching || checking || moving || !!pending || externalBlocked || projectUncertain}/>)
+        : null}
+      {message.role !== 'user' && message.canvas_draft
+        ? <CanvasDraftCard threadId={page.notebook.id} owner={owner} draft={message.canvas_draft}
+            disabled={watching || checking || moving || !!pending || externalBlocked || projectUncertain}/>
+        : null}
     </article>)}
-    {milestone ? <MilestoneBanner milestone={milestone} onDismiss={() => setMilestone(null)} onReview={() => { setMilestone(null); openReview('Summary'); }}
+    {projectMode && milestone ? <MilestoneBanner milestone={milestone} onDismiss={() => setMilestone(null)} onReview={() => { setMilestone(null); openReview('Summary'); }}
       onReflect={from => { setMilestone(null); insertScaffold(reflectionScaffold(from), 'project'); }}/> : null}
-    <StageRecommendation project={project} disabled={reviewDisabled} act={decideInline}/>
+    {projectMode ? <StageRecommendation project={project} disabled={reviewDisabled} act={decideInline}/> : null}
     {evidence ? <aside className="evidence" aria-label="Cited evidence">
       <div className="evidence-heading"><h3 ref={evidenceHeading} tabIndex={-1}>{citationText(evidence.citation)}</h3>
         <button onClick={() => {
@@ -735,11 +700,8 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
       {downloadError ? <p role="alert">{downloadError}</p> : null}
     </aside> : null}
     {preview ? <article className="message preview"><h3>Coach · unsaved preview</h3><CoachText text={preview}/></article> : null}
-    {pending && !watching ? <div className="recovery-actions">
-      <p className="supporting">{pending.message ? 'Pending edit' : 'Pending question'}: {pending.text}</p>
-      <button disabled={checking || busy} onClick={() => void reconcile(pending)}>Check saved answer</button>
-      <button disabled={checking || busy || checkedKey !== pending.key} onClick={() => void send(true)}>Retry same question</button>
-      <button disabled={checking || busy || checkedKey !== pending.key} onClick={discardPending}>Discard and edit</button>
+    {pending && !watching ? <div className="recovery-actions" role="status" aria-label="Checking your answer">
+      <span className="typing-dots" aria-hidden="true"><i/><i/><i/></span>
     </div> : null}
     </div></div>
     <div className="composer-dock"><div className="chat-column">
@@ -773,14 +735,24 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           <button type="button" className="icon-button" disabled={uploading || !!pending} aria-label={`Remove attachment ${file.title}`}
             onClick={() => remember(textRef.current, null, attachments.filter(item => item.id !== file.id))}><Icon name="close"/></button></li>)}
       </ul> : null}
-      <label className="sr-only" htmlFor="lecture-question">{intent === 'lecture' ? 'Your lecture question' : 'Your project contribution'}</label>
+      {canvasSelection ? <p className="canvas-selection-chip" role="status">
+        <Icon name="path"/> Discussing canvas node: {canvasSelection.label}
+        <button type="button" className="icon-button" aria-label="Stop discussing the canvas node"
+          onClick={onCanvasSelectionConsumed}><Icon name="close"/></button>
+      </p> : null}
+      {artifactSelection ? <p className="canvas-selection-chip" role="status">
+        <Icon name="edit"/> Discussing draft: {artifactSelection.label}
+        <button type="button" className="icon-button" aria-label="Stop discussing the draft"
+          onClick={onArtifactSelectionConsumed}><Icon name="close"/></button>
+      </p> : null}
+      <label className="sr-only" htmlFor="lecture-question">{intent === 'improve' ? 'What you want to improve' : 'Your project contribution'}</label>
       <textarea ref={composer} id="lecture-question" value={text} maxLength={12000} rows={3} aria-describedby="composer-hint" onKeyDown={event => {
         if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
           event.preventDefault();
           event.currentTarget.form?.requestSubmit();
         }
       }}
-        placeholder={intent === 'lecture' ? "Ask about a lecture, reading, or course concept…" : "Share an idea or ask a question…"} onChange={event => remember(event.target.value, pendingRef.current)}/>
+        placeholder={intent === 'improve' ? "Share your design and what you’d like to improve…" : "Share an idea or ask a question…"} onChange={event => remember(event.target.value, pendingRef.current)}/>
       <div className="composer-actions">
         <button className="icon-button attach-button" type="button" aria-label="Attach files" title="Attach files" disabled={externalBlocked || uploading || watching || !!pending} onClick={() => attachmentInput.current?.click()}><Icon name="attach"/></button>
         <ModeSwitch value={intent} disabled={watching || checking || moving || !!pending} onChange={next => {
@@ -795,9 +767,9 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           onClick={() => void stopGeneration()}><Icon name="close"/></button> :
         <button className="primary send-button" aria-label="Send message" title="Send message" type="submit" disabled={watching || checking || busy || moving || projectUncertain || externalBlocked || uploading || feedbackBusy || !!pending || !text.trim()}><Icon name="arrow"/></button>}</div>
     </form>
-    <ChatProgress value={progress.value} status={status}/>
     {storageError ? <p role="alert">Tab storage is unavailable. Keep a copy of your draft before reloading.</p> : null}
-    <div className="turn-status" role="status" aria-live="polite">{status}</div>
+    {/* In-progress is wordless: the transcript's bouncing dots carry the state. */}
+    <div className="turn-status" role="status" aria-live="polite">{watching || checking || pending ? '' : status}</div>
     <p className="composer-note">Your coach can make mistakes. You decide what goes into your work.</p>
     </div></div>
     </div>
@@ -815,7 +787,7 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
           closePath();
         }
       }}>
-      <ThinkingPath bookmarks={visibleBookmarks?.messages ?? []} bookmarkError={bookmarkError} bookmarksReady={!!visibleBookmarks}
+      <ThinkingPath projectMode={projectMode} bookmarks={visibleBookmarks?.messages ?? []} bookmarkError={bookmarkError} bookmarksReady={!!visibleBookmarks}
         refreshBookmarks={() => { void readBookmarks().catch(() => setBookmarkError('Could not load bookmarks. Try again.')); }}
         jumpToMessage={id => void jumpToMessage(id)} removeStar={id => void star(id, false)} key={pathTab.n} project={project} title={displayTitle} initialTab={pathTab.tab} onTabChange={tab => setPathTab(value => ({ ...value, tab }))} insertScaffold={insertScaffold}
         disabled={reviewDisabled}
@@ -825,5 +797,10 @@ export function Conversation({ page, project, owner, refresh, expired, busy, loa
     </dialog> : null}
     {pathOpen && reviewDocked ? <ResizeHandle side="review" label="Resize Review panel" value={layout.reviewWidth} min={REVIEW_LIMITS.min} max={layout.reviewMax}
       onResize={layout.resizeReview} onReset={layout.resetReview}/> : null}
+    {canvasProposal ? <ChatToCanvasProposal
+      threadId={page.notebook.parent_notebook_id ?? page.notebook.id}
+      messageId={canvasProposal.messageId} content={canvasProposal.content}
+      onClose={() => setCanvasProposal(null)}
+      onCreated={() => { setCanvasProposal(null); setStatus('Node added to your canvas.'); }}/> : null}
   </section>;
 }

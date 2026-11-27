@@ -35,10 +35,12 @@ FastAPI (`api.py` façade → `http/app.py`)
 |---|---|
 | `domain.py` | Pydantic contracts: `CoachRequest`, `CoachTurn`, `EducationalAssessment`, `PendingPhaseTransition`, citations |
 | `coaching/reply_text.py` / `coaching/streaming.py` | Opt-in reply text streaming: `reply_text.py` decodes the top-level `response_text` from streamed tool-input JSON; `streaming.py` maps provider fragments to `reply_delta` / `reply_discard` events only for clients that asked. Fragments are unvalidated and never persisted. |
-| `application.py` / `coaching/` | Compatibility import plus durable `CoachApplicationService` execution, including research-observation persist. `coaching/deep_review_context.py` owns Deep Review `full_history` vs `checkpoint_delta` planning. |
+| `application.py` / `coaching/` | Compatibility import plus durable `CoachApplicationService` execution, including research-observation persist. `coaching/deep_review_context.py` owns Deep Review `full_history` vs `checkpoint_delta` planning. `coaching/deep_review_jobs.py` owns the process-local worker pool and its clean-shutdown seam (`shutdown_deep_review_executor`, called from the FastAPI lifespan). |
+| `specialists/review_orchestration.py` | Deep Review job vocabulary: queued/running/completed/failed plus `cancel_requested`/`cancelled` (explicit student cancellation) and `ambiguous` (`review_outcome_unknown` — the billable invocation started but no result was committed, so the outcome is unknowable; never silently re-run, resolved only by an explicit re-enqueue). Owns the durable `invoked_at` marker, lease parse/staleness helpers and job blob persistence. |
 | `api.py` / `http/app.py` | Compatibility import plus FastAPI app factory/composition, student and professor routes, and HTTP error mapping |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
 | `workspace_service.py` | Notebook/history/source/preference CRUD application service; student transcript export |
+| `project_export.py` | Bounded, owner-checked selected project export assembly (ticket 52): pure envelope builder over saved projections; no model call, no ids/operational fields in the output |
 | `workflow.py` | Single LangGraph coach workflow wrapper (not one agent per phase) |
 | `student_journey.py` / `learning/` | Compatibility imports plus the five research-aligned phases, journey normalization, review helpers, questions, and the How Might We scaffold projection (`learning/hmw.py`). New journeys default to Guide (`response_detail=short`). |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
@@ -51,7 +53,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
 | `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
 | `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests). Live parsing lives in `agentcore_runtime/`. Runtime model/guardrail env is fail-closed in `agentcore_runtime/model.py`. |
-| `specialists/` | Legacy server-owned `qa` / `coaching` / `review` helpers. Active AgentCore chat uses one `fast_chat` invoke. Explicit Deep Review is a dedicated FastAPI route; the browser cannot pick a privileged specialist on `/coach/turn`. |
+| `specialists/` | Legacy server-owned `qa` / `coaching` / `review` helpers. Active AgentCore chat uses one `fast_chat` invoke. Explicit Deep Review is a dedicated FastAPI route (POST enqueue/GET status/POST cancel); the browser cannot pick a privileged specialist on `/coach/turn`. |
 | `prompts/` | Application composer for mock/OpenAI/Bedrock. Canonical AgentCore pedagogy is `agentcore_runtime/prompts/`. |
 | `agentcore_harness_provider.py` | Isolated InvokeHarness Luna eval adapter (not production DEFAULT) |
 | `context_planner.py` | Token-aware model-context planner (`fast_chat` vs Deep Review `full_history`) |
@@ -62,7 +64,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `retrieval.py` | Provider-neutral retrieval port, local chunk retriever, and composite KB/local splitter |
 | `retrieval_gate.py` | Deterministic, non-LLM gate for whether a normal chat turn retrieves |
 | `coaching/evidence_scope.py` | Single owner of the first-pass evidence scope: `decide_first_pass_scope` takes plain inputs (message, sources with flags, attachment count, interaction intent, `force_retrieval`, upload setting) and returns course-catalog yes/no, personal files yes/no, expected mode and the cues that fired. Pure: no `boto3`, provider, settings or store import (an `ast` test enforces it). `coaching/execution.py` and the offline gate eval (`scripts/evals/evaluate_retrieval.py::gate_decision`) both call it. State reads, the Laya model call, snapshot changes and `record_field` telemetry stay in `execution.py`. |
-| `turn_perf.py` | Privacy-safe per-request latency/context instrumentation (`coach_turn_perf` JSON plus `TIMING` seconds lines) |
+| `turn_perf.py` | Privacy-safe per-request latency/context instrumentation (`coach_turn_perf` JSON plus `TIMING` seconds lines). Phase boundaries measured from request start (`first_safe_reply_ready_ms`, `turn_confirmed_ms`) are distinguished from span durations, and provider-reported first-text timings carry a `first_text_timing_source` label so unknown durations are explicit. `http_request` access logs carry the same opaque `X-Request-ID` for browser↔backend correlation. |
 | `file_processing.py` | Upload storage, text extraction, safe paths |
 | `settings.py` | Environment-driven configuration (`Settings`) |
 | `models.py` | Model registry and allowed model IDs |
@@ -161,7 +163,12 @@ and rollback path. Update `docs/IMPLEMENTATION_STATUS.md`.
 **Change source handling**
 
 `sources/`, `file_processing.py`, and tests in
-`tests/domain/test_source_library.py`.
+`tests/domain/test_source_library.py`. Local source reads must stay
+relocation-safe for the documented fresh-location restore:
+`sources/projection.py::safe_source_file_path` re-anchors stale absolute
+upload paths under the configured `files_dir` (pinned by
+`tests/http/test_source_recovery_relocation.py`; see
+`docs/operations/WORKSPACE_RECOVERY_REHEARSAL.md`).
 
 ## Validation
 

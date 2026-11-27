@@ -243,7 +243,16 @@ class ProfessorAnalyticsRepository:
                        m.metadata_text AS message_metadata, m.assessment_text,
                        m.cited_source_ids_text, m.proposed_stage,
                        m.decision_status, m.decision_at,
-                       m.created_at AS message_created_at
+                       m.created_at AS message_created_at,
+                       n.settings_text AS notebook_settings_text,
+                       (SELECT COUNT(*) FROM student_artifacts a
+                        WHERE a.notebook_id = n.id) AS artifact_count,
+                       (SELECT COALESCE(SUM(a.revision - 1), 0) FROM student_artifacts a
+                        WHERE a.notebook_id = n.id) AS artifact_revision_saves,
+                       (SELECT COUNT(*) FROM student_canvases c
+                        WHERE c.notebook_id = n.id) AS canvas_count,
+                       (SELECT COALESCE(SUM(c.revision - 1), 0) FROM student_canvases c
+                        WHERE c.notebook_id = n.id) AS canvas_revision_saves
                 FROM users u JOIN notebooks n ON n.user_id=u.id
                 LEFT JOIN messages m ON m.notebook_id=n.id {_ACTIVE_BRANCH_JOIN}
                 WHERE 1=1 {_STUDENT_ROLE_FILTER}

@@ -304,3 +304,71 @@ def test_library_uploads_links_attachment_scope_and_image_validation(tmp_path: P
         client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('other'))
         assert client.get(library + '/sources').json()['sources'] == []
         assert client.get(library + f'/sources/{attached}/content').status_code == 404
+
+
+def test_reader_improve_grounds_feedback_with_only_requested_evidence(
+    tmp_path: Path, monkeypatch: MonkeyPatch,
+) -> None:
+    """Improve can critique directly, use an attachment, or cite course notes."""
+    import json
+
+    import fitz
+
+    from backend.source_library import sync_lecture_notes_folder
+
+    monkeypatch.setattr(settings, 'public_api_base_url', 'https://testserver')
+    course = tmp_path / 'course' / 'lectureNotes'
+    course.mkdir(parents=True)
+    with fitz.open() as document:
+        page = document.new_page()
+        page.insert_text((72, 72), 'Lecture 4 visibility: test the timer under direct sunlight.')
+        document.save(course / 'Lecture 4.pdf')
+    monkeypatch.setattr(settings, 'lecture_notes_dir', course.parent)
+    monkeypatch.setattr(settings, 'course_material_sync_enabled', True)
+    monkeypatch.setattr(settings, 'course_materials_bucket', '')
+    root = StudentStore(tmp_path / 'improve-sources.sqlite3')
+    _seed_user(root, 'student', 'student')
+    oidc = FakeOIDC(root)
+    origin = {'Origin': 'https://testserver'}
+
+    with TestClient(create_app(root, oidc_client=oidc), base_url='https://testserver') as client:
+        client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))
+        created = client.post('/api/v1/reader/threads', json={'kind': 'chat'}, headers=origin)
+        assert created.status_code in (200, 201)
+        thread = created.json()['notebook']['id']
+        student = StudentStore(root.path, identifier='cognito:student')
+        sync_lecture_notes_folder(student, thread)
+        path = f'/api/v1/reader/threads/{thread}'
+
+        def save_feedback(question: str, key: str, attachment_ids: list[str] | None = None) -> dict:
+            response = client.post(path + '/improve/stream', json={
+                'student_message': question,
+                'idempotency_key': key,
+                'attachment_source_ids': attachment_ids or [],
+            }, headers=origin)
+            assert response.status_code == 200
+            done = next(event['turn'] for event in map(json.loads, response.text.splitlines())
+                        if event['event'] == 'done')
+            saved = client.get(path + '/messages/page').json()['messages'][-1]
+            assert saved['citations'] == done['assessment']['citations']
+            return saved
+
+        critique = save_feedback(
+            'How can I improve the visibility of my crossing timer?', 'critique',
+        )
+        assert critique['citations'] == []
+
+        attachment = client.post(path + '/attachments', files={
+            'files': ('prototype.txt', b'The crossing timer has a pale display with small numbers.', 'text/plain'),
+        }, headers=origin)
+        assert attachment.status_code == 200
+        attachment_id = attachment.json()[0]['id']
+        attached_feedback = save_feedback(
+            'Please critique my crossing timer for visibility.', 'attached', [attachment_id],
+        )
+        assert {citation['source_id'] for citation in attached_feedback['citations']} == {attachment_id}
+
+        course_feedback = save_feedback(
+            'How should I test the visibility of my crossing timer using Lecture 4?', 'course',
+        )
+        assert [citation['title'] for citation in course_feedback['citations']] == ['Lecture 4.pdf']

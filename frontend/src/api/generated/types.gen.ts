@@ -5,6 +5,152 @@ export type ClientOptions = {
 };
 
 /**
+ * ArtifactFeedback
+ *
+ * One validated before/after proposal for the student's artifact.
+ *
+ * ``original_text`` is the server-resolved saved passage (or the whole
+ * bounded document text when ``paragraph`` is None). ``base_artifact_id``
+ * and ``base_artifact_revision`` are server-stamped from the snapshot the
+ * coaching context was resolved from; the model never supplies them.
+ */
+export type ArtifactFeedback = {
+    /**
+     * Base Artifact Id
+     */
+    base_artifact_id?: string | null;
+    /**
+     * Base Artifact Revision
+     */
+    base_artifact_revision?: number | null;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Kind
+     */
+    kind: 'revise_text';
+    /**
+     * Original Text
+     */
+    original_text?: string;
+    /**
+     * Paragraph
+     */
+    paragraph?: number | null;
+    /**
+     * Proposed Text
+     */
+    proposed_text: string;
+    /**
+     * Rationale
+     */
+    rationale: string;
+};
+
+/**
+ * CanvasDraftProposal
+ *
+ * One reviewable synthesized draft from the student's selected canvas nodes.
+ */
+export type CanvasDraftProposal = {
+    /**
+     * Base Canvas Id
+     */
+    base_canvas_id?: string | null;
+    /**
+     * Base Canvas Revision
+     */
+    base_canvas_revision?: number | null;
+    /**
+     * Draft Text
+     */
+    draft_text: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Node Ids
+     */
+    node_ids?: Array<string>;
+    /**
+     * Provenance
+     */
+    provenance?: 'coach';
+    /**
+     * Rationale
+     */
+    rationale?: string;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * CanvasSuggestion
+ *
+ * One validated proposal for the student's Design Canvas.
+ *
+ * ``base_canvas_revision`` is server-stamped from the canvas snapshot the
+ * coaching context was resolved from; the model never supplies it. Target
+ * node ids for ``new_edge`` proposals are untrusted text — they are checked
+ * against the real graph only at acceptance, by the ordinary canvas save.
+ */
+export type CanvasSuggestion = {
+    /**
+     * Base Canvas Id
+     */
+    base_canvas_id?: string | null;
+    /**
+     * Base Canvas Revision
+     */
+    base_canvas_revision?: number | null;
+    /**
+     * Description
+     */
+    description?: string;
+    /**
+     * Explanation
+     */
+    explanation?: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Kind
+     */
+    kind: 'new_node' | 'new_edge';
+    /**
+     * Node Kind
+     */
+    node_kind?: string | null;
+    /**
+     * Rationale
+     */
+    rationale: string;
+    /**
+     * Relation
+     */
+    relation?: string | null;
+    /**
+     * Source Node Id
+     */
+    source_node_id?: string | null;
+    /**
+     * Target Node Id
+     */
+    target_node_id?: string | null;
+    /**
+     * Title
+     */
+    title?: string;
+};
+
+/**
  * CitationReference
  *
  * A stable source citation that can be resolved in the notebook source viewer.
@@ -33,6 +179,13 @@ export type CitationReference = {
 };
 
 /**
+ * DeepReviewJobStatus
+ *
+ * Durable status of one background Deep Review job.
+ */
+export type DeepReviewJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancel_requested' | 'cancelled' | 'ambiguous';
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -40,6 +193,488 @@ export type HttpValidationError = {
      * Detail
      */
     detail?: Array<ValidationError>;
+};
+
+/**
+ * MilestoneRecap
+ *
+ * One persisted recap of a confirmed educational milestone.
+ *
+ * Every field is derived server-side from the confirmed transition, the
+ * saved assessment and saved student work. ``id`` is content-derived from
+ * the transition so duplicate confirmation is detectable.
+ */
+export type MilestoneRecap = {
+    /**
+     * Accomplishments
+     */
+    accomplishments?: string;
+    /**
+     * Changes
+     */
+    changes?: string;
+    /**
+     * Confirmed At
+     */
+    confirmed_at: string;
+    /**
+     * Gaps
+     */
+    gaps?: Array<string>;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Next Action
+     */
+    next_action: string;
+    /**
+     * Next Stage Id
+     */
+    next_stage_id: string;
+    /**
+     * Next Stage Label
+     */
+    next_stage_label: string;
+    /**
+     * Relevant Work
+     */
+    relevant_work?: Array<RecapWork>;
+    /**
+     * Stage Id
+     */
+    stage_id: string;
+    /**
+     * Stage Label
+     */
+    stage_label: string;
+    /**
+     * Transition Id
+     */
+    transition_id: string;
+};
+
+/**
+ * ProjectBrief
+ *
+ * Lecture-informed whole-chat brief; absent facts must remain null.
+ */
+export type ProjectBrief = {
+    current_idea?: ProjectBriefPoint;
+    problem?: ProjectBriefPoint;
+    still_to_explore?: ProjectBriefPoint;
+    what_matters?: ProjectBriefPoint;
+    who_and_why?: ProjectBriefPoint;
+};
+
+/**
+ * ProjectBriefPoint
+ *
+ * One concise project claim with exact supporting student quotations, or an explicit unknown.
+ */
+export type ProjectBriefPoint = {
+    /**
+     * Evidence
+     */
+    evidence?: Array<string>;
+    /**
+     * Text
+     */
+    text?: string | null;
+};
+
+/**
+ * ProjectBriefResult
+ *
+ * Owner-authorized summary state; only current results contain generated claims.
+ */
+export type ProjectBriefResult = {
+    brief?: ProjectBrief | null;
+    /**
+     * Status
+     */
+    status: 'current' | 'missing' | 'empty' | 'preview' | 'failed';
+    /**
+     * Version
+     */
+    version?: string;
+};
+
+/**
+ * ReaderArtifact
+ *
+ * One owner-authorized persistent artifact with its canonical document and resolved references.
+ */
+export type ReaderArtifact = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Document
+     */
+    document: {
+        [key: string]: unknown;
+    };
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * References
+     */
+    references: Array<{
+        [key: string]: unknown;
+    }>;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Schema Version
+     */
+    schema_version: number;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * ReaderArtifactCreate
+ *
+ * Explicit create payload; the document and references are validated server-side.
+ */
+export type ReaderArtifactCreate = {
+    /**
+     * Document
+     */
+    document: {
+        [key: string]: unknown;
+    };
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Origin
+     */
+    origin?: string | null;
+    /**
+     * References
+     */
+    references?: Array<{
+        [key: string]: unknown;
+    }> | null;
+    /**
+     * Request Id
+     */
+    request_id?: string | null;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ReaderArtifactDelete
+ *
+ * Require an explicit confirmation before deleting owned work.
+ */
+export type ReaderArtifactDelete = {
+    /**
+     * Confirmed
+     */
+    confirmed: boolean;
+};
+
+/**
+ * ReaderArtifactRestore
+ *
+ * Restore guard: the caller must have seen the current revision.
+ */
+export type ReaderArtifactRestore = {
+    /**
+     * Revision
+     */
+    revision: number;
+};
+
+/**
+ * ReaderArtifactSummary
+ *
+ * Bounded artifact identity without the document body.
+ */
+export type ReaderArtifactSummary = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Schema Version
+     */
+    schema_version: number;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * ReaderArtifactUpdate
+ *
+ * Explicit save payload; the seen revision guards against stale writes.
+ *
+ * Omitted references keep the saved list; an explicit list replaces it.
+ */
+export type ReaderArtifactUpdate = {
+    /**
+     * Document
+     */
+    document: {
+        [key: string]: unknown;
+    };
+    /**
+     * References
+     */
+    references?: Array<{
+        [key: string]: unknown;
+    }> | null;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Title
+     */
+    title?: string | null;
+};
+
+/**
+ * ReaderArtifactVersion
+ *
+ * One readable version preview with its canonical document.
+ */
+export type ReaderArtifactVersion = {
+    /**
+     * Artifact Id
+     */
+    artifact_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Document
+     */
+    document: {
+        [key: string]: unknown;
+    };
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Restored From
+     */
+    restored_from: number | null;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ReaderArtifactVersionSummary
+ *
+ * Bounded version checkpoint metadata without the document body.
+ */
+export type ReaderArtifactVersionSummary = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Restored From
+     */
+    restored_from: number | null;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ReaderArtifactVersions
+ *
+ * Owner-fenced bounded version history, newest first.
+ */
+export type ReaderArtifactVersions = {
+    /**
+     * Artifact Id
+     */
+    artifact_id: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+    /**
+     * Versions
+     */
+    versions: Array<ReaderArtifactVersionSummary>;
+};
+
+/**
+ * ReaderArtifacts
+ *
+ * Owner/notebook-fenced artifact list, newest first.
+ */
+export type ReaderArtifacts = {
+    /**
+     * Artifacts
+     */
+    artifacts: Array<ReaderArtifactSummary>;
+    /**
+     * Kinds
+     */
+    kinds: Array<string>;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+};
+
+/**
+ * ReaderBookmark
+ *
+ * Bounded preview with authoritative saved stage and mode for one bookmark.
+ */
+export type ReaderBookmark = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Interaction Intent
+     */
+    interaction_intent: 'lecture_help' | 'improve_design' | 'project_coaching' | null;
+    /**
+     * Preview
+     */
+    preview: string;
+    /**
+     * Role
+     */
+    role: 'user' | 'assistant';
+    /**
+     * Stage Id
+     */
+    stage_id: string | null;
+};
+
+/**
+ * ReaderBookmarks
+ *
+ * All active bookmarks, independent of the currently loaded transcript page.
+ */
+export type ReaderBookmarks = {
+    /**
+     * Conversation Revision
+     */
+    conversation_revision: number;
+    /**
+     * Messages
+     */
+    messages: Array<ReaderBookmark>;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
 };
 
 /**
@@ -54,6 +689,306 @@ export type ReaderBootstrap = {
     listing: ReaderNotebooks;
     preferences: ReaderPreferences;
     session: ReaderSession;
+};
+
+/**
+ * ReaderBriefRequest
+ *
+ * Only explicit retry intent is accepted; all summary inputs are server-owned.
+ */
+export type ReaderBriefRequest = {
+    /**
+     * Retry
+     */
+    retry?: boolean;
+};
+
+/**
+ * ReaderCanvas
+ *
+ * One owner-authorized persistent canvas with its canonical graph.
+ */
+export type ReaderCanvas = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Graph
+     */
+    graph: {
+        [key: string]: unknown;
+    };
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Schema Version
+     */
+    schema_version: number;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * ReaderCanvasCreate
+ *
+ * Explicit create payload; the graph is validated canonically server-side.
+ */
+export type ReaderCanvasCreate = {
+    /**
+     * Graph
+     */
+    graph: {
+        [key: string]: unknown;
+    };
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ReaderCanvasDelete
+ *
+ * Explicit deletion confirmation for the canvas revision shown to the student.
+ */
+export type ReaderCanvasDelete = {
+    /**
+     * Confirmed
+     */
+    confirmed: boolean;
+    /**
+     * Revision
+     */
+    revision: number;
+};
+
+/**
+ * ReaderCanvasRestore
+ *
+ * Restore guard: the caller must have seen the current revision.
+ */
+export type ReaderCanvasRestore = {
+    /**
+     * Revision
+     */
+    revision: number;
+};
+
+/**
+ * ReaderCanvasSummary
+ *
+ * Bounded canvas identity without the graph body.
+ */
+export type ReaderCanvasSummary = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Schema Version
+     */
+    schema_version: number;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+};
+
+/**
+ * ReaderCanvasUpdate
+ *
+ * Explicit save payload; the seen revision guards against stale writes.
+ */
+export type ReaderCanvasUpdate = {
+    /**
+     * Graph
+     */
+    graph: {
+        [key: string]: unknown;
+    };
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Title
+     */
+    title?: string | null;
+};
+
+/**
+ * ReaderCanvasVersion
+ *
+ * One readable version preview with its canonical graph.
+ */
+export type ReaderCanvasVersion = {
+    /**
+     * Canvas Id
+     */
+    canvas_id: string;
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Graph
+     */
+    graph: {
+        [key: string]: unknown;
+    };
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Restored From
+     */
+    restored_from: number | null;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ReaderCanvasVersionSummary
+ *
+ * Bounded version checkpoint metadata without the graph body.
+ */
+export type ReaderCanvasVersionSummary = {
+    /**
+     * Created At
+     */
+    created_at: string;
+    /**
+     * Origin
+     */
+    origin: string;
+    /**
+     * Restored From
+     */
+    restored_from: number | null;
+    /**
+     * Revision
+     */
+    revision: number;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ReaderCanvasVersions
+ *
+ * Owner-fenced bounded version history, newest first.
+ */
+export type ReaderCanvasVersions = {
+    /**
+     * Canvas Id
+     */
+    canvas_id: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+    /**
+     * Versions
+     */
+    versions: Array<ReaderCanvasVersionSummary>;
+};
+
+/**
+ * ReaderCanvases
+ *
+ * Owner/notebook-fenced canvas list, newest first.
+ */
+export type ReaderCanvases = {
+    /**
+     * Canvases
+     */
+    canvases: Array<ReaderCanvasSummary>;
+    /**
+     * Node Kinds
+     */
+    node_kinds: Array<string>;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Relations
+     */
+    relations: Array<string>;
+    /**
+     * Stages
+     */
+    stages: Array<string>;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
 };
 
 /**
@@ -73,6 +1008,71 @@ export type ReaderChatSummary = {
 };
 
 /**
+ * ReaderCreate
+ *
+ * Create a named project notebook or an untitled standalone chat.
+ */
+export type ReaderCreate = {
+    /**
+     * Kind
+     */
+    kind?: 'notebook' | 'chat';
+    /**
+     * Name
+     */
+    name?: string | null;
+    /**
+     * Parent Notebook Id
+     */
+    parent_notebook_id?: string | null;
+};
+
+/**
+ * ReaderDecision
+ *
+ * Explicit decision for one saved recommendation; additional authority is forbidden.
+ */
+export type ReaderDecision = {
+    /**
+     * Accepted
+     */
+    accepted: boolean;
+};
+
+/**
+ * ReaderDeepReview
+ *
+ * Owner-bound Deep Review eligibility and the latest durable job, if any.
+ */
+export type ReaderDeepReview = {
+    /**
+     * Eligible
+     */
+    eligible: boolean;
+    job: ReaderReviewJob | null;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+};
+
+/**
+ * ReaderDeepReviewCancel
+ *
+ * Cancel only the review job shown to the student at the time of the action.
+ */
+export type ReaderDeepReviewCancel = {
+    /**
+     * Review Id
+     */
+    review_id: string;
+};
+
+/**
  * ReaderError
  *
  * Public read failure; callers use status codes rather than echoing detail.
@@ -85,11 +1085,48 @@ export type ReaderError = {
 };
 
 /**
+ * ReaderFacioneScore
+ *
+ * A rubric dimension and its saved score, when assessed.
+ */
+export type ReaderFacioneScore = {
+    /**
+     * Dimension
+     */
+    dimension: string;
+    /**
+     * Score
+     */
+    score: number | null;
+};
+
+/**
+ * ReaderLibraryDelete
+ *
+ * Require a deliberate permanent delete from the private Library.
+ */
+export type ReaderLibraryDelete = {
+    /**
+     * Confirmed
+     */
+    confirmed: true;
+};
+
+/**
  * ReaderMessage
  *
  * Visible saved message without private assessment or storage metadata.
  */
 export type ReaderMessage = {
+    /**
+     * Artifact Feedback
+     */
+    artifact_feedback?: Array<ArtifactFeedback>;
+    canvas_draft?: CanvasDraftProposal | null;
+    /**
+     * Canvas Suggestions
+     */
+    canvas_suggestions?: Array<CanvasSuggestion>;
     /**
      * Citations
      */
@@ -107,6 +1144,10 @@ export type ReaderMessage = {
      */
     id: string;
     /**
+     * Interaction Intent
+     */
+    interaction_intent?: 'lecture_help' | 'improve_design' | 'project_coaching' | null;
+    /**
      * Rating
      */
     rating?: 'useful' | 'not_useful' | null;
@@ -118,6 +1159,38 @@ export type ReaderMessage = {
      * Starred
      */
     starred?: boolean;
+};
+
+/**
+ * ReaderModel
+ *
+ * A configured model choice and supported reasoning settings.
+ */
+export type ReaderModel = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Reasoning Efforts
+     */
+    reasoning_efforts: Array<string>;
+};
+
+/**
+ * ReaderMoveChat
+ *
+ * Move an existing chat to an owned notebook, or to Chats with null.
+ */
+export type ReaderMoveChat = {
+    /**
+     * Parent Notebook Id
+     */
+    parent_notebook_id: string | null;
 };
 
 /**
@@ -146,6 +1219,49 @@ export type ReaderNotebook = {
      * Pinned
      */
     pinned?: boolean;
+};
+
+/**
+ * ReaderNotebookSettings
+ *
+ * Owner-fenced notebook identity for workspace actions.
+ */
+export type ReaderNotebookSettings = {
+    /**
+     * Assignment
+     */
+    assignment: {
+        [key: string]: string;
+    };
+    /**
+     * Chat Model Label
+     */
+    chat_model_label: string;
+    /**
+     * Models
+     */
+    models: Array<ReaderModel>;
+    notebook: ReaderNotebook;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Reasoning Effort
+     */
+    reasoning_effort: string | null;
+    /**
+     * Response Detail
+     */
+    response_detail: 'short' | 'long';
+    /**
+     * Response Language
+     */
+    response_language: string;
+    /**
+     * Selected Model
+     */
+    selected_model: string;
 };
 
 /**
@@ -200,6 +1316,30 @@ export type ReaderPage = {
 };
 
 /**
+ * ReaderPending
+ *
+ * Visible recommendation without private assessment or research metadata.
+ */
+export type ReaderPending = {
+    /**
+     * From Stage
+     */
+    from_stage: string;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Rationale
+     */
+    rationale: string;
+    /**
+     * To Stage
+     */
+    to_stage: string;
+};
+
+/**
  * ReaderPreferences
  *
  * Presentation defaults scoped to the verified workspace owner.
@@ -212,7 +1352,7 @@ export type ReaderPreferences = {
     /**
      * Default Mode
      */
-    default_mode: 'lecture' | 'project';
+    default_mode: 'improve' | 'project';
     /**
      * Display Name
      */
@@ -229,6 +1369,170 @@ export type ReaderPreferences = {
      * Starter Prompts
      */
     starter_prompts: boolean;
+};
+
+/**
+ * ReaderPreferencesPatch
+ *
+ * Allow only supported workspace preferences to be changed.
+ */
+export type ReaderPreferencesPatch = {
+    /**
+     * Appearance
+     */
+    appearance?: 'System' | 'Light' | 'Dark' | null;
+    /**
+     * Default Mode
+     */
+    default_mode?: 'improve' | 'project' | null;
+    /**
+     * Display Name
+     */
+    display_name?: string | null;
+    /**
+     * Reduce Motion
+     */
+    reduce_motion?: boolean | null;
+    /**
+     * Starter Prompts
+     */
+    starter_prompts?: boolean | null;
+};
+
+/**
+ * ReaderProject
+ *
+ * Owner-fenced saved project work and canonical pending action.
+ */
+export type ReaderProject = {
+    /**
+     * Current Stage
+     */
+    current_stage: string;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    pending: ReaderPending | null;
+    /**
+     * Recaps
+     */
+    recaps?: Array<MilestoneRecap>;
+    review: ReaderReview;
+    /**
+     * Stages
+     */
+    stages: Array<ReaderStage>;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+};
+
+/**
+ * ReaderRemove
+ *
+ * Require affirmative confirmation before deleting owned notebook data.
+ */
+export type ReaderRemove = {
+    /**
+     * Confirmed
+     */
+    confirmed: true;
+};
+
+/**
+ * ReaderRemoved
+ *
+ * Owner-fenced receipt for one confirmed deletion.
+ */
+export type ReaderRemoved = {
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Status
+     */
+    status: 'deleted';
+};
+
+/**
+ * ReaderReview
+ *
+ * Student-facing review projected from saved conversation assessments.
+ */
+export type ReaderReview = {
+    /**
+     * Facione Scores
+     */
+    facione_scores: Array<ReaderFacioneScore>;
+    /**
+     * Improvements
+     */
+    improvements: Array<ReaderReviewFeedback>;
+    project_brief: ProjectBriefResult;
+    /**
+     * Strengths
+     */
+    strengths: Array<ReaderReviewFeedback>;
+    /**
+     * Summary
+     */
+    summary: string;
+};
+
+/**
+ * ReaderReviewFeedback
+ *
+ * Saved formative feedback grouped by the stage it addresses.
+ */
+export type ReaderReviewFeedback = {
+    /**
+     * Items
+     */
+    items: Array<string>;
+    /**
+     * Stage Id
+     */
+    stage_id: string;
+};
+
+/**
+ * ReaderReviewJob
+ *
+ * Saved Deep Review information needed by the student workspace.
+ */
+export type ReaderReviewJob = {
+    /**
+     * Conversation Revision
+     */
+    conversation_revision: number | null;
+    /**
+     * Review Id
+     */
+    review_id: string;
+    /**
+     * Reviewed Revision
+     */
+    reviewed_revision: number;
+    status: DeepReviewJobStatus;
+    /**
+     * Summary
+     */
+    summary: string | null;
+};
+
+/**
+ * ReaderSelection
+ *
+ * Requested focus; the application enforces the canonical unlock policy.
+ */
+export type ReaderSelection = {
+    /**
+     * Stage Id
+     */
+    stage_id: string;
 };
 
 /**
@@ -249,6 +1553,298 @@ export type ReaderSession = {
      * Owner Id
      */
     owner_id: string;
+};
+
+/**
+ * ReaderSettingsPatch
+ *
+ * Allowlisted notebook controls without access to learning assessments or stage state.
+ */
+export type ReaderSettingsPatch = {
+    /**
+     * Assignment
+     */
+    assignment?: {
+        [key: string]: string;
+    } | null;
+    /**
+     * Name
+     */
+    name?: string | null;
+    /**
+     * Pinned
+     */
+    pinned?: boolean | null;
+    /**
+     * Reasoning Effort
+     */
+    reasoning_effort?: string | null;
+    /**
+     * Response Detail
+     */
+    response_detail?: 'short' | 'long' | null;
+    /**
+     * Response Language
+     */
+    response_language?: string | null;
+    /**
+     * Selected Model
+     */
+    selected_model?: string | null;
+};
+
+/**
+ * ReaderSource
+ *
+ * Source identity and selection without storage keys or extracted content.
+ */
+export type ReaderSource = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Locked
+     */
+    locked: boolean;
+    /**
+     * Selected
+     */
+    selected: boolean;
+    /**
+     * Size
+     */
+    size: number;
+    /**
+     * Title
+     */
+    title: string;
+};
+
+/**
+ * ReaderSourceDetail
+ *
+ * Bounded extracted text for safe plain-text inspection, never embedded HTML.
+ */
+export type ReaderSourceDetail = {
+    source: ReaderSource;
+    /**
+     * Text
+     */
+    text: string;
+    /**
+     * Truncated
+     */
+    truncated: boolean;
+};
+
+/**
+ * ReaderSourceSelection
+ *
+ * Explicit desired selection; stale repeats cannot invert canonical selection.
+ */
+export type ReaderSourceSelection = {
+    /**
+     * Selected
+     */
+    selected: boolean;
+};
+
+/**
+ * ReaderSources
+ *
+ * Owner/notebook fence around the available grounding sources.
+ */
+export type ReaderSources = {
+    /**
+     * Max File Bytes
+     */
+    max_file_bytes: number;
+    /**
+     * Max Files
+     */
+    max_files: number;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Sources
+     */
+    sources: Array<ReaderSource>;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+};
+
+/**
+ * ReaderStage
+ *
+ * Canonical stage artifact with server-projected navigation availability.
+ */
+export type ReaderStage = {
+    /**
+     * Artifact Label
+     */
+    artifact_label: string;
+    /**
+     * Coach Summary
+     */
+    coach_summary?: string;
+    /**
+     * Completed
+     */
+    completed: boolean;
+    /**
+     * Criteria
+     */
+    criteria?: Array<string>;
+    /**
+     * Decision
+     */
+    decision?: '' | 'pending' | 'confirmed' | 'rejected';
+    /**
+     * Feedback
+     */
+    feedback?: Array<SavedContribution>;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Next Action
+     */
+    next_action: string;
+    /**
+     * Selectable
+     */
+    selectable: boolean;
+    /**
+     * Stage Id
+     */
+    stage_id: string;
+    /**
+     * Student Work
+     */
+    student_work?: Array<SavedContribution>;
+};
+
+/**
+ * ReaderStar
+ *
+ * Explicit desired bookmark state; no transcript or stage authority.
+ */
+export type ReaderStar = {
+    /**
+     * Starred
+     */
+    starred: boolean;
+};
+
+/**
+ * ReaderThreadWorkspace
+ *
+ * One owner-consistent bounded open read for the student workspace.
+ *
+ * These independently read projections are not a transactional snapshot. No
+ * transcript beyond the first page, uploaded source body or version history
+ * is included; bounded counts inside each projection are the availability
+ * indicators until typed source resources own them.
+ */
+export type ReaderThreadWorkspace = {
+    bookmarks: ReaderBookmarks;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    page: ReaderPage;
+    project: ReaderProject;
+    settings: ReaderNotebookSettings;
+};
+
+/**
+ * ReaderUpload
+ *
+ * Payload-free receipt; queue and processing phases have no invented percentages.
+ */
+export type ReaderUpload = {
+    /**
+     * Filenames
+     */
+    filenames: Array<string>;
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Retryable
+     */
+    retryable: boolean;
+    /**
+     * State
+     */
+    state: 'queued' | 'processing' | 'saved' | 'failed';
+};
+
+/**
+ * ReaderUploads
+ *
+ * Owner/notebook-fenced upload receipts, not durable upload history.
+ */
+export type ReaderUploads = {
+    /**
+     * Jobs
+     */
+    jobs: Array<ReaderUpload>;
+    /**
+     * Owner Id
+     */
+    owner_id: string;
+    /**
+     * Thread Id
+     */
+    thread_id: string;
+};
+
+/**
+ * RecapWork
+ *
+ * One bounded pointer at the student's own saved stage contribution.
+ */
+export type RecapWork = {
+    /**
+     * Message Id
+     */
+    message_id: string;
+    /**
+     * Preview
+     */
+    preview: string;
+};
+
+/**
+ * SavedContribution
+ *
+ * Exact active transcript text with its original message identifier.
+ */
+export type SavedContribution = {
+    /**
+     * Message Id
+     */
+    message_id: string;
+    /**
+     * Text
+     */
+    text: string;
 };
 
 /**
@@ -308,6 +1904,68 @@ export type ReaderBootstrapResponses = {
 
 export type ReaderBootstrapResponse = ReaderBootstrapResponses[keyof ReaderBootstrapResponses];
 
+export type ReaderPreferencesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/v1/reader/preferences';
+};
+
+export type ReaderPreferencesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+};
+
+export type ReaderPreferencesError = ReaderPreferencesErrors[keyof ReaderPreferencesErrors];
+
+export type ReaderPreferencesResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderPreferences;
+};
+
+export type ReaderPreferencesResponse = ReaderPreferencesResponses[keyof ReaderPreferencesResponses];
+
+export type ReaderPreferencesUpdateData = {
+    body: ReaderPreferencesPatch;
+    path?: never;
+    query?: never;
+    url: '/api/v1/reader/preferences';
+};
+
+export type ReaderPreferencesUpdateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderPreferencesUpdateError = ReaderPreferencesUpdateErrors[keyof ReaderPreferencesUpdateErrors];
+
+export type ReaderPreferencesUpdateResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderPreferences;
+};
+
+export type ReaderPreferencesUpdateResponse = ReaderPreferencesUpdateResponses[keyof ReaderPreferencesUpdateResponses];
+
 export type ReaderSessionData = {
     body?: never;
     path?: never;
@@ -365,6 +2023,1025 @@ export type ReaderNotebooksResponses = {
 };
 
 export type ReaderNotebooksResponse = ReaderNotebooksResponses[keyof ReaderNotebooksResponses];
+
+export type ReaderThreadsCreateData = {
+    body: ReaderCreate;
+    path?: never;
+    query?: never;
+    url: '/api/v1/reader/threads';
+};
+
+export type ReaderThreadsCreateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderThreadsCreateError = ReaderThreadsCreateErrors[keyof ReaderThreadsCreateErrors];
+
+export type ReaderThreadsCreateResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderNotebookSettings;
+};
+
+export type ReaderThreadsCreateResponse = ReaderThreadsCreateResponses[keyof ReaderThreadsCreateResponses];
+
+export type ReaderArtifactsData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts';
+};
+
+export type ReaderArtifactsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactsError = ReaderArtifactsErrors[keyof ReaderArtifactsErrors];
+
+export type ReaderArtifactsResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderArtifacts;
+};
+
+export type ReaderArtifactsResponse = ReaderArtifactsResponses[keyof ReaderArtifactsResponses];
+
+export type ReaderArtifactCreateData = {
+    body: ReaderArtifactCreate;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts';
+};
+
+export type ReaderArtifactCreateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactCreateError = ReaderArtifactCreateErrors[keyof ReaderArtifactCreateErrors];
+
+export type ReaderArtifactCreateResponses = {
+    /**
+     * Successful Response
+     */
+    201: ReaderArtifact;
+};
+
+export type ReaderArtifactCreateResponse = ReaderArtifactCreateResponses[keyof ReaderArtifactCreateResponses];
+
+export type ReaderArtifactData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}';
+};
+
+export type ReaderArtifactErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactError = ReaderArtifactErrors[keyof ReaderArtifactErrors];
+
+export type ReaderArtifactResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderArtifact;
+};
+
+export type ReaderArtifactResponse = ReaderArtifactResponses[keyof ReaderArtifactResponses];
+
+export type ReaderArtifactUpdateData = {
+    body: ReaderArtifactUpdate;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}';
+};
+
+export type ReaderArtifactUpdateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactUpdateError = ReaderArtifactUpdateErrors[keyof ReaderArtifactUpdateErrors];
+
+export type ReaderArtifactUpdateResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderArtifact;
+};
+
+export type ReaderArtifactUpdateResponse = ReaderArtifactUpdateResponses[keyof ReaderArtifactUpdateResponses];
+
+export type ReaderArtifactDeleteData = {
+    body: ReaderArtifactDelete;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/delete';
+};
+
+export type ReaderArtifactDeleteErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactDeleteError = ReaderArtifactDeleteErrors[keyof ReaderArtifactDeleteErrors];
+
+export type ReaderArtifactDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderArtifactSummary;
+};
+
+export type ReaderArtifactDeleteResponse = ReaderArtifactDeleteResponses[keyof ReaderArtifactDeleteResponses];
+
+export type ReaderArtifactDuplicateData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/duplicate';
+};
+
+export type ReaderArtifactDuplicateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactDuplicateError = ReaderArtifactDuplicateErrors[keyof ReaderArtifactDuplicateErrors];
+
+export type ReaderArtifactDuplicateResponses = {
+    /**
+     * Successful Response
+     */
+    201: ReaderArtifact;
+};
+
+export type ReaderArtifactDuplicateResponse = ReaderArtifactDuplicateResponses[keyof ReaderArtifactDuplicateResponses];
+
+export type ReaderArtifactVersionsData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions';
+};
+
+export type ReaderArtifactVersionsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactVersionsError = ReaderArtifactVersionsErrors[keyof ReaderArtifactVersionsErrors];
+
+export type ReaderArtifactVersionsResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderArtifactVersions;
+};
+
+export type ReaderArtifactVersionsResponse = ReaderArtifactVersionsResponses[keyof ReaderArtifactVersionsResponses];
+
+export type ReaderArtifactVersionData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+        /**
+         * Revision
+         */
+        revision: number;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions/{revision}';
+};
+
+export type ReaderArtifactVersionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactVersionError = ReaderArtifactVersionErrors[keyof ReaderArtifactVersionErrors];
+
+export type ReaderArtifactVersionResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderArtifactVersion;
+};
+
+export type ReaderArtifactVersionResponse = ReaderArtifactVersionResponses[keyof ReaderArtifactVersionResponses];
+
+export type ReaderArtifactRestoreData = {
+    body: ReaderArtifactRestore;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Artifact Id
+         */
+        artifact_id: string;
+        /**
+         * Revision
+         */
+        revision: number;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/artifacts/{artifact_id}/versions/{revision}/restore';
+};
+
+export type ReaderArtifactRestoreErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderArtifactRestoreError = ReaderArtifactRestoreErrors[keyof ReaderArtifactRestoreErrors];
+
+export type ReaderArtifactRestoreResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderArtifact;
+};
+
+export type ReaderArtifactRestoreResponse = ReaderArtifactRestoreResponses[keyof ReaderArtifactRestoreResponses];
+
+export type ReaderBookmarksData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/bookmarks';
+};
+
+export type ReaderBookmarksErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderBookmarksError = ReaderBookmarksErrors[keyof ReaderBookmarksErrors];
+
+export type ReaderBookmarksResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderBookmarks;
+};
+
+export type ReaderBookmarksResponse = ReaderBookmarksResponses[keyof ReaderBookmarksResponses];
+
+export type ReaderCanvasesData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/canvases';
+};
+
+export type ReaderCanvasesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderCanvasesError = ReaderCanvasesErrors[keyof ReaderCanvasesErrors];
+
+export type ReaderCanvasesResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderCanvases;
+};
+
+export type ReaderCanvasesResponse = ReaderCanvasesResponses[keyof ReaderCanvasesResponses];
+
+export type ReaderCanvasCreateData = {
+    body: ReaderCanvasCreate;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/canvases';
+};
+
+export type ReaderCanvasCreateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderCanvasCreateError = ReaderCanvasCreateErrors[keyof ReaderCanvasCreateErrors];
+
+export type ReaderCanvasCreateResponses = {
+    /**
+     * Successful Response
+     */
+    201: ReaderCanvas;
+};
+
+export type ReaderCanvasCreateResponse = ReaderCanvasCreateResponses[keyof ReaderCanvasCreateResponses];
+
+export type ReaderCanvasData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Canvas Id
+         */
+        canvas_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}';
+};
+
+export type ReaderCanvasErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderCanvasError = ReaderCanvasErrors[keyof ReaderCanvasErrors];
+
+export type ReaderCanvasResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderCanvas;
+};
+
+export type ReaderCanvasResponse = ReaderCanvasResponses[keyof ReaderCanvasResponses];
+
+export type ReaderCanvasUpdateData = {
+    body: ReaderCanvasUpdate;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Canvas Id
+         */
+        canvas_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}';
+};
+
+export type ReaderCanvasUpdateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderCanvasUpdateError = ReaderCanvasUpdateErrors[keyof ReaderCanvasUpdateErrors];
+
+export type ReaderCanvasUpdateResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderCanvas;
+};
+
+export type ReaderCanvasUpdateResponse = ReaderCanvasUpdateResponses[keyof ReaderCanvasUpdateResponses];
+
+export type ReaderCanvasDeleteData = {
+    body: ReaderCanvasDelete;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Canvas Id
+         */
+        canvas_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/delete';
+};
+
+export type ReaderCanvasDeleteErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderCanvasDeleteError = ReaderCanvasDeleteErrors[keyof ReaderCanvasDeleteErrors];
+
+export type ReaderCanvasDeleteResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderCanvasSummary;
+};
+
+export type ReaderCanvasDeleteResponse = ReaderCanvasDeleteResponses[keyof ReaderCanvasDeleteResponses];
+
+export type ReaderCanvasVersionsData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Canvas Id
+         */
+        canvas_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions';
+};
+
+export type ReaderCanvasVersionsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderCanvasVersionsError = ReaderCanvasVersionsErrors[keyof ReaderCanvasVersionsErrors];
+
+export type ReaderCanvasVersionsResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderCanvasVersions;
+};
+
+export type ReaderCanvasVersionsResponse = ReaderCanvasVersionsResponses[keyof ReaderCanvasVersionsResponses];
+
+export type ReaderCanvasVersionData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Canvas Id
+         */
+        canvas_id: string;
+        /**
+         * Revision
+         */
+        revision: number;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions/{revision}';
+};
+
+export type ReaderCanvasVersionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderCanvasVersionError = ReaderCanvasVersionErrors[keyof ReaderCanvasVersionErrors];
+
+export type ReaderCanvasVersionResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderCanvasVersion;
+};
+
+export type ReaderCanvasVersionResponse = ReaderCanvasVersionResponses[keyof ReaderCanvasVersionResponses];
+
+export type ReaderCanvasRestoreData = {
+    body: ReaderCanvasRestore;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Canvas Id
+         */
+        canvas_id: string;
+        /**
+         * Revision
+         */
+        revision: number;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/canvases/{canvas_id}/versions/{revision}/restore';
+};
+
+export type ReaderCanvasRestoreErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderCanvasRestoreError = ReaderCanvasRestoreErrors[keyof ReaderCanvasRestoreErrors];
+
+export type ReaderCanvasRestoreResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderCanvas;
+};
+
+export type ReaderCanvasRestoreResponse = ReaderCanvasRestoreResponses[keyof ReaderCanvasRestoreResponses];
+
+export type ReaderDeepReviewData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/deep-review';
+};
+
+export type ReaderDeepReviewErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderDeepReviewError = ReaderDeepReviewErrors[keyof ReaderDeepReviewErrors];
+
+export type ReaderDeepReviewResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderDeepReview;
+};
+
+export type ReaderDeepReviewResponse = ReaderDeepReviewResponses[keyof ReaderDeepReviewResponses];
+
+export type ReaderDeepReviewStartData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/deep-review';
+};
+
+export type ReaderDeepReviewStartErrors = {
+    /**
+     * Bad Request
+     */
+    400: ReaderError;
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderDeepReviewStartError = ReaderDeepReviewStartErrors[keyof ReaderDeepReviewStartErrors];
+
+export type ReaderDeepReviewStartResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderDeepReview;
+};
+
+export type ReaderDeepReviewStartResponse = ReaderDeepReviewStartResponses[keyof ReaderDeepReviewStartResponses];
+
+export type ReaderDeepReviewCancelData = {
+    body: ReaderDeepReviewCancel;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/deep-review/cancel';
+};
+
+export type ReaderDeepReviewCancelErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderDeepReviewCancelError = ReaderDeepReviewCancelErrors[keyof ReaderDeepReviewCancelErrors];
+
+export type ReaderDeepReviewCancelResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderDeepReview;
+};
+
+export type ReaderDeepReviewCancelResponse = ReaderDeepReviewCancelResponses[keyof ReaderDeepReviewCancelResponses];
 
 export type ReaderMessagesData = {
     body?: never;
@@ -424,3 +3101,838 @@ export type ReaderMessagesResponses = {
 };
 
 export type ReaderMessagesResponse = ReaderMessagesResponses[keyof ReaderMessagesResponses];
+
+export type ReaderStarData = {
+    body: ReaderStar;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Message Id
+         */
+        message_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/messages/{message_id}/star';
+};
+
+export type ReaderStarErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderStarError = ReaderStarErrors[keyof ReaderStarErrors];
+
+export type ReaderStarResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderStar;
+};
+
+export type ReaderStarResponse = ReaderStarResponses[keyof ReaderStarResponses];
+
+export type ReaderThreadMoveData = {
+    body: ReaderMoveChat;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/move';
+};
+
+export type ReaderThreadMoveErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderThreadMoveError = ReaderThreadMoveErrors[keyof ReaderThreadMoveErrors];
+
+export type ReaderThreadMoveResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderNotebookSettings;
+};
+
+export type ReaderThreadMoveResponse = ReaderThreadMoveResponses[keyof ReaderThreadMoveResponses];
+
+export type ReaderProjectData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/project';
+};
+
+export type ReaderProjectErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderProjectError = ReaderProjectErrors[keyof ReaderProjectErrors];
+
+export type ReaderProjectResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderProject;
+};
+
+export type ReaderProjectResponse = ReaderProjectResponses[keyof ReaderProjectResponses];
+
+export type ReaderProjectBriefData = {
+    body: ReaderBriefRequest;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/project/brief';
+};
+
+export type ReaderProjectBriefErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+    /**
+     * Too Many Requests
+     */
+    429: ReaderError;
+    /**
+     * Service Unavailable
+     */
+    503: ReaderError;
+};
+
+export type ReaderProjectBriefError = ReaderProjectBriefErrors[keyof ReaderProjectBriefErrors];
+
+export type ReaderProjectBriefResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProjectBriefResult;
+};
+
+export type ReaderProjectBriefResponse = ReaderProjectBriefResponses[keyof ReaderProjectBriefResponses];
+
+export type ReaderProjectResolveData = {
+    body: ReaderDecision;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Transition Id
+         */
+        transition_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/project/resolve/{transition_id}';
+};
+
+export type ReaderProjectResolveErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderProjectResolveError = ReaderProjectResolveErrors[keyof ReaderProjectResolveErrors];
+
+export type ReaderProjectResolveResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderProject;
+};
+
+export type ReaderProjectResolveResponse = ReaderProjectResolveResponses[keyof ReaderProjectResolveResponses];
+
+export type ReaderProjectSelectData = {
+    body: ReaderSelection;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/project/select-stage';
+};
+
+export type ReaderProjectSelectErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderProjectSelectError = ReaderProjectSelectErrors[keyof ReaderProjectSelectErrors];
+
+export type ReaderProjectSelectResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderProject;
+};
+
+export type ReaderProjectSelectResponse = ReaderProjectSelectResponses[keyof ReaderProjectSelectResponses];
+
+export type ReaderThreadRemoveData = {
+    body: ReaderRemove;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/remove';
+};
+
+export type ReaderThreadRemoveErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderThreadRemoveError = ReaderThreadRemoveErrors[keyof ReaderThreadRemoveErrors];
+
+export type ReaderThreadRemoveResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderRemoved;
+};
+
+export type ReaderThreadRemoveResponse = ReaderThreadRemoveResponses[keyof ReaderThreadRemoveResponses];
+
+export type ReaderNotebookSettingsData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/settings';
+};
+
+export type ReaderNotebookSettingsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderNotebookSettingsError = ReaderNotebookSettingsErrors[keyof ReaderNotebookSettingsErrors];
+
+export type ReaderNotebookSettingsResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderNotebookSettings;
+};
+
+export type ReaderNotebookSettingsResponse = ReaderNotebookSettingsResponses[keyof ReaderNotebookSettingsResponses];
+
+export type ReaderNotebookSettingsUpdateData = {
+    body: ReaderSettingsPatch;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/settings';
+};
+
+export type ReaderNotebookSettingsUpdateErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderNotebookSettingsUpdateError = ReaderNotebookSettingsUpdateErrors[keyof ReaderNotebookSettingsUpdateErrors];
+
+export type ReaderNotebookSettingsUpdateResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderNotebookSettings;
+};
+
+export type ReaderNotebookSettingsUpdateResponse = ReaderNotebookSettingsUpdateResponses[keyof ReaderNotebookSettingsUpdateResponses];
+
+export type ReaderSourcesData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/sources';
+};
+
+export type ReaderSourcesErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderSourcesError = ReaderSourcesErrors[keyof ReaderSourcesErrors];
+
+export type ReaderSourcesResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderSources;
+};
+
+export type ReaderSourcesResponse = ReaderSourcesResponses[keyof ReaderSourcesResponses];
+
+export type ReaderSourceData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Source Id
+         */
+        source_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/sources/{source_id}';
+};
+
+export type ReaderSourceErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderSourceError = ReaderSourceErrors[keyof ReaderSourceErrors];
+
+export type ReaderSourceResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderSourceDetail;
+};
+
+export type ReaderSourceResponse = ReaderSourceResponses[keyof ReaderSourceResponses];
+
+export type ReaderSourceLinkData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Source Id
+         */
+        source_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/sources/{source_id}/link';
+};
+
+export type ReaderSourceLinkErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderSourceLinkError = ReaderSourceLinkErrors[keyof ReaderSourceLinkErrors];
+
+export type ReaderSourceLinkResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderSources;
+};
+
+export type ReaderSourceLinkResponse = ReaderSourceLinkResponses[keyof ReaderSourceLinkResponses];
+
+export type ReaderSourceRemoveData = {
+    /**
+     * Payload
+     */
+    body?: ReaderLibraryDelete | null;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Source Id
+         */
+        source_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/sources/{source_id}/remove';
+};
+
+export type ReaderSourceRemoveErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderSourceRemoveError = ReaderSourceRemoveErrors[keyof ReaderSourceRemoveErrors];
+
+export type ReaderSourceRemoveResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderSources;
+};
+
+export type ReaderSourceRemoveResponse = ReaderSourceRemoveResponses[keyof ReaderSourceRemoveResponses];
+
+export type ReaderSourceSelectData = {
+    body: ReaderSourceSelection;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Source Id
+         */
+        source_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/sources/{source_id}/select';
+};
+
+export type ReaderSourceSelectErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderSourceSelectError = ReaderSourceSelectErrors[keyof ReaderSourceSelectErrors];
+
+export type ReaderSourceSelectResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderSources;
+};
+
+export type ReaderSourceSelectResponse = ReaderSourceSelectResponses[keyof ReaderSourceSelectResponses];
+
+export type ReaderUploadsData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/uploads';
+};
+
+export type ReaderUploadsErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderUploadsError = ReaderUploadsErrors[keyof ReaderUploadsErrors];
+
+export type ReaderUploadsResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderUploads;
+};
+
+export type ReaderUploadsResponse = ReaderUploadsResponses[keyof ReaderUploadsResponses];
+
+export type ReaderUploadDiscardData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Upload Id
+         */
+        upload_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/discard';
+};
+
+export type ReaderUploadDiscardErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderUploadDiscardError = ReaderUploadDiscardErrors[keyof ReaderUploadDiscardErrors];
+
+export type ReaderUploadDiscardResponses = {
+    /**
+     * Response Readeruploaddiscard
+     *
+     * Successful Response
+     */
+    200: {
+        [key: string]: boolean;
+    };
+};
+
+export type ReaderUploadDiscardResponse = ReaderUploadDiscardResponses[keyof ReaderUploadDiscardResponses];
+
+export type ReaderUploadRetryData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+        /**
+         * Upload Id
+         */
+        upload_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/uploads/{upload_id}/retry';
+};
+
+export type ReaderUploadRetryErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Conflict
+     */
+    409: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderUploadRetryError = ReaderUploadRetryErrors[keyof ReaderUploadRetryErrors];
+
+export type ReaderUploadRetryResponses = {
+    /**
+     * Response Readeruploadretry
+     *
+     * Successful Response
+     */
+    202: {
+        [key: string]: boolean;
+    };
+};
+
+export type ReaderUploadRetryResponse = ReaderUploadRetryResponses[keyof ReaderUploadRetryResponses];
+
+export type ReaderThreadWorkspaceData = {
+    body?: never;
+    path: {
+        /**
+         * Thread Id
+         */
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/reader/threads/{thread_id}/workspace';
+};
+
+export type ReaderThreadWorkspaceErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ReaderError;
+    /**
+     * Forbidden
+     */
+    403: ReaderError;
+    /**
+     * Not Found
+     */
+    404: ReaderError;
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ReaderThreadWorkspaceError = ReaderThreadWorkspaceErrors[keyof ReaderThreadWorkspaceErrors];
+
+export type ReaderThreadWorkspaceResponses = {
+    /**
+     * Successful Response
+     */
+    200: ReaderThreadWorkspace;
+};
+
+export type ReaderThreadWorkspaceResponse = ReaderThreadWorkspaceResponses[keyof ReaderThreadWorkspaceResponses];

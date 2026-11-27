@@ -190,8 +190,8 @@ export function firstSentence(text: string): string {
   return sentence.length > 200 ? `${sentence.slice(0, 199).trimEnd()}…` : sentence;
 }
 
-export const lectureToProjectScaffold = (answer: string) =>
-  `From lecture help: "${firstSentence(answer)}"\nHere is how this applies to my project…`;
+export const feedbackToProjectScaffold = (answer: string) =>
+  `From earlier feedback: "${firstSentence(answer)}"\nHere is how this applies to my project…`;
 
 export interface SkillSummary { strongest: string; grow: string; growScore: number; strongestScore: number }
 
@@ -210,7 +210,7 @@ export interface CheckIn { rule: CheckInRule; message: string; action: string; s
 const DAY = 24 * 60 * 60 * 1000;
 
 /** Choose at most one check-in from saved data. First matching rule wins; dismissed rules are skipped. */
-export function chooseCheckIn(project: Project, summary: ChatSummary | undefined, mode: 'lecture' | 'project',
+export function chooseCheckIn(project: Project, summary: ChatSummary | undefined, mode: 'improve' | 'project',
   dismissed: readonly string[], now = Date.now()): CheckIn | null {
   if (project.pending) return null;
   const stage: Stage | undefined = project.stages.find(item => item.id === project.current_stage);

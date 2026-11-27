@@ -2,6 +2,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { ApiError, currentSession, type Project, type ProjectBriefResult } from './api';
+import { requestProjectBrief } from './api/client';
 
 const fields = [
   ['who_and_why', 'Who and why'], ['problem', 'Problem'], ['current_idea', 'Current idea'],
@@ -28,12 +29,9 @@ export function ProjectBriefCard({ project, disabled, onSaved }: { project: Proj
     controller.current?.abort(); controller.current = request;
     setWorking(true); setError('');
     try {
-      const response = await fetch(`/api/v1/reader/threads/${encodeURIComponent(project.thread_id)}/project/brief`, {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store',
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ retry }), signal: request.signal,
-      });
-      if (!response.ok) throw new ApiError(response.status);
-      const next = await response.json() as ProjectBriefResult;
+      // Generated explicit-generation write; reading cached state never starts
+      // generation implicitly, and failures keep requiring the explicit retry.
+      const next = await requestProjectBrief(project.thread_id, retry, request.signal);
       const owner = await currentSession(request.signal);
       if (request.signal.aborted || currentVersion.current !== version || owner.owner_id !== project.owner_id) return;
       // A concurrent new turn invalidates the request rather than displaying a partial or outdated brief.

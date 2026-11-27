@@ -1,0 +1,843 @@
+{
+  "kind": "cost-scenario-config",
+  "as_of": "2026-11-26",
+  "pricing_caveat": "Public AWS Aurora DSQL list rates were checked on 2026-11-26. Other service prices remain dated planning estimates. There is no reconciled bill or measured workload DPU usage. The 2026-11-24 bounded checks recorded US$0.9800952 of cumulative reservations for a separate Gemma/workspace/AgentCore test. Replace estimates with billing evidence before a gate decision.",
+  "fx": {
+    "sgd_per_usd": "1.30",
+    "as_of": "2026-11-26",
+    "evidence": "Approximate 1.30 SGD/USD planning rate (estimate, 2026-11 knowledge); not a fetched market rate. Convert with a dated operator rate before real accounting."
+  },
+  "measured_local_anchors": [
+    {
+      "label": "Write-volume proxy for one full 80-student mixed run",
+      "value": "Application SQLite store grew 233,472 -> 3,420,160 bytes; 80 notebooks, 1,222 messages, 160 sources, 502 artifact versions, 291 canvas versions.",
+      "source": "ticket 48 ledger (2026-11-26 SGT, local mock mixed-workload probe)",
+      "measured": true
+    },
+    {
+      "label": "Autosave latency at 80 concurrent students",
+      "value": "Artifact autosave p95 <= 39.5 ms; canvas autosave p95 <= 27.3 ms.",
+      "source": "ticket 48 ledger (2026-11-26 SGT, local mock)",
+      "measured": true
+    },
+    {
+      "label": "Fresh-connection cost per transaction (offline simulation)",
+      "value": "~30.9 ms p50 per transaction with 25 ms simulated connect; 200 connections opened for 200 transactions vs 8 for the pool candidate.",
+      "source": "ticket 38 ledger (2026-11-25 SGT, offline simulation, not live DSQL)",
+      "measured": true
+    },
+    {
+      "label": "Bounded concurrency behaviour",
+      "value": "Admission overload: 5 admitted / 3 rejected of 8 requesters, max wait 198.3 ms against the 2 s bound; offloaded blocking work kept max event-loop lag at ~6.1 ms.",
+      "source": "ticket 39 ledger (2026-11-25 SGT, offline simulation)",
+      "measured": true
+    },
+    {
+      "label": "Composed prompt size per turn",
+      "value": "AgentCore system prompt p50 7,719 / p95 10,298 estimator tokens (3.0 chars/token); one historical live smoke measured 6,366 real input tokens.",
+      "source": "ticket 40 ledger (2026-11-25 SGT, offline estimator measurement + recorded live smoke)",
+      "measured": true
+    },
+    {
+      "label": "Bounded live cost datapoint (separate test, not a monthly figure)",
+      "value": "US$0.9800952 cumulative conservative reservations covering 80 direct Gemma Mantle requests, an 80-session workspace read wave and one guarded AgentCore check (~US$0.0123 per direct request).",
+      "source": "CLASSROOM_CAPACITY_GATE.md (2026-11-24, separately capped live checks; Gemma pricing differs from the deployed Haiku 4.5)",
+      "measured": true
+    }
+  ],
+  "regional_assessment": [
+    {
+      "component": "CloudFront static/asset edge",
+      "documented_region": "Global edge locations incl. Singapore (documented CloudFront network)",
+      "documented_evidence": "compose.prod.yaml terminates viewer TLS at CloudFront before the EC2/Caddy origin; AWS_STATELESS_EC2.md documents the CloudFront origin-facing prefix list.",
+      "singapore_latency": "Static assets can be served from a Singapore edge; dynamic API paths still traverse to us-west-2.",
+      "latency_basis": "estimate",
+      "measured_source": null,
+      "data_residency": "Edge caching of student content is not evidenced either way; the documented origin remains us-west-2.",
+      "availability_note": "CloudFront operates edge locations in Singapore as long-standing public network knowledge (unverified for current configurations).",
+      "migration_note": "No automatic region migration is performed; CDN behaviour is part of the documented deployment, not a region decision."
+    },
+    {
+      "component": "Application host (EC2 + Caddy + Compose)",
+      "documented_region": "us-west-2",
+      "documented_evidence": "compose.prod.yaml AWS_REGION=us-west-2; AWS_STATELESS_EC2.md runbook commands pin --region us-west-2 and the ECR registry.",
+      "singapore_latency": "Singapore <-> us-west-2 round trip is roughly 170-200 ms (long-haul fibre planning knowledge); every dynamic request pays at least one such round trip.",
+      "latency_basis": "estimate",
+      "measured_source": null,
+      "data_residency": "Application processing of student content happens outside Singapore; PDPA transfer assessment is an owner/compliance decision, not made here.",
+      "availability_note": "EC2 us-west-2 availability is documented by the deployed runbook itself.",
+      "migration_note": "No automatic region migration is performed; any host move is a separately scoped, measured decision."
+    },
+    {
+      "component": "Aurora DSQL (canonical transcript/state store)",
+      "documented_region": "us-west-2",
+      "documented_evidence": "compose.prod.yaml DATABASE_PROVIDER=dsql in AWS_REGION=us-west-2; AWS_STATELESS_EC2.md creates/confirm the DSQL cluster in us-west-2.",
+      "singapore_latency": "Student requests travel to the Oregon app. The app and DSQL are in the same region. Ticket 38 simulated connection overhead locally and no deployment database hop or Singapore-to-DSQL latency was measured.",
+      "latency_basis": "unknown",
+      "measured_source": null,
+      "data_residency": "All student conversation/source/learning state is persisted outside Singapore; owner/compliance decision required, none taken here.",
+      "availability_note": "AWS lists Aurora DSQL in both Oregon and Singapore as checked 2026-11-26. Singapore list rates are US$9 per million DPUs and US$0.40/GB-month versus Oregon's US$8 and US$0.33. https://docs.aws.amazon.com/aurora-dsql/latest/userguide/what-is-aurora-dsql.html https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/current/ap-southeast-1/index.json",
+      "migration_note": "No automatic region migration is performed; a region move would require a new cluster, additive data migration and rehearsed rollback."
+    },
+    {
+      "component": "Bedrock models (Haiku 4.5 fast chat; Sonnet 4.6 Deep Review)",
+      "documented_region": "us-west-2",
+      "documented_evidence": "compose.prod.yaml pins AGENTCORE_MODEL_REGION=us-west-2 and the global.anthropic.claude-haiku-4-5-20251001-v1:0 / claude-sonnet-4-6 model ids.",
+      "singapore_latency": "Model invocation latency from Singapore is UNKNOWN (never measured here); the 2026-11-24 bounded Gemma check (p50 3.4 s / p95 32.3 s for 80 direct requests) is the only recorded live-shaped datapoint and used a different model.",
+      "latency_basis": "unknown",
+      "measured_source": null,
+      "data_residency": "Prompts (student-derived content) are processed by the model endpoint in us-west-2; owner/compliance decision required, none taken here.",
+      "availability_note": "ap-southeast-1 availability of Claude Haiku 4.5 was announced for October 2025 (launch knowledge, unverified); Sonnet 4.6 regional availability unverified.",
+      "migration_note": "No automatic region migration is performed; a model-region change requires new model ids, quota, guardrail equivalence and measured evidence."
+    },
+    {
+      "component": "AgentCore Runtime (specialist runtime)",
+      "documented_region": "us-west-2",
+      "documented_evidence": "AGENTCORE_RUNTIME_ARN host configuration and AWS_STATELESS_EC2.md's bedrock-mantle us-west-2 resource reference.",
+      "singapore_latency": "Runtime invoke latency from Singapore is UNKNOWN (never measured here).",
+      "latency_basis": "unknown",
+      "measured_source": null,
+      "data_residency": "Runtime microVMs process prompts in us-west-2; session affinity is documented in compose.prod.yaml.",
+      "availability_note": "AgentCore availability in ap-southeast-1 is unknown as of 2025 knowledge (unverified).",
+      "migration_note": "No automatic region migration is performed; runtime assets would need republishing and the Mantle guardrail checks re-verified."
+    },
+    {
+      "component": "Bedrock Knowledge Base (MANAGED, course retrieval)",
+      "documented_region": "us-west-2",
+      "documented_evidence": "compose.prod.yaml documents production Knowledge Base JUQNP8AZAZ as MANAGED in us-west-2; KNOWLEDGE_BASE_REGION falls back to AWS_REGION.",
+      "singapore_latency": "Retrieve latency from Singapore is UNKNOWN (never measured here); course sync uploads from an operator laptop cross regions.",
+      "latency_basis": "unknown",
+      "measured_source": null,
+      "data_residency": "Course materials (not private student uploads) are indexed in us-west-2; private user content stays in the S3 uploads bucket under the same region.",
+      "availability_note": "The existing MANAGED knowledge base is region-bound; re-creation elsewhere would require re-ingestion and new identifiers.",
+      "migration_note": "No automatic region migration is performed; KB moves are separately scoped with re-ingestion and gate re-evaluation."
+    },
+    {
+      "component": "Cognito identity (Guest/Cognito sessions)",
+      "documented_region": "us-west-2",
+      "documented_evidence": "AWS_STATELESS_EC2.md wires Cognito callback/cookies against the us-west-2 deployment; cognito_config/cognito_cookies run at the API boundary.",
+      "singapore_latency": "Login/token round trips to us-west-2 affect every session start; magnitude UNKNOWN (never measured here).",
+      "latency_basis": "unknown",
+      "measured_source": null,
+      "data_residency": "Identity records live outside Singapore; owner/compliance decision required, none taken here.",
+      "availability_note": "Cognito operates in ap-southeast-1 as long-standing public knowledge (unverified); the deployed pool is region-bound.",
+      "migration_note": "No automatic region migration is performed; a user-pool move means new identities and a coordinated release."
+    },
+    {
+      "component": "Recorded bounded live latency datapoints (2026-11-24)",
+      "documented_region": "Deployed us-west-2 stack via CloudFront",
+      "documented_evidence": "CLASSROOM_CAPACITY_GATE.md Gemma-38 section and docs/examples/classroom-capacity/gemma-results-2026-11-24.json.",
+      "singapore_latency": "80/80 direct Gemma requests: p50 3.442 s / p95 32.319 s / max 42.262 s; 80/80 Guest workspace reads through CloudFront/FastAPI/DSQL: p95 6.506 s. Client-side geography was not separately recorded.",
+      "latency_basis": "measured",
+      "measured_source": "docs/examples/classroom-capacity/gemma-results-2026-11-24.json (bounded, separately capped live checks; not a regional-latency measurement and not the deployed Haiku model)",
+      "data_residency": "These checks sent synthetic requests only; no student content was involved.",
+      "availability_note": "A single guarded AgentCore check completed one model cycle with no validation recovery after the citation nullability fix.",
+      "migration_note": "No automatic region migration is performed; these datapoints justify re-measurement, not movement."
+    }
+  ],
+  "s30_objective_sgd": "30",
+  "scenarios": [
+    {
+      "name": "low",
+      "students": 6,
+      "description": "Small bounded pilot matching the pending 5-8-student formative study: 6 active students, ~20 coached turns each per month (incl. 2 stage checkpoints), 1 Deep Review each, gate-selected retrieval on ~1/3 of turns, modest uploads and history.",
+      "deployment_assumption": "The documented 24/7 us-west-2 topology unchanged: EC2 t3.small + EBS, Aurora DSQL, S3, CloudFront, Cognito (Lite free tier), AgentCore Haiku 4.5, Sonnet 4.6 Deep Review, Guardrails v4, MANAGED Knowledge Base.",
+      "lines": [
+        {
+          "category": "hosting",
+          "name": "EC2 t3.small on-demand (us-west-2, 730 h)",
+          "quantity": "730",
+          "unit": "hour",
+          "unit_price_usd": "0.0208",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "730 h x US$0.0208/h on-demand (2025-10 pricing knowledge, unverified). Documented single-app-instance topology (compose.prod.yaml)."
+        },
+        {
+          "category": "hosting",
+          "name": "EBS gp3 root/data volume (30 GB)",
+          "quantity": "30",
+          "unit": "GB-month",
+          "unit_price_usd": "0.08",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "30 GB x US$0.08/GB-month (2025-10 pricing knowledge, unverified); Docker json-file logs and Compose volumes live on this volume."
+        },
+        {
+          "category": "hosting",
+          "name": "Aurora DSQL activity",
+          "quantity": null,
+          "unit": "DPU",
+          "unit_price_usd": "0.000008",
+          "cost_basis": "unknown",
+          "quantity_basis": "unknown",
+          "price_as_of": "2026-09-11",
+          "evidence": "Oregon AWS list price verified 2026-11-26. DPUs aggregate active compute, reads and writes, including failed work. Idle accrues zero activity DPUs. Autosave/retry operation counts and SQLite byte growth cannot establish monthly DPUs. https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/current/us-west-2/index.json"
+        },
+        {
+          "category": "generation",
+          "name": "Haiku 4.5 input tokens (fast chat + checkpoints + retries)",
+          "quantity": "1.25",
+          "unit": "Mtok",
+          "unit_price_usd": "1.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "6 students x 20 turns x ~8k tokens (ticket 40 measured system prompt p50 ~7.7k estimator tokens) + checkpoints, x1.25 retry allowance (ticket 48 measured one OCC conflict per student per wave, 100% fresh-base retry). US$1.00/Mtok (2025-10 knowledge, unverified); prompt-cache discounts excluded (conservative)."
+        },
+        {
+          "category": "generation",
+          "name": "Haiku 4.5 output tokens",
+          "quantity": "0.10",
+          "unit": "Mtok",
+          "unit_price_usd": "5.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "~0.6k output tokens/turn + checkpoints, x1.25 retries. US$5.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "Sonnet 4.6 input tokens (Deep Review + retries)",
+          "quantity": "0.225",
+          "unit": "Mtok",
+          "unit_price_usd": "3.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "6 Deep Reviews x ~30k input, x1.25 retry allowance (ticket 48 measured Deep Reviews complete under load; ambiguous outcomes stay billable per policy). US$3.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "Sonnet 4.6 output tokens (Deep Review + retries)",
+          "quantity": "0.0225",
+          "unit": "Mtok",
+          "unit_price_usd": "15.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "6 Deep Reviews x ~3k output, x1.25 retries. US$15.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "AgentCore Runtime invocations",
+          "quantity": "180",
+          "unit": "invocation",
+          "unit_price_usd": "0.005",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Flat US$0.005/invocation planning estimate for vCPU/memory-seconds (2025-10 AgentCore Runtime pricing knowledge, unverified); 120 fast-chat invocations + 6 Deep Reviews weighted x10 for the 200 s timeout profile. Actual metered pricing may differ materially."
+        },
+        {
+          "category": "generation",
+          "name": "Bedrock Guardrails v4 evaluations",
+          "quantity": "180",
+          "unit": "evaluation",
+          "unit_price_usd": "0.001",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "US$0.001/evaluation planning estimate (2025-10 Guardrails pricing knowledge, unverified); one evaluation per model invocation, Guardrails version 4 documented in compose.prod.yaml."
+        },
+        {
+          "category": "retrieval",
+          "name": "Knowledge Base Retrieve queries (MANAGED)",
+          "quantity": "40",
+          "unit": "query",
+          "unit_price_usd": "0.0025",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "US$2.50 per 1,000 Retrieve queries planning estimate (2025-10 knowledge, unverified); the deterministic gate selects ~1/3 of turns for retrieval. MANAGED-tier infrastructure pricing is not separately verified."
+        },
+        {
+          "category": "ingestion",
+          "name": "Embeddings / KB sync amortized",
+          "quantity": "0.5",
+          "unit": "Mtok",
+          "unit_price_usd": "0.13",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Amortized monthly embedding volume for course sync and reindexing (assumption); ~US$0.13/Mtok embedding-class pricing (2025-10 knowledge, unverified); one-time course ingestion amortized over 12 months."
+        },
+        {
+          "category": "storage",
+          "name": "S3 Standard objects (uploads + course materials)",
+          "quantity": "2",
+          "unit": "GB-month",
+          "unit_price_usd": "0.023",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "2 GB x US$0.023/GB-month (2025-10 pricing knowledge, unverified); ticket 48's measured 80-student run stored ~3.4 MB of application state locally, so volumes here are corpus-dominated assumptions."
+        },
+        {
+          "category": "storage",
+          "name": "Aurora DSQL storage",
+          "quantity": "2",
+          "unit": "GB-month",
+          "unit_price_usd": "0.33",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2026-09-11",
+          "evidence": "Assume 2 GB-month of retained primary data and indexes including revision history. Oregon AWS list price verified 2026-11-26. This uses one logical copy in a single Region and does not subtract any account-wide free allowance. https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/current/us-west-2/index.json"
+        },
+        {
+          "category": "backups",
+          "name": "S3 off-host backup and versioned copy storage",
+          "quantity": "1",
+          "unit": "GB-month",
+          "unit_price_usd": "0.05",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "S3 copy-storage planning estimate (2025-10 knowledge, unverified). Separate AWS Backup for DSQL is outside this assumed S3 copy workflow and would need its own inventory line if enabled."
+        },
+        {
+          "category": "observability",
+          "name": "CloudWatch Logs / metrics",
+          "quantity": "0",
+          "unit": "GB-month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because compose.prod.yaml ships docker json-file logs (3 x 10 MB rotation) on the instance volume with no log shipper; if CloudWatch is added later, ~US$0.50/GB ingested (2025-10 knowledge, unverified) applies."
+        },
+        {
+          "category": "network",
+          "name": "Data transfer out to internet (CloudFront/origin egress)",
+          "quantity": "5",
+          "unit": "GB",
+          "unit_price_usd": "0.085",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "us-west-2 to internet ~US$0.085/GB first 10 TB (2025-10 knowledge, unverified); CloudFront request charges are small and folded into this estimate."
+        },
+        {
+          "category": "other",
+          "name": "DNS/domain/certificates amortized",
+          "quantity": "1",
+          "unit": "month",
+          "unit_price_usd": "1.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Route 53 hosted zone ~US$0.50/month plus certificate/DNS overhead planning estimate (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "other",
+          "name": "Cognito user pool (Lite)",
+          "quantity": "0",
+          "unit": "MAU",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because <=80 MAU is far below the documented Lite free tier (10,000 MAU, 2024 pricing knowledge, unverified); Essentials pricing would be a new operator decision."
+        },
+        {
+          "category": "other",
+          "name": "Hosted editor/canvas services (React Flow / Tiptap)",
+          "quantity": "0",
+          "unit": "service",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "measured_local",
+          "evidence": "Zero because both editors run client-side in the React bundle (tickets 04/43/44); no hosted service is required or used - ticket 48 measured their autosaves against the local API only."
+        },
+        {
+          "category": "other",
+          "name": "AWS support plan",
+          "quantity": "0",
+          "unit": "month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because Basic (free) support is assumed; a paid plan would be a new operator decision."
+        },
+        {
+          "category": "other",
+          "name": "GST/taxes",
+          "quantity": "0",
+          "unit": "month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "unknown",
+          "evidence": "Zero because tax treatment is unverified; the estimated totals EXCLUDE GST - a GST-registered account could add up to 9% (recorded in the report limitations)."
+        }
+      ]
+    },
+    {
+      "name": "expected",
+      "students": 24,
+      "description": "One module-sized section: 24 active students, ~40 coached turns each per month (incl. 2 stage checkpoints), 1 Deep Review each, gate-selected retrieval, steady uploads and growth within retention bounds.",
+      "deployment_assumption": "The documented 24/7 us-west-2 topology unchanged, with EC2 t3.medium (the documented ~100-concurrent-student limiter profile implies headroom) and the same DSQL/S3/CloudFront/Cognito/AgentCore services as the low scenario.",
+      "lines": [
+        {
+          "category": "hosting",
+          "name": "EC2 t3.medium on-demand (us-west-2, 730 h)",
+          "quantity": "730",
+          "unit": "hour",
+          "unit_price_usd": "0.0416",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "730 h x US$0.0416/h on-demand (2025-10 pricing knowledge, unverified); ticket 39/48 local evidence (bounded threadpool, ~536 MiB RSS at 80 students) motivates the medium size, not a live measurement."
+        },
+        {
+          "category": "hosting",
+          "name": "EBS gp3 root/data volume (30 GB)",
+          "quantity": "30",
+          "unit": "GB-month",
+          "unit_price_usd": "0.08",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "30 GB x US$0.08/GB-month (2025-10 pricing knowledge, unverified)."
+        },
+        {
+          "category": "hosting",
+          "name": "Aurora DSQL activity",
+          "quantity": null,
+          "unit": "DPU",
+          "unit_price_usd": "0.000008",
+          "cost_basis": "unknown",
+          "quantity_basis": "unknown",
+          "price_as_of": "2026-09-11",
+          "evidence": "Oregon AWS list price verified 2026-11-26. DPUs aggregate active compute, reads and writes, including failed work. Idle accrues zero activity DPUs. Autosave/retry operation counts and SQLite byte growth cannot establish monthly DPUs. https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/current/us-west-2/index.json"
+        },
+        {
+          "category": "generation",
+          "name": "Haiku 4.5 input tokens (fast chat + checkpoints + retries)",
+          "quantity": "9.72",
+          "unit": "Mtok",
+          "unit_price_usd": "1.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "24 students x 40 turns x ~8k tokens (ticket 40 measured system prompt p50 ~7.7k estimator tokens) + checkpoints, x1.25 retry allowance (ticket 48 measured OCC conflicts recover 100% via fresh-base retry). US$1.00/Mtok (2025-10 knowledge, unverified); prompt-cache discounts excluded (conservative)."
+        },
+        {
+          "category": "generation",
+          "name": "Haiku 4.5 output tokens",
+          "quantity": "0.738",
+          "unit": "Mtok",
+          "unit_price_usd": "5.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "~0.6k output tokens/turn + checkpoints, x1.25 retries. US$5.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "Sonnet 4.6 input tokens (Deep Review + retries)",
+          "quantity": "0.9",
+          "unit": "Mtok",
+          "unit_price_usd": "3.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "24 Deep Reviews x ~30k input, x1.25 retry allowance. US$3.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "Sonnet 4.6 output tokens (Deep Review + retries)",
+          "quantity": "0.09",
+          "unit": "Mtok",
+          "unit_price_usd": "15.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "24 Deep Reviews x ~3k output, x1.25 retries. US$15.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "AgentCore Runtime invocations",
+          "quantity": "1200",
+          "unit": "invocation",
+          "unit_price_usd": "0.005",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Flat US$0.005/invocation planning estimate (2025-10 AgentCore Runtime pricing knowledge, unverified); 960 fast-chat invocations + 24 Deep Reviews weighted x10. Actual metered pricing may differ materially."
+        },
+        {
+          "category": "generation",
+          "name": "Bedrock Guardrails v4 evaluations",
+          "quantity": "1200",
+          "unit": "evaluation",
+          "unit_price_usd": "0.001",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "US$0.001/evaluation planning estimate (2025-10 Guardrails pricing knowledge, unverified); one evaluation per model invocation."
+        },
+        {
+          "category": "retrieval",
+          "name": "Knowledge Base Retrieve queries (MANAGED)",
+          "quantity": "300",
+          "unit": "query",
+          "unit_price_usd": "0.0025",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "US$2.50 per 1,000 Retrieve queries planning estimate (2025-10 knowledge, unverified); gate-selected grounded turns. MANAGED-tier infrastructure pricing not separately verified."
+        },
+        {
+          "category": "ingestion",
+          "name": "Embeddings / KB sync amortized",
+          "quantity": "2.5",
+          "unit": "Mtok",
+          "unit_price_usd": "0.13",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Amortized monthly embedding volume for course sync and reindexing (assumption); ~US$0.13/Mtok embedding-class pricing (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "storage",
+          "name": "S3 Standard objects (uploads + course materials)",
+          "quantity": "10",
+          "unit": "GB-month",
+          "unit_price_usd": "0.023",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "10 GB x US$0.023/GB-month (2025-10 pricing knowledge, unverified); corpus growth is an assumption."
+        },
+        {
+          "category": "storage",
+          "name": "Aurora DSQL storage",
+          "quantity": "5",
+          "unit": "GB-month",
+          "unit_price_usd": "0.33",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2026-09-11",
+          "evidence": "Assume 5 GB-month of retained primary data and indexes including revision history. Oregon AWS list price verified 2026-11-26. This uses one logical copy in a single Region and does not subtract any account-wide free allowance. https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/current/us-west-2/index.json"
+        },
+        {
+          "category": "backups",
+          "name": "S3 off-host backup and versioned copy storage",
+          "quantity": "5",
+          "unit": "GB-month",
+          "unit_price_usd": "0.05",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "S3 copy-storage planning estimate (2025-10 knowledge, unverified). Separate AWS Backup for DSQL is outside this assumed S3 copy workflow and would need its own inventory line if enabled."
+        },
+        {
+          "category": "observability",
+          "name": "CloudWatch Logs / metrics",
+          "quantity": "0",
+          "unit": "GB-month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because compose.prod.yaml ships docker json-file logs (3 x 10 MB rotation) with no log shipper; if CloudWatch is added later, ~US$0.50/GB ingested (2025-10 knowledge, unverified) applies."
+        },
+        {
+          "category": "network",
+          "name": "Data transfer out to internet (CloudFront/origin egress)",
+          "quantity": "25",
+          "unit": "GB",
+          "unit_price_usd": "0.085",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "us-west-2 to internet ~US$0.085/GB first 10 TB (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "other",
+          "name": "DNS/domain/certificates amortized",
+          "quantity": "1",
+          "unit": "month",
+          "unit_price_usd": "1.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Route 53 hosted zone ~US$0.50/month plus certificate/DNS overhead planning estimate (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "other",
+          "name": "Cognito user pool (Lite)",
+          "quantity": "0",
+          "unit": "MAU",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because ~24 MAU is far below the documented Lite free tier (10,000 MAU, 2024 pricing knowledge, unverified)."
+        },
+        {
+          "category": "other",
+          "name": "Hosted editor/canvas services (React Flow / Tiptap)",
+          "quantity": "0",
+          "unit": "service",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "measured_local",
+          "evidence": "Zero because both editors run client-side in the React bundle (tickets 04/43/44); no hosted service is required or used - ticket 48 measured their autosaves against the local API only."
+        },
+        {
+          "category": "other",
+          "name": "AWS support plan",
+          "quantity": "0",
+          "unit": "month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because Basic (free) support is assumed; a paid plan would be a new operator decision."
+        },
+        {
+          "category": "other",
+          "name": "GST/taxes",
+          "quantity": "0",
+          "unit": "month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "unknown",
+          "evidence": "Zero because tax treatment is unverified; the estimated totals EXCLUDE GST - a GST-registered account could add up to 9% (recorded in the report limitations)."
+        }
+      ]
+    },
+    {
+      "name": "high",
+      "students": 80,
+      "description": "Full classroom scale matching the ticket-48 probe: 80 active students, ~80 coached turns each per month (incl. checkpoints), 1 Deep Review each, heavier uploads, revisions and history growth.",
+      "deployment_assumption": "The documented 24/7 us-west-2 topology unchanged (EC2 t3.medium + the documented 120-call concurrency bounds); no vertical scaling is assumed because no live envelope evidence exists.",
+      "lines": [
+        {
+          "category": "hosting",
+          "name": "EC2 t3.medium on-demand (us-west-2, 730 h)",
+          "quantity": "730",
+          "unit": "hour",
+          "unit_price_usd": "0.0416",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "730 h x US$0.0416/h on-demand (2025-10 pricing knowledge, unverified). Ticket 48's local RSS high-water mark (~536 MiB) does not establish live EC2 sizing; any scaling is a separately measured decision."
+        },
+        {
+          "category": "hosting",
+          "name": "EBS gp3 root/data volume (30 GB)",
+          "quantity": "30",
+          "unit": "GB-month",
+          "unit_price_usd": "0.08",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "30 GB x US$0.08/GB-month (2025-10 pricing knowledge, unverified)."
+        },
+        {
+          "category": "hosting",
+          "name": "Aurora DSQL activity",
+          "quantity": null,
+          "unit": "DPU",
+          "unit_price_usd": "0.000008",
+          "cost_basis": "unknown",
+          "quantity_basis": "unknown",
+          "price_as_of": "2026-09-11",
+          "evidence": "Oregon AWS list price verified 2026-11-26. DPUs aggregate active compute, reads and writes, including failed work. Idle accrues zero activity DPUs. Autosave/retry operation counts and SQLite byte growth cannot establish monthly DPUs. https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/current/us-west-2/index.json"
+        },
+        {
+          "category": "generation",
+          "name": "Haiku 4.5 input tokens (fast chat + checkpoints + retries)",
+          "quantity": "64.4",
+          "unit": "Mtok",
+          "unit_price_usd": "1.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "80 students x 80 turns x ~8k tokens (ticket 40 measured system prompt p50 ~7.7k estimator tokens) + checkpoints, x1.25 retry allowance (ticket 48 measured OCC conflicts recover 100% via fresh-base retry). US$1.00/Mtok (2025-10 knowledge, unverified); prompt-cache discounts excluded (conservative)."
+        },
+        {
+          "category": "generation",
+          "name": "Haiku 4.5 output tokens",
+          "quantity": "4.86",
+          "unit": "Mtok",
+          "unit_price_usd": "5.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "~0.6k output tokens/turn + checkpoints, x1.25 retries. US$5.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "Sonnet 4.6 input tokens (Deep Review + retries)",
+          "quantity": "3.0",
+          "unit": "Mtok",
+          "unit_price_usd": "3.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "80 Deep Reviews x ~30k input, x1.25 retry allowance; ticket 48 measured 80/80 durable Deep Reviews completing under load (p50 17.2 s). US$3.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "Sonnet 4.6 output tokens (Deep Review + retries)",
+          "quantity": "0.3",
+          "unit": "Mtok",
+          "unit_price_usd": "15.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "80 Deep Reviews x ~3k output, x1.25 retries. US$15.00/Mtok (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "generation",
+          "name": "AgentCore Runtime invocations",
+          "quantity": "7200",
+          "unit": "invocation",
+          "unit_price_usd": "0.005",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Flat US$0.005/invocation planning estimate (2025-10 AgentCore Runtime pricing knowledge, unverified); 6,400 fast-chat invocations + 80 Deep Reviews weighted x10. Actual metered pricing may differ materially."
+        },
+        {
+          "category": "generation",
+          "name": "Bedrock Guardrails v4 evaluations",
+          "quantity": "7200",
+          "unit": "evaluation",
+          "unit_price_usd": "0.001",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "US$0.001/evaluation planning estimate (2025-10 Guardrails pricing knowledge, unverified); one evaluation per model invocation."
+        },
+        {
+          "category": "retrieval",
+          "name": "Knowledge Base Retrieve queries (MANAGED)",
+          "quantity": "2000",
+          "unit": "query",
+          "unit_price_usd": "0.0025",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "US$2.50 per 1,000 Retrieve queries planning estimate (2025-10 knowledge, unverified); gate-selected grounded turns. MANAGED-tier infrastructure pricing not separately verified."
+        },
+        {
+          "category": "ingestion",
+          "name": "Embeddings / KB sync amortized",
+          "quantity": "10",
+          "unit": "Mtok",
+          "unit_price_usd": "0.13",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Amortized monthly embedding volume for course sync and reindexing (assumption); ~US$0.13/Mtok embedding-class pricing (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "storage",
+          "name": "S3 Standard objects (uploads + course materials)",
+          "quantity": "40",
+          "unit": "GB-month",
+          "unit_price_usd": "0.023",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "40 GB x US$0.023/GB-month (2025-10 pricing knowledge, unverified); corpus growth is an assumption."
+        },
+        {
+          "category": "storage",
+          "name": "Aurora DSQL storage",
+          "quantity": "15",
+          "unit": "GB-month",
+          "unit_price_usd": "0.33",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2026-09-11",
+          "evidence": "Assume 15 GB-month of retained primary data and indexes including revision history. Oregon AWS list price verified 2026-11-26. This uses one logical copy in a single Region and does not subtract any account-wide free allowance. https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AuroraDSQL/current/us-west-2/index.json"
+        },
+        {
+          "category": "backups",
+          "name": "S3 off-host backup and versioned copy storage",
+          "quantity": "20",
+          "unit": "GB-month",
+          "unit_price_usd": "0.05",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "S3 copy-storage planning estimate (2025-10 knowledge, unverified). Separate AWS Backup for DSQL is outside this assumed S3 copy workflow and would need its own inventory line if enabled."
+        },
+        {
+          "category": "observability",
+          "name": "CloudWatch Logs / metrics",
+          "quantity": "0",
+          "unit": "GB-month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because compose.prod.yaml ships docker json-file logs (3 x 10 MB rotation) with no log shipper; if CloudWatch is added later, ~US$0.50/GB ingested (2025-10 knowledge, unverified) applies."
+        },
+        {
+          "category": "network",
+          "name": "Data transfer out to internet (CloudFront/origin egress)",
+          "quantity": "100",
+          "unit": "GB",
+          "unit_price_usd": "0.085",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "us-west-2 to internet ~US$0.085/GB first 10 TB (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "other",
+          "name": "DNS/domain/certificates amortized",
+          "quantity": "1",
+          "unit": "month",
+          "unit_price_usd": "1.00",
+          "cost_basis": "estimate",
+          "quantity_basis": "assumption",
+          "price_as_of": "2025-10-01",
+          "evidence": "Route 53 hosted zone ~US$0.50/month plus certificate/DNS overhead planning estimate (2025-10 knowledge, unverified)."
+        },
+        {
+          "category": "other",
+          "name": "Cognito user pool (Lite)",
+          "quantity": "0",
+          "unit": "MAU",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because ~80 MAU is far below the documented Lite free tier (10,000 MAU, 2024 pricing knowledge, unverified)."
+        },
+        {
+          "category": "other",
+          "name": "Hosted editor/canvas services (React Flow / Tiptap)",
+          "quantity": "0",
+          "unit": "service",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "measured_local",
+          "evidence": "Zero because both editors run client-side in the React bundle (tickets 04/43/44); no hosted service is required or used - ticket 48 measured their autosaves against the local API only."
+        },
+        {
+          "category": "other",
+          "name": "AWS support plan",
+          "quantity": "0",
+          "unit": "month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "assumption",
+          "evidence": "Zero because Basic (free) support is assumed; a paid plan would be a new operator decision."
+        },
+        {
+          "category": "other",
+          "name": "GST/taxes",
+          "quantity": "0",
+          "unit": "month",
+          "unit_price_usd": "0",
+          "cost_basis": "not_applicable",
+          "quantity_basis": "unknown",
+          "evidence": "Zero because tax treatment is unverified; the estimated totals EXCLUDE GST - a GST-registered account could add up to 9% (recorded in the report limitations)."
+        }
+      ]
+    }
+  ]
+}

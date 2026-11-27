@@ -162,6 +162,9 @@ SAFE_PERF_FIELDS = frozenset(
         "agentcore_ttft_ms",
         "model_first_content_ms",
         "model_first_reply_text_ms",
+        "first_text_timing_source",
+        "first_safe_reply_ready_ms",
+        "turn_confirmed_ms",
         "agentcore_model_duration_ms",
         "notebook_load_count",
         "source_catalog_load_count",
@@ -313,6 +316,19 @@ class CoachTurnPerf:
         )
         if "agent_ms" not in payload and payload.get("agentcore_invoke_ms") is not None:
             payload["agent_ms"] = payload["agentcore_invoke_ms"]
+        # Label whether the provider-reported internal first-text timings were
+        # measured at all, so unknown durations are never silently assumed.
+        if any(
+            key in payload
+            for key in (
+                "agentcore_ttft_ms",
+                "model_first_content_ms",
+                "model_first_reply_text_ms",
+            )
+        ):
+            payload["first_text_timing_source"] = "runtime_reported"
+        else:
+            payload["first_text_timing_source"] = "not_reported"
         return {key: value for key, value in payload.items() if key in SAFE_PERF_FIELDS}
 
 
@@ -355,6 +371,18 @@ def record_field(name: str, value: Any) -> None:
     perf = current_perf()
     if perf is not None:
         perf.set(name, value)
+
+
+def mark_elapsed(name: str) -> None:
+    """Record milliseconds since the request start on an approved field.
+
+    Used for phase boundaries measured against the request start (such as the
+    first safe visible text and the final confirmed completion), as opposed to
+    span durations. No-op when no request accumulator is bound.
+    """
+    perf = current_perf()
+    if perf is not None:
+        perf.set(name, elapsed_ms(perf.started))
 
 
 def record_count(name: str, delta: int = 1) -> None:

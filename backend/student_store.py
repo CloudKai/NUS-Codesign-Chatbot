@@ -59,6 +59,13 @@ from .persistence.store.migrations import (
     migrate_guest_claim_columns,
     migrate_notebook_revision,
     migrate_oauth_login_states,
+    migrate_student_artifacts,
+    migrate_artifact_reference_columns,
+    migrate_student_artifact_kind,
+    migrate_student_artifact_request_id,
+    migrate_student_artifact_versions,
+    migrate_student_canvases,
+    migrate_student_canvas_versions,
     migrate_users_table,
     repair_misbound_notebook_foreign_key,
 )
@@ -178,6 +185,13 @@ class StudentStore:
         self._operations: StoreOperations = bind_store_operations(self)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            migrate_student_artifacts(connection)
+            migrate_student_artifact_kind(connection)
+            migrate_student_artifact_versions(connection)
+            migrate_artifact_reference_columns(connection)
+            migrate_student_artifact_request_id(connection)
+            migrate_student_canvases(connection)
+            migrate_student_canvas_versions(connection)
             migrate_guest_claim_columns(connection)
             self._migrate_oauth_login_states(connection)
             self._migrate_users_table(connection)
@@ -563,6 +577,16 @@ class StudentStore:
                 if isinstance(guest_preferences, dict) else ""
             )
             for notebook_id in notebook_ids:
+                # Saved authoring resources carry their own owner fence, as do
+                # checkpoints. Transfer them with the parent in this transaction.
+                for table in (
+                    "student_artifacts", "student_artifact_versions",
+                    "student_canvases", "student_canvas_versions",
+                ):
+                    connection.execute(
+                        f"UPDATE {table} SET user_id=? WHERE notebook_id=? AND user_id=?",
+                        (target_user_id, notebook_id, guest_user_id),
+                    )
                 connection.execute("UPDATE notebooks SET user_id=? WHERE id=? AND user_id=?",
                                    (target_user_id, notebook_id, guest_user_id))
             if active_guest_notebook in notebook_ids:
@@ -1805,20 +1829,330 @@ class StudentStore:
             "The notebook was updated before Deep Review could be queued"
         )
 
-    def mark_deep_review_job_running(self, thread_id: str, review_id: str) -> bool:
-        """Mark a queued Deep Review job running for *review_id*.
+    def mark_deep_review_job_running(
+        self,
+        thread_id: str,
+        review_id: str,
+        *,
+        lease_owner: str | None = None,
+        lease_seconds: int | None = None,
+        max_attempts: int | None = None,
+    ) -> bool:
+        """Claim a queued (or expired-lease) Deep Review job for one worker.
+
+        With lease arguments this is an atomic claim: a running job whose
+        lease is still valid is owned by another live worker, while an
+        expired-lease running job can be reclaimed only before invocation.
+        Reclaiming increments ``attempts``. Without lease arguments the legacy
+        idempotent behaviour is preserved for uninvoked jobs.
 
         Args:
             thread_id: Owned notebook id.
             review_id: Job id that must still own the in-flight slot.
+            lease_owner: Claimant token persisted for result fencing.
+            lease_seconds: Claim lease length; the worker heartbeats it.
+            max_attempts: Claim refusal bound for crashed-worker recovery.
 
         Returns:
-            ``True`` when this worker claimed the running state.
+            ``True`` when this worker claimed (or already owns) the job.
 
         Raises:
             ValueError: When the notebook is missing.
         """
         from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_KEY,
+            DEEP_REVIEW_JOB_QUEUED,
+            DEEP_REVIEW_JOB_RUNNING,
+            _parse_job_timestamp,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return False
+                if job.get("invoked_at"):
+                    return False
+                status = str(job.get("status") or "")
+                if status == DEEP_REVIEW_JOB_RUNNING and lease_owner is None:
+                    # Legacy compatibility: re-marking a running job succeeds.
+                    return True
+                if status == DEEP_REVIEW_JOB_RUNNING:
+                    lease_expiry = _parse_job_timestamp(job.get("lease_expires_at"))
+                    now = datetime.now(timezone.utc)
+                    if lease_expiry is not None and lease_expiry > now:
+                        return False
+                if status not in {
+                    DEEP_REVIEW_JOB_QUEUED,
+                    DEEP_REVIEW_JOB_RUNNING,
+                }:
+                    return False
+                attempts = int(job.get("attempts") or 0)
+                if max_attempts is not None and attempts >= max(1, int(max_attempts)):
+                    return False
+                job["status"] = DEEP_REVIEW_JOB_RUNNING
+                job["attempts"] = attempts + 1
+                job["lease_owner"] = str(lease_owner or "").strip() or None
+                job["lease_expires_at"] = (
+                    (
+                        datetime.now(timezone.utc) + timedelta(seconds=int(lease_seconds))
+                    ).isoformat()
+                    if lease_seconds
+                    else None
+                )
+                job["updated_at"] = utc_now()
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could start"
+        )
+
+    def heartbeat_deep_review_job(
+        self,
+        thread_id: str,
+        review_id: str,
+        *,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Extend one running Deep Review job's lease for its current owner.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id claimed by ``lease_owner``.
+            lease_owner: Claimant token from the successful claim.
+            lease_seconds: New lease length from now.
+
+        Returns:
+            ``True`` when the lease was extended; ``False`` when the job is
+            missing, not running, or claimed by a different owner (the
+            caller's claim was superseded and it must not persist results).
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_KEY,
+            DEEP_REVIEW_JOB_RUNNING,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        cleaned_owner = str(lease_owner or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return False
+                if str(job.get("status") or "") != DEEP_REVIEW_JOB_RUNNING:
+                    return False
+                if str(job.get("lease_owner") or "").strip() != cleaned_owner:
+                    return False
+                job["lease_expires_at"] = (
+                    datetime.now(timezone.utc) + timedelta(seconds=int(lease_seconds))
+                ).isoformat()
+                job["updated_at"] = utc_now()
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the Deep Review lease could renew"
+        )
+
+    def complete_deep_review_job(
+        self,
+        thread_id: str,
+        *,
+        review_id: str,
+        snapshot: dict[str, Any],
+        lease_owner: str | None = None,
+    ) -> None:
+        """Persist a Deep Review snapshot and mark the job completed.
+
+        Resets ``coaching_turns_since_deep_review`` to ``0``. Does not insert
+        messages, change ``current_stage``, or require a matching
+        ``conversation_revision``. When ``lease_owner`` is supplied, a
+        supersedence fence applies: a worker whose claim was re-claimed by a
+        newer live lease cannot commit a duplicate or stale result — the
+        re-claimed job's own completion is the only authoritative write.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id that must still own the in-flight slot.
+            snapshot: Validated ``deep_review_snapshot`` payload.
+            lease_owner: Claimant token from the successful claim.
+
+        Raises:
+            ValueError: When the notebook is missing.
+            ConversationRevisionConflictError: When settings could not be saved.
+        """
+        from backend.specialists.review_orchestration import (
+            COUNTER_SETTINGS_KEY,
+            DEEP_REVIEW_JOB_COMPLETED,
+            DEEP_REVIEW_JOB_KEY,
+            DEEP_REVIEW_SNAPSHOT_KEY,
+            deep_review_job_is_active,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        if not isinstance(snapshot, dict) or not snapshot:
+            raise ValueError("Deep Review snapshot is required")
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return
+                if not deep_review_job_is_active(job):
+                    return
+                if not self._deep_review_lease_held(job, lease_owner):
+                    return
+                now = utc_now()
+                job["status"] = DEEP_REVIEW_JOB_COMPLETED
+                job["updated_at"] = now
+                job["error_code"] = None
+                job["lease_owner"] = None
+                job["lease_expires_at"] = None
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                metadata[DEEP_REVIEW_SNAPSHOT_KEY] = dict(snapshot)
+                metadata[COUNTER_SETTINGS_KEY] = 0
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be saved"
+        )
+
+    @staticmethod
+    def _deep_review_lease_held(job: dict[str, Any], lease_owner: str | None) -> bool:
+        """Return whether *lease_owner* may transition one claimed job.
+
+        Administrative callers may omit a token. A worker must still hold
+        the persisted token, even when the replacement lease has expired.
+        """
+        if lease_owner is None:
+            return True
+        persisted_owner = str(job.get("lease_owner") or "").strip()
+        return bool(persisted_owner) and persisted_owner == lease_owner.strip()
+
+    def fail_deep_review_job(
+        self,
+        thread_id: str,
+        *,
+        review_id: str,
+        error_code: str,
+        lease_owner: str | None = None,
+    ) -> None:
+        """Mark a Deep Review job failed without changing the counter or snapshot.
+
+        The same supersedence fence as completion applies: a worker whose
+        claim was re-claimed by a newer live lease cannot overwrite the
+        winner's terminal state.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id that must still own the in-flight slot.
+            error_code: Privacy-safe failure code such as ``review_timeout``.
+            lease_owner: Claimant token from the successful claim, when the
+                caller is a worker; administrative callers omit it.
+
+        Raises:
+            ValueError: When the notebook is missing.
+            ConversationRevisionConflictError: When settings could not be saved.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_FAILED,
+            DEEP_REVIEW_JOB_KEY,
+            deep_review_job_is_active,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        cleaned_error = str(error_code or "").strip() or "review_failed"
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return
+                if not deep_review_job_is_active(job):
+                    return
+                if not self._deep_review_lease_held(job, lease_owner):
+                    return
+                job["status"] = DEEP_REVIEW_JOB_FAILED
+                job["updated_at"] = utc_now()
+                job["error_code"] = cleaned_error
+                job["lease_owner"] = None
+                job["lease_expires_at"] = None
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be marked failed"
+        )
+
+    def request_deep_review_cancellation(self, thread_id: str, review_id: str) -> bool:
+        """Record the owner's request to cancel one Deep Review job.
+
+        A queued job has not been claimed and cannot have invoked the paid
+        model, so it is cancelled immediately. A claimed (running) job first
+        records ``cancel_requested`` and keeps its lease: only its live worker
+        — at a phase boundary — or lease expiry may move it to a terminal
+        state, so a billable invocation is never silently discarded or
+        silently re-run.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id to cancel.
+
+        Returns:
+            ``True`` when the request was recorded (or was already requested),
+            ``False`` for a terminal or missing job.
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_ERROR_CANCELLED,
+            DEEP_REVIEW_JOB_CANCEL_REQUESTED,
+            DEEP_REVIEW_JOB_CANCELLED,
             DEEP_REVIEW_JOB_KEY,
             DEEP_REVIEW_JOB_QUEUED,
             DEEP_REVIEW_JOB_RUNNING,
@@ -1839,11 +2173,152 @@ class StudentStore:
                 if not job or str(job.get("review_id") or "") != cleaned_id:
                     return False
                 status = str(job.get("status") or "")
-                if status == DEEP_REVIEW_JOB_RUNNING:
+                if status == DEEP_REVIEW_JOB_CANCEL_REQUESTED:
                     return True
-                if status != DEEP_REVIEW_JOB_QUEUED:
+                if status not in {DEEP_REVIEW_JOB_QUEUED, DEEP_REVIEW_JOB_RUNNING}:
                     return False
-                job["status"] = DEEP_REVIEW_JOB_RUNNING
+                now = utc_now()
+                job["updated_at"] = now
+                if status == DEEP_REVIEW_JOB_QUEUED:
+                    job["status"] = DEEP_REVIEW_JOB_CANCELLED
+                    job["error_code"] = DEEP_REVIEW_ERROR_CANCELLED
+                else:
+                    job["status"] = DEEP_REVIEW_JOB_CANCEL_REQUESTED
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review cancellation could be recorded"
+        )
+
+    def cancel_deep_review_job(
+        self,
+        thread_id: str,
+        review_id: str,
+        *,
+        lease_owner: str | None = None,
+        error_code: str = "review_cancelled",
+    ) -> bool:
+        """Move one uninvoked cancel-requested job to ``cancelled``.
+
+        The same supersedence fence as completion applies: only the worker
+        that owns the live claim (or an administrative caller without a
+        token, e.g. lease-expiry recovery) may acknowledge the request.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id in the ``cancel_requested`` state.
+            lease_owner: Claimant token, when the caller is the live worker.
+            error_code: Terminal cancellation error code.
+
+        Returns:
+            ``True`` when the job became ``cancelled``; ``False`` when it is
+            missing, not cancel-requested, or fenced by a newer live claim.
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_CANCEL_REQUESTED,
+            DEEP_REVIEW_JOB_CANCELLED,
+            DEEP_REVIEW_JOB_KEY,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return False
+                if str(job.get("status") or "") != DEEP_REVIEW_JOB_CANCEL_REQUESTED:
+                    return False
+                if job.get("invoked_at"):
+                    return False
+                if not self._deep_review_lease_held(job, lease_owner):
+                    return False
+                job["status"] = DEEP_REVIEW_JOB_CANCELLED
+                job["updated_at"] = utc_now()
+                job["error_code"] = str(error_code or "").strip() or "review_cancelled"
+                job["lease_owner"] = None
+                job["lease_expires_at"] = None
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be cancelled"
+        )
+
+    def mark_deep_review_job_invoked(
+        self,
+        thread_id: str,
+        review_id: str,
+        *,
+        lease_owner: str,
+        lease_seconds: int,
+    ) -> bool:
+        """Durably mark that the billable provider invocation has started.
+
+        Once ``invoked_at`` is persisted, the external outcome is unknown if
+        the worker dies before committing: recovery must surface ambiguity
+        instead of blindly re-running the possibly-successful billable call.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id claimed by ``lease_owner``.
+            lease_owner: Claimant token from the successful claim.
+            lease_seconds: New lease length from now (the invocation is
+                covered by the held lease).
+
+        Returns:
+            ``True`` when the marker was persisted for the current owner;
+            ``False`` when the job is missing, not running, already invoked,
+            or the claim was superseded (the caller must not invoke).
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_KEY,
+            DEEP_REVIEW_JOB_RUNNING,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        cleaned_owner = str(lease_owner or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return False
+                if str(job.get("status") or "") != DEEP_REVIEW_JOB_RUNNING:
+                    return False
+                if str(job.get("lease_owner") or "").strip() != cleaned_owner:
+                    return False
+                if job.get("invoked_at"):
+                    return False
+                job["invoked_at"] = utc_now()
+                job["lease_expires_at"] = (
+                    datetime.now(timezone.utc) + timedelta(seconds=int(lease_seconds))
+                ).isoformat()
                 job["updated_at"] = utc_now()
                 metadata[DEEP_REVIEW_JOB_KEY] = job
                 if self._update_settings_text_only(
@@ -1851,43 +2326,44 @@ class StudentStore:
                 ):
                     return True
         raise ConversationRevisionConflictError(
-            "The notebook was updated before Deep Review could start"
+            "The notebook was updated before the Deep Review invocation could be marked"
         )
 
-    def complete_deep_review_job(
+    def mark_deep_review_job_ambiguous(
         self,
         thread_id: str,
-        *,
         review_id: str,
-        snapshot: dict[str, Any],
-    ) -> None:
-        """Persist a Deep Review snapshot and mark the job completed.
+        *,
+        error_code: str = "review_outcome_unknown",
+    ) -> bool:
+        """Mark one invoked job whose external outcome cannot be known.
 
-        Resets ``coaching_turns_since_deep_review`` to ``0``. Does not insert
-        messages, change ``current_stage``, or require a matching
-        ``conversation_revision``.
+        Used on recovery only: the job's claim lease has lapsed after the
+        billable invocation started but before a result was committed. The
+        transition fails closed against a live worker — if the lease is
+        still valid (or was renewed by a healthy owner), nothing changes.
 
         Args:
             thread_id: Owned notebook id.
-            review_id: Job id that must still own the in-flight slot.
-            snapshot: Validated ``deep_review_snapshot`` payload.
+            review_id: Invoked job id in ``running`` or ``cancel_requested``.
+            error_code: Privacy-safe ambiguity code.
+
+        Returns:
+            ``True`` when the job became ``ambiguous``; ``False`` otherwise.
 
         Raises:
             ValueError: When the notebook is missing.
-            ConversationRevisionConflictError: When settings could not be saved.
         """
         from backend.specialists.review_orchestration import (
-            COUNTER_SETTINGS_KEY,
-            DEEP_REVIEW_JOB_COMPLETED,
-            DEEP_REVIEW_JOB_FAILED,
+            DEEP_REVIEW_JOB_AMBIGUOUS,
+            DEEP_REVIEW_JOB_CANCEL_REQUESTED,
             DEEP_REVIEW_JOB_KEY,
-            DEEP_REVIEW_SNAPSHOT_KEY,
+            DEEP_REVIEW_JOB_RUNNING,
+            _parse_job_timestamp,
             parse_deep_review_job,
         )
 
         cleaned_id = str(review_id or "").strip()
-        if not isinstance(snapshot, dict) or not snapshot:
-            raise ValueError("Deep Review snapshot is required")
         for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
             with self._lock, self._connect() as connection:
                 row = connection.execute(
@@ -1899,78 +2375,29 @@ class StudentStore:
                 metadata = dict(self._thread_dict(row).get("metadata") or {})
                 job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
                 if not job or str(job.get("review_id") or "") != cleaned_id:
-                    return
-                if str(job.get("status") or "") in {
-                    DEEP_REVIEW_JOB_COMPLETED,
-                    DEEP_REVIEW_JOB_FAILED,
-                }:
-                    return
-                now = utc_now()
-                job["status"] = DEEP_REVIEW_JOB_COMPLETED
-                job["updated_at"] = now
-                job["error_code"] = None
-                metadata[DEEP_REVIEW_JOB_KEY] = job
-                metadata[DEEP_REVIEW_SNAPSHOT_KEY] = dict(snapshot)
-                metadata[COUNTER_SETTINGS_KEY] = 0
-                if self._update_settings_text_only(
-                    connection, thread_id, row, metadata
-                ):
-                    return
-        raise ConversationRevisionConflictError(
-            "The notebook was updated before Deep Review could be saved"
-        )
-
-    def fail_deep_review_job(
-        self,
-        thread_id: str,
-        *,
-        review_id: str,
-        error_code: str,
-    ) -> None:
-        """Mark a Deep Review job failed without changing the counter or snapshot.
-
-        Args:
-            thread_id: Owned notebook id.
-            review_id: Job id that must still own the in-flight slot.
-            error_code: Privacy-safe failure code such as ``review_timeout``.
-
-        Raises:
-            ValueError: When the notebook is missing.
-            ConversationRevisionConflictError: When settings could not be saved.
-        """
-        from backend.specialists.review_orchestration import (
-            DEEP_REVIEW_JOB_COMPLETED,
-            DEEP_REVIEW_JOB_FAILED,
-            DEEP_REVIEW_JOB_KEY,
-            parse_deep_review_job,
-        )
-
-        cleaned_id = str(review_id or "").strip()
-        cleaned_error = str(error_code or "").strip() or "review_failed"
-        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
-            with self._lock, self._connect() as connection:
-                row = connection.execute(
-                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
-                    (thread_id, self.owner_id),
-                ).fetchone()
-                if not row:
-                    raise ValueError("Notebook not found")
-                metadata = dict(self._thread_dict(row).get("metadata") or {})
-                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
-                if not job or str(job.get("review_id") or "") != cleaned_id:
-                    return
-                if str(job.get("status") or "") == DEEP_REVIEW_JOB_COMPLETED:
-                    return
-                job["status"] = DEEP_REVIEW_JOB_FAILED
+                    return False
+                if job.get("status") not in {
+                    DEEP_REVIEW_JOB_RUNNING,
+                    DEEP_REVIEW_JOB_CANCEL_REQUESTED,
+                } or not job.get("invoked_at"):
+                    return False
+                lease_expiry = _parse_job_timestamp(job.get("lease_expires_at"))
+                if lease_expiry is not None and lease_expiry > datetime.now(timezone.utc):
+                    return False
+                job["status"] = DEEP_REVIEW_JOB_AMBIGUOUS
                 job["updated_at"] = utc_now()
-                job["error_code"] = cleaned_error
+                job["error_code"] = (
+                    str(error_code or "").strip() or "review_outcome_unknown"
+                )
+                job["lease_owner"] = None
+                job["lease_expires_at"] = None
                 metadata[DEEP_REVIEW_JOB_KEY] = job
                 if self._update_settings_text_only(
                     connection, thread_id, row, metadata
                 ):
-                    return
+                    return True
         raise ConversationRevisionConflictError(
-            "The notebook was updated before Deep Review could be marked failed"
+            "The notebook was updated before Deep Review ambiguity could be recorded"
         )
 
     def start_or_get_stage_review_job(
@@ -4587,8 +5014,8 @@ class StudentStore:
             if signal.kind == 'recommendation_displayed':
                 if not row['proposed_stage']:
                     raise ValueError('Recommendation not found')
-            elif metadata.get('interaction_intent') != 'lecture_help':
-                raise ValueError('Lecture answer not found')
+            elif metadata.get('interaction_intent') not in ('lecture_help', 'improve_design'):
+                raise ValueError('Answer not found')
             if signal.kind == 'evidence_opened' and not _load(row['cited_source_ids_text'], []):
                 raise ValueError('Cited answer not found')
             receipts = learning_receipts(metadata.get('learning_signals'))
@@ -5787,6 +6214,12 @@ class StudentStore:
                 if journey_blob["current_stage"] != metadata_patch.get("thinking_stage"):
                     raise ValueError("Confirmed transition does not match the learning journey")
                 preserved = overlay_progress_fields(progress, metadata_patch)
+                # Milestone recaps ride the same atomic transaction as the
+                # confirmed stage; they are bounded settings metadata, not
+                # progress fields, so they pass through untouched.
+                recaps_patch = metadata_patch.get("milestone_recaps")
+                if isinstance(recaps_patch, list):
+                    preserved = {**preserved, "milestone_recaps": recaps_patch}
                 if expected_progress is not None:
                     # A newer same-stage contribution wins over an older
                     # recommendation; unchanged fields retain normal confirm semantics.
@@ -5963,6 +6396,88 @@ class StudentStore:
                 row, include_extracted_text=include_extracted_text
             ),
         )
+
+    def create_artifact(self, thread_id: str, title: str, document: Any,
+                        kind: str = 'notes',
+                        references: list[dict[str, Any]] | None = None, *,
+                        origin: str | None = None,
+                        request_id: str | None = None) -> dict[str, Any]:
+        """Create one owned persistent student artifact anchored to this notebook.
+
+        Keyword-only ``origin`` records provenance (default editor) and
+        ``request_id`` makes a retried create replay the original row.
+        """
+        return self._bound_operations().artifacts.create(
+            thread_id, title, document, kind, references,
+            origin=origin, request_id=request_id)
+
+    def get_artifact(self, artifact_id: str) -> dict[str, Any] | None:
+        """Return one owned artifact with its canonical document, or None."""
+        return self._bound_operations().artifacts.get(artifact_id)
+
+    def list_artifacts(self, thread_id: str) -> list[dict[str, Any]]:
+        """List one owned notebook's artifacts, newest first, without document bodies."""
+        return self._bound_operations().artifacts.list(thread_id)
+
+    def update_artifact(self, artifact_id: str, document: Any, revision: int,
+                        title: str | None = None,
+                        references: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Apply one revision-guarded explicit save for an owned artifact."""
+        return self._bound_operations().artifacts.update(artifact_id, document, revision, title,
+                                                         references=references)
+
+    def duplicate_artifact(self, artifact_id: str) -> dict[str, Any]:
+        """Copy one owned artifact with its kind, title and canonical document."""
+        return self._bound_operations().artifacts.duplicate(artifact_id)
+
+    def delete_artifact(self, artifact_id: str, confirmed: bool) -> None:
+        """Delete one owned artifact after an explicit confirmation."""
+        return self._bound_operations().artifacts.delete(artifact_id, confirmed)
+
+    def list_artifact_versions(self, artifact_id: str) -> list[dict[str, Any]]:
+        """List one owned artifact's bounded version metadata, newest first."""
+        return self._bound_operations().artifacts.list_versions(artifact_id)
+
+    def get_artifact_version(self, artifact_id: str, revision: int) -> dict[str, Any] | None:
+        """Return one owned version's readable preview, or None."""
+        return self._bound_operations().artifacts.get_version(artifact_id, revision)
+
+    def restore_artifact(self, artifact_id: str, version_revision: int, seen_revision: int) -> dict[str, Any]:
+        """Restore an older version as a new revision guarded by the current one."""
+        return self._bound_operations().artifacts.restore(artifact_id, version_revision, seen_revision)
+
+    def create_canvas(self, thread_id: str, title: str, graph: Any) -> dict[str, Any]:
+        """Create one owned persistent design canvas anchored to this notebook."""
+        return self._bound_operations().canvases.create(thread_id, title, graph)
+
+    def get_canvas(self, canvas_id: str) -> dict[str, Any] | None:
+        """Return one owned canvas with its canonical graph, or None."""
+        return self._bound_operations().canvases.get(canvas_id)
+
+    def list_canvases(self, thread_id: str) -> list[dict[str, Any]]:
+        """List one owned notebook's canvases, newest first, without graph bodies."""
+        return self._bound_operations().canvases.list(thread_id)
+
+    def update_canvas(self, canvas_id: str, graph: Any, revision: int,
+                      title: str | None = None) -> dict[str, Any]:
+        """Apply one revision-guarded explicit save for an owned canvas."""
+        return self._bound_operations().canvases.update(canvas_id, graph, revision, title)
+
+    def delete_canvas(self, canvas_id: str, revision: int, confirmed: bool) -> None:
+        """Delete one owned canvas and its history after revision-bound confirmation."""
+        self._bound_operations().canvases.delete(canvas_id, revision, confirmed)
+
+    def list_canvas_versions(self, canvas_id: str) -> list[dict[str, Any]]:
+        """List one owned canvas's bounded version metadata, newest first."""
+        return self._bound_operations().canvases.list_versions(canvas_id)
+
+    def get_canvas_version(self, canvas_id: str, revision: int) -> dict[str, Any] | None:
+        """Return one owned canvas version's readable preview, or None."""
+        return self._bound_operations().canvases.get_version(canvas_id, revision)
+
+    def restore_canvas(self, canvas_id: str, version_revision: int, seen_revision: int) -> dict[str, Any]:
+        """Restore an older canvas version as a new revision guarded by the current one."""
+        return self._bound_operations().canvases.restore(canvas_id, version_revision, seen_revision)
 
     def get_source(
         self,

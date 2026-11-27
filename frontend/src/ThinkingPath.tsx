@@ -12,8 +12,9 @@ export type ReviewTab = (typeof reviewTabs)[number];
 const tabSlug = (tab: ReviewTab) => tab.toLowerCase().replace(/\s+/g, '-');
 
 /** Show saved feedback and the explicit Thinking Path actions for this chat. */
-export function ThinkingPath({ project, title, disabled, act, startInChat, onClose, status, children, insertScaffold, initialTab, onTabChange, bookmarks, bookmarkError, bookmarksReady, refreshBookmarks, removeStar, jumpToMessage }: {
+export function ThinkingPath({ projectMode = true, project, title, disabled, act, startInChat: _startInChat, onClose, status, children, insertScaffold, initialTab, onTabChange, bookmarks, bookmarkError, bookmarksReady, refreshBookmarks, removeStar, jumpToMessage }: {
   jumpToMessage: (id: string) => void; bookmarks: Bookmark[]; bookmarkError: string; bookmarksReady: boolean; refreshBookmarks: () => void; removeStar: (id: string) => void;
+  projectMode?: boolean;
   project: Project; title: string; disabled: boolean; insertScaffold: (text: string, switchTo?: 'project') => void; initialTab?: ReviewTab; onTabChange: (tab: ReviewTab) => void; act: (route: string, body: object) => Promise<void>;
   startInChat: () => void; onClose: () => void; status: string; children: ReactNode;
 }) {
@@ -27,7 +28,6 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
   useEffect(() => { window.clearTimeout(savedTimer.current); setSaved(''); }, [status, disabled]);
   const [showTips, setShowTips] = useState(false);
   const current = project.stages.find(stage => stage.id === project.current_stage)!;
-  const done = project.stages.filter(stage => stage.completed).length;
   const pending = project.pending;
   const review = project.review;
   const [generatedBrief, setGeneratedBrief] = useState<ProjectBriefResult | null>(null);
@@ -52,12 +52,12 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
       <header className="review-header">
         <h2 id="review-heading" tabIndex={-1}>Review</h2>
         <div className="review-header-actions">
-          <button className="icon-button" aria-label="Download project summary" title="Download project summary"
-            onClick={() => { downloadProject(downloadView, title); setSaved('Project summary downloaded.'); window.clearTimeout(savedTimer.current); savedTimer.current = window.setTimeout(() => setSaved(''), 4000); }}><Icon name="download"/></button>
+          {projectMode ? <button className="icon-button" aria-label="Download project summary" title="Download project summary"
+            onClick={() => { downloadProject(downloadView, title); setSaved('Project summary downloaded.'); window.clearTimeout(savedTimer.current); savedTimer.current = window.setTimeout(() => setSaved(''), 4000); }}><Icon name="download"/></button> : null}
           <button className="icon-button" aria-label="Close Review" title="Close Review" onClick={onClose}><Icon name="close"/></button>
         </div>
       </header>
-      <div className="review-tabs" role="tablist" aria-label="Review views">
+      {projectMode ? <div className="review-tabs" role="tablist" aria-label="Review views">
         {reviewTabs.map((tab, index) => {
           const id = tabSlug(tab);
           const selected = activeTab === tab;
@@ -78,10 +78,11 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
             {tab}{pendingDecision ? <span className="decision-dot" aria-hidden="true"/> : null}
           </button>;
         })}
-      </div>
+      </div> : null}
     </div>
-    <p className="review-status supporting" role="status">{saved || status}</p>
+    <p className="review-status supporting" role="status">{(projectMode && saved) || status}</p>
     {children}
+    {projectMode ? <>
     <section id="review-panel-progression" role="tabpanel" aria-labelledby="review-tab-progression"
       hidden={activeTab !== 'Progression'} tabIndex={0}>
       {pending ? <section className="review-card recommendation-card" aria-labelledby="recommendation-title">
@@ -173,10 +174,11 @@ export function ThinkingPath({ project, title, disabled, act, startInChat, onClo
         </details> : null}
       </section>
     </section>
-    <section id="review-panel-my-work" role="tabpanel" aria-labelledby="review-tab-my-work"
-      hidden={activeTab !== 'My work'} tabIndex={0}>
-      <MyWork project={project} focus={workFocus} bookmarks={bookmarks} disabled={disabled} error={bookmarkError} ready={bookmarksReady} refresh={refreshBookmarks} removeStar={removeStar} jumpToMessage={jumpToMessage}/>
-    </section>
+    </> : null}
+    <div id="review-panel-my-work" role={projectMode ? 'tabpanel' : undefined} aria-labelledby={projectMode ? 'review-tab-my-work' : undefined}
+      hidden={projectMode && activeTab !== 'My work'} tabIndex={projectMode ? 0 : undefined}>
+      <MyWork project={project} groupByStage={projectMode} focus={workFocus} bookmarks={bookmarks} disabled={disabled} error={bookmarkError} ready={bookmarksReady} refresh={refreshBookmarks} removeStar={removeStar} jumpToMessage={jumpToMessage}/>
+    </div>
   </section>;
 }
 
@@ -228,6 +230,10 @@ function StageDetail({ stage, bookmarkCount, isCurrent, disabled, onSelect, onUs
   const tools = showTools ? courseTools(stage.id) : [];
   return <div className="stage-detail">
     <p className="stage-next">{stage.next_action}</p>
+    {stage.criteria.length ? <div className="stage-block">
+      <h4>What a useful deliverable looks like</h4>
+      <ul className="stage-criteria">{stage.criteria.map(item => <li key={item}>{item}</li>)}</ul>
+    </div> : null}
     {!isCurrent && !stage.selectable ? <p className="supporting">Not available yet.</p> : null}
     {!isCurrent && stage.selectable ? <button className="stage-continue" aria-label={`${actionLabel} ${stage.label}`} disabled={disabled} onClick={onSelect}>
       {actionLabel} <Icon name="chevronRight"/></button> : null}
@@ -248,9 +254,9 @@ function StageDetail({ stage, bookmarkCount, isCurrent, disabled, onSelect, onUs
   </div>;
 }
 
-/** Only explicitly bookmarked messages, grouped by saved stage in canonical order. */
-function MyWork({ project, focus, bookmarks, disabled, error, ready, refresh, removeStar, jumpToMessage }: {
-  project: Project; focus?: { id: string; n: number }; bookmarks: Bookmark[]; disabled: boolean;
+/** Show explicitly starred messages, grouping by stage for Design coaching. */
+function MyWork({ project, groupByStage, focus, bookmarks, disabled, error, ready, refresh, removeStar, jumpToMessage }: {
+  project: Project; groupByStage: boolean; focus?: { id: string; n: number }; bookmarks: Bookmark[]; disabled: boolean;
   jumpToMessage: (id: string) => void; error: string; ready: boolean; refresh: () => void; removeStar: (id: string) => void;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({ [project.current_stage]: true });
@@ -265,7 +271,10 @@ function MyWork({ project, focus, bookmarks, disabled, error, ready, refresh, re
     <header className="card-head"><h3 id="my-work-title">My work</h3></header>
     <p className="supporting">Star messages in Chat to keep useful ideas and coach replies here.</p>
     {error ? <p role="alert">{error} <button disabled={disabled} onClick={refresh}>Refresh bookmarks</button></p> : !ready ? <p role="status">Loading bookmarks…</p> : null}
-    {groups.map(group => {
+    {!groupByStage && ready && !bookmarks.length ? <p className="supporting">No starred messages yet.</p> : null}
+    {!groupByStage && bookmarks.length ? <BookmarkList label="Starred messages" entries={bookmarks} disabled={disabled}
+      jumpToMessage={jumpToMessage} removeStar={removeStar}/> : null}
+    {groupByStage ? groups.map(group => {
       const entries = bookmarks.filter(item => (item.stage_id ?? 'none') === group.id);
       return <section className="bookmark-group" id={`bookmarks-${group.id}`} key={group.id} aria-labelledby={`bookmark-heading-${group.id}`}>
         <h4><button id={`bookmark-heading-${group.id}`} className="bookmark-heading" aria-label={group.label} aria-describedby={`bookmark-count-${group.id}`} aria-expanded={!!open[group.id]} aria-controls={`bookmark-list-${group.id}`}
@@ -274,14 +283,22 @@ function MyWork({ project, focus, bookmarks, disabled, error, ready, refresh, re
         </button></h4>
         <div className="bookmark-content" id={`bookmark-list-${group.id}`} hidden={!open[group.id]}>
           {ready && !entries.length ? <p className="supporting">No starred messages in this stage yet.</p> : null}
-          <ol className="bookmark-list" aria-label={`Starred messages in ${group.label}`}>{entries.map(item => <li key={item.id} className="bookmark-entry">
-            <p className="bookmark-author"><strong>{item.role === 'user' ? 'You' : 'Coach'}</strong>{item.interaction_intent === 'lecture_help' ? <span className="bookmark-mode">Lecture Help</span> : null}</p>
-            <div className="bookmark-preview">{item.role === 'assistant' ? <CoachText text={item.preview} links={false}/> : item.preview}</div>
-            <div className="bookmark-actions"><button className="bookmark-jump" disabled={disabled} onClick={() => jumpToMessage(item.id)}>Jump to message<Icon name="chevronRight"/></button>
-              <button className="bookmark-remove" disabled={disabled} aria-label="Remove star" title="Remove star" onClick={() => removeStar(item.id)}><Icon name="star"/></button></div>
-          </li>)}</ol>
+          <BookmarkList label={`Starred messages in ${group.label}`} entries={entries} disabled={disabled}
+            jumpToMessage={jumpToMessage} removeStar={removeStar}/>
         </div>
       </section>;
-    })}
+    }) : null}
   </section>;
+}
+
+/** Keep saved previews and their actions consistent across both Review modes. */
+function BookmarkList({ label, entries, disabled, jumpToMessage, removeStar }: {
+  label: string; entries: Bookmark[]; disabled: boolean; jumpToMessage: (id: string) => void; removeStar: (id: string) => void;
+}) {
+  return <ol className="bookmark-list" aria-label={label}>{entries.map(item => <li key={item.id} className="bookmark-entry">
+    <p className="bookmark-author"><strong>{item.role === 'user' ? 'You' : 'Coach'}</strong>{item.interaction_intent === 'lecture_help' ? <span className="bookmark-mode">Lecture Help</span> : null}</p>
+    <div className="bookmark-preview">{item.role === 'assistant' ? <CoachText text={item.preview} links={false}/> : item.preview}</div>
+    <div className="bookmark-actions"><button className="bookmark-jump" disabled={disabled} onClick={() => jumpToMessage(item.id)}>Jump to message<Icon name="chevronRight"/></button>
+      <button className="bookmark-remove" disabled={disabled} aria-label="Remove star" title="Remove star" onClick={() => removeStar(item.id)}><Icon name="star"/></button></div>
+  </li>)}</ol>;
 }

@@ -26,7 +26,7 @@ from ui.layout.column_resize import (
 from ui.layout.sources_scroll import sync_sources_scroll
 from ui.layout.studio_scroll import sync_studio_scroll
 from ui.menu_popovers import menu_popover_widget_key
-from ui.panels.chat import mount_awaiting_coach_turn_recovery, render_chat_panel
+from ui.panels.chat import active_interaction_intent, mount_awaiting_coach_turn_recovery, render_chat_panel
 from ui.panels.nav import (
     clear_transcript_export_cache,
     close_mobile_drawers,
@@ -69,7 +69,7 @@ def _mobile_journey_needs_review_attention() -> bool:
 
 def _render_mobile_journey_attention_flag() -> None:
     """Mount a hidden DOM flag so CSS can badge the Analytics control."""
-    if not _mobile_journey_needs_review_attention():
+    if active_interaction_intent() == "improve_design" or not _mobile_journey_needs_review_attention():
         return
     with st.container(key="mobile_journey_attention"):
         st.markdown(_MOBILE_JOURNEY_ATTENTION_FLAG, unsafe_allow_html=True)
@@ -422,7 +422,8 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
             # Recovery / attention pollers stay outside chat_panel (and after
             # Search) so remounts do not tear down scroll helpers.
             mount_awaiting_coach_turn_recovery()
-            mount_stage_review_attention_watch()
+            if active_interaction_intent() != "improve_design":
+                mount_stage_review_attention_watch()
 
         with nav_column:
             render_nav_panel()
@@ -445,7 +446,10 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                             on_click=_on_close_mobile_studio,
                         )
                     studio_started = time.perf_counter()
-                    if st.session_state.get("thread_id"):
+                    if active_interaction_intent() == "improve_design":
+                        st.markdown("**Thinking Path**")
+                        st.caption("Switch to Design coaching to use the Thinking Path.")
+                    elif st.session_state.get("thread_id"):
                         render_studio_panel()
                     else:
                         st.markdown("**Thinking Path**")

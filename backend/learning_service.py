@@ -143,10 +143,33 @@ class LearningProgressService:
             )
             if progress_update:
                 next_journey = {**next_journey, **progress_update}
+            # One deterministic recap per confirmed stage, merged from saved
+            # assessment and saved work inside the same transaction. Recaps
+            # record history only; they never complete or advance a stage.
+            recap_patch: dict[str, Any] | None = None
+            try:
+                from backend.persistence.store.contracts import utc_now
+                from backend.learning.recaps import build_milestone_recap, merge_milestone_recaps
+
+                recap = build_milestone_recap(
+                    pending,
+                    messages=self._store.get_messages(thread_id),
+                    confirmed_at=utc_now(),
+                )
+                if recap is not None:
+                    recap_patch = {"milestone_recaps": [
+                        entry.model_dump() for entry in merge_milestone_recaps(
+                            metadata.get("milestone_recaps"), recap)]}
+            except Exception:
+                logger.exception(
+                    "milestone_recap_build_failed thread_id=%s transition_id=%s",
+                    thread_id, pending.id,
+                )
             metadata_patch = {
                 "learning_journey": next_journey,
                 "thinking_stage": pending.to_stage,
                 **progress_update,
+                **(recap_patch or {}),
             }
 
         resolved = self._store.apply_phase_transition_decision(

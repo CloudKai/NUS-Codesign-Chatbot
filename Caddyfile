@@ -14,14 +14,24 @@
 	# the browser adapter independently requires verified credentials in all modes.
 	@reader {
 		method GET
-		path_regexp reader ^/api/v1/reader/(bootstrap|session|preferences|threads|threads/[^/]+/(settings|transcript\.txt|messages/page|coach-turn|project|bookmarks|uploads|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content))$
+		path_regexp reader ^/api/v1/reader/(bootstrap|session|preferences|threads|threads/[^/]+/(settings|transcript\.txt|messages/page|coach-turn|project(/export)?|deep-review|bookmarks|uploads|workspace|sources(/[^/]+(/content)?)?|messages/[^/]+/citations/[^/]+/content|artifacts(/[^/]+(/versions(/[^/]+)?|/export)?)?|canvases(/[^/]+(/versions(/[^/]+)?|/export)?)?))$
 	}
 	handle @reader {
 		reverse_proxy app:8000
 	}
+	# Saved-workspace writes: artifact/canvas guarded saves (PUT). Creation,
+	# deletion, duplication and version restores are POSTs on the lecture
+	# matcher below; nothing else accepts PUT at the edge.
+	@writer {
+		method PUT
+		path_regexp writer ^/api/v1/reader/threads/[^/]+/(artifacts|canvases)/[^/]+$
+	}
+	handle @writer {
+		reverse_proxy app:8000
+	}
 	@lecture {
 		method POST
-		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|move|attachments|coach-turn/stop|messages/[^/]+/(revise(/stream)?|learning-signal|star)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove|link)|lecture/stream|project/(brief|stream|select-stage|resolve/[^/]+)))$
+		path_regexp lecture ^/api/v1/reader/(preferences|threads|threads/[^/]+/(settings|remove|move|attachments|coach-turn/stop|messages/[^/]+/(revise(/stream)?|learning-signal|star)|uploads(/[^/]+/(retry|discard))?|sources/[^/]+/(select|remove|link)|(lecture|improve)/stream|project/(brief|stream|select-stage|resolve/[^/]+)|artifacts(/[^/]+/(delete|duplicate|versions/[^/]+/restore))?|canvases(/[^/]+/(delete|versions/[^/]+/restore))?|deep-review(/cancel)?))$
 	}
 	handle @lecture {
 		reverse_proxy app:8000 {
@@ -103,6 +113,13 @@
 	# FastAPI finishes is acceptable; the same idempotency key recovers the
 	# durable result. Leave Caddy's default unlimited read timeout.
 	handle / {
+		reverse_proxy app:8000
+	}
+
+	# Recognized student view deep links only; the SPA shell carries no private
+	# data and every API path stays under the explicit allowlists above.
+	@student_views path /chats/* /notebooks/* /notebooks/*/artifacts/* /library /search /settings
+	handle @student_views {
 		reverse_proxy app:8000
 	}
 

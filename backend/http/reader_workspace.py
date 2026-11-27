@@ -41,6 +41,12 @@ class ReaderSettingsPatch(BaseModel):
     assignment: dict[Annotated[str, Field(max_length=80)], Annotated[str, Field(max_length=4000)]] | None = Field(default=None, max_length=20)
 
 
+class ReaderError(BaseModel):
+    """Public read failure; callers use status codes rather than echoing detail."""
+
+    detail: str
+
+
 class ReaderPreferences(BaseModel):
     """Presentation defaults scoped to the verified workspace owner."""
 
@@ -48,7 +54,7 @@ class ReaderPreferences(BaseModel):
     appearance: Literal["System", "Light", "Dark"]
     display_name: str
     reduce_motion: bool
-    default_mode: Literal["lecture", "project"]
+    default_mode: Literal["improve", "project"]
     starter_prompts: bool
 
 
@@ -62,7 +68,7 @@ def reader_preferences(owner: OwnerServices) -> ReaderPreferences:
         appearance=theme if theme in ("System", "Light", "Dark") else "System",
         display_name=name if isinstance(name, str) else "",
         reduce_motion=values.get("reader_reduce_motion") is True,
-        default_mode="project" if values.get("reader_default_mode") == "project" else "lecture",
+        default_mode="project" if values.get("reader_default_mode") == "project" else "improve",
         starter_prompts=values.get("reader_starter_prompts") is not False,
     )
 
@@ -74,7 +80,7 @@ class ReaderPreferencesPatch(BaseModel):
     appearance: Literal["System", "Light", "Dark"] | None = None
     display_name: str | None = Field(default=None, max_length=80)
     reduce_motion: bool | None = None
-    default_mode: Literal["lecture", "project"] | None = None
+    default_mode: Literal["improve", "project"] | None = None
     starter_prompts: bool | None = None
 
 
@@ -91,6 +97,13 @@ class ReaderRemove(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     confirmed: Literal[True]
+
+
+class ReaderRemoved(BaseModel):
+    """Owner-fenced receipt for one confirmed deletion."""
+
+    owner_id: str
+    status: Literal["deleted"]
 
 
 class ReaderMoveChat(BaseModel):
@@ -170,6 +183,24 @@ def reader_chat_model_label(saved_model_label: str) -> str:
     return "Course coach"
 
 
+def reader_notebook_settings(thread_id: str, owner: OwnerServices) -> ReaderNotebookSettings:
+    """Project one owned notebook's action settings; 404 when it does not exist."""
+    row = owner.workspace.get_thread(thread_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Notebook not found")
+    meta = row.get('metadata') or {}
+    model = get_model(str(meta.get('selected_model') or DEFAULT_CHAT_MODEL_ID))
+    return ReaderNotebookSettings(
+        owner_id=owner.user_id, notebook=reader_notebook_for_owner(row, owner),
+        response_detail=normalize_journey(meta.get('learning_journey'))['response_detail'],
+        response_language=str(meta.get('response_language') or 'English'),
+        selected_model=model.id, reasoning_effort=validate_reasoning(model, meta.get('reasoning_effort')),
+        assignment=meta.get('assignment') or {},
+        chat_model_label=reader_chat_model_label(model.label),
+        models=[ReaderModel(id=item.id, label=item.label, reasoning_efforts=list(item.reasoning_efforts)) for item in MODEL_REGISTRY],
+    )
+
+
 def register_reader_workspace(
     app: FastAPI, reader_owner: Callable[[Request], OwnerServices],
     revise: Callable[[str, str, str, str, Request, OwnerServices], CoachTurn],
@@ -177,23 +208,9 @@ def register_reader_workspace(
 ) -> None:
     """Register authenticated CRUD/export adapters, preserving the shared service behavior."""
 
-    def notebook(thread_id: str, owner: OwnerServices) -> ReaderNotebookSettings:
-        row = owner.workspace.get_thread(thread_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Notebook not found")
-        meta = row.get('metadata') or {}
-        model = get_model(str(meta.get('selected_model') or DEFAULT_CHAT_MODEL_ID))
-        return ReaderNotebookSettings(
-            owner_id=owner.user_id, notebook=reader_notebook_for_owner(row, owner),
-            response_detail=normalize_journey(meta.get('learning_journey'))['response_detail'],
-            response_language=str(meta.get('response_language') or 'English'),
-            selected_model=model.id, reasoning_effort=validate_reasoning(model, meta.get('reasoning_effort')),
-            assignment=meta.get('assignment') or {},
-            chat_model_label=reader_chat_model_label(model.label),
-            models=[ReaderModel(id=item.id, label=item.label, reasoning_efforts=list(item.reasoning_efforts)) for item in MODEL_REGISTRY],
-        )
-
-    @app.post('/api/v1/reader/threads', response_model=ReaderNotebookSettings)
+    @app.post('/api/v1/reader/threads', response_model=ReaderNotebookSettings,
+              operation_id="readerThreadsCreate",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
     def create(payload: ReaderCreate, owner: OwnerServices = Depends(reader_owner)) -> ReaderNotebookSettings:
         """Create an owned entry using the canonical workspace defaults."""
         quick_chat = payload.kind == "chat"
@@ -216,17 +233,21 @@ def register_reader_workspace(
             reader_notebook=not quick_chat,
             parent_notebook_id=payload.parent_notebook_id,
         )
-        return notebook(row['id'], owner)
+        return reader_notebook_settings(row['id'], owner)
 
-    @app.get('/api/v1/reader/threads/{thread_id}/settings', response_model=ReaderNotebookSettings)
+    @app.get('/api/v1/reader/threads/{thread_id}/settings', response_model=ReaderNotebookSettings,
+             operation_id="readerNotebookSettings",
+             responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
     def read(thread_id: str, owner: OwnerServices = Depends(reader_owner)) -> ReaderNotebookSettings:
         """Read the canonical notebook action projection without private metadata."""
-        return notebook(thread_id, owner)
+        return reader_notebook_settings(thread_id, owner)
 
-    @app.post('/api/v1/reader/threads/{thread_id}/settings', response_model=ReaderNotebookSettings)
+    @app.post('/api/v1/reader/threads/{thread_id}/settings', response_model=ReaderNotebookSettings,
+              operation_id="readerNotebookSettingsUpdate",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
     def rename(thread_id: str, payload: ReaderSettingsPatch, owner: OwnerServices = Depends(reader_owner)) -> ReaderNotebookSettings:
         """Rename only an owned notebook, preserving all transcript and learning state."""
-        current = notebook(thread_id, owner)
+        current = reader_notebook_settings(thread_id, owner)
         if payload.name is not None and not payload.name.strip():
             raise HTTPException(status_code=422, detail="Enter a notebook name")
         patch = payload.model_dump(exclude_none=True, exclude={'name', 'pinned'})
@@ -241,16 +262,20 @@ def register_reader_workspace(
             if payload.reasoning_effort not in model.reasoning_efforts:
                 raise HTTPException(status_code=422, detail="Reasoning setting unavailable")
         owner.workspace.update_thread(thread_id, name=payload.name.strip() if payload.name is not None else None, metadata=patch or None)
-        return notebook(thread_id, owner)
+        return reader_notebook_settings(thread_id, owner)
 
-    @app.post('/api/v1/reader/threads/{thread_id}/remove')
-    def remove(thread_id: str, payload: ReaderRemove, owner: OwnerServices = Depends(reader_owner)) -> dict[str, str]:
+    @app.post('/api/v1/reader/threads/{thread_id}/remove', response_model=ReaderRemoved,
+              operation_id="readerThreadRemove",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
+    def remove(thread_id: str, payload: ReaderRemove, owner: OwnerServices = Depends(reader_owner)) -> ReaderRemoved:
         """Delete confirmed owned data through the existing cleanup-aware service."""
-        notebook(thread_id, owner)
+        reader_notebook_settings(thread_id, owner)
         owner.workspace.delete_thread(thread_id)
-        return {'owner_id': owner.user_id, 'status': 'deleted'}
+        return ReaderRemoved(owner_id=owner.user_id, status='deleted')
 
-    @app.post('/api/v1/reader/threads/{thread_id}/move', response_model=ReaderNotebookSettings)
+    @app.post('/api/v1/reader/threads/{thread_id}/move', response_model=ReaderNotebookSettings,
+              operation_id="readerThreadMove",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}, 404: {"model": ReaderError}})
     def move(thread_id: str, payload: ReaderMoveChat, owner: OwnerServices = Depends(reader_owner)) -> ReaderNotebookSettings:
         """Save an owner-validated chat location without moving any conversation data."""
         row = owner.workspace.get_thread(thread_id)
@@ -269,24 +294,26 @@ def register_reader_workspace(
                 owner.workspace.update_thread(thread_id, metadata={_PARENT_NOTEBOOK_KEY: target_id})
             except ValueError as error:
                 raise HTTPException(status_code=404, detail="Chat not found") from error
-        return notebook(thread_id, owner)
+        return reader_notebook_settings(thread_id, owner)
 
     @app.get('/api/v1/reader/threads/{thread_id}/transcript.txt')
     def export(thread_id: str, owner: OwnerServices = Depends(reader_owner)) -> Response:
         """Download the full active saved transcript, independent of the loaded browser window."""
-        notebook(thread_id, owner)
+        reader_notebook_settings(thread_id, owner)
         transcript = owner.workspace.export_transcript(thread_id)
         return Response(transcript.data, media_type=transcript.mime, headers={
             'Content-Disposition': "attachment; filename*=UTF-8''" + quote(transcript.filename, safe=''),
             'X-Content-Type-Options': 'nosniff',
         })
 
-    @app.get('/api/v1/reader/preferences', response_model=ReaderPreferences)
+    @app.get('/api/v1/reader/preferences', response_model=ReaderPreferences, operation_id="readerPreferences",
+             responses={401: {"model": ReaderError}, 403: {"model": ReaderError}})
     def preferences(owner: OwnerServices = Depends(reader_owner)) -> ReaderPreferences:
         """Read supported presentation values without exposing unrelated settings."""
         return reader_preferences(owner)
 
-    @app.post('/api/v1/reader/preferences', response_model=ReaderPreferences)
+    @app.post('/api/v1/reader/preferences', response_model=ReaderPreferences, operation_id="readerPreferencesUpdate",
+              responses={401: {"model": ReaderError}, 403: {"model": ReaderError}})
     def appearance(payload: ReaderPreferencesPatch, owner: OwnerServices = Depends(reader_owner)) -> ReaderPreferences:
         """Merge only supplied keys with the owner's existing preferences."""
         patch = payload.model_dump(exclude_none=True)

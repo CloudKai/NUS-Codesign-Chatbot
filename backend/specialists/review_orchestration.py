@@ -42,8 +42,15 @@ DEEP_REVIEW_JOB_QUEUED = "queued"
 DEEP_REVIEW_JOB_RUNNING = "running"
 DEEP_REVIEW_JOB_COMPLETED = "completed"
 DEEP_REVIEW_JOB_FAILED = "failed"
+DEEP_REVIEW_JOB_CANCEL_REQUESTED = "cancel_requested"
+DEEP_REVIEW_JOB_CANCELLED = "cancelled"
+DEEP_REVIEW_JOB_AMBIGUOUS = "ambiguous"
 DEEP_REVIEW_JOB_ACTIVE_STATUSES = frozenset(
-    {DEEP_REVIEW_JOB_QUEUED, DEEP_REVIEW_JOB_RUNNING}
+    {
+        DEEP_REVIEW_JOB_QUEUED,
+        DEEP_REVIEW_JOB_RUNNING,
+        DEEP_REVIEW_JOB_CANCEL_REQUESTED,
+    }
 )
 DEEP_REVIEW_JOB_STATUSES = frozenset(
     {
@@ -51,10 +58,15 @@ DEEP_REVIEW_JOB_STATUSES = frozenset(
         DEEP_REVIEW_JOB_RUNNING,
         DEEP_REVIEW_JOB_COMPLETED,
         DEEP_REVIEW_JOB_FAILED,
+        DEEP_REVIEW_JOB_CANCEL_REQUESTED,
+        DEEP_REVIEW_JOB_CANCELLED,
+        DEEP_REVIEW_JOB_AMBIGUOUS,
     }
 )
 DEEP_REVIEW_ERROR_TIMEOUT = "review_timeout"
 DEEP_REVIEW_ERROR_FAILED = "review_failed"
+DEEP_REVIEW_ERROR_CANCELLED = "review_cancelled"
+DEEP_REVIEW_ERROR_OUTCOME_UNKNOWN = "review_outcome_unknown"
 
 REVIEW_DEPTH_INCREMENTAL = "incremental"
 REVIEW_DEPTH_DEEP = "deep"
@@ -129,6 +141,10 @@ def parse_deep_review_job(value: Any) -> dict[str, Any] | None:
             base_checkpoint_version = None
     except (TypeError, ValueError):
         base_checkpoint_version = None
+    try:
+        attempts = max(0, int(value.get("attempts") or 0))
+    except (TypeError, ValueError):
+        attempts = 0
     return {
         "review_id": review_id,
         "status": status,
@@ -140,7 +156,11 @@ def parse_deep_review_job(value: Any) -> dict[str, Any] | None:
         "base_checkpoint_version": base_checkpoint_version,
         "started_at": str(value.get("started_at") or "").strip() or None,
         "updated_at": str(value.get("updated_at") or "").strip() or None,
+        "invoked_at": str(value.get("invoked_at") or "").strip() or None,
         "error_code": str(value.get("error_code") or "").strip() or None,
+        "attempts": attempts,
+        "lease_owner": str(value.get("lease_owner") or "").strip() or None,
+        "lease_expires_at": str(value.get("lease_expires_at") or "").strip() or None,
     }
 
 
@@ -171,12 +191,19 @@ def deep_review_job_is_stale(
     """
     if not deep_review_job_is_active(job):
         return False
+    current = now or datetime.now(timezone.utc)
+    # The claimed lease is authoritative when present: the job is stale once
+    # the lease has lapsed (a live worker heartbeats it forward). Legacy
+    # blobs predate lease fields and fall back to started/updated timestamps
+    # against the operator timeout.
+    lease_expiry = _parse_job_timestamp((job or {}).get("lease_expires_at"))
+    if lease_expiry is not None:
+        return current > lease_expiry
     started = _parse_job_timestamp((job or {}).get("started_at")) or _parse_job_timestamp(
         (job or {}).get("updated_at")
     )
     if started is None:
         return True
-    current = now or datetime.now(timezone.utc)
     return (current - started).total_seconds() > max(1, int(timeout_seconds))
 
 
@@ -216,9 +243,13 @@ def new_deep_review_job(
         "message_ids": [str(item).strip() for item in message_ids if str(item).strip()],
         "started_at": str(started_at or "").strip(),
         "updated_at": str(started_at or "").strip(),
+        "invoked_at": None,
         "error_code": None,
         "base_checkpoint_revision": None,
         "base_checkpoint_version": None,
+        "attempts": 0,
+        "lease_owner": None,
+        "lease_expires_at": None,
     }
     try:
         if base_checkpoint_revision is not None:

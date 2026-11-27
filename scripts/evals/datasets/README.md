@@ -7,6 +7,7 @@ Labelled questions for measuring course-material retrieval (recall@4, wrong-skip
 | `retrieval_questions.jsonl` | One JSON object per line, one question per object. |
 | `course_materials.json` | Manifest of the 10 course PDFs. Maps each `material_id` to the identifiers retrieval returns. |
 | `../../../tests/domain/test_retrieval_question_set.py` | Offline checks: schema, count, ids, page ranges, and that each evidence snippet is on the tagged page. |
+| `workspace_evidence.synthetic.jsonl` | 24 **synthetic** workspace-evidence rows (ticket 42), all marked `synthetic: true`: explicit/implicit lecture questions, project coaching, ambiguous follow-ups, selected uploads and canvas/artifact evidence, with `authorized_materials` filter rows and verbatim `evidence` snippets verified against the tagged PDF pages by `tests/scripts/test_evaluate_workspace_evidence.py`. Measured by `../../../scripts/evals/evaluate_workspace_evidence.py`. |
 
 ## Question record
 

@@ -41,7 +41,7 @@ corpus. No course renaming, second-course setup or corpus migration is required.
 | Context | `context_planner.py`, coaching/deep review context, runtime prompts | Complete transcript stays persisted; bounded recent Fast Chat context and broader Deep Review context already exist. Do not truncate authoritative work for speed. |
 | Normal turn | `backend/coaching/execution.py`, single workflow, AgentCore provider, `agentcore_runtime/main.py` | Application owns authorization/retrieval/state/save; runtime owns bounded structured generation. Recent native Gemma JSON/nullability fixes retained. |
 | Stream | `backend/coaching/stream_events.py`, `streaming.py`, `frontend/src/stream.ts`, `replyPreview.ts` | Dispatch identity, status, provisional discard, validated reply, saved done and exact-key recovery already implemented. Browser never automatically retries generation. |
-| Persistence | SQLite/DSQL store adapters, `dsql_connection.py`, transaction wrappers | DSQL currently opens/closes connections with fresh IAM tokens. Whole-transaction OCC retry and rollback are meaningful constraints on any future pool. No pool added without measurements. |
+| Persistence | SQLite/DSQL store adapters, `dsql_connection.py`, transaction wrappers | DSQL currently opens/closes connections with fresh IAM tokens. Whole-transaction OCC retry and rollback are meaningful constraints on any future pool. Ticket 38's offline harness (`scripts/benchmark_dsql_connections.py`) records the comparison and nine pool-contract checks; the fresh-connection default is kept pending an approved live run. |
 | Deep Review | `backend/coaching/deep_review_jobs.py` and execution snapshot/review projection | Persisted receipts and bounded process-local workers exist. Queued/running work does not resume after restart; GET marks it failed. Durable worker recovery is outstanding. |
 | Observability | `turn_perf.py`, usage and operational JSON logs | Existing timing/usage seams should be extended before adding monitoring services. First-model-text and first-visible-text are distinct, especially after the Mantle safety fix. |
 
@@ -57,9 +57,11 @@ No new AWS runtime, infrastructure, database or production dependency is added.
 
 ## Implemented decisions and contracts
 
-**Generated reads.** FastAPI/Pydantic remain authoritative. Three operations have
-stable IDs (`readerSession`, `readerNotebooks`, `readerMessages`) and documented
-read-error models. `scripts/export_reader_openapi.py` forces temporary mock
+**Generated reads.** FastAPI/Pydantic remain authoritative. Eight operations have
+stable IDs (`readerSession`, `readerNotebooks`, `readerMessages`, `readerBootstrap`,
+`readerPreferences`, `readerPreferencesUpdate`, `readerNotebookSettings`,
+`readerNotebookSettingsUpdate`) and documented read-error models.
+`scripts/export_reader_openapi.py` forces temporary mock
 storage before importing the app, refuses reused settings, blocks network
 connections, and projects only allowlisted routes and reachable schemas.
 `--check` compares deterministic output without writing. Internal professor,
@@ -257,10 +259,15 @@ new persistence, model invocation, conversation body or source payload.
 The generated client includes `readerBootstrap`. `verifiedBootstrap` retains
 cookie renewal and performs a fresh session probe afterward, comparing all
 three projection identities before returning. Reader request epochs/aborts still
-fence resets. The initial preference-only WorkspaceTools mount uses the verified
-bootstrap rather than reloading immediately. Thread changes and all mutation
-reconciliation keep their existing checks. No positive Query retention or private
-cache persistence is enabled.
+fence resets. The verified bootstrap seeds the owner's preferences Query
+resource (`src/api/workspaceSettings.ts`), so no component refetches them
+immediately; the same module owns the four generated preference/settings
+operations. Thread changes and all mutation
+reconciliation keep their existing checks. Preferences and notebook settings
+carry small measured per-resource freshness (90 s and 30 s, inside the approved
+investigation ranges) adopted only after identity-lifecycle tests pass; every
+other resource keeps zero retention, and no private cache persistence is
+enabled.
 
 The [before/after JSON](../examples/performance/cde2300-bootstrap-2026-11-24.json)
 retains three observations per scenario with the same corrected browser harness.
@@ -317,7 +324,7 @@ The separate production runtime safety rollout remains pending authorization.
 | P1 implemented | Startup profiling and owner-verified bootstrap in `useReader.ts` and initial preferences | Six to two startup reads; owner-race and saved-preference regressions pass; navigation remains unchanged |
 | P1 | Add resource-specific Query coverage/retention with centralized keys; benchmark bootstrap/workspace aggregation before adoption | Account switch during reads/streams, logout, stale revision, mutation reconciliation and measured request reduction |
 | P1 | Extend approved generated REST operations in small read groups, then ordinary mutations | Explicit allowlist/models/errors, codegen checks, compatibility tests; keep NDJSON and generation explicit |
-| P2 | Benchmark DSQL connect/transaction cost through injected adapters before bounded lifespan pooling | IAM lifetime, checkout timeout, rollback/reset, OCC retries and cross-request contamination; approved live caps |
+| P2 | Benchmark DSQL connect/transaction cost through injected adapters before bounded lifespan pooling | Offline harness complete (ticket 38): nine pool-contract checks pass and local numbers are recorded. Remaining gate: approved, capped live DSQL run via `scripts/benchmark_dsql_connections.py --live` before any adoption |
 | P2 | Separate provider/runtime/guardrail latency and compare compact prompts/models/direct inference | Shared quality corpus, citation/structured-output rate, first-visible latency and token/cost evidence; no extra model per turn |
 | P3 | Recover durable Deep Review work through persisted jobs/leases using existing store boundaries | Restart/failure/cancel/duplicate tests, revision fence, bounded retries and no stale-work overwrite |
 | P3 | Extract cohesive chat lifecycle/API boundaries only where tests/profiling identify maintenance problems | Existing normal/edit/cancel/recovery contracts and owner isolation retained |

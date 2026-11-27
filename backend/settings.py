@@ -290,6 +290,9 @@ class Settings:
     deep_review_job_timeout_seconds: int = _bounded_int(
         "DEEP_REVIEW_JOB_TIMEOUT_SECONDS", 240, 30, 600
     )
+    deep_review_max_attempts: int = _bounded_int(
+        "DEEP_REVIEW_MAX_ATTEMPTS", 2, 1, 5
+    )
     guardrail_id: str = os.getenv("GUARDRAIL_ID", "").strip()
     guardrail_version: str = os.getenv("GUARDRAIL_VERSION", "").strip()
     knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()

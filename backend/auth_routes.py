@@ -17,6 +17,7 @@ from backend.auth_oidc import (
     OAUTH_STATE_TTL_SECONDS,
 )
 from backend.auth_profiles import has_streamlit_access, sync_authenticated_user
+from backend.http.origin import same_configured_origin
 from backend.cognito_cookies import (
     SESSION_HINT_COOKIE_VALUE,
     id_token_cookie_settings,
@@ -127,7 +128,7 @@ def _is_configured_same_origin(request: Request) -> bool:
         and not supplied.query
         and not supplied.fragment
         and supplied.scheme == expected.scheme
-        and supplied.netloc.lower() == expected.netloc.lower()
+        and same_configured_origin(origin, settings.public_api_base_url, settings.api_base_url)
         and supplied.netloc.lower() == host.lower()
     )
 

@@ -137,15 +137,15 @@ after 650ms.
   Ask a lecture question.
 - **Chat header:** the title is a breadcrumb inside a notebook ("Notebook › Chat"; the notebook
   part opens the notebook and truncates first), so there is no separate folder row. One Review
-  button replaces the stepper and the old Review button. When the chat has project work (saved
+  button replaces the stepper and the old Review button. In Design coaching, when the chat has project work (saved
   student work, a completed stage or a pending recommendation) it shows compact progress such
   as "2/5 · Concept generation" (stage name hidden below 768px). One dot marks a pending stage
-  decision, and the button then opens Progression. Chats with no project work show plain Review.
+  decision, and the button then opens Progression. Improve my design and chats without project work show plain Review.
   The stage stepper component remains on Home's Continue card only, under the same condition.
 - **Chat mode on open:** a saved chat reopens in the mode of the student's latest turn when
   saved project data shows it; otherwise Design coaching if the chat has project work, else
   Lecture help. A saved draft intent wins.
-- **Inline recommendation and milestone:** a pending recommendation appears after the last
+- **Inline recommendation and milestone:** in Design coaching, a pending recommendation appears after the last
   message with Move to / Stay here. A milestone banner appears only after a confirmed move
   that the refreshed project confirms, or when all stages are observed complete.
 - **Coach check-ins:** one deterministic card above the composer chosen from saved data
@@ -176,7 +176,7 @@ after 650ms.
   retry. No partial, stale or unsupported summary substitutes for a complete one.
   Server-cached summaries are bound to every active message; failed attempts do
   not automatically replay on remount. Preview mode never fabricates summaries.
-  Review first opens on Progression, then remembers view and open/closed choice
+  Design coaching Review first opens on Progression, then remembers view and open/closed choice
   per verified owner/chat in this browser tab. Visibility changes still clear
   private content and verify the owner before restoring it. Display preferences
   contain no transcript or feedback; sign-out clears them. Close/header toggle,
@@ -210,9 +210,16 @@ after 650ms.
   draft, stable edit request keys and read-first failed-save recovery.
 - **Recovery:** preserve actionable errors, pending-write checks, disabled states
   and unsaved streaming labels even when simplifying ordinary status copy.
-  A pending question or edit offers Check saved answer, Retry same question and Discard and edit.
-  Retry and Discard unlock only after a check finds no saved reply, so nothing is sent twice. Discard
-  puts the text back in the composer under a new key, which frees a question the server rejects for good.
+  A pending question or edit is wordless progress: bouncing dots only — no note,
+  no buttons. A check that finds nothing saved returns the text to the composer
+  automatically under the safety of that check, so nothing is sent twice and no
+  controls are needed. A check that cannot complete keeps the receipt, keeps the
+  dots, and rechecks when the chat reopens. In-progress words are suppressed
+  while dots show; terminal outcomes (saved, busy, budget) still announce.
+  A pending receipt is recovery state and an in-flight coach turn is recoverable
+  through its persisted receipt: neither locks the workspace navigation, so the
+  sidebar, other chats and New chat stay clickable while the coach is queuing,
+  streaming or awaiting recovery.
   Start my design project and Ask a lecture question on Home also set the mode of an empty chat that is
   already open. Transcript recovery, edit and citation buttons, the mode switch, suggestion chips, the wordmark and
   the drawer's section, Settings, Refresh and Sign out controls keep 44px targets below 768px. Request keys use
@@ -225,7 +232,7 @@ after 650ms.
   POEMS, Crazy 8, Powers of Ten, selection criteria, prioritisation matrix, goals, values and
   features, prototyping plan, test questions and the story arc. Each shows the lecture week.
   In an opened Review stage the list stays folded behind a "Tools from the course" button.
-  Review has three tabs in this order: Progression (stages, next action, tools), Summary
+  Design coaching Review has three tabs in this order: Progression (stages, next action, tools), Summary
   (wide project summary, stage-by-stage feedback, Facione) and My work (only messages
   the owner explicitly starred). Bookmarks keep the original saved stage and author;
   only Lecture Help has a mode tag. The five stage groups stay in canonical order,
@@ -236,6 +243,9 @@ after 650ms.
   original and highlight it for six seconds. These controls keep 44px phone targets.
   Save failures appear inside My work as well as the Chat status. Feedback remains
   in Summary; My work does not automatically collect transcript or feedback.
+  Improve my design opens directly to My work with one list of starred messages.
+  Jump to message returns to the saved reply and its citations. Switching back to
+  Design coaching restores the saved stage, any pending decision, and project summary export.
   Do not add frameworks that are not in the notes. The empathy map is included at the owner's
   request. The Week 3 slides are not in `lecture_notes/`, so it uses the standard Says, Thinks,
   Does, Feels quadrants (see `COURSE_CONTENT.md`).

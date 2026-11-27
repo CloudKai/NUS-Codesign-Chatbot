@@ -31,6 +31,7 @@ from .source_library import (
 from .specialists.review_orchestration import (
     DEEP_REVIEW_SNAPSHOT_KEY,
     JOURNEY_STAGE_REVIEWS_KEY,
+    explicit_deep_review_available,
     public_journey_stage_reviews,
 )
 from .student_journey import normalize_journey
@@ -201,6 +202,51 @@ class WorkspaceService:
         """Return one owned notebook or ``None``."""
         thread = self._store.get_thread(thread_id)
         return public_thread(thread) if thread and not (thread.get("metadata") or {}).get("reader_library") else None
+
+    def get_artifact(self, thread_id: str, artifact_id: str) -> dict[str, Any]:
+        """Return an artifact only from the requested owned notebook, or raise LookupError."""
+        artifact = self._store.get_artifact(artifact_id)
+        if artifact is None or artifact["thread_id"] != thread_id:
+            raise LookupError("Artifact not found")
+        return artifact
+
+    def deep_review_available(self, thread_id: str) -> bool:
+        """Return persisted Thinking Path eligibility or raise for a missing notebook."""
+        thread = self.get_thread(thread_id)
+        if thread is None:
+            raise LookupError("Notebook not found")
+        journey = normalize_journey(thread["metadata"].get("learning_journey"))
+        return explicit_deep_review_available(completed_stages=journey.get("completed_stages") or [])
+
+    def save_artifact(
+        self, thread_id: str, artifact_id: str, document: dict[str, Any], revision: int,
+        title: str | None, references: list[dict[str, Any]] | None,
+    ) -> dict[str, Any]:
+        """Save the seen artifact revision in its owned notebook or propagate a conflict."""
+        self.get_artifact(thread_id, artifact_id)
+        return self._store.update_artifact(artifact_id, document, revision, title, references=references)
+
+    def get_canvas(self, thread_id: str, canvas_id: str) -> dict[str, Any]:
+        """Return a canvas only from the requested owned notebook, or raise LookupError."""
+        canvas = self._store.get_canvas(canvas_id)
+        if canvas is None or canvas["thread_id"] != thread_id:
+            raise LookupError("Canvas not found")
+        return canvas
+
+    def save_canvas(
+        self, thread_id: str, canvas_id: str, graph: dict[str, Any], revision: int, title: str | None,
+    ) -> dict[str, Any]:
+        """Save the seen canvas revision in its owned notebook or propagate a conflict."""
+        self.get_canvas(thread_id, canvas_id)
+        return self._store.update_canvas(canvas_id, graph, revision, title)
+
+    def delete_canvas(
+        self, thread_id: str, canvas_id: str, revision: int, confirmed: bool,
+    ) -> dict[str, Any]:
+        """Delete a confirmed canvas revision and return its previous projection for the caller."""
+        canvas = self.get_canvas(thread_id, canvas_id)
+        self._store.delete_canvas(canvas_id, revision, confirmed)
+        return canvas
 
     def create_thread(
         self,

@@ -1,0 +1,28 @@
+# Secret scanning baseline (ticket 46). Extends gitleaks' default rules with an
+# allowlist for three deliberate synthetic fixtures — never for real credentials.
+# CI runs `gitleaks detect` (git mode) against the checked-out history; any new
+# finding fails the job. Local equivalent:
+#   gitleaks detect --no-banner --redact
+[extend]
+useDefault = true
+
+# The security-readiness suite plants an intentionally fake, realistic-looking
+# credential to prove secrets never reach logs or projections. Rewriting it
+# would weaken the fixture; the string is not a real key.
+[[allowlists]]
+description = "Synthetic planted secret in tests/http/test_security_readiness.py"
+paths = ['tests/http/test_security_readiness\.py']
+regexes = ['sk-live-SECRET-0123456789']
+
+# Deterministic idempotency fixture strings whose names merely end in "key".
+[[allowlists]]
+description = "Synthetic idempotency key fixture in tests/domain/test_mode_classification.py"
+paths = ['tests/domain/test_mode_classification\.py']
+regexes = ['idempotency_key="phase2-nl-revisit"']
+
+[[allowlists]]
+description = "Synthetic Streamlit button key in tests/ui/test_professor_ui.py"
+paths = ['tests/ui/test_professor_ui\.py']
+regexes = ['professor_followup_student-1']
+
+

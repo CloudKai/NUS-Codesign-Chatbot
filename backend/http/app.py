@@ -40,6 +40,7 @@ from backend.domain import (
 )
 from backend.owner_context import OwnerResolver, OwnerServices
 from backend.http.notebook_reader import register_notebook_reader
+from backend.http.origin import same_configured_origin, same_netloc
 from backend.upload_queue import SourceUploadCoordinator
 from starlette.concurrency import run_in_threadpool
 from backend.persistence.guest_sessions import GUEST_SESSION_TTL
@@ -230,6 +231,10 @@ async def _app_lifespan(app: FastAPI):
     finally:
         # Drain bounded work on shutdown; browser departure never owns cleanup.
         await run_in_threadpool(app.state.reader_uploads.close)
+        # Stop accepting Deep Review dispatches; durable envelopes recover.
+        from backend.coaching.deep_review_jobs import shutdown_deep_review_executor
+
+        shutdown_deep_review_executor()
 
 
 def create_app(
@@ -364,7 +369,9 @@ def create_app(
             site = str(request.headers.get("sec-fetch-site") or "").strip().lower()
             origin = str(request.headers.get("origin") or "").strip()
             if (site and site not in {"same-origin", "none"}) or (
-                origin and origin.rstrip("/") != settings.public_api_base_url.rstrip("/")
+                origin and not same_configured_origin(
+                    origin, settings.public_api_base_url, settings.api_base_url,
+                )
             ):
                 return JSONResponse(
                     status_code=403, content={"detail": "Same-origin request required"}
@@ -386,6 +393,7 @@ def create_app(
                 route=route,
                 status_code=500,
                 started=started,
+                request_id=request_id,
             )
             raise
         response.headers["X-Request-ID"] = request_id
@@ -398,6 +406,7 @@ def create_app(
             route=route,
             status_code=response.status_code,
             started=started,
+            request_id=request_id,
         )
         return response
 
@@ -568,7 +577,9 @@ def create_app(
         if (
             not origin
             or supplied.scheme not in {"http", "https"}
-            or supplied.netloc.lower() != expected.netloc.lower()
+            or not same_configured_origin(
+                origin, settings.public_api_base_url, settings.api_base_url,
+            )
             or supplied.netloc.lower() != request_host.lower()
             or supplied.scheme != expected.scheme
         ):
@@ -616,7 +627,9 @@ def create_app(
             or supplied.path not in {"", "/"}
             or supplied.query
             or supplied.fragment
-            or supplied.netloc.lower() != expected.netloc.lower()
+            or not same_configured_origin(
+                origin, settings.public_api_base_url, settings.api_base_url,
+            )
             or not trusted_host
             or supplied.scheme != expected.scheme
         ):
@@ -706,8 +719,10 @@ def create_app(
         if (
             not origin
             or supplied_origin.scheme != expected_origin.scheme
-            or supplied_origin.netloc.lower() != expected_origin.netloc.lower()
-            or request_host.lower() != api_origin.netloc.lower()
+            or not same_configured_origin(
+                origin, settings.public_api_base_url, settings.api_base_url,
+            )
+            or not same_netloc(request_host, api_origin.netloc)
         ):
             raise HTTPException(status_code=403, detail="Same-origin request required")
         _reject_cognito_precedence(request)
@@ -1831,7 +1846,11 @@ def create_app(
                 )
             uploads.append((name, payload, upload.content_type))
         try:
-            return owner.workspace.upload_sources(thread_id, uploads)
+            # Blocking file/SQLite work stays off the event loop (measured in
+            # ticket 39: on-loop placement stalls every concurrent request).
+            return await run_in_threadpool(
+                owner.workspace.upload_sources, thread_id, uploads
+            )
         except ValueError as error:
             raise _value_error(error) from error
 
@@ -1859,7 +1878,11 @@ def create_app(
                 )
             uploads.append((name, payload, upload.content_type))
         try:
-            return owner.workspace.upload_attachments(thread_id, uploads)
+            # Blocking file/SQLite work stays off the event loop (measured in
+            # ticket 39: on-loop placement stalls every concurrent request).
+            return await run_in_threadpool(
+                owner.workspace.upload_attachments, thread_id, uploads
+            )
         except ValueError as error:
             raise _value_error(error) from error
 
@@ -2113,6 +2136,15 @@ def create_app(
         owner: OwnerServices = Depends(current_owner),
     ) -> CoachTurn:
         """Run the typed coaching workflow for an owned notebook."""
+        # Canvas and artifact contexts and their origins are server-resolved
+        # only (reader dispatch); clients cannot inject them. The reader
+        # dispatch marks its own server-resolved request so the resolved
+        # context survives.
+        if not request._context_server_resolved:
+            request.canvas_context = ""
+            request.canvas_context_origin = None
+            request.artifact_context = ""
+            request.artifact_feedback_origin = None
         request = _with_idempotency_header(request, http_request)
         if not owner.store.get_thread(request.thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
@@ -2273,12 +2305,41 @@ def create_app(
         """Return the owner-scoped Deep Review job, including a completed snapshot.
 
         Stale queued/running jobs are fail-closed to ``failed`` /
-        ``review_timeout``. Another student cannot read this notebook's job.
+        ``review_timeout``; a job whose billable invocation started but never
+        committed is surfaced as ``ambiguous`` (``review_outcome_unknown``)
+        and is never silently re-run. Another student cannot read this
+        notebook's job.
         """
         if not owner.store.get_thread(thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
         try:
             job = owner.coach.get_deep_review_job(thread_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        if job is None:
+            raise HTTPException(status_code=404, detail="Deep Review job not found")
+        return job
+
+    @app.post(
+        "/api/v1/threads/{thread_id}/deep-review/cancel",
+        response_model=DeepReviewJob,
+    )
+    def cancel_deep_review(
+        thread_id: str,
+        expected_review_id: str | None = Query(default=None, min_length=1, max_length=64),
+        owner: OwnerServices = Depends(current_owner),
+    ) -> DeepReviewJob:
+        """Request cancellation of the owned notebook's Deep Review job.
+
+        A queued job is cancelled immediately; a claimed job records
+        ``cancel_requested`` and its live worker decides at the next phase
+        boundary. Cancelling a terminal job answers the unchanged job. The
+        response is the current owner-scoped job envelope.
+        """
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            job = owner.coach.cancel_deep_review(thread_id, expected_review_id=expected_review_id)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         if job is None:
@@ -2331,6 +2392,15 @@ def create_app(
         do not send the header get the original event set.
         """
 
+        # Canvas and artifact contexts and their origins are server-resolved
+        # only (reader dispatch); clients cannot inject them. The reader
+        # dispatch marks its own server-resolved request so the resolved
+        # context survives.
+        if not request._context_server_resolved:
+            request.canvas_context = ""
+            request.canvas_context_origin = None
+            request.artifact_context = ""
+            request.artifact_feedback_origin = None
         return _stream_coach_turn(request, http_request, owner)
 
     active_turns: dict[tuple[str, str, str], TurnCancellation] = {}

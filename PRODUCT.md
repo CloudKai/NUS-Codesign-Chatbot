@@ -13,8 +13,9 @@ conversation history and student-authored project work across sessions.
 ## Mechanism
 One backend-owned five-stage workflow supports problem identification, concept
 generation, design specification, ethics and critical thinking, and reflection.
-Students explicitly confirm recommended stage transitions. Lecture help does not
-advance the project. Student work is not graded by this tool.
+Students explicitly confirm recommended stage transitions. Improve my design
+gives feedback on an existing design in the same chat without advancing the
+Thinking Path. Student work is not graded by this tool.
 
 ## Confirmed design commitments
 The React redesign follows the user's ChatGPT, Gemini and Codex references:

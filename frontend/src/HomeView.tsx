@@ -1,6 +1,7 @@
 /** Welcome-back home: where the student left off, in one click. Read-only; no model calls. */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, currentSession, get, type ChatSummary, type Notebook, type Project } from './api';
+import { useEffect, useMemo, useState } from 'react';
+import type { ChatSummary, Notebook, Project } from './api';
+import { readProject, readArtifacts, readCanvases } from './api/client';
 import { skillSummary } from './coachingContent';
 import { Icon } from './Icon';
 import { recentChats } from './notebookChats';
@@ -26,10 +27,13 @@ export function relativeTime(iso: string | undefined, now = Date.now()) {
   return 'just now';
 }
 
-export function HomeView({ owner, name, entries, summaries, locked, openChat, startChat, decided, expired }: {
+export function HomeView({ owner, name, entries, summaries, locked, openChat, startChat,
+  openArtifact, openCanvas }: {
   owner: string; name: string; entries: Notebook[]; summaries: Record<string, ChatSummary>; locked: boolean;
-  openChat: (id: string) => void; startChat: (intent: 'project' | 'lecture') => void;
-  decided: (id: string) => Promise<void>; expired: () => void;
+  openChat: (id: string) => void; startChat: (intent: 'project' | 'improve') => void;
+  expired?: () => void;
+  openArtifact?: (folderId: string, artifactId: string) => void;
+  openCanvas?: (folderId: string, canvasId: string) => void;
 }) {
   // Chats without a saved preview are empty or untitled drafts, so they are not worth resuming from Home.
   const chats = useMemo(() => recentChats([
@@ -39,61 +43,47 @@ export function HomeView({ owner, name, entries, summaries, locked, openChat, st
   const latest = chats[0];
   const others = chats.slice(1, 4);
   const [project, setProject] = useState<Project | null>(null);
-  const [deciding, setDeciding] = useState(false);
-  const [decisionStatus, setDecisionStatus] = useState('');
-  const lock = useRef(false);
-  const active = useRef(true);
-  const controller = useRef(new AbortController());
-  useEffect(() => {
-    active.current = true;
-    return () => { active.current = false; controller.current.abort(); };
-  }, []);
   async function loadProject(id: string, signal: AbortSignal) {
-    const value = await get<Project>(`/api/v1/reader/threads/${encodeURIComponent(id)}/project`, signal);
+    const value = await readProject(id, signal);
     if (value.owner_id === owner && value.thread_id === id) setProject(value);
   }
   useEffect(() => {
     setProject(null);
-    setDecisionStatus('');
     if (!latest) return;
     const request = new AbortController();
     loadProject(latest.id, request.signal)
       .catch(() => { /* The card still shows title, preview and time without progress. */ });
     return () => request.abort();
   }, [latest?.id, owner]);
-  /** Same endpoint and lock rules as the in-chat card; the answer is never replayed, only re-read. */
-  async function decide(accepted: boolean) {
-    const pending = project?.pending;
-    if (!latest || !pending || lock.current || locked) return;
-    const id = latest.id;
-    lock.current = true;
-    setDeciding(true);
-    setDecisionStatus('Checking saved project…');
-    controller.current = new AbortController();
-    const signal = controller.current.signal;
-    try {
-      const session = await currentSession(signal);
-      if (session.owner_id !== owner) { expired(); return; }
-      const response = await fetch(`/api/v1/reader/threads/${encodeURIComponent(id)}/project/resolve/${encodeURIComponent(pending.id)}`, {
-        method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accepted }),
-      });
-      if ([401, 403].includes(response.status)) { expired(); return; }
-      await loadProject(id, signal);
-      await decided(id);
-      if (active.current) setDecisionStatus(response.ok ? (accepted ? 'Moved to the next stage.' : 'Staying in this stage.') : 'That decision is no longer available. Saved project refreshed.');
-    } catch (error) {
-      if (active.current && !(error instanceof DOMException && error.name === 'AbortError')) {
-        setDecisionStatus(error instanceof ApiError && [401, 403].includes(error.status) ? 'Sign in again to continue.' : 'Could not verify the decision. Open the chat to check the saved project.');
-      }
-    } finally {
-      lock.current = false;
-      if (active.current) setDeciding(false);
-    }
-  }
   const folder = (chat: Notebook) => entries.find(entry => entry.id === chat.parent_notebook_id && entry.kind === 'notebook')?.name;
   const stage = project?.stages.find(item => item.id === project.current_stage);
   const skills = skillSummary(project?.review?.facione_scores ?? []);
+  // The project notebook owns the persistent artifacts and canvases; everything
+  // here reuses persisted summaries, timestamps and bounded list reads. No
+  // model call, no fabricated progress and no activity counts as learning.
+  const projectNotebookId = latest
+    ? (latest.kind === 'notebook' ? latest.id : latest.parent_notebook_id ?? undefined)
+    : undefined;
+  const [artifacts, setArtifacts] = useState<{ id: string; title: string; updated_at: string }[] | null>(null);
+  const [canvases, setCanvases] = useState<{ id: string; title: string; updated_at: string }[] | null>(null);
+  useEffect(() => {
+    setArtifacts(null); setCanvases(null);
+    if (!projectNotebookId) return;
+    const request = new AbortController();
+    readArtifacts(projectNotebookId, request.signal)
+      .then(list => setArtifacts(list.artifacts.slice(0, 2)))
+      .catch(() => { /* The card still shows the chat and progress without saved work. */ });
+    readCanvases(projectNotebookId, request.signal)
+      .then(list => setCanvases(list.canvases.slice(0, 2)))
+      .catch(() => { /* Same truthful absence for canvases. */ });
+    return () => request.abort();
+  }, [projectNotebookId]);
+  const stageFeedback = (project?.review?.improvements ?? [])
+    .find(item => item.stage_id === project?.current_stage)?.items.slice(0, 2) ?? [];
+  // The most recent confirmed-milestone recap, persisted at confirmation time.
+  const recap = (project?.recaps ?? [])
+    .slice()
+    .sort((a, b) => (a.confirmed_at < b.confirmed_at ? 1 : -1))[0] ?? null;
   // The student's own latest saved contribution, so Home shows the companion remembers their work.
   const lastShared = (() => {
     if (!project) return '';
@@ -117,18 +107,49 @@ export function HomeView({ owner, name, entries, summaries, locked, openChat, st
           ? <p className="continue-preview">{lastShared ? <span className="continue-label">You last shared</span> : null}{lastShared ? `“${lastShared}”` : summaries[latest.id].preview}</p> : null}
         {project && stage && hasProjectWork(project) ? <div className="continue-progress">
           <StageStepper stages={project.stages} currentStage={project.current_stage} pending={!!project.pending} compact/>
-          <p><strong>{stage.label}</strong></p>
-          {project.pending ? <div className="home-decision">
-            <p className="home-decision-question">Ready for {project.stages.find(item => item.id === project.pending!.to_stage)?.label ?? 'the next stage'}?</p>
-            <div className="stage-actions">
-              <button className="primary" disabled={locked || deciding} onClick={() => void decide(true)}>Move on</button>
-              <button disabled={locked || deciding} onClick={() => void decide(false)}>Stay here</button>
-            </div>
-          </div> : <p className="supporting">{stage.next_action}</p>}
-          <p className="supporting" role="status">{decisionStatus}</p>
+          <p className="home-work-on"><span className="continue-label">To work on</span>
+            {(() => {
+              const pending = project.pending;
+              const pendingLabel = pending
+                ? project.stages.find(item => item.id === pending.to_stage)?.label ?? 'the next stage'
+                : '';
+              return project.pending
+                ? `“${bounded(project.pending.rationale) || pendingLabel}”`
+                : stage.next_action;
+            })()}</p>
+          <button className="primary" disabled={locked} onClick={() => openChat(latest.id)}>Continue <Icon name="chevronRight"/></button>
+          {stageFeedback.length
+            ? <p className="supporting">Saved feedback for this stage: {stageFeedback.join(' · ')}</p> : null}
           {skills ? <p className="supporting">Strongest skill: {skills.strongest}. Next to grow: {skills.grow}.</p> : null}
         </div> : null}
-        <button className="primary" disabled={locked} onClick={() => openChat(latest.id)}>Continue <Icon name="chevronRight"/></button>
+        {recap ? <section className="milestone-recap" aria-label="Milestone recap">
+          <h3>Milestone: {recap.stage_label} confirmed</h3>
+          {recap.accomplishments ? <p>{recap.accomplishments}</p> : null}
+          {recap.changes ? <p>What changed: {recap.changes}</p> : null}
+          {recap.gaps.length ? <p className="supporting">Still open: {recap.gaps.join(' · ')}</p> : null}
+          <p className="supporting">Next: {recap.next_action}</p>
+        </section> : null}
+        {projectNotebookId ? <section className="recent-work" aria-label="Recent work">
+          <h3>Recent work</h3>
+          {artifacts === null ? null : artifacts.length
+            ? <ul>{artifacts.map(entry => <li key={entry.id}>
+                <button disabled={locked || !openArtifact}
+                  onClick={() => openArtifact?.(projectNotebookId, entry.id)}>
+                  <Icon name="document"/><span>{entry.title}</span>
+                  <time>{relativeTime(entry.updated_at)}</time>
+                </button>
+              </li>)}</ul>
+            : <p className="supporting">No documents yet. Create one from your notebook.</p>}
+          {canvases === null ? null : canvases.length
+            ? <ul>{canvases.map(entry => <li key={entry.id}>
+                <button disabled={locked || !openCanvas}
+                  onClick={() => openCanvas?.(projectNotebookId, entry.id)}>
+                  <Icon name="panel"/><span>{entry.title}</span>
+                  <time>{relativeTime(entry.updated_at)}</time>
+                </button>
+              </li>)}</ul>
+            : <p className="supporting">No canvases yet. Map your reasoning from your notebook.</p>}
+        </section> : null}
       </article>
       {others.length ? <section className="recent-chats" aria-label="Other recent chats">
         <h2>Recent chats</h2>
@@ -146,8 +167,9 @@ export function HomeView({ owner, name, entries, summaries, locked, openChat, st
         <p className="supporting">The coach suggests when to move on. You decide.</p>
         <div className="empty-workspace-actions">
           <button className="primary" disabled={locked} onClick={() => startChat('project')}>Start my design project</button>
-          <button disabled={locked} onClick={() => startChat('lecture')}>Ask a lecture question</button>
+          <button aria-describedby="home-improve-description" disabled={locked} onClick={() => startChat('improve')}>Improve my design</button>
         </div>
+        <p id="home-improve-description" className="supporting">Get feedback on a design you already have.</p>
       </section>
     </>}
     <p className="supporting privacy-note">Your work here is not graded.</p>
@@ -157,4 +179,10 @@ export function HomeView({ owner, name, entries, summaries, locked, openChat, st
 function lastActive(summary: ChatSummary | undefined, folder: string | undefined) {
   const when = relativeTime(summary?.activity_at);
   return [when ? `Last active ${when}` : 'Your latest chat', folder ? `in ${folder}` : ''].filter(Boolean).join(' ');
+}
+
+/** Bounded AI-generated work-on text: the saved coach rationale, never re-generated on page load. */
+function bounded(text: string): string {
+  const trimmed = text.split(/\s+/).filter(Boolean).join(' ').trim();
+  return trimmed.length > 160 ? `${trimmed.slice(0, 157).trimEnd()}…` : trimmed;
 }

@@ -75,6 +75,35 @@ class CitationOutput(BaseModel):
     excerpt: str = ""
 
 
+class CanvasSuggestionOutput(BaseModel):
+    """One inert canvas proposal from the model, validated before persistence.
+
+    Field text is untrusted and later re-validated server-side; targets are
+    labels resolved against the real graph only when the student accepts.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(min_length=4, max_length=64)
+    kind: Literal["new_node", "new_edge"]
+    node_kind: str | None = Field(default=None, max_length=32)
+    title: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=2_000)
+    relation: str | None = Field(default=None, max_length=32)
+    source_node_id: str | None = Field(default=None, max_length=64)
+    target_node_id: str | None = Field(default=None, max_length=64)
+    rationale: str = Field(default="", max_length=500)
+
+
+class ArtifactFeedbackOutput(BaseModel):
+    """One inert before/after text proposal from the model, re-validated server-side."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    proposed_text: str = Field(min_length=1, max_length=8_000)
+    rationale: str = Field(min_length=1, max_length=500)
+
+
 class AssessmentOutput(BaseModel):
     """Required educational assessment fields for one coach_turn."""
 
@@ -557,6 +586,37 @@ class FastChatTurnOutput(BaseModel):
             "Return true only when the student's request or supplied material is "
             "clearly unrelated to CDE2300 course content and the active CDE2300 "
             "design project. Return false when relevance is plausible or uncertain."
+        ),
+    )
+    canvas_suggestions: list[CanvasSuggestionOutput] = Field(
+        default_factory=list,
+        description=(
+            "Optional. Return [] unless the supplied canvas context describes "
+            "selected canvas nodes AND proposing a node or relationship would "
+            "genuinely help the student's reasoning. At most 5 proposals. "
+            "Proposals are inert text for the student to review; they are not "
+            "actions. For a new node: set kind to new_node and fill node_kind "
+            "(one of the canvas node types named in the canvas context rules), "
+            "a short title (max 200 chars), an optional description (max 2000 "
+            "chars) and a one-sentence rationale. For a new relationship "
+            "between two nodes named in the canvas context: set kind to "
+            "new_edge, relation (one of the canvas relationship types), "
+            "source_node_id and target_node_id from the context labels, and a "
+            "rationale. Give every proposal a stable unique id starting with "
+            "sg-. Never propose database actions, stage changes, or content "
+            "the student did not discuss."
+        ),
+    )
+    artifact_feedback: ArtifactFeedbackOutput | None = Field(
+        default=None,
+        description=(
+            "Optional. Return null unless the untrusted artifact context shows "
+            "saved draft text AND revising it would genuinely help the "
+            "student's reasoning. At most one proposal. proposed_text is the "
+            "complete revised passage (max 8000 chars) the student will review "
+            "as a before/after pair; rationale is one sentence. This is inert "
+            "text for review, never an action. Never propose database "
+            "operations, stage changes, or content the student did not draft."
         ),
     )
 

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 
+from .artifact_feedback import ArtifactFeedback
+from .canvas_draft import CanvasDraftProposal
+from .canvas_suggestions import CanvasSuggestion
 from .coaching.progress import emit_coach_reply_delta, reply_delta_sink_bound
 from .domain import (
     ClearCode,
@@ -35,6 +39,90 @@ from .student_journey import (
 
 
 _CITATION_LABEL = re.compile(r"S\d+")
+_CANVAS_NODE_TITLE = re.compile(r"Node '([^']{1,200})'")
+
+# Deterministic artifact feedback: a focused formative refinement of the
+# resolved saved passage. The proposal is data the student reviews as a
+# before/after pair; it persists nothing on its own.
+_FEEDBACK_ADDITION = (
+    " Name who is affected, what success looks like, and one constraint you "
+    "must respect."
+)
+_FEEDBACK_RATIONALE = (
+    "The passage states the idea; the revision names the affected people, the "
+    "intended outcome and one constraint, which is what this stage asks for."
+)
+
+
+def _mock_artifact_feedback(request: CoachRequest) -> ArtifactFeedback | None:
+    """Return one deterministic before/after proposal for an artifact passage.
+
+    The identity is content-stable for the same proposed text, so accepting
+    the same proposal twice is detectable client-side.
+    """
+    context = request.artifact_context or ""
+    if not context.strip():
+        return None
+    original = request.artifact_feedback_origin.original_text if (
+        request.artifact_feedback_origin is not None) else ""
+    base = (original or context).strip()
+    proposed = (base + _FEEDBACK_ADDITION)[:8_000]
+    digest = hashlib.sha1(proposed.encode("utf-8")).hexdigest()[:8]
+    return ArtifactFeedback(
+        id=f"af-mock-{digest}",
+        kind="revise_text",
+        proposed_text=proposed,
+        rationale=_FEEDBACK_RATIONALE,
+    )
+
+
+def _mock_canvas_draft(request: CoachRequest) -> CanvasDraftProposal | None:
+    """Return one deterministic synthesized draft for an explicit draft request.
+
+    The proposal is untrusted data: it creates nothing and the student edits
+    and confirms it before any artifact exists.
+    """
+    if request.canvas_selection_purpose != "draft":
+        return None
+    context = (request.canvas_context or "").strip()
+    if not context:
+        return None
+    title_match = _CANVAS_NODE_TITLE.search(context)
+    title = f"Draft brief: {title_match.group(1)}"[:200] if title_match else "Draft brief"
+    return CanvasDraftProposal(
+        id=f"cd-mock-{hashlib.sha1(context.encode('utf-8')).hexdigest()[:8]}",
+        title=title,
+        draft_text=f"{context}\n\nDrafted by the coach from your selected nodes. "
+                   "Edit this text before confirming.",
+        rationale="Synthesized from the selected canvas nodes for your review.",
+    )
+
+
+def _mock_canvas_suggestion(request: CoachRequest) -> CanvasSuggestion | None:
+    """Return one deterministic node proposal for a canvas coaching turn.
+
+    Coaching about a selected canvas node proposes a candidate concept node
+    derived from the server-resolved selection text. The proposal is untrusted
+    data: it persists nothing and the identity is stable for the same proposed
+    content, so accepting it twice is detectable client-side.
+    """
+    if request.canvas_selection_purpose == "draft":
+        return None  # a draft request gets a reviewable draft, not a node proposal
+    match = _CANVAS_NODE_TITLE.search(request.canvas_context or "")
+    if match is None:
+        return None
+    title = f"Idea: {match.group(1)}"[:200]
+    digest = hashlib.sha1(title.encode("utf-8")).hexdigest()[:8]
+    return CanvasSuggestion(
+        id=f"sg-mock-{digest}",
+        kind="new_node",
+        node_kind="concept",
+        title=title,
+        description=(
+            "Proposed from your selected canvas node. Edit it before accepting."
+        ),
+        rationale="The selected node does not yet have a candidate concept attached.",
+    )
 _MAX_GROUNDED_EXCERPT_CHARS = 320
 _CLEAR_BY_STAGE = {
     "problem_identification": ClearCode.CONCISE,
@@ -318,6 +406,30 @@ class DeterministicCoachProvider:
             and not request.allow_model_knowledge
             and not request.source_ids
         )
+        if request.interaction_intent == "improve_design":
+            response = (
+                "Pick the part of your design you most want to improve. "
+                "What change would make it easier for the intended users, "
+                "and how could you test it with them?"
+            )
+            evidence = _mock_grounded_evidence(request)
+            if evidence:
+                excerpt, label = evidence
+                response = f"The material you shared says: “{excerpt}” [{label}].\n\n{response}"
+            elif request.retrieval_required and not request.allow_model_knowledge:
+                response = f"I couldn't verify an excerpt from the requested materials.\n\n{response}"
+            suggestion = _mock_canvas_suggestion(request)
+            feedback = _mock_artifact_feedback(request)
+            return ProviderAssessmentResult(
+                response_text=response,
+                assessment=EducationalAssessment(
+                    current_stage=request.current_stage, response_mode="qa"
+                ),
+                specialist="qa",
+                canvas_suggestions=[suggestion] if suggestion else [],
+                artifact_feedback=[feedback] if feedback else [],
+                canvas_draft=_mock_canvas_draft(request),
+            )
         if request.interaction_intent == "lecture_help" or (
             request.interaction_intent is None
             and (specialist == SPECIALIST_QA or course_catalog_qa)
@@ -412,6 +524,17 @@ class DeterministicCoachProvider:
             response_text=response,
             assessment=assessment,
             research_coding=_mock_research_coding(request),
+            canvas_suggestions=[
+                suggestion
+                for suggestion in [_mock_canvas_suggestion(request)]
+                if suggestion is not None
+            ],
+            artifact_feedback=[
+                feedback
+                for feedback in [_mock_artifact_feedback(request)]
+                if feedback is not None
+            ],
+            canvas_draft=_mock_canvas_draft(request),
         )
 
     def _qa_result(self, request: CoachRequest) -> ProviderAssessmentResult:

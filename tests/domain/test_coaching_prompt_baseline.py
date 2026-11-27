@@ -18,7 +18,7 @@ def test_canonical_coaching_prompts_match_pedagogical_baseline() -> None:
     payload = json.loads(_FIXTURE.read_text(encoding="utf-8"))
     assert "explicit pedagogical review" in str(payload.get("note") or "").lower()
     files = payload["files"]
-    assert len(files) == 6
+    assert len(files) == 7
     for item in files:
         path = Path(item["path"])
         digest = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()

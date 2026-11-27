@@ -241,6 +241,81 @@ ON research_access_events(actor_user_id, created_at, id);
 CREATE INDEX ASYNC IF NOT EXISTS idx_research_access_request
 ON research_access_events(request_id, created_at, id);
 
+CREATE TABLE IF NOT EXISTS student_artifacts (
+    id TEXT PRIMARY KEY,
+    notebook_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'notes',
+    document_text TEXT NOT NULL,
+    references_text TEXT NOT NULL DEFAULT '[]',
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 1,
+    origin TEXT NOT NULL DEFAULT 'editor',
+    request_id TEXT,
+    request_fingerprint TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS student_artifact_versions (
+    id TEXT PRIMARY KEY,
+    artifact_id TEXT NOT NULL,
+    notebook_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    document_text TEXT NOT NULL,
+    references_text TEXT NOT NULL DEFAULT '[]',
+    origin TEXT NOT NULL,
+    restored_from INTEGER,
+    created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_student_artifact_versions_unique
+ON student_artifact_versions(artifact_id, revision);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_student_artifacts_notebook_updated
+ON student_artifacts(notebook_id, updated_at);
+
+-- PostgreSQL/DSQL allow multiple NULLs in a unique index, so legacy rows
+-- without a request id never collide. SQLite uses a partial index instead.
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_student_artifacts_request
+ON student_artifacts(notebook_id, request_id);
+
+CREATE TABLE IF NOT EXISTS student_canvases (
+    id TEXT PRIMARY KEY,
+    notebook_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    graph_text TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 1,
+    origin TEXT NOT NULL DEFAULT 'editor',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_student_canvases_notebook_updated
+ON student_canvases(notebook_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS student_canvas_versions (
+    id TEXT PRIMARY KEY,
+    canvas_id TEXT NOT NULL,
+    notebook_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    graph_text TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    restored_from INTEGER,
+    created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_student_canvas_versions_unique
+ON student_canvas_versions(canvas_id, revision);
+
 CREATE TABLE IF NOT EXISTS system_metadata (
     key TEXT PRIMARY KEY,
     value_text TEXT NOT NULL,
@@ -259,6 +334,10 @@ NOTEBOOK_CHILD_TABLES = (
     "research_observations",
     "messages",
     "sources",
+    "student_artifacts",
+    "student_artifact_versions",
+    "student_canvases",
+    "student_canvas_versions",
 )
 
 # Backwards-compatible alias used by older call sites during the refactor.

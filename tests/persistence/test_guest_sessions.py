@@ -287,6 +287,10 @@ def test_guest_claim_fences_owner_transfer_and_same_account_retry(tmp_path: Path
     guest = StudentStore(path, identifier=str(guest_profile["identifier"]))
     notebook_id = guest.create_thread(model_id="mock", support_mode="guided")
     message_id = guest.add_message(notebook_id, "user", "Keep this transcript")
+    artifact = guest.create_artifact(notebook_id, "Field notes", {"type": "doc", "content": []})
+    guest.update_artifact(artifact["id"], {"type": "doc", "content": []}, 1, "Revised notes")
+    canvas = guest.create_canvas(notebook_id, "Map", {"nodes": [], "edges": []})
+    guest.update_canvas(canvas["id"], {"nodes": [], "edges": []}, 1, "Revised map")
     with guest._connect() as connection:
         connection.execute(
             "INSERT INTO sources (id, notebook_id, kind, title, content_type, "
@@ -325,6 +329,12 @@ def test_guest_claim_fences_owner_transfer_and_same_account_retry(tmp_path: Path
     )
     assert result == {"notebook_ids": [notebook_id], "notebook_count": 1}
     assert account.get_thread(notebook_id) is not None
+    assert account.get_artifact(artifact["id"])["title"] == "Revised notes"
+    assert account.get_canvas(canvas["id"])["title"] == "Revised map"
+    assert len(account.list_artifact_versions(artifact["id"])) == 2
+    assert len(account.list_canvas_versions(canvas["id"])) == 2
+    assert guest.get_artifact(artifact["id"]) is None
+    assert guest.get_canvas(canvas["id"]) is None
     assert account.get_messages(notebook_id)[0]["id"] == message_id
     source = account.get_source(notebook_id, "source-a", include_extracted_text=False)
     assert source["object_key"] == mapping["users/guest/notebooks/source-a/raw/brief.pdf"]

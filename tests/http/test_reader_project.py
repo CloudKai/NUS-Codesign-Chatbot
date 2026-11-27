@@ -79,6 +79,34 @@ def test_reader_project_resumes_canonical_authored_work(tmp_path: Path, monkeypa
     assert review['facione_scores'][0]['score'] == 4
 
 
+def test_reader_project_projects_stage_criteria(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Review stages show authored deliverable criteria without awarding completion."""
+    monkeypatch.setattr(settings, 'public_api_base_url', 'https://testserver')
+    root = StudentStore(tmp_path / 'criteria.sqlite3')
+    _seed_user(root, 'student', 'student')
+    student = StudentStore(root.path, identifier='cognito:student')
+    thread = student.create_thread(model_id='mock', support_mode='critical-thinking')
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc), base_url='https://testserver')
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))
+    view = client.get(f'/api/v1/reader/threads/{thread}/project').json()
+    assert view['current_stage'] == 'problem_identification'
+    stages = {stage['id']: stage for stage in view['stages']}
+    assert stages['problem_identification']['criteria'] == [
+        'Names the affected people and their context.',
+        'Describes the outcome they need without fixing one solution.',
+        'Points to evidence from interviews or fieldwork.',
+    ]
+    assert stages['reflection']['criteria'] == [
+        'Explains one change in your thinking.',
+        'Gives the evidence that changed it.',
+        'Names what remains uncertain.',
+    ]
+    # Criteria describe the deliverable only; no stage is completed or unlocked by them.
+    assert all(stage['criteria'] for stage in stages.values())
+    assert not stages['reflection']['completed'] and not stages['reflection']['selectable']
+
+
 def test_reader_project_turn_requires_confirmation(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
     """A saved project recommendation is visible without awarding completion."""
     import json
@@ -234,3 +262,118 @@ def test_reader_stale_recommendation_and_completed_stage_coaching(tmp_path: Path
     view = client.get(f'{path}/project').json()
     assert view['current_stage'] == 'problem_identification'
     assert [stage['id'] for stage in view['stages'] if stage['completed']] == ['problem_identification']
+
+
+def test_reader_project_projects_saved_milestone_recaps(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    """Confirmed-milestone recaps are read-only projections; malformed entries are dropped."""
+    monkeypatch.setattr(settings, 'public_api_base_url', 'https://testserver')
+    root = StudentStore(tmp_path / 'recaps.sqlite3')
+    _seed_user(root, 'student', 'student')
+    student = StudentStore(root.path, identifier='cognito:student')
+    thread = student.create_thread(model_id='mock', support_mode='critical-thinking')
+    student.update_thread(thread, metadata={'milestone_recaps': [
+        {'id': 'recap-1', 'stage_id': 'problem_identification',
+         'stage_label': 'Problem identification', 'transition_id': 'tr-1',
+         'next_stage_id': 'concept_generation', 'next_stage_label': 'Concept generation',
+         'next_action': 'Describe two different concepts.',
+         'accomplishments': 'Named the unsafe crossing.', 'changes': '',
+         'gaps': ['Who else is affected?'], 'relevant_work': [],
+         'confirmed_at': '2026-11-25T01:00:00Z'},
+        {'stage_id': 'nonsense'},
+    ]})
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc), base_url='https://testserver')
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))
+    view = client.get(f'/api/v1/reader/threads/{thread}/project').json()
+    recaps = view['recaps']
+    assert [recap['id'] for recap in recaps] == ['recap-1']
+    assert recaps[0]['stage_id'] == 'problem_identification'
+    assert recaps[0]['accomplishments'] == 'Named the unsafe crossing.'
+    assert recaps[0]['gaps'] == ['Who else is affected?']
+
+
+def test_improve_turn_preserves_pending_project_progress(
+    tmp_path: Path, monkeypatch: MonkeyPatch,
+) -> None:
+    """An Improve turn streams and saves without affecting a pending recommendation."""
+    import json
+
+    import backend.owner_context as owners
+    from backend.domain import StageDecision
+    from backend.mock_provider import DeterministicCoachProvider
+
+    monkeypatch.setattr(settings, 'public_api_base_url', 'https://testserver')
+    monkeypatch.setattr(owners, 'configured_coach_provider',
+                        lambda: DeterministicCoachProvider(StageDecision.ADVANCE))
+    root = StudentStore(tmp_path / 'improve.sqlite3')
+    _seed_user(root, 'student', 'student')
+    student = StudentStore(root.path, identifier='cognito:student')
+    thread = student.create_thread(model_id='mock', support_mode='critical-thinking')
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc, auto_advance_stages=False),
+                        base_url='https://testserver')
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))
+    path = f'/api/v1/reader/threads/{thread}'
+    headers = {'Origin': 'https://testserver'}
+    project = client.post(f'{path}/project/stream', json={
+        'student_message': 'Older residents need to cross safely to reach the shops.',
+        'idempotency_key': 'project-first',
+    }, headers=headers)
+    assert project.status_code == 200
+    before = client.get(f'{path}/project').json()
+    assert before['pending']
+
+    message = 'My crossing prototype has a timer. How could I make it easier to read?'
+    response = client.post(f'{path}/improve/stream', json={
+        'student_message': message, 'idempotency_key': 'improve-first',
+    }, headers=headers)
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    turn = next(event['turn'] for event in events if event['event'] == 'done')
+    assert turn['response_text']
+    assert turn['pending_transition'] is None
+    assert turn['assessment']['recommendation'] is None
+    assert client.get(f'{path}/coach-turn?idempotency_key=improve-first').json() == turn
+    after = client.get(f'{path}/project').json()
+    assert after['pending'] == before['pending']
+    assert after['current_stage'] == before['current_stage']
+    assert after['stages'] == before['stages']
+    saved = client.get(f'{path}/messages/page').json()['messages']
+    assert [row['content'] for row in saved[-2:]] == [message, turn['response_text'].strip()]
+
+
+def test_reader_preserves_legacy_intent_and_revises_it_as_improve(
+    tmp_path: Path, monkeypatch: MonkeyPatch,
+) -> None:
+    """Older chats reopen and revise without rewriting their historical classification."""
+    import json
+
+    monkeypatch.setattr(settings, 'public_api_base_url', 'https://testserver')
+    root = StudentStore(tmp_path / 'legacy-improve.sqlite3')
+    _seed_user(root, 'student', 'student')
+    student = StudentStore(root.path, identifier='cognito:student')
+    thread = student.create_thread(model_id='mock', support_mode='critical-thinking')
+    oidc = FakeOIDC(root)
+    client = TestClient(create_app(root, oidc_client=oidc), base_url='https://testserver')
+    client.cookies.set(settings.cognito_id_token_cookie_name, oidc.add('student'))
+    path = f'/api/v1/reader/threads/{thread}'
+    headers = {'Origin': 'https://testserver'}
+    legacy = client.post(f'{path}/lecture/stream', headers=headers, json={
+        'student_message': 'Hello',
+        'idempotency_key': 'legacy-turn',
+    })
+    assert legacy.status_code == 200
+    before = client.get(f'{path}/messages/page').json()['messages']
+    original = next(row for row in before if row['role'] == 'user')
+    assert original['interaction_intent'] == 'lecture_help'
+
+    revised = client.post(f"{path}/messages/{original['id']}/revise/stream",
+                          headers=headers, json={
+                              'content': 'Help me improve my crossing timer.',
+                              'idempotency_key': 'legacy-revision',
+                          })
+    events = [json.loads(line) for line in revised.text.splitlines()]
+    assert any(event['event'] == 'done' for event in events)
+    rows = client.get(f'{path}/messages/page').json()['messages']
+    assert [row['interaction_intent'] for row in rows[-2:]] == ['improve_design', 'improve_design']
+    assert rows[-2]['content'] == 'Help me improve my crossing timer.'

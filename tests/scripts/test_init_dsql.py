@@ -915,3 +915,442 @@ def test_apply_dsql_schema_runs_revision_migration_only_on_full_bootstrap():
         if "ALTER TABLE messages ADD COLUMN conversation_revision" in item
     )
     assert notebooks_pos < messages_pos
+
+
+_WORKSPACE_TABLES = (
+    "student_artifacts",
+    "student_artifact_versions",
+    "student_canvases",
+    "student_canvas_versions",
+)
+_WORKSPACE_INDEXES = (
+    "idx_student_artifact_versions_unique",
+    "idx_student_artifacts_notebook_updated",
+    "idx_student_artifacts_request",
+    "idx_student_canvases_notebook_updated",
+    "idx_student_canvas_versions_unique",
+)
+_WORKSPACE_UNIQUE_INDEXES = frozenset(
+    {
+        "idx_student_artifact_versions_unique",
+        "idx_student_artifacts_request",
+        "idx_student_canvas_versions_unique",
+    }
+)
+
+
+def _normalized_sql(sql: str) -> str:
+    return " ".join(sql.split())
+
+
+def _canonical_workspace_create_sql(table: str) -> str:
+    prefix = f"CREATE TABLE IF NOT EXISTS {table.upper()}"
+    for statement in iter_dsql_ddl_statements():
+        normalized = _normalized_sql(statement)
+        if normalized.upper().startswith(prefix):
+            return normalized
+    raise AssertionError(f"{table} CREATE TABLE missing from the DSQL schema")
+
+
+def _workspace_legacy_shapes() -> dict[str, set[str]]:
+    """Pre-architecture-programme shapes: no post-rollout workspace columns."""
+    return {
+        "student_artifacts": {
+            "id",
+            "notebook_id",
+            "user_id",
+            "title",
+            "document_text",
+            "schema_version",
+            "revision",
+            "origin",
+            "created_at",
+            "updated_at",
+        },
+        "student_artifact_versions": {
+            "id",
+            "artifact_id",
+            "notebook_id",
+            "user_id",
+            "revision",
+            "title",
+            "kind",
+            "document_text",
+            "origin",
+            "restored_from",
+            "created_at",
+        },
+        "student_canvases": {
+            "id",
+            "notebook_id",
+            "user_id",
+            "title",
+            "graph_text",
+            "schema_version",
+            "revision",
+            "origin",
+            "created_at",
+            "updated_at",
+        },
+        "student_canvas_versions": {
+            "id",
+            "canvas_id",
+            "notebook_id",
+            "user_id",
+            "revision",
+            "title",
+            "graph_text",
+            "origin",
+            "restored_from",
+            "created_at",
+        },
+    }
+
+
+def test_workspace_migration_plan_creates_missing_tables_with_canonical_columns():
+    """Fresh cluster: four CREATE TABLE statements mirroring dsql_schema.py."""
+    planned = _DSQL_CLI.plan_workspace_table_migrations({})
+    normalized = [_normalized_sql(sql) for sql in planned]
+
+    assert [sql for sql in normalized if sql.startswith("CREATE TABLE")] == [
+        _canonical_workspace_create_sql(table) for table in _WORKSPACE_TABLES
+    ]
+    assert not any(" ADD COLUMN " in f" {sql} " for sql in normalized)
+
+    index_sql = [
+        sql for sql in normalized if " INDEX ASYNC " in f" {sql.upper()} "
+    ]
+    assert len(index_sql) == len(_WORKSPACE_INDEXES)
+    for index in _WORKSPACE_INDEXES:
+        assert any(index in sql for sql in index_sql)
+    for sql in index_sql:
+        index_name = sql.split("EXISTS ")[1].split()[0]
+        is_unique = sql.upper().startswith("CREATE UNIQUE INDEX ASYNC")
+        assert is_unique is (index_name in _WORKSPACE_UNIQUE_INDEXES)
+
+    grants = [
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table} "
+        "TO co_design_app"
+        for table in _WORKSPACE_TABLES
+    ]
+    assert [sql for sql in normalized if sql.startswith("GRANT ")] == grants
+    assert normalized[-len(grants):] == grants
+
+
+def test_workspace_migration_plan_adds_post_rollout_columns_to_legacy_tables():
+    """Existing cluster: one DSQL-safe ADD COLUMN per missing post-rollout column."""
+    planned = _DSQL_CLI.plan_workspace_table_migrations(_workspace_legacy_shapes())
+    normalized = [_normalized_sql(sql) for sql in planned]
+
+    assert not any(sql.startswith("CREATE TABLE") for sql in normalized)
+    alters = [sql for sql in normalized if sql.startswith("ALTER TABLE")]
+    assert alters == [
+        "ALTER TABLE student_artifacts ADD COLUMN kind TEXT",
+        "ALTER TABLE student_artifacts ADD COLUMN references_text TEXT",
+        "ALTER TABLE student_artifacts ADD COLUMN request_id TEXT",
+        "ALTER TABLE student_artifacts ADD COLUMN request_fingerprint TEXT",
+        "ALTER TABLE student_artifact_versions ADD COLUMN references_text TEXT",
+    ]
+    for sql in alters:
+        assert " NOT NULL" not in sql.upper()
+        assert "DEFAULT" not in sql.upper()
+
+    assert any("idx_student_artifacts_request" in sql for sql in normalized)
+    assert any(sql.startswith("GRANT ") for sql in normalized)
+
+
+def test_workspace_migration_plan_is_idempotent_for_complete_tables():
+    """Nothing missing: only guarded indexes and grants are planned."""
+    shapes = _workspace_legacy_shapes()
+    shapes["student_artifacts"].update(
+        {"kind", "references_text", "request_id", "request_fingerprint"}
+    )
+    shapes["student_artifact_versions"].add("references_text")
+
+    planned = _DSQL_CLI.plan_workspace_table_migrations(shapes)
+    normalized = [_normalized_sql(sql) for sql in planned]
+
+    assert not any(
+        sql.startswith(("CREATE TABLE", "ALTER TABLE")) for sql in normalized
+    )
+    assert len(normalized) == len(_WORKSPACE_INDEXES) + len(_WORKSPACE_TABLES)
+    for sql in normalized[: len(_WORKSPACE_INDEXES)]:
+        assert " INDEX ASYNC IF NOT EXISTS " in f" {sql.upper()} "
+    for table in _WORKSPACE_TABLES:
+        assert (
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table} "
+            "TO co_design_app"
+        ) in normalized
+
+
+class _WorkspaceMigrationAdminState:
+    """Shared fake-admin catalog and execution log for workspace migration tests."""
+
+    def __init__(self, columns_by_table: dict[str, set[str]]):
+        self.columns_by_table = {
+            table.lower(): {column.lower() for column in columns}
+            for table, columns in columns_by_table.items()
+        }
+        # (table, column) -> ids whose column is NULL; consumed by UPDATEs so
+        # backfill loops terminate like a real database.
+        self.null_ids: dict[tuple[str, str], set[str]] = {}
+        self.indexes: set[str] = set()
+        self.executed: list[str] = []
+        self.events: list[str] = []
+        self.commits = 0
+        self.closed = 0
+
+
+class _WorkspaceMigrationAdminConnection:
+    """Fake DSQL admin connection supporting per-table catalog reads."""
+
+    def __init__(self, state: _WorkspaceMigrationAdminState):
+        self.state = state
+
+    def execute(self, sql: str, params: Any = None) -> _GuestMigrationResult:
+        normalized = " ".join(sql.split())
+        upper = normalized.upper()
+        if "INFORMATION_SCHEMA.COLUMNS" in upper:
+            table = str(tuple(params or ())[0]).lower()
+            return _GuestMigrationResult(
+                [
+                    {
+                        "column_name": name,
+                        "column_default": None,
+                        "is_nullable": "YES",
+                    }
+                    for name in sorted(
+                        self.state.columns_by_table.get(table, set())
+                    )
+                ]
+            )
+        if upper.startswith("SELECT ID FROM"):
+            tokens = normalized.split()
+            table = tokens[3].lower()
+            column = tokens[5].lower()
+            limit = int(tuple(params or ())[0])
+            remaining = sorted(self.state.null_ids.get((table, column), set()))
+            return _GuestMigrationResult(
+                [{"id": row_id} for row_id in remaining[:limit]]
+            )
+        self.state.executed.append(normalized)
+        self.state.events.append(normalized)
+        if upper.startswith("CREATE TABLE"):
+            table = normalized.split()[5].lower()
+            self.state.columns_by_table.setdefault(table, set())
+            return _GuestMigrationResult()
+        if " ADD COLUMN " in f" {upper} ":
+            tokens = normalized.split()
+            self.state.columns_by_table.setdefault(tokens[2].lower(), set()).add(
+                tokens[5].lower()
+            )
+            return _GuestMigrationResult()
+        if " INDEX ASYNC " in f" {upper} ":
+            tokens = normalized.split()
+            index_name = tokens[tokens.index("EXISTS") + 1]
+            if index_name in self.state.indexes:
+                return _GuestMigrationResult()
+            self.state.indexes.add(index_name)
+            return _GuestMigrationResult([{"job_id": f"job-{index_name}"}])
+        if upper.startswith("GRANT "):
+            return _GuestMigrationResult()
+        if upper.startswith("UPDATE "):
+            table = normalized.split()[1].lower()
+            column = normalized.split()[3].lower()
+            inside = normalized.split("IN (", 1)[1].rsplit(")", 1)[0]
+            repaired = {
+                part.strip().strip("'") for part in inside.split(", ")
+            }
+            self.state.null_ids.get((table, column), set()).difference_update(
+                repaired
+            )
+            self.state.events.append(normalized)
+            return _GuestMigrationResult()
+        raise AssertionError(f"Unexpected admin SQL: {sql}")
+
+    def commit(self) -> None:
+        self.state.commits += 1
+        self.state.events.append("COMMIT")
+
+    def rollback(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.state.closed += 1
+
+
+def test_apply_workspace_table_migration_inspects_catalog_waits_and_reruns_cleanly():
+    """Apply reads the catalog, waits for each async index, then reruns idempotently."""
+    state = _WorkspaceMigrationAdminState(_workspace_legacy_shapes())
+    waits: list[str] = []
+
+    def connect_admin(**_kwargs):
+        return _WorkspaceMigrationAdminConnection(state)
+
+    def fake_wait(**kwargs):
+        waits.append(kwargs["job_id"])
+        state.events.append(f"WAIT {kwargs['job_id']}")
+
+    with (
+        patch.object(_DSQL_CLI, "_connect_admin", side_effect=connect_admin),
+        patch.object(
+            _DSQL_CLI, "wait_for_async_index_job", side_effect=fake_wait
+        ),
+    ):
+        dry_plan = _DSQL_CLI.apply_workspace_table_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+            dry_run=True,
+        )
+        assert state.executed == []
+        applied = _DSQL_CLI.apply_workspace_table_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+        )
+        assert applied == dry_plan
+
+        assert len(
+            [sql for sql in state.executed if sql.startswith("ALTER TABLE")]
+        ) == 5
+        assert waits == [f"job-{name}" for name in _WORKSPACE_INDEXES]
+        assert state.events.index(f"WAIT job-{_WORKSPACE_INDEXES[0]}") < (
+            state.events.index(
+                next(
+                    sql
+                    for sql in state.executed
+                    if sql.startswith("GRANT ")
+                )
+            )
+        )
+        assert state.closed >= len(applied) + 1
+
+        state.executed.clear()
+        waits.clear()
+        rerun = _DSQL_CLI.apply_workspace_table_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+        )
+
+    assert len(rerun) == len(_WORKSPACE_INDEXES) + len(_WORKSPACE_TABLES)
+    assert not any(
+        sql.startswith(("CREATE TABLE", "ALTER TABLE"))
+        for sql in state.executed
+    )
+    assert waits == []
+
+
+def test_apply_workspace_table_migration_backfills_null_post_rollout_columns_in_batches():
+    """Legacy NULL kind/references_text rows gain canonical defaults, id-batched.
+
+    DSQL-safe ADD COLUMN leaves legacy rows NULL, so the apply path must
+    backfill ``student_artifacts.kind`` → ``'notes'`` and both
+    ``references_text`` columns → ``'[]'`` with id-keyed UPDATE batches of at
+    most the documented batch size, after every ADD COLUMN, and never touch
+    the by-design nullable ``request_id`` / ``request_fingerprint``.
+    """
+    state = _WorkspaceMigrationAdminState(_workspace_legacy_shapes())
+    artifact_ids = [f"artifact-{index:04d}" for index in range(1200)]
+    version_ids = [f"version-{index:04d}" for index in range(3)]
+    state.null_ids = {
+        ("student_artifacts", "kind"): set(artifact_ids),
+        ("student_artifacts", "references_text"): set(artifact_ids),
+        ("student_artifact_versions", "references_text"): set(version_ids),
+    }
+
+    def connect_admin(**_kwargs):
+        return _WorkspaceMigrationAdminConnection(state)
+
+    with (
+        patch.object(_DSQL_CLI, "_connect_admin", side_effect=connect_admin),
+        patch.object(_DSQL_CLI, "wait_for_async_index_job"),
+    ):
+        applied = _DSQL_CLI.apply_workspace_table_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+        )
+
+        batch_size = _DSQL_CLI.REVISION_NULL_BACKFILL_BATCH_SIZE
+
+        def expected_batches(
+            table: str, column: str, value: str, ids: list[str]
+        ) -> list[str]:
+            ordered = sorted(ids)
+            return [
+                f"UPDATE {table} SET {column} = {value} WHERE id IN ("
+                + ", ".join(f"'{row_id}'" for row_id in
+                            ordered[start:start + batch_size])
+                + f") AND {column} IS NULL"
+                for start in range(0, len(ordered), batch_size)
+            ]
+
+        expected_updates = (
+            expected_batches("student_artifacts", "kind", "'notes'", artifact_ids)
+            + expected_batches(
+                "student_artifacts", "references_text", "'[]'", artifact_ids
+            )
+            + expected_batches(
+                "student_artifact_versions", "references_text", "'[]'",
+                version_ids,
+            )
+        )
+        assert len(expected_updates) == 5  # 1200+1200+3 rows → 2+2+1 batches
+
+        updates = [sql for sql in state.executed if sql.startswith("UPDATE ")]
+        alters = [sql for sql in state.executed if sql.startswith("ALTER TABLE")]
+        assert updates == expected_updates
+        # Every batch stays within the DSQL per-transaction row limit.
+        for statement in updates:
+            inside = statement.split("IN (", 1)[1].rsplit(")", 1)[0]
+            assert len(inside.split(", ")) <= batch_size
+        # Backfills run after every ADD COLUMN and are reported as applied.
+        assert state.executed.index(alters[-1]) < state.executed.index(
+            updates[0]
+        )
+        assert [sql for sql in applied if sql.startswith("UPDATE ")] == (
+            expected_updates
+        )
+
+        # Rerun after every NULL was repaired: backfills are a no-op.
+        state.executed.clear()
+        rerun = _DSQL_CLI.apply_workspace_table_migration(
+            endpoint="ep.example",
+            region="us-west-2",
+        )
+
+    assert not any(sql.startswith("UPDATE ") for sql in state.executed)
+    assert not any(sql.startswith("UPDATE ") for sql in rerun)
+
+
+def test_init_dsql_workspace_tables_only_cli_dispatches_dry_run(capsys):
+    applied: list[dict[str, Any]] = []
+
+    def fake_migration(**kwargs):
+        applied.append(kwargs)
+        return ["CREATE TABLE IF NOT EXISTS student_canvases (id TEXT)"]
+
+    with patch.object(
+        _DSQL_CLI, "apply_workspace_table_migration", fake_migration
+    ):
+        result = _INIT_DSQL.main(
+            [
+                "--endpoint",
+                "ep.example",
+                "--region",
+                "us-west-2",
+                "--workspace-tables-only",
+                "--dry-run",
+            ]
+        )
+
+    assert result == 0
+    assert applied == [
+        {
+            "endpoint": "ep.example",
+            "region": "us-west-2",
+            "database": "postgres",
+            "admin_user": "admin",
+            "dry_run": True,
+        }
+    ]
+    output = capsys.readouterr().out
+    assert "Dry run only" in output

@@ -140,6 +140,44 @@ export function useWorkspaceLayout(): WorkspaceLayout {
 
 export const WorkspaceLayoutContext = createContext<WorkspaceLayout | null>(null);
 
+/** The OS/app reduced-motion preference, for JS-driven movement the CSS rule cannot cover. */
+export function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** Rules installed by applyLayoutStyle, keyed by class name, so width updates replace instead of duplicate. */
+const layoutStyleRules = new Map<string, CSSStyleRule>();
+
+/**
+ * Apply dynamic layout custom properties (for example `--nav-w`) to one class.
+ *
+ * The production CSP allows only same-origin stylesheets (`style-src 'self'`),
+ * so React's inline `style` attribute is blocked and the student's saved panel
+ * widths would silently fall back to defaults. CSSOM rule insertion is not
+ * restricted by CSP, so the value is written into the bundled stylesheet after
+ * its original class rule. With no readable same-origin stylesheet (tests,
+ * blocked storage) this is a safe no-op.
+ */
+export function applyLayoutStyle(className: string, declarations: Record<string, string>): void {
+  const ruleText = `.${className} { ${Object.entries(declarations).map(([name, value]) => `${name}: ${value};`).join(' ')} }`;
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList;
+    try { rules = sheet.cssRules; } catch { /* Cross-origin stylesheets are neither readable nor ours. */ continue; }
+    if (!Array.from(rules).some(rule => rule instanceof CSSStyleRule && rule.selectorText?.includes(`.${className}`))) continue;
+    try {
+      const installed = layoutStyleRules.get(className);
+      if (installed && installed.parentStyleSheet === sheet) {
+        for (const [name, value] of Object.entries(declarations)) installed.style.setProperty(name, value);
+        return;
+      }
+      sheet.insertRule(ruleText, rules.length);
+      layoutStyleRules.set(className, rules[rules.length - 1] as CSSStyleRule);
+      return;
+    } catch { /* A read-only sheet cannot host the rule; try the next one. */ }
+  }
+}
+
 /** Read the shared layout. Must be used inside the workspace. */
 export function useWorkspaceLayoutContext(): WorkspaceLayout {
   const layout = useContext(WorkspaceLayoutContext);

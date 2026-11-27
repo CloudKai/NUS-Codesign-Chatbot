@@ -1,12 +1,16 @@
 # Student learning companion
 
-Shared educational language for lecture help and student-led design development.
+Shared educational language for student-led design development.
 
 ## Language
 
+**Improve my design**:
+Feedback on an existing student design. It shares the saved conversation and
+can cite relevant sources. Only Design coaching uses the Thinking Path.
+
 **Lecture help**:
-A direct answer to a course-content question, supported by available course
-evidence. Using lecture help alone does not imply an attempt to complete a project stage.
+The former course Q&A mode, retained as a historical reporting category for
+turns originally sent in that mode.
 
 **Project coaching**:
 Guidance that helps a student develop and explain their own design reasoning

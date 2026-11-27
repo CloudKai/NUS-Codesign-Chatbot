@@ -11,6 +11,10 @@ from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Literal
 
+from backend.artifact_feedback import ArtifactFeedback
+from backend.canvas_draft import CanvasDraftProposal
+from backend.canvas_suggestions import CanvasSuggestion
+
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -462,6 +466,35 @@ def require_visible_text(value: str) -> str:
     return value
 
 
+class CanvasContextOrigin(BaseModel):
+    """Server-resolved canvas snapshot the coaching context came from.
+
+    Set only by the student reader dispatch. Clients cannot make it
+    authoritative; legacy coach routes strip client-supplied values. It stamps
+    suggestions with the base revision the model actually reasoned about, and
+    carries the resolved selection node ids for draft provenance.
+    """
+
+    canvas_id: str = Field(min_length=1, max_length=64)
+    revision: int = Field(ge=1)
+    node_ids: list[str] = Field(default_factory=list, max_length=5)
+
+
+class ArtifactFeedbackOrigin(BaseModel):
+    """Server-resolved artifact snapshot and passage the feedback context came from.
+
+    Set only by the student reader dispatch. ``paragraph`` indexes the saved
+    document's top-level blocks (None = the whole bounded document text);
+    ``original_text`` is the resolved saved text used as the proposal's
+    "before" side. Clients cannot make it authoritative.
+    """
+
+    artifact_id: str = Field(min_length=1, max_length=64)
+    revision: int = Field(ge=1)
+    paragraph: int | None = Field(default=None, ge=0)
+    original_text: str = Field(default="", max_length=4_000)
+
+
 class CoachRequest(BaseModel):
     """Input required to run one local critical-thinking workflow turn.
 
@@ -477,7 +510,7 @@ class CoachRequest(BaseModel):
     _visible_message = field_validator("student_message")(require_visible_text)
     # Public interaction choice, distinct from server-owned specialist routing.
     # None preserves inferred routing for existing clients.
-    interaction_intent: Literal["lecture_help", "project_coaching"] | None = None
+    interaction_intent: Literal["lecture_help", "improve_design", "project_coaching"] | None = None
     current_stage: str
     response_detail: str = Field(pattern="^(short|long)$")
     # Server-filled owner identifier for AgentCore harness compatibility.
@@ -491,6 +524,16 @@ class CoachRequest(BaseModel):
     attachment_titles: list[str] = Field(default_factory=list, max_length=5)
     source_context: str = ""
     student_project_context: str = ""
+    canvas_context: str = Field(default="", max_length=4_000)
+    # Server-filled snapshot identity for the canvas context above.
+    canvas_context_origin: CanvasContextOrigin | None = None
+    # Server-filled selection purpose: discuss (default) or draft. Clients
+    # cannot make this authoritative.
+    canvas_selection_purpose: Literal["discuss", "draft"] | None = None
+    # Server-resolved artifact feedback context (bounded saved text) and its
+    # snapshot identity. Clients cannot inject either.
+    artifact_context: str = Field(default="", max_length=4_000)
+    artifact_feedback_origin: ArtifactFeedbackOrigin | None = None
     conversation_summary: str = ""
     conversation_memory: dict[str, Any] | None = None
     retrieved_chunks: list[RetrievalChunkReference] = Field(default_factory=list)
@@ -498,6 +541,10 @@ class CoachRequest(BaseModel):
     allow_model_knowledge: bool = False
     # Set only by the student reader adapter. Legacy clients use saved language.
     _reader_english: bool = PrivateAttr(default=False)
+    # Set by the reader dispatch after it resolved the canvas/artifact
+    # context server-side. The legacy coach routes strip client-supplied
+    # context fields unless this marker is present.
+    _context_server_resolved: bool = PrivateAttr(default=False)
     response_language: str = Field(default="English", min_length=1, max_length=50)
     history: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -673,6 +720,9 @@ class DeepReviewJobStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCEL_REQUESTED = "cancel_requested"
+    CANCELLED = "cancelled"
+    AMBIGUOUS = "ambiguous"
 
 
 class DeepReviewJob(BaseModel):
@@ -696,6 +746,20 @@ class CoachTurn(BaseModel):
     assessment: EducationalAssessment
     pending_transition: PendingPhaseTransition | None = None
     auto_advanced_to: str | None = None
+    # Bounded untrusted canvas proposals. Server-validated and revision-stamped;
+    # nothing applies until the student explicitly accepts via the ordinary
+    # revision-guarded canvas save.
+    canvas_suggestions: list[CanvasSuggestion] = Field(
+        default_factory=list, max_length=5
+    )
+    # At most one before/after artifact feedback pair, same acceptance rules.
+    artifact_feedback: list[ArtifactFeedback] = Field(
+        default_factory=list, max_length=1
+    )
+    # One reviewable synthesized draft for an explicit draft request. It is
+    # untrusted data: nothing is created until the student confirms, and the
+    # confirmation always makes a new artifact.
+    canvas_draft: CanvasDraftProposal | None = None
 
 
 class ProviderCoachOutput(BaseModel):
@@ -746,6 +810,13 @@ class ProviderAssessmentResult(BaseModel):
     qualifying_coaching_turn: bool = False
     deep_review_succeeded: bool = False
     review_trigger: str | None = None
+    # Raw provider canvas proposals. The workflow validates and revision-stamps
+    # them; nothing here is executable.
+    canvas_suggestions: list[CanvasSuggestion] = Field(default_factory=list)
+    # Raw provider artifact feedback; same rules, at most one pair.
+    artifact_feedback: list[ArtifactFeedback] = Field(default_factory=list)
+    # Raw provider canvas draft for explicit draft requests; same rules.
+    canvas_draft: CanvasDraftProposal | None = None
     # Transient orchestration flag from FastChatTurnOutput. Not educational
     # assessment, research coding, or a persisted student-facing field.
     needs_source_retrieval: bool = False

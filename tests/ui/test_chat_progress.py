@@ -747,3 +747,37 @@ def test_chat_stays_enabled_while_persisted_deep_review_job_is_running() -> None
     assert app.chat_input
     assert _deep_review_button(app).disabled is True
     assert "_deep_review_running_thread_id" not in app.session_state
+
+
+def test_review_tab_can_cancel_a_persisted_deep_review() -> None:
+    """The student can request cancellation and sees the durable result."""
+    from backend.specialists.review_orchestration import DEEP_REVIEW_JOB_KEY
+    from backend.student_store import StudentStore
+
+    app = saved_app()
+    thread_id = str(app.session_state["thread_id"])
+    store = StudentStore()
+    store.start_or_get_deep_review_job(
+        thread_id,
+        review_id="ui-cancel-review",
+        reviewed_revision=0,
+        stage_at_start="problem_identification",
+        source_ids=[],
+        message_ids=[],
+    )
+    assert store.mark_deep_review_job_running(
+        thread_id, "ui-cancel-review", lease_owner="worker", lease_seconds=240
+    )
+    app.session_state["studio_tab"] = "Review"
+    app.run()
+    next(button for button in app.button if button.label == "Cancel Deep Review").click().run()
+
+    job = store.get_thread(thread_id)["metadata"][DEEP_REVIEW_JOB_KEY]
+    assert job["status"] == "cancel_requested"
+    assert not app.exception
+    assert any("Cancellation requested" in element.label for element in app.status)
+    assert store.cancel_deep_review_job(thread_id, "ui-cancel-review", lease_owner="worker")
+    app.run()
+
+    assert not app.exception
+    assert any("Deep Review cancelled" in element.value for element in app.info)

@@ -358,7 +358,24 @@ are in that folder's `README.md`.
 | `retrieval_questions.jsonl` | 94 questions. Fields: `id`, `question`, `expected_material`, `expected_pages` (1-based PDF pages), `alt_expected`, `evidence`, `kind`, `note`. |
 | `retrieval_gate_messages.synthetic.jsonl` | 295 **synthetic** student messages. Fields: `id`, `message`, `stage`, `selected_sources`, `attachments`, `history`, `expected_decision` (`retrieve` or `skip`), `expected_scope`, `category`, `certainty`, `follow_up`, `question_id`, `expected_material`, `rationale`, `synthetic` (always `true`). |
 | `retrieval_gate_followups.synthetic.jsonl` | 12 **synthetic** follow-up cases, same row format as the gate messages, ids `gm296` to `gm307`, each with prior turns in `history`. Reported apart from the 295 messages. See "Follow-up cases". |
+| `workspace_evidence.synthetic.jsonl` | 24 **synthetic** workspace-evidence rows (ids `we001` to `we024`), one per line, extending labelled coverage to explicit/implicit lecture questions, project coaching, ambiguous follow-ups, selected uploads and canvas/artifact evidence. Extra fields beyond the gate record: `evidence_source` (`course`, `student_upload`, `workspace_context`, `both` or `none`) and `authorized_materials` (non-empty restricts course retrieval to those `material_id`s, measuring the authorization filter). Course-evidence rows carry `expected_material`/`expected_pages`/`evidence` with the same verbatim-page rule as the question set. Measured by `evaluate_workspace_evidence.py`; the 295-message gate corpus and its numbers are unchanged. |
 | `course_materials.json` | One entry per lecture PDF: `material_id`, `object_key`, `local_path`, `filename`, `group`, `source_id`, `pdf_pages`. |
+
+## Workspace-evidence evaluation (offline)
+
+`scripts/evals/evaluate_workspace_evidence.py` runs the extended
+`workspace_evidence.synthetic.jsonl` corpus fully offline: the production gate
+adapter decides each row, and course retrieval runs through the same
+`OfflineCourseSearch` lexical stand-in. It reports gate agreement (with and
+without borderline rows), precision/recall@1/2/4/8, MRR, citation correctness
+(the verbatim `evidence` snippet must appear in the retrieved page text),
+authorization-filter correctness (rows with non-empty `authorized_materials`
+must not return hits outside that set — the same sentence in an unselected
+deck counts as a filter miss, not a hit), honest evidence gaps for upload and
+canvas/artifact rows, and local search latency. No Bedrock or Knowledge Base
+call is possible; live KB evaluation stays the capped `--live-kb` mode below.
+See the [dataset README](../scripts/evals/datasets/README.md) for the row
+format and label provenance.
 
 The script validates these files on load and stops with a `DatasetError`
 if a row breaks the format. `tests/scripts/test_evaluate_retrieval.py`

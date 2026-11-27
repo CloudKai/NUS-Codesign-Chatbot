@@ -228,6 +228,13 @@ decisions. Keep the five research-aligned phase definitions and review projectio
 `backend/learning/`; keep provider-neutral request/assessment contracts in
 `domain.py`. Lecturer Research coding models stay in `backend/research/`.
 
+The reader sends artifact and canvas saves through `WorkspaceService`, which
+checks the notebook anchor before the repository applies the expected revision.
+Canvas deletion also verifies the revision and removes its history in one
+transaction. The reader Deep Review surface uses the same coach job service as
+Streamlit and projects only the status, eligibility and saved summary needed
+by the student.
+
 Use a focused class when it owns dependencies or state. Prefer a typed pure
 function for deterministic transformations. Do not add wrapper classes or
 interfaces without a real substitution/test boundary.
@@ -317,6 +324,20 @@ The three-panel desktop layout uses a temporary Thinking Path panel on mobile wi
 explicit return focus. Saved student contributions and coach summaries remain distinct.
 No schema/data migration or source/workspace management expansion is introduced.
 
+Ticket34/#34 makes each stage's deliverable requirements actionable without touching
+stage authority. `backend/learning/requirements.py` holds authored, deterministic
+criteria per stage that restate the existing CDE2300-aligned deliverable guidance
+already behind `project_resume` actions and the lecture tools; `StageResume.criteria`
+projects them read-only through the reader project and the Review stage detail shows
+them next to the saved next action. Criteria never award completion, unlock a stage
+or alter recommendations — `LearningProgressService` confirmation is unchanged.
+Resumable scheduled activities are deliberately NOT implemented: the available
+CDE2300 evidence (lecture-note templates, stage actions, Facione practice) supports
+the contextual tools already shown, and no evidence supports schedules, assessment
+rules or lecturer-configured activity sequences. That gap is recorded rather than
+invented; any future activity feature needs lecturer authority and curriculum
+evidence first.
+
 Ticket13/#26 adds nine narrow reader routes for source list/plain-text inspection,
 original attachment download, explicit selection/removal and bounded upload
 submit/status/retry/discard. These delegate to WorkspaceService and the existing
@@ -348,6 +369,99 @@ Streamlit-only workflows and existing literal Markdown rendering are recorded in
 pilot README; this bounded engineering slice does not authorize a default frontend switch.
 
 `streamlit_app.py` remains the entrypoint for the protected Streamlit workspace.
+
+Ticket 20 adds persistent design canvases as first-class notebook children.
+A student creates an empty canvas from the notebook page's Canvas tab, opens
+the routed `/notebooks/{folder}/canvases/{canvas}` view and edits course-aligned
+nodes (12 allowlisted kinds) and labeled relationships (9 allowlisted relations)
+through a React Flow surface plus an accessible outline that works without
+dragging. The backend stores one bounded canonical graph snapshot per canvas in
+additive `student_canvases` (SQLite migration + DSQL bootstrap DDL; ≤ 100
+nodes, ≤ 200 edges, ≤ 256 KiB, unique node/edge ids, edges joining existing
+nodes only, finite positions), with revision-guarded explicit saves (409 on
+stale), foreign/unknown ids failing 404, and unsafe graphs failing 422. The
+generated reader contract gains `readerCanvases`, `readerCanvasCreate`,
+`readerCanvas` and `readerCanvasUpdate`. Dragging stays local; only explicit
+saves write. Canvas autosave, versions and exports belong to later tickets, and
+this student canvas is entirely separate from the internal LangGraph workflow.
+
+Ticket 21 completes the canvas as a full visual reasoning map. Nodes may carry
+an optional Thinking Path stage association (`stage` in the canonical snapshot,
+validated against the five persisted stage ids; the association is a label only
+and never changes learning state). The editor adds node duplication, canvas
+multi-selection with safe removal of incident edges, search with outline
+narrowing and locate (fit-to-node), type/stage filters that dim non-matching
+nodes, and bounded tab-local undo/redo that is cleared on save and never
+presented as durable version history. The outline still performs every
+essential action without dragging.
+
+Ticket 22 adds debounced canvas autosave through the same revision-guarded
+cycle as artifacts: outline edits, duplication, connections, removals and
+completed drags deduplicate into one confirmed save per two-second pause, the
+confirmed revision reconciles so the next save never goes stale (a latent
+stale-revision bug in the shared hook was found by the seam and fixed for both
+editors), owner-scoped session-storage drafts restore after a refresh with a
+visible notice, and two-tab 409 conflicts preserve the losing graph with
+explicit reload or keep-and-save-over resolutions. The student canvas remains
+separate from the internal workflow graph.
+
+Ticket 23 adds bounded canvas version history: every save and restore
+checkpoints an additive `student_canvas_versions` row (SQLite migration + DSQL
+bootstrap DDL with an async unique index, ≤ 50 newest-first metadata, legacy
+canvases truthfully report no versions until their next save), the generated
+contract gains `readerCanvasVersions`, `readerCanvasVersion` and
+`readerCanvasRestore`, and the editor's History panel previews one version as a
+readable outline and restores it as a **new** revision guarded by the seen
+revision — all intervening history survives restarts and foreign owners never
+see it.
+
+Ticket 24 adds canvas exports through the documented download exception (same
+pattern as the artifact export): `GET .../canvases/{canvas_id}/export` serves
+structured graph JSON, a human-readable outline or a legible deterministic SVG
+as nosniff attachments with sanitized filenames. `backend/canvas_export.py` is
+a pure module: the JSON envelope carries provenance and the canonical graph
+but no workspace identifiers, the outline names every node kind/stage and
+labeled relationship without internal ids, and the SVG always spans the whole
+graph — off-screen nodes included — with XML-escaped text, so no hosted
+rendering service is introduced.
+
+Ticket 25 links artifacts and canvas reasoning to evidence. An additive
+`references_text` column joins artifacts and their version checkpoints, canvas
+nodes carry references inside the canonical graph, and a shared pure module
+(`backend/persistence/store/operations/references.py`) structurally validates
+bounded reference lists and resolves them under the owner/project boundary:
+sources and artifacts must belong to this notebook and owner, messages must be
+active rows, canvas nodes must exist inside an owned same-notebook canvas.
+Writes fail closed (422) on any unresolved reference; reads project resolved
+entries with an explicit unavailable state and never substitute content. The
+artifact editor gains an Evidence panel and canvas node details gain an
+evidence picker, with provenance distinctions preserved for the AI-assistance
+tickets that follow.
+
+Ticket 26 turns selected chat content into canvas nodes. A per-message
+"Add to canvas" action opens an editable proposal — node type, title, content
+and destination canvas — prefilled from the exact message; only confirmation
+writes, through the ordinary revision-guarded canvas save after re-reading the
+fresh revision, with the originating message id attached as the node's
+evidence reference. The reference resolution boundary is the notebook family
+(a notebook, its parent and its child chats, matching how sources are shared),
+so a node on the notebook canvas traces to a message in any of its chats while
+other families stay closed. Reject and cancel save nothing; a stale
+destination (409) keeps the proposal open for a re-confirm; nothing converts
+automatically.
+
+Ticket 27 coaches selected canvas reasoning through the existing coach
+lifecycle. The stream request gains an optional `canvas_selection`
+(canvas id, seen revision, ≤ 5 node ids); the reader resolves the canvas
+inside the notebook family, guards the revision (409) and node existence
+(422), and renders the authorized node text plus depth-1 relationships
+server-side into a bounded `<canvas_context>` prompt section
+(`backend/prompts/composer.py`: new untrusted, delimiter-neutralized section
+clipped to 3,500 characters between project context and retrieved evidence).
+The legacy `/coach/turn` routes strip any client-supplied canvas context, so
+the field remains server-resolved only; retrieval, citations, safety,
+admission and stage authority are unchanged and nothing mutates the graph.
+
 Streamlit renders state and calls a typed API client. Keep SQLite, filesystem,
 model SDK, LangChain and LangGraph access behind FastAPI and its services.
 
@@ -457,6 +571,32 @@ present, also contributes its strengths and areas-to-develop onto the frozen
 reviewed Thinking Path stage; it does not replace historical incremental
 assessments.
 
+Explicit Deep Review is durable across restarts without queue infrastructure.
+The job envelope lives in the notebook's persisted settings blob (the same
+SQLite/DSQL row students already own), so owner, project, frozen input
+revision, message/source ids, idempotent reuse, status, attempts, claim
+`lease_owner`/`lease_expires_at`, heartbeat time and result/failure metadata all
+survive a process restart with no second copy of the truth. A worker claims a
+queued (or expired-lease) job atomically via `mark_deep_review_job_running`,
+heartbeats the lease before and after the bounded model invoke, and commits
+idempotently through `complete_deep_review_job`; a superseded claimant whose
+lease was re-claimed cannot commit a duplicate or stale result. The owner's
+next job read (`get_deep_review_job`) resubmits safe queued/claimed work left
+by a restart within the bounded attempt budget (`DEEP_REVIEW_MAX_ATTEMPTS`);
+exhausted attempts fail honestly with `review_timeout` and preserved admission
+accounting. An old review can never overwrite newer authoritative student
+state: completion writes only the snapshot, job status and counter, never
+transcript rows, stage or conversation revision, and the frozen
+`reviewed_stage_id`/revision provenance is kept. Outcomes are at-least-once,
+not exactly-once: an inference that may already have succeeded but was lost to
+a crash surfaces as a bounded retry or an honest `review_timeout`, never as a
+silently duplicated billable call. This persistence-backed design (one
+Uvicorn worker, one notebook-scoped job slot, admission limits unchanged)
+suffices for the classroom scale the demo targets; a message queue or Step
+Functions would be justified only if evidence showed multi-worker fan-out or
+cross-instance leases were needed, which would require separate approval and
+cost analysis.
+
 Only the student's explicit confirmation may apply an advancement in the safe
 default mode (`AUTO_ADVANCE_STAGES=false`). The system must persist the
 recommendation and confirmation/rejection event first. Remove hidden comment
@@ -522,7 +662,12 @@ Month-1 auto-advance pilot override. Operator release steps:
 
 ## Providers and retrieval
 
-Repository defaults in `.env.example` and `backend/settings.py` are cost-safe:
+Defaults in `backend/settings.py` without environment overrides are cost-safe.
+The checked-in `.env.example` is an AgentCore/Haiku configuration example, not
+the mock default; copying it can enable external calls. For deterministic local
+work, explicitly set the following mock overrides. See the [deployment
+reconciliation](deploy/DEPLOYMENT_SAFETY_RECORD.md) for the distinction between
+settings defaults, Compose/example settings and historical deployment state:
 
 ```env
 MODEL_PROVIDER=mock

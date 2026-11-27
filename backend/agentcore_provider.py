@@ -49,6 +49,8 @@ from agentcore_runtime.models import (
     parse_review_turn_output,
 )
 
+from .artifact_feedback import bounded_artifact_feedback
+from .canvas_suggestions import bounded_canvas_suggestions
 from .coaching.mode_policy import enforce_model_mode, policy_from_request
 from .context_planner import (
     CONTEXT_POLICY_FAST_CHAT,
@@ -651,8 +653,12 @@ def _runtime_context(
     )
     cleaned = str(specialist or "").strip().lower()
     context: dict[str, Any] = {
-        "current_stage": request.current_stage,
-        "agentcore_topic": agentcore_topic_for_stage(request.current_stage),
+        **(
+            {"interaction_intent": "improve_design"}
+            if request.interaction_intent == "improve_design"
+            else {"current_stage": request.current_stage,
+                  "agentcore_topic": agentcore_topic_for_stage(request.current_stage)}
+        ),
         "response_detail": "guide" if request.response_detail == "short" else "free",
         "language": request.response_language,
         "allowed_citations": labels,
@@ -1141,6 +1147,55 @@ def _validated_fast_chat(
         deep_review_succeeded=False,
         review_trigger=None,
         needs_source_retrieval=bool(output.needs_source_retrieval),
+        canvas_suggestions=_model_canvas_suggestions(request, output),
+        artifact_feedback=_model_artifact_feedback(request, output),
+    )
+
+
+def _model_canvas_suggestions(request: CoachRequest, output: Any) -> list[Any]:
+    """Validate model canvas proposals against the server-resolved origin.
+
+    Model proposals are untrusted: malformed or hostile entries drop silently,
+    at most five survive, and the base revision is always the server-resolved
+    snapshot, never a model-claimed value. Without a resolved canvas origin no
+    proposal survives at all.
+    """
+    origin = request.canvas_context_origin
+    if origin is None:
+        return []
+    raw = getattr(output, "canvas_suggestions", None)
+    if not isinstance(raw, list) or not raw:
+        return []
+    return bounded_canvas_suggestions(
+        [
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+            for item in raw
+        ],
+        origin_canvas_id=origin.canvas_id,
+        origin_revision=int(origin.revision),
+    )
+
+
+def _model_artifact_feedback(request: CoachRequest, output: Any) -> list[Any]:
+    """Validate model artifact feedback against the server-resolved origin.
+
+    Without a resolved artifact origin nothing survives; the base revision,
+    paragraph and original text always come from the server-resolved snapshot.
+    """
+    origin = request.artifact_feedback_origin
+    if origin is None:
+        return []
+    raw = getattr(output, "artifact_feedback", None)
+    if raw is None:
+        return []
+    if hasattr(raw, "model_dump"):
+        raw = raw.model_dump(mode="json")
+    return bounded_artifact_feedback(
+        [raw],
+        origin_artifact_id=origin.artifact_id,
+        origin_revision=int(origin.revision),
+        origin_paragraph=origin.paragraph,
+        origin_original_text=origin.original_text,
     )
 
 
@@ -1662,7 +1717,8 @@ class AgentCoreCoachProvider:
             ):
                 estimate_specialist = SPECIALIST_COACHING
             system_text = fast_chat_system_prompt_for_estimate(
-                topic=agentcore_topic_for_stage(request.current_stage),
+                topic=("improve_design" if request.interaction_intent == "improve_design"
+                       else agentcore_topic_for_stage(request.current_stage)),
                 trusted_runtime_rules=preliminary.runtime_instructions,
                 runtime_context=_runtime_context(
                     request,
@@ -1817,7 +1873,8 @@ class AgentCoreCoachProvider:
         runtime_specialist = specialist
         payload: dict[str, Any] = {
             "phase": resolved_phase,
-            "topic": agentcore_topic_for_stage(request.current_stage),
+            "topic": ("improve_design" if request.interaction_intent == "improve_design"
+                      else agentcore_topic_for_stage(request.current_stage)),
             "output_contract": resolved_contract,
             "runtime_context": _runtime_context(
                 request,

@@ -104,11 +104,16 @@ from backend.rate_limit import RateLimitExceeded
 from backend.providers import ProviderUnavailableError
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
+    DEEP_REVIEW_ERROR_CANCELLED,
     DEEP_REVIEW_ERROR_FAILED,
+    DEEP_REVIEW_ERROR_OUTCOME_UNKNOWN,
     DEEP_REVIEW_ERROR_TIMEOUT,
+    DEEP_REVIEW_JOB_CANCEL_REQUESTED,
     DEEP_REVIEW_JOB_COMPLETED,
     DEEP_REVIEW_JOB_FAILED,
     DEEP_REVIEW_JOB_KEY,
+    DEEP_REVIEW_JOB_QUEUED,
+    DEEP_REVIEW_JOB_RUNNING,
     DEEP_REVIEW_SNAPSHOT_KEY,
     DEEP_REVIEW_TURN_MESSAGE,
     JOURNEY_STAGE_REVIEWS_KEY,
@@ -164,6 +169,7 @@ from backend.turn_perf import (
     current_perf,
     elapsed_ms,
     emit_coach_turn_perf,
+    mark_elapsed,
     record_count,
     record_failure,
     record_field,
@@ -695,7 +701,7 @@ class CoachApplicationService:
         # the result instead of attempting a second transition resolution.
         # Accept harmless casing/punctuation only; never treat yes/okay as confirm.
         if (
-            request.interaction_intent != "lecture_help"
+            request.interaction_intent not in {"lecture_help", "improve_design"}
             and is_exact_confirm_command(request.student_message)
             and self._progress is not None
         ):
@@ -937,7 +943,7 @@ class CoachApplicationService:
                 )
                 if (
                     requested_manual_stage is not None
-                    and request.interaction_intent != "lecture_help"
+                    and request.interaction_intent not in {"lecture_help", "improve_design"}
                     and runtime_settings.student_stage_selection
                     and request.revise_user_message_id is None
                     and not completed_replay
@@ -1072,7 +1078,10 @@ class CoachApplicationService:
         if existing is not None and existing.status in {
             DeepReviewJobStatus.QUEUED,
             DeepReviewJobStatus.RUNNING,
+            DeepReviewJobStatus.CANCEL_REQUESTED,
         }:
+            # A pending cancellation reuses the in-flight job: the student
+            # either sees it cancelled or completed, then can enqueue anew.
             return existing
         thread = self._notebooks.get_thread(thread_id)
         if not thread:
@@ -1480,7 +1489,12 @@ class CoachApplicationService:
         )
 
     def get_deep_review_job(self, thread_id: str) -> DeepReviewJob | None:
-        """Return the owner-scoped Deep Review job, failing stale in-flight work.
+        """Return the owner-scoped Deep Review job, recovering or failing in-flight work.
+
+        Durable queued/claimed work left behind by a restart is resubmitted on
+        this read seam; stale work whose bounded recovery attempts are
+        exhausted (or whose process-local worker is stalled past its lease)
+        fails with ``review_timeout``.
 
         Args:
             thread_id: Authenticated owner's notebook id.
@@ -1498,23 +1512,132 @@ class CoachApplicationService:
         metadata = dict(thread.get("metadata") or {})
         job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
         timeout = runtime_settings.deep_review_job_timeout_seconds
-        if job is not None and deep_review_job_is_stale(job, timeout):
-            try:
-                self._store.fail_deep_review_job(
-                    thread_id,
-                    review_id=str(job["review_id"]),
-                    error_code=DEEP_REVIEW_ERROR_TIMEOUT,
-                )
-            except Exception:
-                logger.exception(
-                    "deep_review_stale_fail_failed review_id=%s",
-                    job.get("review_id"),
-                )
+        max_attempts = max(1, int(runtime_settings.deep_review_max_attempts))
+        if job is not None and str(job.get("status") or "") in {
+            DEEP_REVIEW_JOB_QUEUED,
+            DEEP_REVIEW_JOB_RUNNING,
+            DEEP_REVIEW_JOB_CANCEL_REQUESTED,
+        }:
+            # Restart recovery: durable queued/claimed work is resumed on the
+            # next read instead of being lost with the process-local worker.
+            # Submission is deduplicated in-process, so repeated reads are
+            # harmless whether or not a worker is already live. A stale job
+            # whose bounded attempts are exhausted fails honestly with
+            # ``review_timeout``.
+            stale = deep_review_job_is_stale(job, timeout)
+            attempts = int(job.get("attempts") or 0)
+            status = str(job.get("status") or "")
+            queued = status == DEEP_REVIEW_JOB_QUEUED
+            if stale and not queued and job.get("invoked_at"):
+                # Ambiguous external outcome: the billable invocation started
+                # but no result was committed before the claim lapsed. The
+                # outcome is unknowable, so this job is never silently re-run
+                # or auto-retried; an explicit re-enqueue is the only retry.
+                # Cost/capacity accounting is retained, not released.
+                try:
+                    self._store.mark_deep_review_job_ambiguous(
+                        thread_id,
+                        str(job["review_id"]),
+                        error_code=DEEP_REVIEW_ERROR_OUTCOME_UNKNOWN,
+                    )
+                except Exception:
+                    logger.exception(
+                        "deep_review_ambiguous_mark_failed review_id=%s",
+                        job.get("review_id"),
+                    )
+                thread = self._notebooks.get_thread(thread_id) or thread
+                metadata = dict(thread.get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+            elif stale and status == DEEP_REVIEW_JOB_CANCEL_REQUESTED:
+                # The worker that should honor the request is gone; the
+                # student's cancellation is finalized, never re-run.
+                try:
+                    self._store.cancel_deep_review_job(
+                        thread_id,
+                        str(job["review_id"]),
+                        error_code=DEEP_REVIEW_ERROR_CANCELLED,
+                    )
+                except Exception:
+                    logger.exception(
+                        "deep_review_cancel_recover_failed review_id=%s",
+                        job.get("review_id"),
+                    )
+                thread = self._notebooks.get_thread(thread_id) or thread
+                metadata = dict(thread.get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+            elif queued or stale:
+                if attempts >= max_attempts:
+                    try:
+                        self._store.fail_deep_review_job(
+                            thread_id,
+                            review_id=str(job["review_id"]),
+                            error_code=DEEP_REVIEW_ERROR_TIMEOUT,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "deep_review_stale_fail_failed review_id=%s",
+                            job.get("review_id"),
+                        )
+                    thread = self._notebooks.get_thread(thread_id) or thread
+                    metadata = dict(thread.get("metadata") or {})
+                    job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                else:
+                    try:
+                        from backend.coaching.deep_review_jobs import (
+                            submit_deep_review_job,
+                        )
+
+                        submit_deep_review_job(self, thread_id, str(job["review_id"]))
+                    except Exception:
+                        logger.exception(
+                            "deep_review_recovery_submit_failed review_id=%s",
+                            job.get("review_id"),
+                        )
+        if job is None:
+            return None
+        return self._deep_review_job_model(
+            job,
+            metadata=metadata,
+            conversation_revision=int(thread.get("conversation_revision") or 0),
+        )
+
+    def cancel_deep_review(
+        self, thread_id: str, *, expected_review_id: str | None = None
+    ) -> DeepReviewJob | None:
+        """Record the student's request to cancel the notebook's Deep Review.
+
+        A queued job is cancelled immediately (nothing billable can have
+        started). A claimed job is marked ``cancel_requested`` and its live
+        worker decides at the next phase boundary: before invocation it
+        cancels cleanly, after invocation the already-billable result is
+        committed rather than discarded or repeated.
+
+        Args:
+            thread_id: Authenticated owner's notebook id.
+            expected_review_id: The job displayed to the student, if supplied.
+
+        Returns:
+            The current job envelope, or ``None`` when this notebook has
+            never queued a Deep Review. A different job is left untouched.
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        metadata = dict(thread.get("metadata") or {})
+        job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+        if job is None:
+            return None
+        review_id = str(job.get("review_id") or "")
+        if expected_review_id is None or expected_review_id == review_id:
+            self._store.request_deep_review_cancellation(thread_id, review_id)
             thread = self._notebooks.get_thread(thread_id) or thread
             metadata = dict(thread.get("metadata") or {})
             job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
-        if job is None:
-            return None
+            if job is None:
+                return None
         return self._deep_review_job_model(
             job,
             metadata=metadata,
@@ -1547,14 +1670,18 @@ class CoachApplicationService:
             DEEP_REVIEW_JOB_FAILED,
         }:
             return
-        if deep_review_job_is_stale(job, timeout):
-            self._store.fail_deep_review_job(
-                thread_id,
-                review_id=cleaned_id,
-                error_code=DEEP_REVIEW_ERROR_TIMEOUT,
-            )
-            return
-        if not self._store.mark_deep_review_job_running(thread_id, cleaned_id):
+        # Lease claim: a queued job or an expired-lease running job is
+        # (re-)claimed atomically; a live lease or exhausted attempts refuses.
+        # The claim, not a pre-read staleness check, is the recovery decision,
+        # so a crash after claim is recovered within bounded attempts.
+        lease_owner = str(uuid.uuid4())
+        if not self._store.mark_deep_review_job_running(
+            thread_id,
+            cleaned_id,
+            lease_owner=lease_owner,
+            lease_seconds=timeout,
+            max_attempts=max(1, int(runtime_settings.deep_review_max_attempts)),
+        ):
             return
         with usage_operation("deep_review", thread_id, admission=self._generation_admission) as usage:
             try:
@@ -1571,6 +1698,17 @@ class CoachApplicationService:
                             thread_id,
                             review_id=cleaned_id,
                             error_code=DEEP_REVIEW_ERROR_TIMEOUT,
+                            lease_owner=lease_owner,
+                        )
+                        return
+                    if str(job.get("status") or "") == DEEP_REVIEW_JOB_CANCEL_REQUESTED:
+                        # Cancellation honored before the billable invocation:
+                        # no provider call is made and no result is committed.
+                        self._store.cancel_deep_review_job(
+                            thread_id,
+                            cleaned_id,
+                            lease_owner=lease_owner,
+                            error_code=DEEP_REVIEW_ERROR_CANCELLED,
                         )
                         return
                     journey = normalize_journey(metadata.get("learning_journey"))
@@ -1627,6 +1765,34 @@ class CoachApplicationService:
                             "deep_review_context_metrics": metrics,
                         }
                     )
+                    # Heartbeat before the model invoke: the lease now covers
+                    # the bounded planning + invoke phase, so a healthy worker
+                    # is not mistaken for a crashed claim while it works.
+                    self._store.heartbeat_deep_review_job(
+                        thread_id,
+                        cleaned_id,
+                        lease_owner=lease_owner,
+                        lease_seconds=timeout,
+                    )
+                    # Durably mark the billable invocation before it starts:
+                    # a crash after this point leaves an unknown external
+                    # outcome that recovery surfaces as ambiguous instead of
+                    # re-running the possibly-successful paid call.
+                    if not self._store.mark_deep_review_job_invoked(
+                        thread_id,
+                        cleaned_id,
+                        lease_owner=lease_owner,
+                        lease_seconds=timeout,
+                    ):
+                        # A cancel request may have arrived while planning.
+                        # Only this lease owner can acknowledge it before invocation.
+                        self._store.cancel_deep_review_job(
+                            thread_id,
+                            cleaned_id,
+                            lease_owner=lease_owner,
+                            error_code=DEEP_REVIEW_ERROR_CANCELLED,
+                        )
+                        return
                     turn = self._workflow.run(prepared)
                     prepared, turn = self._maybe_rag_fallback(prepared, turn, snapshot)
                     self._workflow.take_provisional_research_coding(thread_id)
@@ -1648,21 +1814,31 @@ class CoachApplicationService:
                         reviewed_message_ids=list(job.get("message_ids") or []),
                         source_ids=list(job.get("source_ids") or []),
                     )
+                    # Heartbeat again before the terminal write so the final
+                    # completion window stays inside the held lease.
+                    self._store.heartbeat_deep_review_job(
+                        thread_id,
+                        cleaned_id,
+                        lease_owner=lease_owner,
+                        lease_seconds=timeout,
+                    )
                     self._store.complete_deep_review_job(
                         thread_id,
                         review_id=cleaned_id,
                         snapshot=snapshot_payload,
+                        lease_owner=lease_owner,
                     )
                     saved_thread = self._notebooks.get_thread(thread_id) or {}
                     saved_job = parse_deep_review_job((saved_thread.get("metadata") or {}).get(DEEP_REVIEW_JOB_KEY))
                     usage.success = bool(saved_job and saved_job.get("review_id") == cleaned_id and saved_job.get("status") == DEEP_REVIEW_JOB_COMPLETED)
             except Exception as error:
-                logger.warning("deep_review_execute_failed operation_id=%s", usage.operation_id)
+                logger.exception("deep_review_execute_failed operation_id=%s", usage.operation_id)
                 try:
                     self._store.fail_deep_review_job(
                         thread_id,
                         review_id=cleaned_id,
                         error_code=error.category if isinstance(error, RateLimitExceeded) else DEEP_REVIEW_ERROR_FAILED,
+                        lease_owner=lease_owner,
                     )
                 except Exception:
                     logger.warning(
@@ -1830,7 +2006,7 @@ class CoachApplicationService:
         )
         stage_status_request = (
             not owned_review
-            and prepared_request.interaction_intent != "lecture_help"
+            and prepared_request.interaction_intent not in {"lecture_help", "improve_design"}
             and is_current_stage_status_request(prepared_request.student_message)
         )
         requested_manual_stage = manual_stage_selection_target(
@@ -1840,7 +2016,7 @@ class CoachApplicationService:
             requested_manual_stage
             if (
                 not owned_review
-                and prepared_request.interaction_intent != "lecture_help"
+                and prepared_request.interaction_intent not in {"lecture_help", "improve_design"}
                 and runtime_settings.student_stage_selection
                 and prepared_request.revise_user_message_id is None
             )
@@ -1859,7 +2035,7 @@ class CoachApplicationService:
         existing_pending: dict[str, Any] | None = None
         if (
             not owned_review
-            and prepared_request.interaction_intent != "lecture_help"
+            and prepared_request.interaction_intent not in {"lecture_help", "improve_design"}
             and prepared_request.revise_user_message_id is None
         ):
             candidate_pending = self._store.get_pending_phase_transition(
@@ -1981,7 +2157,7 @@ class CoachApplicationService:
                 )
         if (
             not owned_review
-            and prepared_request.interaction_intent != "lecture_help"
+            and prepared_request.interaction_intent not in {"lecture_help", "improve_design"}
             and not stage_status_request
             and is_compound_status_guidance_request(prepared_request.student_message)
         ):
@@ -1994,7 +2170,11 @@ class CoachApplicationService:
                 }
             )
         completed = normalize_journey(snapshot.metadata.get("learning_journey"))["completed_stages"]
-        if prepared_request.current_stage in completed and not owned_review:
+        if (
+            prepared_request.interaction_intent != "improve_design"
+            and prepared_request.current_stage in completed
+            and not owned_review
+        ):
             # Historical completion survives refinement; navigation back to the
             # unlocked frontier needs no second award or recommendation.
             turn = turn.model_copy(update={
@@ -2076,13 +2256,14 @@ class CoachApplicationService:
                 model_id=self._workflow.model_id_for(prepared_request),
             )
             citations = self._relevant_citations(prepared_request, turn, snapshot)
-        if owned_review:
+        if owned_review or prepared_request.interaction_intent == "improve_design":
             research_observation = None
-        turn = turn.model_copy(
-            update={
-                "assessment": turn.assessment.model_copy(update={"citations": citations})
-            }
-        )
+        assessment_update: dict[str, Any] = {"citations": citations}
+        if prepared_request.interaction_intent == "improve_design":
+            assessment_update["current_stage"] = ""
+        turn = turn.model_copy(update={
+            "assessment": turn.assessment.model_copy(update=assessment_update),
+        })
         transition_id = turn.pending_transition.id if turn.pending_transition else None
         source_refs = [
             {
@@ -2200,6 +2381,9 @@ class CoachApplicationService:
         check_turn_cancelled(saving=True)
         persist_started = time.perf_counter()
         emit_coach_reply_ready(turn.response_text)
+        # The reply has passed validation and is about to be shown/saved: this
+        # is the first-safe-visible-text boundary, measured from request start.
+        mark_elapsed("first_safe_reply_ready_ms")
         emit_coach_progress(PROGRESS_SAVING)
         self._store.persist_coach_turn(
             prepared_request.thread_id,
@@ -2210,7 +2394,8 @@ class CoachApplicationService:
             expected_response_detail=prepared_request.response_detail,
             user_content=prepared_request.student_message,
             user_metadata={
-                "thinking_stage": prepared_request.current_stage,
+                **({"thinking_stage": prepared_request.current_stage}
+                   if prepared_request.interaction_intent != "improve_design" else {}),
                 "interaction_intent": prepared_request.interaction_intent,
                 "source_ids": prepared_request.source_ids,
                 "attachment_source_ids": prepared_request.attachment_source_ids,
@@ -2247,12 +2432,38 @@ class CoachApplicationService:
             assistant_message_id=transition_id,
             assistant_metadata={
                 "interaction_intent": prepared_request.interaction_intent,
-                "thinking_stage": (
-                    auto_advance.to_stage
-                    if auto_advance is not None
-                    else manual_stage_target or prepared_request.current_stage
+                **({
+                    "thinking_stage": (auto_advance.to_stage if auto_advance is not None
+                                       else manual_stage_target or prepared_request.current_stage),
+                    "assessment": turn.assessment.persisted_mapping(),
+                } if prepared_request.interaction_intent != "improve_design" else {
+                    "citations": [citation.model_dump(mode="json") for citation in citations],
+                }),
+                **(
+                    {
+                        "canvas_suggestions": [
+                            item.model_dump(mode="json", exclude_none=True)
+                            for item in turn.canvas_suggestions
+                        ]
+                    }
+                    if turn.canvas_suggestions
+                    else {}
                 ),
-                "assessment": turn.assessment.persisted_mapping(),
+                **(
+                    {
+                        "artifact_feedback": [
+                            item.model_dump(mode="json", exclude_none=True)
+                            for item in turn.artifact_feedback
+                        ]
+                    }
+                    if turn.artifact_feedback
+                    else {}
+                ),
+                **(
+                    {"canvas_draft": turn.canvas_draft.model_dump(mode="json", exclude_none=True)}
+                    if turn.canvas_draft is not None
+                    else {}
+                ),
                 "pending_transition_id": transition_id,
                 "proposed_stage": (
                     auto_advance.to_stage
@@ -2324,16 +2535,19 @@ class CoachApplicationService:
             manual_stage_selection_to=manual_stage_target,
             mark_stage_review_dirty=(
                 not server_owned_turn and manual_stage_target is None
-                and prepared_request.interaction_intent != "lecture_help"
+                and prepared_request.interaction_intent not in {"lecture_help", "improve_design"}
             ),
             review_counter_qualifying=bool(
                 orchestration.get("qualifying_coaching_turn")
-            ) and prepared_request.interaction_intent != "lecture_help",
+            ) and prepared_request.interaction_intent not in {"lecture_help", "improve_design"},
             review_counter_deep_succeeded=bool(
                 orchestration.get("deep_review_succeeded")
-            ) and prepared_request.interaction_intent != "lecture_help",
+            ) and prepared_request.interaction_intent not in {"lecture_help", "improve_design"},
         )
         record_field("persist_turn_ms", elapsed_ms(persist_started))
+        # The turn is durably confirmed here: the final-confirmed-completion
+        # boundary, measured from request start (after the visible-text one).
+        mark_elapsed("turn_confirmed_ms")
         # Ordinary coaching turns—including substantive work while staying in
         # a completed stage—only persist/coalesce the revisit marker.  A
         # durable review job can be created here only when this transaction
@@ -2396,7 +2610,7 @@ class CoachApplicationService:
                 prepared_request.thread_id
             )
         }
-        if prepared_request.interaction_intent == "lecture_help":
+        if prepared_request.interaction_intent in {"lecture_help", "improve_design"}:
             return summary
         progress_fields = {
             "learning_summary": turn.assessment.learning_summary,
@@ -2636,7 +2850,7 @@ class CoachApplicationService:
         try:
             chunks, context = self._retrieve_for_turn(
                 student_message=request.student_message,
-                current_stage=request.current_stage,
+                current_stage="" if request.interaction_intent == "improve_design" else request.current_stage,
                 retrieval_sources=retrieval_sources,
                 project_context=request.student_project_context,
                 conversation_summary=request.conversation_summary,
@@ -2940,8 +3154,9 @@ class CoachApplicationService:
             if request.reasoning_effort is not None
             else metadata.get("reasoning_effort"),
         )
-        project_context = _project_context_from_metadata(metadata)
-        conversation_summary = " ".join(
+        improving = request.interaction_intent == "improve_design"
+        project_context = "" if improving else _project_context_from_metadata(metadata)
+        conversation_summary = "" if improving else " ".join(
             str(metadata.get("learning_summary") or "").split()
         ).strip()
         gate_started = time.perf_counter()
@@ -3121,7 +3336,7 @@ class CoachApplicationService:
             try:
                 retrieved_chunks, retrieval_result_context = self._retrieve_for_turn(
                     student_message=request.student_message,
-                    current_stage=authoritative_stage,
+                    current_stage="" if improving else authoritative_stage,
                     retrieval_sources=retrieval_sources,
                     project_context=project_context,
                     conversation_summary=conversation_summary,
@@ -3372,10 +3587,11 @@ class CoachApplicationService:
                 ),
                 {},
             )
+            original_intent = replacement_metadata.get("interaction_intent")
             request = CoachRequest(
                 thread_id=thread_id,
                 student_message=content.strip(),
-                interaction_intent=replacement_metadata.get("interaction_intent"),
+                interaction_intent="improve_design" if original_intent == "lecture_help" else original_intent,
                 current_stage=revision.current_stage,
                 response_detail=detail,
                 model_id=model_id,

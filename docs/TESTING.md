@@ -56,11 +56,15 @@ git diff --check
 | Retrieval eval script and data files | `scripts/test_evaluate_retrieval.py`, `domain/test_retrieval_question_set.py`, `domain/test_retrieval_gate_message_set.py` (see [retrieval evaluation](RETRIEVAL_EVAL.md)) |
 | Persistence/migrations | `persistence/test_student_store.py`, `scripts/test_init_db.py`, `scripts/test_init_dsql.py`, `persistence/test_storage_providers.py` |
 | Idempotency/revisions/deletion | `persistence/test_coach_idempotency.py`, `persistence/test_conversation_revision.py`, `persistence/test_delete_idempotency.py` |
-| Upload/storage failure safety | `http/test_upload_hardening.py`, `persistence/test_hardening_storage_sync.py` |
+| Upload/storage failure safety | `http/test_upload_hardening.py` (size/count/filename hardening plus the event-loop offload contract: blocking upload writes run in the bounded threadpool, never on the loop), `persistence/test_hardening_storage_sync.py` |
 | Streamlit behavior | `ui/test_streamlit_ui.py`, `ui/test_streamlit_api_mode.py`, `ui/test_rerun_scope.py`, `ui/test_theme_styles.py` |
 | Production configuration/edge | `http/test_production_config.py`, `test_deployment_config.py` |
 | Logging/rate limits | `http/test_privacy_logging.py`, `http/test_rate_limit.py` |
 | Architecture façades and inventories | `test_architecture_contracts.py` |
+| Reader Query resources and settings surface | `frontend/src/api/workspaceSettings.test.ts`, `frontend/src/WorkspaceTools.test.tsx`, `frontend/src/api/queryClient.test.ts` |
+| Persistent artifacts and canvases | `persistence/test_student_artifacts.py`, `persistence/test_student_canvases.py`, `persistence/test_reference_links.py`, `http/test_reader_artifacts.py`, `http/test_reader_canvases.py`, `frontend/src/CanvasEditor.test.tsx` |
+| Canvas and artifact autosave | `frontend/src/useArtifactAutosave.test.ts`, `frontend/src/CanvasAutosave.test.tsx` |
+| Bundle/route-load and long-content render cost | `frontend/tests/browser/route_load.spec.ts` (real-browser route downloads and lazy-editor guard), `frontend/src/renderPerf.test.tsx` (opt-in jsdom mount-cost harness, `PERF_MEASURE=1 npx vitest run src/renderPerf.test.tsx`), `npm run measure:bundle --prefix frontend` (post-build asset sizes). |
 
 ## Regression workflow
 
@@ -87,6 +91,94 @@ For a local headed smoke, start the app with `sh scripts/start.sh` and run
 (**Ready** and **Move to**). It requires Node.js/`npx`, an installed
 Playwright CLI wrapper, and approved manual Cognito sign-in. Keep the helper
 outside CI and use the regular sign-in flow.
+
+## Browser CI slice (ticket 05)
+
+A finite, self-cleaning Playwright Test slice boots the production-built reader
+frontend and a real same-origin disposable FastAPI/SQLite stack with the
+deterministic mock provider. It is non-billable, binds to loopback only, uses a
+temporary workspace (never a developer database), and covers Guest and a
+synthetic registered identity — no live Cognito or AWS. Repeatable command:
+
+```sh
+npm run test:browser --prefix frontend
+# CI equivalent: PW_PYTHON=python3 npm run test:browser --prefix frontend
+```
+
+The specs live in `frontend/tests/browser/`:
+
+| Spec | Covers |
+|---|---|
+| `guest_journey.spec.ts` | Guest signs in, opens a notebook, submits a deterministic mock coaching turn, and reopens the committed reply after reload (saved-turn recovery). Also asserts no fabricated chat-progress percentages and no unexpected console/page errors. |
+| `owner_switch_inflight.spec.ts` | Switching Guest while a generation request is pending aborts the request, drops an approved late reply for the previous owner, hides the old chat, and never replays generation (controlled `page.route` fault injection). |
+| `saved_turn_survives_restart.spec.ts` | The disposable API process is actually stopped and respawned against the same SQLite workspace; the same browser context (Guest cookie preserved) reopens the chat and the committed reply is present. |
+| `interrupted_stream_recovers.spec.ts` | The real stream request completes server-side and only then is the page's connection dropped (`route.fetch()` then `route.abort()`); the client reconciles read-only against `GET /threads/{id}/coach-turn?idempotency_key=` using the **original** key and renders exactly one confirmed turn with no replayed write. |
+| `registered_journey.spec.ts` | A synthetic **registered** student (deterministic Cognito boundary in `tests/browser/registered_stack_app.py`) opens a notebook, submits a mock turn, and reopens the committed reply after a real backend restart while staying the same verified identity. |
+| `student_stop_cancels.spec.ts` | The student clicks the real **Stop generating** control against a paused mock workflow (`tests/browser/cancellable_stack_app.py`, the same paused-`CoachWorkflow.run` technique the FastAPI cancellation test uses). The real stop route answers `stopping`, the released worker ends the turn with the canonical `reply_discard` → 409 `cancelled` sequence, the prompt is kept, nothing is saved, no receipt exists, and no generation is replayed — across a reload. |
+| `route_load.spec.ts` | Route-load measurement and lazy-editor guard (ticket 43): the home view downloads strictly less JavaScript than the routed artifact/canvas editors, deep links still mount both editors, the hashed entry chunk is reused across views, and one JSON evidence line records per-route transfer bytes and editor-ready times (no wall-clock assertions). |
+| `authoring_accessibility.spec.ts` | Accessible authoring evidence (ticket 44): keyboard-only artifact/canvas authoring from the skip link, modal `Add to canvas`/`Develop into artifact` dialogs (focus never reaches a background control, Escape closes, focus returns to the opener), version-history keyboard use, instant canvas Locate under `prefers-reduced-motion: reduce`, WCAG 2.2 AA contrast spot checks in Light and Dark, 390 px touch authoring with no horizontal overflow, screenshots under `output/playwright/a11y/` and a clean console. |
+| `ambiguous_save_recovers.spec.ts` | An interrupted stream whose saved-receipt read returns `null` (the real unsaved body) leaves the question pending with explicit actions only: an explicit **Check saved answer** later recovers the saved reply once, and an explicit **Discard and edit** restores the composer text without resending. |
+| `workspace_journey.spec.ts` | A student authors and explicitly saves a Tiptap document and a labeled canvas. The student transfers chat and document content to the canvas, assembles an artifact from a canvas node, reviews and accepts a coach suggestion, confirms stages, and starts Deep Review. A real backend restart verifies Home resume and recap, the durable review, and the saved document and canvas. The student then confirms canvas deletion. |
+| `artifact_type.spec.ts` | A student selects Reflection in the notebook Documents tab, creates it through the routed app, reloads and verifies the saved document retains its selected type. |
+
+`tests/browser/disposable_stack.py` builds and validates the disposable
+workspace, pins mock/SQLite/local settings, matches `CO_DESIGN_PUBLIC_API_URL`
+to the served origin (required by the guest-start same-origin check), and fails
+fast with the server log if the API dies before readiness. Setting
+`PW_REGISTERED_IDENTITY=1` (or `startStack(..., { registeredIdentity: true })`)
+serves the deterministic registered-identity boundary instead of the plain mock
+app; `PW_STACK_APP=<module>` (or `startStack(..., { cancellableTurns: true })`)
+serves another `tests/browser` fixture app the same way (the modes are mutually
+exclusive). `frontend/tests/browser/stack.ts` starts, stops and restarts that
+process so a spec can exercise a real backend restart.
+`.github/workflows/mock-ci.yml` runs the slice in the `browser-ci-slice` job.
+
+The registered journey seeds verified cookies directly, so it exercises the real
+owner-scoped API path with a synthetic identity but **not** the Cognito Hosted UI
+redirect or token exchange — live Cognito sign-in remains a documented gap
+outside CI. The delayed relay in `tests/browser/reply_streaming_fixture.py` and
+the manual scripts in `tests/browser/*.js` remain available and are untouched.
+
+## Deterministic CI composition (ticket 46)
+
+`.github/workflows/mock-ci.yml` is the standing deterministic gate. Every job is
+bounded by a `timeout-minutes` limit and needs no live AWS, Cognito or paid
+provider:
+
+| Check | Where | Local equivalent |
+|---|---|---|
+| Offline schema/client drift | `mock-suite`: `scripts/export_reader_openapi.py --check`, `npm run api:check` | `npm run api:check --prefix frontend` |
+| Python collection + compile | `mock-suite`: full `pytest` collection and `compileall` | full mock suite command below |
+| Python lint | `mock-suite`: `ruff check .` | `.venv/bin/ruff check .` |
+| TypeScript | `mock-suite`: the reader build runs `tsc --noEmit` | `npm run build --prefix frontend` |
+| Frontend lint (added ticket 46) | `mock-suite`: `npm run lint` — minimal ESLint flat config (`frontend/eslint.config.js`), `typescript-eslint` recommended rules, generated client excluded (never hand-edited, ticket 33 generator quirk); valid findings are fixed, not suppressed | `npm run lint --prefix frontend` |
+| Vitest/component tests | `mock-suite`: `npm test` (unit + component + resource regressions) | `npm test --prefix frontend` |
+| Production-style build | `mock-suite` and `browser-ci-slice`: `npm run build` | same |
+| Bundle-size evidence (added ticket 46) | `mock-suite`: `npm run measure:bundle` prints entry/async raw+gzip bytes after the build; evidence only, thresholds are judged in the ledger | `npm run measure:bundle --prefix frontend` |
+| Playwright browser slice + accessibility | `browser-ci-slice`: includes `route_load`, `authoring_accessibility` and `workspace_journey`. The workspace journey authors and transfers work, accepts a reviewed suggestion, confirms stages, and reopens the saved workspace and Deep Review after a real mock-backend restart. | `npm run test:browser --prefix frontend` |
+| Frontend dependency advisories | `mock-suite`: `npm audit --audit-level=high` | same |
+| Python dependency audit | separate `dependency-audit.yml`: `pip-audit` on `requirements.txt` and `agentcore_runtime/requirements.txt`, weekly cron plus path-filtered PRs, fail-closed | n/a (workflow-only) |
+| Secret scanning (added ticket 46) | `mock-suite`: pinned `ghcr.io/gitleaks/gitleaks:v8.30.1 detect` over the checked-out git history, config in `.gitleaks.toml` | `gitleaks detect --no-banner --redact` |
+| CodeQL | separate `codeql.yml`: Python-only default security queries on `main` | n/a (workflow-only) |
+
+`.gitleaks.toml` extends the default rules and allowlists exactly three
+documented synthetic fixtures (the deliberately fake planted credential in
+`tests/http/test_security_readiness.py` and two deterministic id/button strings
+whose names merely end in `key`); it never allowlists a path wholesale. Any new
+finding fails the job. The gitleaks step scans the default shallow checkout
+(one commit), keeping the job bounded; the full-history local command above is
+the deeper periodic check.
+
+## Reader component tests (ticket 07)
+
+`npm test --prefix frontend` also runs jsdom component and resource tests beside
+the unit specs:
+
+| File | Covers |
+|---|---|
+| `src/api/workspaceSettings.test.ts` | Owner/notebook-scoped Query keys; per-resource freshness configured separately from the zero global defaults; verified bootstrap preferences reused with no duplicate read; refetch after measured freshness expiry; foreign-owner rejection; delayed responses never repopulating a cleared identity; a confirmed save reconciling only the preferences resource and cancelling superseded reads (via `MutationObserver`, no DOM). |
+| `src/WorkspaceTools.test.tsx` | The real settings surface: a theme save POSTs once, confirms with "Changes saved.", applies the appearance and updates the Query cache without replaying a preference read; a remount reuses the confirmed save with zero additional reads; private Query state never enters `sessionStorage`/`localStorage`; a saved answer for a foreign owner is expired, never applied or cached. |
+| `src/api/queryClient.test.ts` | Zero-retention defaults, owner-separated keys, cleared-identity delayed-response fencing, pre-mutation read cancellation. |
 
 ## Saved Summary browser regression (#30)
 
@@ -226,6 +318,14 @@ Other tooling gaps are tracked rather than overstated: Ruff is installed and
 enforced by project CI; static typing has no configured gate, coverage is not
 measured, and Markdown links are not checked in CI.
 
+Run `.venv/bin/ruff check .` separately from `sh scripts/build.sh`: the build
+checks TypeScript/Vite, Vitest, offline OpenAPI/client drift, Python compilation
+and mock pytest, but does not invoke Ruff. There is no configured frontend lint
+script. For numbered duplicate generator files, use the
+[dependency repair guidance](../frontend/README.md#generated-read-contracts)
+before regenerating checked-in source. Keep fixture environment guards before
+application imports, which can construct storage at import time.
+
 ## Mock load probe
 
 Virtual users are **distinct authenticated owners**. The probe must not treat a
@@ -235,7 +335,14 @@ The probe checks FastAPI concurrency, owner isolation, rate limits, SQLite
 persistence, and Knowledge Base Retrieve admission. Treat delays and latency
 percentiles as mock results. Use the [classroom capacity gate](operations/CLASSROOM_CAPACITY_GATE.md)
 for the stepped 80-session rehearsal, bounded generation, restart and restore,
-and the remaining live capacity and cost decisions.
+the stepped 1/10/20/40/60/80 **mixed** workload probe (navigation, ordinary and
+grounded coaching, deliberate OCC races, canvas autosaves and durable Deep
+Review submissions with percentiles, queueing, reconciliation and the capped
+live procedure), and the remaining live capacity and cost decisions. For
+offline monthly SGD cost scenarios with dated pricing estimates and
+regional trade-offs, run `scripts/cost_scenarios.py`
+(see [cost accounting](COST_ACCOUNTING.md)); its totals are estimates,
+never bills, and the S$30 gate stays unresolved there.
 
 ```bash
 PYTHONPATH=. .venv/bin/python scripts/load_probe.py --users 10 --requests-per-user 5
@@ -582,3 +689,9 @@ do not compare small-sample p95 across estimators. One burst per level is a
 smoke baseline, not statistically stable capacity evidence. No real model,
 DSQL, network proxy or browser latency is represented. See the
 [audit and milestone evidence](operations/ARCHITECTURE_IMPROVEMENTS.md).
+
+## Architecture-completion baseline (local ticket 01)
+
+The [fresh baseline ledger](IMPLEMENTATION_STATUS.md#local-completion-ticket-01--fresh-baseline-2026-11-24-sgt) records exact build/lint/collection results, safe startup settings and remaining gates. Against the disposable Summary stack on 8093, run `tests/browser/baseline_citations.js` and `tests/browser/baseline_stage_confirmation.js` through the existing Playwright CLI. They verify local uploaded evidence, saved citations/original bytes, exact-key recovery and visible student confirmation without paid calls. Run the stage probe after the citation probe. Use the existing delayed reply fixture for visible streaming; the ordinary mock API is sufficient for these two probes.
+
+For an offline machine where the CLI wrapper attempts registry access, use an already installed Playwright CLI entry point; do not claim the wrapper worked or install dependencies implicitly. Collect skip reasons with `.venv/bin/python -m pytest --collect-only -o addopts='' -q -rs` when the configured double-quiet output hides collection skips.

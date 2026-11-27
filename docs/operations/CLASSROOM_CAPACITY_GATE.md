@@ -115,6 +115,57 @@ and external charges are reconciled. Orphan/uncertain slots require the stopped-
 worker, new-backup procedure in [GENERATION_ADMISSION.md](../GENERATION_ADMISSION.md).
 This ticket does not automatically recover or waive uncertain charges.
 
+## Mixed classroom workload probe (ticket 48)
+
+```sh
+.venv/bin/python -m scripts.mixed_workload_probe > /private/tmp/mixed-workload.json
+```
+
+A stepped 1/10/20/40/60/80-student **mixed** workload (the classroom_probe
+restart/restore rehearsal covers durability; this probe covers mixed demand
+shape). Each barrier-released wave mixes every student's navigation reads, one
+ordinary and one source-grounded coaching turn, a deliberate two-tab
+same-revision artifact OCC race (one 409 + fresh-base retry per student), a
+canvas autosave, and — for newly arriving students — startup, a source upload
+and one durable Deep Review submission, all through public HTTP against a
+separate guarded mock worker and driver-created disposable roots only. It
+records per-operation counts/errors, nearest-rank p50/p90/p95/p99/max, queue
+observations, OCC conflicts/retries, per-level throughput, transcript/revision
+reconciliation (loss/duplicates), write-volume proxy bytes and Deep Review
+completion, and always reports `live_ready: false` with named unresolved gates.
+
+The 2026-11-26 local run (authoritative numbers in the implementation ledger):
+no confirmed turn/revision loss or duplicates at any level, no admission
+rejections (peak 76 of 80 synthetic queued slots), 80/80 Deep Reviews completed
+(p50 17.2 s / max 37.9 s from submission), and the only non-conflict-free
+observations are the deliberate one-per-student OCC 409s, each recovered by a
+successful retry. At 80 students the synthetic 4-running/80-queued admission
+fixture dominates coached-turn latency (grounded p50 ≈ 5.6 s versus ≈ 0.3 s
+solo) and navigation p95 ≈ 1.2 s exceeds the 500 ms ordinary-API target — a
+local single-process mock observation, not a live verdict.
+
+One probe-fixture defect was diagnosed and fixed red-first: the probe pinned
+`COACH_REQUESTS_PER_MINUTE=10000`, but `_bounded_int` silently restores the
+8 RPM/owner **default** for out-of-range values, so the first 80-student run
+produced 22 honest-but-artifactual `user_rpm` rejections (owners accumulate
+turns across waves). The pin is now the documented production value (120) and a
+harness test asserts every limiter pin survives the settings bounds. The
+application limiter behaved exactly as configured; no application code changed.
+
+**Separately capped live synthetic-account procedure (prepared, never
+executed; every gate below is unresolved):** any live rerun of this workload
+requires, before scheduling — (1) fresh explicit written approval naming a
+request/token **and** monetary cost cap (no prior approval carries forward);
+(2) an approved concurrency ceiling (synthetic accounts are separate Guest or
+Cognito identities, never shared); (3) the lecturer-agreed maximum queue/answer
+wait (gate 1 of "Gates still requiring evidence"); (4) confirmed provider
+quota/region/runtime capacity evidence (gate 2); and (5) the intended
+deployment resource envelope with real client connection types (gate 3). The
+procedure then runs the same stepped levels against the approved environment
+with the caps enforced by a hard call counter that stops the run, records every
+rejection and error category, and reports local-mock and live results as
+separate, non-inferable columns. Absent all five, the probe stays mock-only.
+
 ## Complete recurring cost and decision record
 
 As of 2026-11-17, no complete current bill, measured monthly workload, priced
@@ -140,6 +191,12 @@ post-credit baseline, generation estimate and credit runway are **null**. Empty
 partial usage and known-subtotal0 mean no evidence, not free operation. Mock
 admission charges are not included as real SGD expenses. Do not double-count
 generation estimates already represented by an inventory line.
+
+Ticket 49's [offline scenario renderer](../COST_ACCOUNTING.md#scenario-planning-and-regional-trade-offs-ticket-49)
+adds reproducible low/expected/high SGD planning estimates. It reports priced
+subtotals and leaves full gross unknown in all three scenarios because
+production workload DPU consumption is unmeasured. The S$30 objective remains
+unresolved.
 
 Decision **pending operator/lecturer approval**: retain the existing deployment
 and make no new cash-funded classroom rollout claim. To keep S$30, supply an

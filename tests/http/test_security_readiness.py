@@ -120,6 +120,17 @@ def _reader_requests(data: dict[str, Any]) -> list[tuple[str, str, dict[str, Any
         ("GET", path + "/settings", {}),
         ("GET", path + "/transcript.txt", {}),
         ("GET", path + "/messages/page", {}),
+        ("GET", path + "/workspace", {}),
+        ("GET", path + "/artifacts", {}),
+        ("POST", path + "/artifacts", {"json": {"title": "hijacked", "kind": "notes", "document": {"type": "doc", "content": []}}}),
+        ("PUT", path + "/artifacts/unknown-id", {"json": {"document": {"type": "doc", "content": []}, "revision": 1}}),
+        ("GET", path + "/canvases", {}),
+        ("POST", path + "/canvases", {"json": {"title": "hijacked", "graph": {"nodes": [], "edges": []}}}),
+        ("PUT", path + "/canvases/unknown-id", {"json": {"graph": {"nodes": [], "edges": []}, "revision": 1}}),
+        ("GET", path + "/canvases/unknown-id/versions", {}),
+        ("GET", path + "/canvases/unknown-id/versions/1", {}),
+        ("POST", path + "/canvases/unknown-id/versions/1/restore", {"json": {"revision": 1}}),
+        ("GET", path + "/canvases/unknown-id/export", {}),
         ("GET", path + "/project", {}),
         ("GET", path + "/coach-turn?idempotency_key=alice-1", {}),
         ("GET", path + "/uploads", {}),
@@ -151,7 +162,7 @@ def test_second_owner_cannot_read_or_write_any_reader_route(world: World, alice_
     """Every notebook-scoped reader route returns 404 for another owner and never echoes A's data."""
     intruder = world.registered("bob") if second == "registered" else world.guest()
     for method, url, options in _reader_requests(alice_data):
-        response = intruder.request(method, url, headers=ORIGIN if method == "POST" else {}, **options)
+        response = intruder.request(method, url, headers=ORIGIN if method in {"POST", "PUT", "PATCH", "DELETE"} else {}, **options)
         assert response.status_code in {404, 409}, (method, url, response.status_code, response.text[:200])
         assert PRIVATE not in response.text, (method, url)
         assert "alice-notes" not in response.text, (method, url)
@@ -368,11 +379,13 @@ def test_every_state_changing_reader_route_requires_same_origin(world: World) ->
         {"Origin": "https://testserver", "Sec-Fetch-Site": "cross-site"},
     ]
     for route in _reader_routes(world.app):
-        if not route.methods & {"POST", "PUT", "PATCH", "DELETE"}:
+        methods = sorted(route.methods & {"POST", "PUT", "PATCH", "DELETE"})
+        if not methods:
             continue
         for headers in hostile:
-            response = client.post(_concrete(route.path), headers=headers)
-            assert response.status_code == 403, (route.path, headers, response.status_code, response.text[:120])
+            response = client.request(methods[0], _concrete(route.path), headers=headers,
+                                      json={} if methods[0] != 'POST' else None)
+            assert response.status_code == 403, (route.path, methods[0], headers, response.status_code, response.text[:120])
     assert client.post("/api/v1/reader/preferences", json={"appearance": "Dark"}, headers=ORIGIN).status_code == 200
 
 

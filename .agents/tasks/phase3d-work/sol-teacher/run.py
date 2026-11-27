@@ -1,6 +1,8 @@
-import json, os, subprocess, sys
+import json
+import os
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 from backend.coaching.execution import local_course_intent_candidate
 from backend.course_intent import course_intent_state,course_intent_questions,load_vega_reader,learner_course_score,is_first_student_turn
 from scripts.evals import evaluate_retrieval as ev
@@ -9,11 +11,20 @@ here=Path(__file__).parent
 old=Path('/tmp/course-intent-by-turn.zip')
 os.environ['HF_HUB_OFFLINE']='1'
 ev._block_network()
-from laya import Learner
+
+def load_learner() -> type[Any]:
+    """Import the local learner only after the offline network guard is installed."""
+    from laya import Learner
+
+    return Learner
+
+
+Learner = load_learner()
 
 def read_file(name):
     for i,line in enumerate((here/name).read_text().splitlines(),1):
-        if not line.strip(): continue
+        if not line.strip():
+            continue
         label, content = line.split(' ',1)
         parts=content.split(' || ')
         assert label in ('+','-') and len(parts) in (1,3)
@@ -61,7 +72,9 @@ sol_first=select_threshold(cal,'sol',continuing_cutoff=sol)
 cutoffs={'original':(original['learn'],original['learn_first_turn']),'sol':(sol,sol_first)}
 print('Cutoffs',cutoffs,flush=True)
 fresh=list(read_file('evaluation.txt'))
-norm=lambda s:' '.join(s.casefold().strip(' ?.!').split())
+def norm(s: str) -> str:
+    """Normalize synthetic messages for duplicate detection."""
+    return ' '.join(s.casefold().strip(' ?.!').split())
 assert not {norm(r['message']) for r in fresh} & {norm(r['message']) for r in supplement+messages}
 assert len({norm(r['message']) for r in fresh})==len(fresh)
 fresh_rows=score(fresh,list(models))
