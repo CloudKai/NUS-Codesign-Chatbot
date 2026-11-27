@@ -23,9 +23,12 @@ from typing import Any, Mapping
 logger = logging.getLogger("agentcore_runtime.prompt_cache")
 
 HAIKU_MIN_CACHE_TOKENS = 4096
-# Conservative eligibility: under-count tokens so a cache point is not sent
-# when the prefix may be below Bedrock's minimum.
-CACHE_ELIGIBILITY_CHARS_PER_TOKEN = 4.0
+# Cache-eligibility estimate uses the same chars-per-token ratio as the
+# fast-chat budget estimator (DEFAULT_CHARS_PER_TOKEN = 3.0 in
+# backend/context_planner.py) so "is it worth caching" and "fits the 12K soft
+# target" agree. A cache point that Bedrock cannot honor is simply a cache miss,
+# never an error, so this is a conservative-enough guarantee, not a cap.
+CACHE_ELIGIBILITY_CHARS_PER_TOKEN = 3.0
 CACHE_POINT_TYPE = "default"
 
 

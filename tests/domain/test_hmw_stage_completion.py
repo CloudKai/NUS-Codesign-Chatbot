@@ -216,7 +216,7 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
     assert "hmw_scaffold_ready is internal" in fast_chat
     assert "set hmw_scaffold_ready to true" in fast_chat
     assert "valid working HMW" in fast_chat
-    assert "stay does not imply hmw_scaffold_ready=false" in fast_chat
+    assert "HOW MIGHT WE READINESS AND COMPLETION" in fast_chat
     shared = " ".join(
         Path("agentcore_runtime/prompts/shared_coaching.md")
         .read_text(encoding="utf-8")

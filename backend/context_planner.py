@@ -14,7 +14,7 @@ import math
 import re
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .domain import CoachRequest
 
@@ -52,12 +52,26 @@ _DECISION_HINT = re.compile(
 )
 _ASSUMPTION_HINT = re.compile(r"\bassum(?:e|ed|ing|ption)\b", re.IGNORECASE)
 _CONSTRAINT_HINT = re.compile(
-    r"\b(constraint|budget|deadline|must not|cannot|can't|limited)\b",
+    r"\b("
+    r"constraint|constraints|limit(?:ed|ing)?|deadline|at most|no more than|"
+    r"cannot|can't|must not|afford|budget|cost|price|capacity|maximum|"
+    r"minimum|cheaper than|patchy|offline|connectivity|network|latency|"
+    r"throughput|bandwidth|availability|timeout|downtime|battery"
+    r")\b",
     re.IGNORECASE,
 )
 _ETHICS_HINT = re.compile(
     r"\b(fair(?:ness)?|privacy|transparenc(?:y|t)|harm|safety|ethic(?:s|al)?|"
     r"stakeholder|consent)\b",
+    re.IGNORECASE,
+)
+# Matches a *later* correction to an earlier design decision or preference,
+# e.g. "we switched from A to B" / "actually, not C". Used so the compressor
+# demotes the superseded entry instead of leaving both at equal authority.
+_CORRECTION_HINT = re.compile(
+    r"\b(switch(?:ed|ing|es)? to|instead of|on second thought|changed my mind|"
+    r"actually|no longer|\bnot\b \w+ (?:anymore|again)|scrap(?:ped)?|scratch|"
+    r"replac(?:e|ed|ing)\b\w* with|revis(?:e|ed|ing)\b|went with)\b",
     re.IGNORECASE,
 )
 _INSTRUCTION_SHAPED = re.compile(
@@ -138,8 +152,13 @@ class ConversationMemory(BaseModel):
     important_user_needs: list[str] = Field(default_factory=list)
     concepts_considered: list[str] = Field(default_factory=list)
     selected_concept: str = ""
+    # Global transcript index (monotonic across compressions) the current
+    # selection came from. -1 means "unknown/old" and is superseded by any
+    # known turn so the latest correction wins.
+    selected_concept_turn: int = -1
     rejected_alternatives: list[str] = Field(default_factory=list)
     key_decisions: list[str] = Field(default_factory=list)
+    key_decision_turns: list[int] = Field(default_factory=list)
     requirements: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
     evidence_findings: list[str] = Field(default_factory=list)
@@ -186,6 +205,22 @@ class ConversationMemory(BaseModel):
             if len(cleaned) >= MAX_MEMORY_LIST_ITEMS:
                 break
         return cleaned
+
+    @model_validator(mode="after")
+    def _align_decision_turns(self) -> "ConversationMemory":
+        """Keep ``key_decision_turns`` exactly aligned with ``key_decisions``.
+
+        Older persisted memories (pre-turn tracking) may omit ``key_decision_turns``
+        or hold a different length. Treat missing turns as unknown (-1) so a later
+        explicit correction still supersedes them, rather than silently
+        trusting an old decision.
+        """
+        turns = list(self.key_decision_turns)[:MAX_MEMORY_LIST_ITEMS]
+        desired = len(self.key_decisions)
+        if len(turns) < desired:
+            turns.extend([-1] * (desired - len(turns)))
+        self.key_decision_turns = turns[:desired]
+        return self
 
     def matches_revision(self, conversation_revision: int) -> bool:
         """Return whether this projection belongs to the active conversation branch."""
@@ -519,6 +554,43 @@ def _append_unique(items: list[str], value: str) -> None:
         items.append(cleaned)
 
 
+def _append_turned(
+    items: list[str], turns: list[int], value: str, turn: int
+) -> None:
+    """Append a clipped unique item, recording the transcript index it came from.
+
+    *turn* is a global (monotonically increasing) transcript position so a
+    later turn always has a larger index than anything a previous compression
+    already recorded. Missing turns default to -1 (unknown/old, always superseded
+    by a known turn).
+    """
+    before = len(items)
+    _append_unique(items, value)
+    if len(items) > before:
+        turns.append(int(turn))
+
+
+def _demote_earlier(
+    items: list[str], turns: list[int], demotions: list[str], *, after_turn: int
+) -> None:
+    """Drop every entry with an older turn index into demotions.
+
+    Used when a later explicit correction appears: the superseded earlier
+    decision stays in the transcript but must not share equal authority in
+    derived memory. Older means a strictly smaller transcript index.
+    """
+    kept_items: list[str] = []
+    kept_turns: list[int] = []
+    for item, item_turn in zip(items, turns):
+        if item_turn < after_turn:
+            _append_unique(demotions, f"Superseded by later decision: {item}")
+            continue
+        kept_items.append(item)
+        kept_turns.append(int(item_turn))
+    items[:] = kept_items
+    turns[:] = kept_turns
+
+
 class ExtractiveHistoryCompressor:
     """Deterministic compressor that quotes student content without a model call.
 
@@ -542,9 +614,19 @@ class ExtractiveHistoryCompressor:
         memory.conversation_revision = int(conversation_revision)
         memory.compression_model_id = EXTRACTIVE_COMPRESSION_MODEL_ID
         memory.schema_version = CONVERSATION_MEMORY_VERSION
+        base_turn = (
+            int(existing.compressed_message_count) if existing is not None else 0
+        )
         user_turns = [
             clip_history_text(item.get("content"))
             for item in aged_messages
+            if isinstance(item, dict)
+            and str(item.get("role") or "").strip().lower() == "user"
+            and clip_history_text(item.get("content"))
+        ]
+        user_turn_indices = [
+            index
+            for index, item in enumerate(aged_messages)
             if isinstance(item, dict)
             and str(item.get("role") or "").strip().lower() == "user"
             and clip_history_text(item.get("content"))
@@ -561,16 +643,45 @@ class ExtractiveHistoryCompressor:
         ]
         if continuity_turns and not memory.problem_definition:
             memory.problem_definition = continuity_turns[0][:MAX_MEMORY_FIELD_CHARS]
-        for text in user_turns:
+        for text, uindex in zip(user_turns, user_turn_indices):
+            turn = base_turn + uindex
             if _is_instruction_shaped(text):
                 _append_unique(memory.quoted_student_statements, f'Student: "{text}"')
                 continue
-            if _DECISION_HINT.search(text):
-                _append_unique(memory.key_decisions, text)
-                if not memory.selected_concept and re.search(
-                    r"\b(chose|selected|will use|going with)\b", text, re.IGNORECASE
-                ):
+            is_decision = bool(_DECISION_HINT.search(text))
+            is_correction = bool(_CORRECTION_HINT.search(text))
+            is_selection = bool(
+                re.search(
+                    r"\b(chose|selected|will use|going with|went with|switched to|"
+                    r"revised)\b",
+                    text,
+                    re.IGNORECASE,
+                )
+            )
+            if is_decision or is_correction or is_selection:
+                if is_decision:
+                    _append_turned(
+                        memory.key_decisions, memory.key_decision_turns, text, turn
+                    )
+                    # A later explicit correction supersedes earlier decisions,
+                    # so they no longer share equal authority in derived memory.
+                    if is_correction:
+                        _demote_earlier(
+                            memory.key_decisions,
+                            memory.key_decision_turns,
+                            memory.changes_in_reasoning,
+                            after_turn=turn,
+                        )
+                # Latest explicit selection wins. The replaced choice is noted,
+                # not dropped silently, and its transcript index is tracked.
+                if is_correction or is_selection:
+                    if memory.selected_concept and memory.selected_concept != text:
+                        _append_unique(
+                            memory.changes_in_reasoning,
+                            f"Superseded choice: {memory.selected_concept}",
+                        )
                     memory.selected_concept = _memory_excerpt(text)
+                    memory.selected_concept_turn = turn
                 if re.search(r"\breject", text, re.IGNORECASE):
                     _append_unique(memory.rejected_alternatives, text)
             if _ASSUMPTION_HINT.search(text):

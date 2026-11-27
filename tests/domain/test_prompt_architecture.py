@@ -136,10 +136,33 @@ def test_composer_ordering_stage_separation_and_empty_sources():
     recent_at = text.index("<recent_messages>")
     student_at = text.index("<student_message>")
     runtime_at = text.index("<runtime_instructions>")
-    assert shared_at < stage_at < project_at < retrieved_at < summary_at
-    assert summary_at < memory_at < recent_at < student_at < runtime_at
+    assert shared_at < stage_at < project_at < summary_at
+    assert summary_at < memory_at < recent_at < retrieved_at < student_at < runtime_at
     assert EMPTY_RETRIEVED_COURSE_CONTEXT in text
     assert _STAGE_MARKERS["deep_analysis"] in prepared.stage_instructions
+
+
+def test_retrieved_evidence_placed_beside_the_current_request():
+    """Lost-in-the-middle: current-turn evidence sits directly beside the request
+    in the untrusted channel, not buried under summary/memory/recent in the middle."""
+    context = PromptContext(
+        current_stage="design_specification",
+        student_project_context="Safer crossings for older adults.",
+        retrieved_course_context="The CDE2300 usability method recommends one-handed operation.",
+        conversation_summary="Student refined the scope.",
+        recent_messages=[{"role": "user", "content": "earlier focus"}],
+        student_message="How do I make this usable with one hand?",
+        response_detail="short",
+        allow_model_knowledge=False,
+    )
+    text = PromptComposer().compose(context).composed_text
+    student_at = text.index("<student_message>")
+    retrieved_at = text.index("<retrieved_course_context>")
+    assert student_at > retrieved_at
+    between = text[retrieved_at:student_at]
+    for tag in ("<conversation_summary>", "<conversation_memory>", "<recent_messages>"):
+        assert tag not in between, tag
+    assert text.index("<runtime_instructions>") > student_at
 
 
 def test_canvas_context_renders_as_labeled_section_between_project_and_retrieval():

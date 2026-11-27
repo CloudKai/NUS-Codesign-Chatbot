@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from backend.context_planner import (
     CONTEXT_POLICY_FAST_CHAT,
+    ConversationMemory,
     ContextBudget,
     ExtractiveHistoryCompressor,
     HistoryContextPlanner,
@@ -178,3 +181,135 @@ def test_revision_mismatch_drops_stale_memory() -> None:
     )
     assert stale.verbatim_message_count == 4
     assert stale.compressed_memory is None
+
+
+def _compress(messages: list[dict[str, Any]], *, existing=None) -> "ConversationMemory":
+    """Compress aged turns with the extractive compressor (no recent window)."""
+    return ExtractiveHistoryCompressor().compress(
+        aged_messages=messages, existing=existing, conversation_revision=1
+    )
+
+
+def test_later_correction_supersedes_earlier_selection() -> None:
+    """A student correcting their own choice is remembered as the current one."""
+    memory = _compress(
+        [
+            {"role": "user", "content": "We originally chose QR codes for sign-up."},
+            {"role": "assistant", "content": "What about when students are offline?"},
+            {"role": "user", "content": "Actually we switched to pictograms "
+                "because the site has patchy internet."},
+        ]
+    )
+    assert memory.selected_concept
+    assert "QR codes" not in memory.selected_concept
+    assert "pictograms" in memory.selected_concept
+    # The replaced choice is documented, not silently kept at equal authority.
+    assert any("QR codes" in item for item in memory.changes_in_reasoning)
+    assert all("QR codes" not in item for item in memory.key_decisions)
+    assert all("QR codes" not in item for item in memory.rejected_alternatives)
+    assert memory.selected_concept_turn == 2
+
+
+def test_correction_removes_stale_decision_across_compressions() -> None:
+    """Recency ordering survives incremental compression across batches."""
+    first = _compress(
+        [
+            {"role": "user", "content": "We preferred A because it was cheaper "
+                "but then chose B for accessibility."},
+            {"role": "assistant", "content": "Does that still hold now?"},
+        ]
+    )
+    second = _compress(
+        [
+            {"role": "user", "content": "We decided to use pictograms; "
+                "actually switch away from B."},
+        ],
+        existing=first,
+    )
+    assert any("pictograms" in d for d in second.key_decisions)
+    # The latest turn's concept is the current selection.
+    assert "pictograms" in second.selected_concept
+    assert second.selected_concept_turn == 2
+    # The earlier B decision is demoted into changes_in_reasoning.
+    assert any(
+        "B" in d
+        for d in second.changes_in_reasoning
+    ), second.changes_in_reasoning
+
+
+def test_legacy_memory_without_turns_is_superseded() -> None:
+    """A memory created before turn tracking still lets a correction win."""
+    legacy = ConversationMemory.model_validate(
+        {
+            "conversation_revision": 1,
+            "selected_concept": "QR codes",
+            "key_decisions": ["Originally chose QR codes."],
+            # no key_decision_turns -> unknown (-1), always superseded
+        }
+    )
+    updated = _compress(
+        [
+            {"role": "user", "content": "We went with pictograms after all."},
+        ],
+        existing=legacy,
+    )
+    assert "QR codes" not in updated.selected_concept
+    assert "pictograms" in updated.selected_concept
+
+
+def test_spec_scenario_two_recovers_current_concept_and_connectivity_constraint() -> None:
+    """QR codes -> pictograms (patchy internet) surfaces the current concept AND
+    the connectivity constraint, not the superseded concept."""
+    memory = _compress(
+        [
+            {"role": "user", "content": "We originally chose QR codes to track attendance."},
+            {"role": "assistant", "content": "Any constraints on how they attend?"},
+            {"role": "user", "content": "The site has patchy internet, so attendance "
+                "must work offline."},
+            {"role": "assistant", "content": "Should we change the tracking method?"},
+            {"role": "user", "content": "Actually we switched to pictograms because of it."},
+        ]
+    )
+    assert "pictograms" in memory.selected_concept
+    assert "QR codes" not in memory.selected_concept
+    assert any(
+        ("internet" in d or "offline" in d or "patchy" in d)
+        for d in memory.constraints
+    ), memory.constraints
+    assert any("QR codes" in d for d in memory.changes_in_reasoning), memory.changes_in_reasoning
+
+
+def test_spec_scenario_one_preserves_budget_constraint_without_the_word() -> None:
+    """A '$30' budget is captured even when the student never wrote 'budget'."""
+    memory = _compress(
+        [
+            {"role": "user", "content": "We can build the sign for at most $30."},
+            {"role": "assistant", "content": "Anything else to factor in?"},
+            {"role": "user", "content": "It must fit a small classroom grant."},
+        ]
+    )
+    assert any(
+        "$30" in d and "at most" in d for d in memory.constraints
+    ), memory.constraints
+
+
+def test_spec_scenario_one_budget_survives_full_transcript() -> None:
+    """The budget constraint survives past the recent window in memory."""
+    base = [
+        {"role": "user", "content": "We can build the sign for at most $30."},
+        {"role": "assistant", "content": "Noted."},
+    ]
+    filler = []
+    for index in range(30):
+        role = "user" if index % 2 == 0 else "assistant"
+        filler.append(
+            {"role": role, "content": (
+                "progress note about the Holland Road crossing"
+                if role == "user"
+                else "what still needs checking at turn " + str(index)
+            )}
+        )
+    memory = _compress(base + filler)
+    assert any(
+        "$30" in d for d in memory.constraints
+    ), memory.constraints

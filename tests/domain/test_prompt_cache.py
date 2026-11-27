@@ -47,6 +47,26 @@ def test_prefix_below_minimum_does_not_insert_cache_point_or_padding() -> None:
     assert isinstance(result, str)
 
 
+ALL_FAST_CHAT_TOPICS = (
+    "problem_identification",
+    "concept_generation",
+    "design_specification",
+    "reflection",
+    "deep_analysis",
+)
+
+
+def test_all_fast_chat_static_prefixes_are_cache_eligible() -> None:
+    """Every coaching stage clears the Haiku cache floor under the system's
+    standard token estimate, so enabling ``FAST_CHAT_PROMPT_CACHE_ENABLED`` caches
+    the whole ~10K-token static prompt per stage and stops it counting as
+    per-request input. Regression guard for the context-budget optimization."""
+    for topic in ALL_FAST_CHAT_TOPICS:
+        assert prefix_meets_haiku_cache_minimum(
+            fast_chat_static_prefix(topic)
+        ), topic
+
+
 def test_eligible_prefix_uses_system_content_block_not_cache_config() -> None:
     prefix = "P" * (HAIKU_MIN_CACHE_TOKENS * 4)
     suffix = "\n\nDYNAMIC"

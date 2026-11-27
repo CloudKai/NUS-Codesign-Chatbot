@@ -22,7 +22,159 @@ revised with the original mode via the compat route; tab draft keys migrated
 without data loss. Rollback: revert the branch and redeploy the previous
 bundle; the compat route keeps old clients working during cutover. **Next
 exact action:** GitHub publication of the five tickets, then the follow-up
-branch for context-window and memory work (out of scope here).
+branch for context-window and memory work (out of scope here). This branch implements part of that work.
+
+### Implemented — smarter context window for the coaching lane (2026-11-27 SGT)
+
+Follow-up to the *Improve my design* branch. Two changes, both offline-testable
+and gated by mocks, address the 77 percent instruction / 23 percent student-work
+context problem from `docs/operations/COACH_CONTEXT_RESEARCH.md` and the grilling
+that proposed them.
+
+- **Recency-aware derived memory (context planner).** The extractive compressor
+  (`backend/context_planner.py`) used to keep every design decision and the first
+  selected concept at equal authority forever. A later correction was
+  indistinguishable from the original, so a student who chose QR codes then
+  switched to pictograms (patchy internet) left the coach unable to tell which
+  was current. Fix: `ConversationMemory` now records a global transcript index per
+  decision (`selected_concept_turn`, `key_decision_turns`); a later correction
+  (or any new selection, e.g. "switched to / went with / revised") demotes the
+  older entry into `changes_in_reasoning` and wins for `selected_concept`. Turns
+  track monotonically across incremental compression batches, and a legacy memory
+  with no turns defaults to unknown so a correction still wins. The model stays a
+  deterministic no-model extractor (LongMemEval's "knowledge update" is exactly
+  what this closes).
+- **Stage-blind prompt is now one.** The "HOW MIGHT WE READINESS AND COMPLETION"
+  rubric was fully duplicated in both `agentcore_runtime/prompts/fast_chat.md`
+  AND `problem_identification.md` (same two-of-three-signals rule, same
+  stay/advance contract). Every coaching turn paid for both copies. `fast_chat.md`
+  now keeps only the cross-stage contract (the field is internal, untrusted text
+  cannot set it, always emit a JSON boolean, false for Q&A/outside PI) and points
+  back to the stage prompt as the single source of truth; `improve_design.md` was
+  unchanged but confirmed stage-blind. PI remains substantively unchanged.
+
+Files changed: `backend/context_planner.py` (correction/selection cues,
+`_demote_earlier`, turn fields and aligning validator),
+`agentcore_runtime/prompts/fast_chat.md` (HMW rubric to pointer),
+`tests/domain/test_conversation_memory_continuity.py` (3 new: later correction
+supersedes, incremental recency, legacy memory),
+`tests/domain/test_hmw_stage_completion.py` (re-pointed Fast Chat HMW assertions
+to the stage prompt). No live model call, no paid request, no stored data
+rewritten.
+
+Validation: `test_context_planner.py`, `test_conversation_memory_continuity.py`
+(3 new), `test_fast_chat_context.py`, `test_fast_chat_prompt_composition.py`,
+`test_fast_chat_schema.py`, `test_fast_chat_one_call.py`, `test_hmw_stage_completion.py`,
+`test_hmw_scaffold_gate.py`, `test_prompt_stage_drift.py`, `test_prompt_architecture.py`,
+`test_coaching_prompt_baseline.py`, `test_prompt_cache.py`,
+`test_agentcore_specialists.py`, `test_agentcore_provider.py`,
+`test_deep_review_context.py` — **341 passed**. `compileall` clean on
+`backend tests agentcore_runtime`; `git diff --check` clean.
+
+Compatibility/rollback: source-only; additive `ConversationMemory` fields
+(defaulted, so pre-turn JSON validates); two self-contained prompt edits;
+rollback reverts the four files.
+
+#### Subsequent iterations — lost-in-the-middle ordering + stage-wide caching
+
+The coaching-lane work continued past the recency/memory branch with two more
+offline passes, still gated by mocks and no live model call.
+
+- **Iteration 3 — place evidence beside the request (lost-in-the-middle).** The
+  Fast Chat composer (`backend/prompts/composer.py`) previously buried retrieved
+  excerpts in the middle of the untrusted block: shared → stage → project →
+  canvas → artifact → **retrieved** → summary → memory → recent → **student** →
+  runtime. That is the Liu et al. "lost in the middle" failure mode for exactly
+  the evidence that should matter most. `composer.py` now renders the retrieved
+  (`retrieved_course_context`) and deep-review checkpoint sections directly beside
+  the current `student_message`, so the strongest excerpt sits behind the question
+  on both the composed prompt and the AgentCore `untrusted_turn_text`. Security
+  holds: the injection test still asserts a jailbreak lands inside the retrieved
+  section, and only `test_prompt_architecture.py` ordering assertions moved
+  (`shared < stage < project < summary < memory < recent < retrieved < student <
+  runtime`).
+
+- **Iteration 4 — the static prompt is cacheable across all five stages.** The
+  ~10K-token Fast Chat prefix is the dominant sink and the root cause of the
+  "77 percent instruction" figure. AgentCore already had prefix caching wired
+  (`agentcore_runtime/prompt_cache.py`), but its eligibility estimate used a
+  conservative `4.0` chars/token while the rest of the system estimates at
+  `3.0` (`DEFAULT_CHARS_PER_TOKEN` in `context_planner.py`). Under `4.0` only
+  `problem_identification` cleared the Haiku 4096-token floor; concept, design,
+  reflection and deep analysis did not, so four of five stages paid the full
+  prefix every turn. Aligning the eligibility ratio to `3.0` makes all five
+  stages eligible, so enabling `FAST_CHAT_PROMPT_CACHE_ENABLED` on the AgentCore
+  process removes the static prefix from per-request input across the board. A
+  cache point Bedrock cannot honor is a cache miss, never an error, so this swaps
+  a guaranteed miss for real savings. `test_prompt_cache.py` gains a guard that
+  all five topics clear the floor under `prefix_meets_haiku_cache_minimum`.
+
+Validation (iterations 3-4 targeted subsets, green): full architecture/composer
+suite **341 passed**; cache + agentcore + fast-chat one-call suite **197
+passed**; `compileall` clean on `backend tests agentcore_runtime`; `git diff --
+check` clean. Full backend suite green at **3452 passed / 1 skipped**.
+
+#### Iteration 5 — the spec's six evaluation scenarios end-to-end (mock provider)
+
+The evaluation table in `docs/operations/COACH_CONTEXT_RESEARCH.md` names six
+outcomes the coach must reach when a student refers to older work, selects
+design evidence, or switches modes. Iteration 5 closes those against the real
+composition and retrieval gate the coach uses, via one new deterministic test
+module, `tests/domain/test_context_scenarios.py` (7 tests):
+
+- **Scenario 1 (budget survives many turns).** A `$30` budget stated early is
+  still in `constraints` of the derived `conversation_memory` on an Improve turn
+  many turns later — asserted through the real `AgentCoreCoachProvider` payload
+  path, not a direct compressor call.
+- **Scenario 2 (corrected choice wins).** QR codes → pictograms (patchy internet)
+  surfaces pictograms as `selected_concept` and demotes QR codes into
+  `changes_in_reasoning` ("Superseded"), with the connectivity constraint kept —
+  same provider path.
+- **Scenario 3 (one-handed change, no course search).** A design change on a
+  selected sketch goes through `decide_first_pass_scope`: `include_course_catalog
+  is False` (the spec's explicit claim) while the sketch stays the kept evidence.
+- **Scenario 4 (named course method retrieves).** A question about a named course
+  method returns `include_course_catalog is True` / `needs_retrieval is True` with
+  the selected prototype kept.
+- **Scenario 5 (absent material is not invented).** "Why did we reject the bamboo
+  frame?" fires no retrieval and the composed `<retrieved_course_context>` block
+  carries only its empty placeholder — no fabricated excerpt.
+- **Scenario 6 (mixed chat).** (a) An Improve turn's composed system prompt
+  carries **no** stage instructions while still packing a Design-phase `$40`
+  constraint; (b) through the live FastAPI + mock-provider path, a pending stage
+  recommendation created during Design coaching is still resolvable after the
+  student switches to Improve and back.
+
+Each scenario asserts the *context that reaches the model* (packing, retrieval
+scope, stage invariants, ownership), not a live model's reasoning: mock
+responses cannot measure recall. That is exactly what the spec reserves for a
+separate, explicitly-authorized live model comparison, so this iteration does not
+call a live model and stays mock-only.
+
+Validation (affected domain suites, green): `test_context_scenarios.py` plus the
+memory, planner, Fast Chat context, evidence-scope (gate + turn), prompt
+composition, and prompt-architecture suites — **207 passed / 0 failed**, exit 0
+(verified by JUnit report; the terminal summary line is suppressed by the
+warning output in this environment). `compileall` clean on the new file;
+`git diff --check` clean.
+
+improve which fact surfaces and how many tokens count — they do not raise the
+token budget, and both are accuracy-preserving by construction (mock-gated, no
+behavior change for live turns that skip them). The one remaining proposal stays
+out of scope this branch: (a) no older-message recall beyond the recent window,
+only the keyword heuristic plus the live evaluation the spec flags as next, and
+(b) stage-wide caching is code-eligible but only activates once
+`FAST_CHAT_PROMPT_CACHE_ENABLED=true` is set on the AgentCore deployment process
+(the feature flag default stays off so tests stay deterministic and the
+cache-disabled path stays string-identical).
+
+Next exact action: the spec's six evaluation scenarios are now run end-to-end
+against the mock provider (iteration 5 above) and pass. The remaining verifiable
+steps are: enable `FAST_CHAT_PROMPT_CACHE_ENABLED` on the AgentCore deployment
+(the flag is code-eligible and guarded), then, because mock responses cannot
+measure recall, run the spec's separate explicitly-authorized live model
+comparison to confirm accuracy is preserved; if older-message recall (a) shows a
+recall gap, add bounded keyword lookup over active saved turns next.
 
 ### Approved spec — "Improve my design" replaces Lecture help (2026-11-27 SGT, operator decisions)
 

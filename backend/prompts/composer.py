@@ -522,19 +522,22 @@ def _join_untrusted(
         parts.append(_section("canvas_context", canvas_text, untrusted=True))
     if artifact:
         parts.append(_section("artifact_context", artifact, untrusted=True))
-    parts.append(_section("retrieved_course_context", retrieved, untrusted=True))
-    compact = str(deep_review_compact_context or "").strip()
-    if compact:
-        parts.append(_section("deep_review_checkpoint_context", compact, untrusted=True))
     if not omit_summary:
         parts.append(_section("conversation_summary", summary or _EMPTY_SUMMARY, untrusted=True))
     parts.extend(
         [
             _section("conversation_memory", memory or _EMPTY_MEMORY, untrusted=True),
             _section("recent_messages", recent or _EMPTY_RECENT, untrusted=True),
-            _section("student_message", student or _EMPTY_STUDENT, untrusted=True),
         ]
     )
+    # Latest-turn evidence sits beside the request (lost-in-the-middle): the
+    # strongest retrieved excerpt is placed right behind the student question
+    # rather than buried in the middle of the untrusted block.
+    parts.append(_section("retrieved_course_context", retrieved, untrusted=True))
+    compact = str(deep_review_compact_context or "").strip()
+    if compact:
+        parts.append(_section("deep_review_checkpoint_context", compact, untrusted=True))
+    parts.append(_section("student_message", student or _EMPTY_STUDENT, untrusted=True))
     return "\n\n".join(parts)
 
 
@@ -566,16 +569,22 @@ def _join_sections(
         parts.append(_section("canvas_context", canvas_text, untrusted=True))
     if artifact:
         parts.append(_section("artifact_context", artifact, untrusted=True))
-    parts.append(_section("retrieved_course_context", retrieved, untrusted=True))
-    compact = str(deep_review_compact_context or "").strip()
-    if compact:
-        parts.append(_section("deep_review_checkpoint_context", compact, untrusted=True))
     if not omit_summary:
         parts.append(_section("conversation_summary", summary or _EMPTY_SUMMARY, untrusted=True))
     parts.extend(
         [
             _section("conversation_memory", memory or _EMPTY_MEMORY, untrusted=True),
             _section("recent_messages", recent or _EMPTY_RECENT, untrusted=True),
+        ]
+    )
+    # Latest-turn evidence sits beside the request (lost-in-the-middle); see
+    # _join_untrusted for the ordering rationale.
+    parts.append(_section("retrieved_course_context", retrieved, untrusted=True))
+    compact = str(deep_review_compact_context or "").strip()
+    if compact:
+        parts.append(_section("deep_review_checkpoint_context", compact, untrusted=True))
+    parts.extend(
+        [
             _section("student_message", student or _EMPTY_STUDENT, untrusted=True),
             _section("runtime_instructions", runtime),
         ]
